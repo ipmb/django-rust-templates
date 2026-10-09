@@ -75,6 +75,23 @@ M2_TAGS = {
 # The four no-FilterExpression tags deferred for reasons unrelated to filters.
 DEFERRED_NO_FILTER_EXPRESSION = {"block", "load", "partial", "partialdef"}
 
+# M5's eleven: every FilterExpression tag that is not Python-owned, minus the
+# one the M5 plan's §D1 moves to M6.
+#
+# The name this set is *not* is the one worth recording. `NEEDS_FILTER_EXPRESSION`
+# has fourteen members, and the three it must shed are shed for three different
+# reasons: `extends` and `include` are the loader tags §6 assigns to Python
+# outright, and `querystring` is deferred *within* the FilterExpression bucket
+# because it is the only `simple_tag` in `defaulttags.py` (`:1286`) — parsing it
+# needs `SimpleNode` in `NODE_CLASSES`, a host handle to the Python callable, and
+# `parse_bits` driven by that callable's signature, all of which are M6's
+# `Library` machinery. A bespoke node would fail parity, because Django's own
+# tree holds a `SimpleNode` and the parity comparison is by class name.
+M5_TAGS = {
+    "cycle", "filter", "firstof", "for", "if", "ifchanged", "lorem",
+    "regroup", "url", "widthratio", "with",
+}
+
 
 def registry_names():
     """The names actually invocable from a template."""
@@ -170,6 +187,32 @@ class TagInventoryTests(unittest.TestCase):
         self.assertEqual(len(M2_TAGS), 9)
         self.assertEqual(NO_FILTER_EXPRESSION - M2_TAGS, DEFERRED_NO_FILTER_EXPRESSION)
 
+    def test_m5s_eleven_tags_and_the_two_derivations_agree(self):
+        """The set, derived two ways, and the two must agree.
+
+        Derivation 1 is the filter partition: every tag whose compile function
+        can reach `parser.compile_filter`, minus the three a later milestone
+        claims. Derivation 2 is the registry minus every tag every later
+        milestone's §10.3 row takes — M2's nine plus M5's eleven are exactly the
+        twenty registered names no later row claims, which is the assertion's
+        second half. Two independent routes to the same eleven, so a slip in
+        either is caught by the other; the *count* is asserted only because both
+        already are, since a count and a set are different claims.
+
+        The eleven are the M5 plan's scope and the milestone's gate is a set
+        difference against them (`test_no_m5_tag_is_still_a_stub`), so this is
+        where "which tags M5 is" stops being a prose phrase.
+        """
+        self.assertEqual(
+            M5_TAGS, NEEDS_FILTER_EXPRESSION - {"extends", "include", "querystring"}
+        )
+        self.assertEqual(len(M5_TAGS), 11)
+        self.assertEqual(
+            M5_TAGS | M2_TAGS,
+            REGISTERED - {"block", "extends", "include", "load",
+                          "partial", "partialdef", "querystring"},
+        )
+
     def test_the_parity_target_is_genuinely_djangos_registry(self):
         """Guard against self-comparison once M9 interposes the shim.
 
@@ -211,6 +254,36 @@ class RustRegistryTests(unittest.TestCase):
         for name in ("block", "extends", "include"):
             with self.subTest(name=name):
                 self.assertNotIn(name, _native.builtin_tag_names())
+
+    def test_no_m5_tag_is_still_a_stub(self):
+        """M5's switch: the milestone is done iff this intersection is empty.
+
+        The two sides are both derived — `M5_TAGS` above, and the stub set from
+        the registry itself, which classifies a name by *asking its compile
+        function* rather than by consulting a list someone maintains. So this
+        cannot be satisfied by editing a literal: the only way to empty the
+        intersection is for every M5 tag's body to stop returning
+        `Unimplemented`, which is the work.
+
+        Deliberately red from Task 1 of the M5 plan until its last tag lands.
+        That is the one red commit the plan declares, and the reason for it is
+        that a gate nobody has seen fail is a comment — the vacuous shape this
+        whole file exists to replace.
+        """
+        from django_rust_templates import _native
+
+        still = set(_native.builtin_tag_stubs()) & M5_TAGS
+        self.assertEqual(still, set(), f"M5 has not landed: {sorted(still)}")
+
+        # Why this test cannot be satisfied from Python, which is the property
+        # that makes it a gate rather than a comment: both sides come from the
+        # engine. `M5_TAGS` is derived above from Django's registry, and
+        # `builtin_tag_stubs()` is derived in Rust by asking each compile
+        # function, so there is no Python literal to edit here. The Rust side
+        # pins its own derivation against a literal in
+        # `registry.rs::every_entry_is_reachable_and_every_unimplemented_one_is_a_stub`
+        # — checked there and not here, because a Python test cannot tell a
+        # derivation from a copy of one.
 
 
 if __name__ == "__main__":

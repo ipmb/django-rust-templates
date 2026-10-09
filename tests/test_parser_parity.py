@@ -281,22 +281,46 @@ class CorpusParityTests(unittest.TestCase):
         self.assertGreaterEqual(len(TEMPLATES), 40)
         self.assertGreaterEqual(len(set(TEMPLATES)), 40, "duplicate corpus entries")
 
-    def test_the_corpus_covers_every_tag_with_a_success_path(self):
+    def test_the_corpus_covers_every_implemented_tag_with_a_success_path(self):
+        """Every tag the engine can *parse* has a happy-path corpus row.
+
+        Enumerated from the engine, not hardcoded. M2's version of this test
+        listed eight names, so it could not fail for any tag it did not name —
+        the vacuous gate the M5 plan exists to close. It now names none and
+        derives the set instead: a tag leaves `builtin_tag_stubs()` when its body
+        lands, and this test starts demanding a row for it in that same commit,
+        whether or not anyone remembered to update a list here.
+
+        It asserts the exact set of *gaps* rather than looping `assertIn`, which
+        is the difference that matters: a loop can only report a tag it already
+        knows to look for, so an exemption written as a missing list entry is
+        indistinguishable from an oversight. Here the exceptions are named,
+        counted, and asserted to be all of them.
+        """
+        implemented = set(_native.builtin_tag_names()) - set(_native.builtin_tag_stubs())
         joined = "\n".join(TEMPLATES)
-        for tag in [
-            "autoescape",
-            "comment",
-            "csrf_token",
-            "debug",
-            "now",
-            "spaceless",
-            "templatetag",
-            "verbatim",
-        ]:
-            self.assertIn(f"{{% {tag}", joined, f"{tag} is not in the corpus")
-        # `resetcycle` is absent on purpose: both of its paths are errors at M2,
-        # so it belongs to Task 6's corpus and has no success tree to compare.
-        # Its descriptor shape is pinned by a unit test in Task 5 instead.
+        # `\b` and not a bare prefix: `{% ifchanged %}` is not a `{% if %}` row,
+        # and a prefix match would let the longer tag's row satisfy the shorter
+        # tag's requirement — quietly, and in the direction that makes a missing
+        # row look present.
+        missing = {
+            tag
+            for tag in implemented
+            if not re.search(r"\{%\s*" + re.escape(tag) + r"\b", joined)
+        }
+        # `resetcycle` is the one implemented tag with no success path *yet*, and
+        # the reason is not an oversight: every successful compile of it needs a
+        # preceding `{% cycle %}`, because `do_resetcycle` raises "No cycles in
+        # template." when `parser.last_cycle_node` is unset, and `cycle` does not
+        # land until M5's Task 6. So the row arrives with that task's corpus, and
+        # this set shrinks to empty there — a second pin that has to move, for the
+        # same reason the Rust one does.
+        deferred = {"resetcycle"}
+        self.assertEqual(
+            missing, deferred, f"corpus gaps that are not the declared exemption: "
+            f"{sorted(missing - deferred)}; "
+            f"declared gaps now covered: {sorted(deferred - missing)}",
+        )
 
 
 class RandomisedParityTests(unittest.TestCase):

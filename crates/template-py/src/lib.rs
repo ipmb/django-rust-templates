@@ -47,6 +47,21 @@ fn builtin_tag_names() -> Vec<&'static str> {
     template_core::parser::registry::builtin_tag_names()
 }
 
+/// The registered names whose compile function is **still a milestone stub**,
+/// ascending — the registry's own answer, derived there by asking each compile
+/// function rather than from a second list.
+///
+/// Exposed for the same reason as `builtin_tag_names`, and with more at stake:
+/// a milestone's *scope* is a prose phrase ("the remaining built-in tags") and
+/// its *gate* is a set difference, so `tests/test_tag_inventory.py` needs the set
+/// the engine believes is unfinished in order to subtract it from the tags that
+/// are done. Derived in `template_core::parser::registry::builtin_tag_stubs`,
+/// where the doc records why a hand-maintained list is not good enough here.
+#[pyfunction]
+fn builtin_tag_stubs() -> Vec<&'static str> {
+    template_core::parser::registry::builtin_tag_stubs()
+}
+
 /// Engine version, so the Python shell can assert it is talking to the build it
 /// expects rather than a stale `.so` left in the tree.
 #[pyfunction]
@@ -1540,6 +1555,7 @@ fn render(
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(builtin_tag_names, m)?)?;
+    m.add_function(wrap_pyfunction!(builtin_tag_stubs, m)?)?;
     m.add_function(wrap_pyfunction!(engine_version, m)?)?;
     m.add_function(wrap_pyfunction!(filter_names, m)?)?;
     m.add_function(wrap_pyfunction!(stringfilter_filters, m)?)?;

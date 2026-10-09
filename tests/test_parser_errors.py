@@ -10,8 +10,11 @@ keeps it that way — including by checking that no other test module has left t
 shim installed in this process.
 """
 
+import ast
 import inspect
+import re
 import sys
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -21,11 +24,13 @@ DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
+from django.template import defaulttags  # noqa: E402
 from django.template.base import DebugLexer, Lexer, Parser  # noqa: E402
 from django.template.engine import Engine  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 from tests.parser_error_corpus import ERRORS  # noqa: E402
+from tests.test_tag_inventory import M5_TAGS  # noqa: E402
 
 # A bare `Parser(tokens)` registers **no** tags: Django's built-ins live in
 # `defaulttags`/`loader_tags` libraries, which `Engine` hands to `Parser` as
@@ -64,6 +69,31 @@ def ours_failure(source, debug=False):
     except Exception as exc:  # noqa: BLE001
         return exc
     return None
+
+
+def compile_function_mentions(tag, name):
+    """Whether the compile function Django registers for `tag` mentions `name`.
+
+    Located through Django's own registry and then read out of the pinned source
+    by line, **not** by a `do_<tag>` naming guess — the convention does not hold,
+    and the guess failed on exactly the two tags that would have hidden it:
+    `cycle` (`defaulttags.py:612`) and `url` (`:1515`) are top-level functions
+    under their own names with no `do_` prefix, so guessing would have reported
+    "raises nothing" for both and quietly widened the exempt set from one tag to
+    three. That is this project's recurring shape — a plausible convention
+    standing in for a measurement — and it is why the lookup is by registry.
+
+    The AST rather than a substring search, so the name has to appear as an
+    identifier: `TemplateSyntaxError` in a comment or a docstring is not a raise,
+    and this is an exemption's justification, where the difference matters.
+    """
+    func = inspect.unwrap(defaulttags.register.tags[tag])
+    module = ast.parse(textwrap.dedent(inspect.getsource(func)))
+    return any(
+        (isinstance(node, ast.Name) and node.id == name)
+        or (isinstance(node, ast.Attribute) and node.attr == name)
+        for node in ast.walk(module)
+    )
 
 
 def token_shape(token):
@@ -142,6 +172,50 @@ class ErrorParityTests(unittest.TestCase):
         self.assertIsInstance(ours, StopIteration)
         self.assertEqual(str(theirs), str(ours))
         self.assertEqual(token_shape(theirs.token), token_shape(ours.token))
+
+    def test_the_error_corpus_covers_every_m5_tag_that_can_fail_to_compile(self):
+        """The error-side mirror of the success-corpus coverage test.
+
+        Derived from `M5_TAGS` and **not** from the stub set, which is the one
+        place this deliberately differs from its success-side twin. A tag's
+        message literal is written by the task that lands the tag, so demanding
+        the row only once the tag is implemented would make this assertion empty
+        exactly while the plan was claiming to close vacuous gates. Keyed to the
+        plan instead, it is red from the plan's first task and turns green one
+        tag at a time — the same shape as the milestone switch, and for the same
+        reason.
+
+        A row per tag, not a row per message: exact wording is what
+        `test_the_corpus_matches_django` and each implementing task's own steps
+        pin, and a coverage gate is a different claim from a wording claim.
+        """
+        for tag in sorted(M5_TAGS - {"ifchanged"}):
+            with self.subTest(tag=tag):
+                covered = any(
+                    re.search(r"\{%\s*" + re.escape(tag) + r"\b", source)
+                    for source, _ in ERRORS
+                )
+                self.assertTrue(
+                    covered, f"{tag} can fail at compile time but no ERRORS row covers it"
+                )
+
+    def test_the_m5_error_exemption_is_derived_from_djangos_source(self):
+        """`ifchanged` is exempt because Django's own compile raises nothing.
+
+        Not because the corpus forgot it: every compile-time failure `ifchanged`
+        can produce comes from the base parser it drives (`parser.parse`,
+        `parser.next_token`), which M3 already pins, so it has no message literal
+        of its own for `ERRORS` to carry. Derived from the pinned source rather
+        than asserted in prose, so a pin bump that gives `ifchanged`'s compile
+        function a raise of its own reddens here and the exemption gets revisited — which is the
+        only way an exemption stays honest.
+        """
+        raising = {
+            tag
+            for tag in M5_TAGS
+            if compile_function_mentions(tag, "TemplateSyntaxError")
+        }
+        self.assertEqual(M5_TAGS - raising, {"ifchanged"})
 
     def test_successful_templates_raise_nothing(self):
         # The control: a corpus that every parser rejects proves nothing about

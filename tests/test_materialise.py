@@ -14,6 +14,7 @@ keeps the node classes Django's own.
 """
 
 import importlib.util
+import re
 import sys
 import unittest
 import unittest.mock
@@ -887,6 +888,110 @@ class VariableNodeTests(unittest.TestCase):
         )
         self.assertIsInstance(decoded, FilterExpression)
         self.assertNotIsInstance(decoded, _native.FilterExpr)
+
+
+_CFG_TEST = "#[cfg(test)]"
+_TAG_MODULES = PROJECT_ROOT / "crates" / "template-core" / "src" / "parser" / "tags"
+
+# `NodeDesc::new("X")` / `NodeDesc::with_nodelist("X", ...)`. `\s*` spans the
+# newline in `tags/mod.rs:182`, where the class name starts on the following line.
+_CLASS = re.compile(r'NodeDesc::(?:new|with_nodelist)\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)"')
+_TEXT = re.compile(r"NodeDesc::text\s*\(")
+
+# Emitted by the parse core rather than by a tag module: `TextNode` by
+# `desc.rs::NodeDesc::text` and `VariableNode` by `parser/mod.rs:186`.
+CORE_EMITTED_CLASSES = {"TextNode", "VariableNode"}
+
+# Names that exist **only** under `#[cfg(test)]`. The stripper below is asserted
+# to remove them, which is the only way to know it removed the right region:
+# a stripper that silently cut real code would fail the second assertion instead,
+# so the pair brackets it from both sides.
+TEST_ONLY_CLASSES = {"StandinBlockNode", "StandinFirstNode", "StandinRefNode", "HostNode"}
+
+
+def strip_cfg_test(source):
+    """`source` with every `#[cfg(test)]` item removed.
+
+    A brace-matching scan and not a split on the first marker. The markers are
+    interleaved with production code — `tags/mod.rs` puts stand-ins under
+    `#[cfg(test)]` from `:207` onward while real helper code follows at `:48-59`
+    and beyond — so a prefix cut would drop a region silently, and a silently
+    dropped region is a class name this check cannot see. That is the failure
+    direction worth engineering against; the other direction is covered by
+    `test_every_node_class_is_emitted_somewhere`.
+    """
+    lines = source.splitlines()
+    kept: list[str] = []
+    index = 0
+    while index < len(lines):
+        if lines[index].strip() != _CFG_TEST:
+            kept.append(lines[index])
+            index += 1
+            continue
+        index += 1  # the attribute itself
+        depth = 0
+        saw_brace = False
+        while index < len(lines):
+            line = lines[index]
+            index += 1
+            depth += line.count("{") - line.count("}")
+            saw_brace = saw_brace or "{" in line
+            if saw_brace and depth <= 0:
+                break  # a block item's closing brace
+            if not saw_brace and line.rstrip().endswith(";"):
+                break  # `use …;`, `pub(crate) use …;` and the like
+    return "\n".join(kept)
+
+
+def tag_emitted_class_names():
+    """Every node class name a tag module's *production* code can emit.
+
+    Static, so it sees a name no corpus row happens to exercise — which is the
+    whole point: the existing runtime guard is `materialise_node`'s `LookupError`,
+    and it can only fire for a node the corpus actually builds.
+    """
+    names = set()
+    for path in sorted(_TAG_MODULES.glob("*.rs")):
+        body = strip_cfg_test(path.read_text(encoding="utf-8"))
+        names.update(_CLASS.findall(body))
+        if _TEXT.search(body):
+            names.add("TextNode")
+    return names
+
+
+class StaticEmitterRegistryTests(unittest.TestCase):
+    """`NODE_CLASSES` against the class names the Rust emitters name.
+
+    The runtime guard is a `LookupError` from `materialise_node`, which fires
+    only for a node the corpus builds. A tag whose emitter names a class nobody
+    registered, on a path no corpus row reaches, is invisible to it — and the
+    class name is a string literal in the Rust source, so a typo is statically
+    visible and the corpus cannot hide it.
+    """
+
+    def test_the_stripper_removes_only_test_code(self):
+        removed = {
+            name
+            for name in TEST_ONLY_CLASSES
+            if name not in tag_emitted_class_names()
+        }
+        self.assertEqual(
+            removed,
+            TEST_ONLY_CLASSES,
+            f"test-only names survived the strip: {sorted(TEST_ONLY_CLASSES - removed)}",
+        )
+
+    def test_every_tag_emitted_class_is_materialisable(self):
+        missing = tag_emitted_class_names() - set(materialiser.NODE_CLASSES)
+        self.assertEqual(missing, set(), f"NODE_CLASSES is missing {sorted(missing)}")
+
+    def test_every_node_class_is_emitted_somewhere(self):
+        dead = (
+            set(materialiser.NODE_CLASSES)
+            - tag_emitted_class_names()
+            - CORE_EMITTED_CLASSES
+        )
+        self.assertEqual(dead, set(), f"unreachable NODE_CLASSES entries: {sorted(dead)}")
 
 
 if __name__ == "__main__":

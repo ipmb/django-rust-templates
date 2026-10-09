@@ -240,6 +240,14 @@ failure rather than an omission. The existing
 `ErrorParityTests.test_the_corpus_matches_django` already verifies each expected
 message against Django's real parser, so a wrong expectation fails loudly.
 
+**Keyed to `M5_TAGS` and not to the implemented set, which makes A3 red from Task
+1 alongside the switch** — the plan's Step 7 therefore expects two reds, not one.
+Keyed to the implemented set it would be empty until Task 3 and thus a comment for
+exactly the stretch where the plan claims to be replacing comments with gates.
+The `ifchanged` exemption is derived from the pinned tree
+(`compile_function_mentions`), not asserted in prose: measured, exactly ten of the
+eleven mention `TemplateSyntaxError` in their registered compile function.
+
 **A4 — no tag can emit a class Python cannot materialise.** A new test derives
 each `class_name` a tag module can construct, by scanning
 `crates/template-core/src/parser/tags/*.rs` for `NodeDesc::new("<C>")` and
@@ -563,6 +571,11 @@ check is unaffected — it compares **keys**.
 - Produces: `_native.builtin_tag_stubs() -> list[str]`, the names whose registry
   `CompileFn` is still `Err(unimplemented(...))`. **This is the milestone's
   switch**: M5 is done iff `set(builtin_tag_stubs()) & M5_TAGS == set()`.
+- Leaves two pins that later tasks must move, both deliberately: the Rust literal
+  in `registry.rs::every_entry_is_reachable_and_every_unimplemented_one_is_a_stub`
+  (fifteen names → the four that survive M5) and `deferred` in
+  `test_parser_parity.py` (`{"resetcycle"}` → `set()`). Task 7 moves the first and
+  Task 6 the second, each in the commit that makes the old value false.
 
 **Why a Rust-side stub list and not a Python literal.** A hardcoded list of
 "which tags are done" is the same defect one layer down: it is right until it is
@@ -577,26 +590,57 @@ a row for it — automatically.
 - [ ] **Step 1: Lift the stub predicate in `registry.rs`.**
 
 The stub set is currently inline in the test. Move it to a `pub fn` beside
-`builtin_tag_names`:
+`builtin_tag_names` — **deriving it by calling each compile function**, not by
+adding an `is_stub` field:
 
 ```rust
-/// The registered names whose compile function is still a milestone stub.
-///
-/// Derived from the table, not from a list: a name is a stub iff its
-/// `CompileFn` is the one `unimplemented` body. M5's gate is "this set and
-/// `M5_TAGS` are disjoint"; a list would make that gate a comment.
-pub fn builtin_tag_stubs() -> Vec<String> {
+/// The registered names whose compile function is still a milestone stub, ascending.
+pub fn builtin_tag_stubs() -> Vec<&'static str> {
+    let probe = Token {
+        token_type: TokenType::Block,
+        contents: "x".to_string(),
+        lineno: 1,
+        position: None,
+    };
     REGISTRY
         .iter()
-        .filter(|entry| entry.is_stub)
-        .map(|entry| entry.name.to_string())
+        .filter(|(_, compile)| {
+            let mut parser = Parser::new(Vec::new(), &NoHost);
+            matches!(
+                compile(&mut parser, &probe),
+                Err(Error { kind: ErrorKind::Unimplemented(_), .. })
+            )
+        })
+        .map(|(name, _)| *name)
         .collect()
 }
 ```
 
-(If `Entry` has no `is_stub` field, add one and set it at the fifteen stub
-sites; the existing test then asserts `builtin_tag_stubs()` has 15 names and
-the same names it hardcodes today.)
+**This replaces the draft's `is_stub` field, on a measurement.** The draft offered
+a column in `Entry`, set at the fifteen stub sites — which is a hand-maintained
+list wearing a struct. Every stub body is exactly `Err(unimplemented(name,
+milestone))` and reads neither the parser nor the token, so a probe token tells
+the two apart without anyone maintaining anything. Probed against the live table:
+all fifteen stubs return `Unimplemented`, and the nine implemented tags return
+`Ok`/`Syntax`/`Internal` and never `Unimplemented` — no panics, which matters
+because `unimplemented` is called only from stub bodies, so `Unimplemented` *is*
+the predicate.
+
+The `Vec<&'static str>` and not the draft's `Vec<String>`: it matches
+`builtin_tag_names`, and it copies nothing.
+
+`ErrorKind`, `TokenType` and `NoHost` are now needed by production code in this
+module, so the three imports at the top widen and the test module's now-redundant
+`use crate::parser::error::ErrorKind;` goes (a glob plus an explicit import of the
+same name is the `unused_imports` lint).
+
+Step 1 also rewrites `every_entry_is_reachable_and_every_unimplemented_one_is_a_stub`
+so its hardcoded fifteen names become a **pin** on the derivation —
+`assert_eq!(builtin_tag_stubs(), stubs, …)` — and adds
+`the_stub_derivation_is_not_a_copy_of_the_table`, which asserts stubs and
+implementations partition `builtin_tag_names`. Both are seen to fail: mutating
+`tags/widthratio.rs`'s body to return a `Syntax` error reddens the pin and names
+`widthratio` as the disagreement.
 
 - [ ] **Step 2: Expose it through PyO3.**
 
@@ -651,29 +695,42 @@ and, in `TagInventoryTests`:
 - [ ] **Step 4: Rewrite the corpus-coverage test to derive.**
 
 Replace the hardcoded list at `test_parser_parity.py:284-299` (keeping its
-docstring's `resetcycle` note):
+`resetcycle` note):
 
 ```python
     def test_the_corpus_covers_every_implemented_tag_with_a_success_path(self):
-        """Every tag the engine can *parse* has a happy-path corpus row.
-
-        Enumerated from the engine, not hardcoded: a tag leaves
-        `builtin_tag_stubs()` when its body lands, and this test then demands a
-        row for it. M2's list was eight names and could not fail for any tag it
-        did not name — the vacuous gate this plan exists to close.
-        """
-        from tests.test_tag_inventory import M5_TAGS
-        from django_rust_templates import _native
         implemented = set(_native.builtin_tag_names()) - set(_native.builtin_tag_stubs())
         joined = "\n".join(TEMPLATES)
-        for tag in sorted(implemented):
-            self.assertIn(f"{{% {tag}", joined, f"{tag} is implemented but not in the corpus")
+        # `\b` and not a bare prefix: `{% ifchanged %}` is not a `{% if %}` row.
+        missing = {
+            tag for tag in implemented
+            if not re.search(r"\{%\s*" + re.escape(tag) + r"\b", joined)
+        }
+        deferred = {"resetcycle"}
+        self.assertEqual(missing, deferred, f"corpus gaps that are not the declared "
+                         f"exemption: {sorted(missing - deferred)}; declared gaps now "
+                         f"covered: {sorted(deferred - missing)}")
 ```
 
-(`_native` is imported at `test_parser_parity.py:53` as
-`from django_rust_templates import _native`; `M5_TAGS` and `TEMPLATES` come from
-the file's existing imports. The local imports in the snippet above are only how
-this plan names them — use the module-level ones.)
+**Two corrections to the draft, both found by running it.**
+
+It asserts the exact set of *gaps* rather than looping `assertIn`, because a loop
+can only report a tag it already knows to look for — so an exemption written as a
+missing list entry is indistinguishable from an oversight, which was the original
+defect. Naming the exemption makes it a pin instead.
+
+And the exemption is real and the draft missed it: `resetcycle` **is** implemented
+(`builtin_tag_names()` member, not a stub) but has no success row and cannot have
+one yet, because every successful compile of it needs a preceding `{% cycle %}` —
+`do_resetcycle` raises `"No cycles in template."` when `parser.last_cycle_node` is
+unset (`defaulttags.py:1441-1443`), and `cycle` does not land until Task 6. So the
+draft's derived loop would have gone red at Task 1 for a tag that is *finished*,
+which is the sort of thing that gets a gate deleted rather than fixed. `deferred`
+shrinks to `set()` in Task 6, in the same commit as the `{% cycle %}` corpus row.
+
+The `\b` matters too: with a bare prefix, a `{% ifchanged %}` row would satisfy
+`{% if` once `if` lands — a missing row reported as present, in the one direction
+a coverage gate must never be wrong.
 
 **Note on `test_the_corpus_covers_every_tag_with_a_success_path`'s name.** It is
 renamed to `..._every_implemented_tag_...`, because "every tag" is now false of a
@@ -682,41 +739,127 @@ set it does not derive.
 
 - [ ] **Step 5: Add the M5-done switch and the error-corpus coverage.**
 
-New test in `test_parser_parity.py` (or `test_tag_inventory.py`):
+New test in `test_tag_inventory.py`, in `RustRegistryTests` beside the other two
+statements about the Rust registry — `M5_TAGS` and its only consumer read
+together, and no cross-module import:
 
 ```python
     def test_no_m5_tag_is_still_a_stub(self):
         """M5's switch. Red until every M5 tag's body has landed."""
-        from tests.test_tag_inventory import M5_TAGS
-        from django_rust_templates import _native
         still = set(_native.builtin_tag_stubs()) & M5_TAGS
         self.assertEqual(still, set(), f"M5 has not landed: {sorted(still)}")
 ```
 
-And in `tests/test_parser_errors.py`, an analogous assertion iterating
-`M5_TAGS` against the sources in `ERRORS` for the tags §D gives a literal
-message (all but `ifchanged`, whose only compile-time failures are the parser's
-own).
+And in `tests/test_parser_errors.py`, the error-side coverage. **This one is
+keyed to `M5_TAGS` and not to the stub set, and it is therefore red at Task 1** —
+the draft said "an analogous assertion" without saying which side of the
+subtraction, and the two choices are not equivalent. Keyed to stubs it is empty
+from Task 1 until Task 3 and so a comment at exactly the moment the plan is
+closing vacuous gates; keyed to the plan it is red from Task 1 and turns green one
+tag at a time, the same shape as the switch:
+
+```python
+    def test_the_error_corpus_covers_every_m5_tag_that_can_fail_to_compile(self):
+        for tag in sorted(M5_TAGS - {"ifchanged"}):
+            with self.subTest(tag=tag):
+                covered = any(
+                    re.search(r"\{%\s*" + re.escape(tag) + r"\b", source)
+                    for source, _ in ERRORS
+                )
+                self.assertTrue(covered, f"{tag} can fail at compile time but no ERRORS row covers it")
+```
+
+The `ifchanged` exemption is *derived*, not asserted in prose, and getting that
+derivation right took two measurements:
+
+```python
+def compile_function_mentions(tag, name):
+    func = inspect.unwrap(defaulttags.register.tags[tag])
+    module = ast.parse(textwrap.dedent(inspect.getsource(func)))
+    return any(
+        (isinstance(n, ast.Name) and n.id == name)
+        or (isinstance(n, ast.Attribute) and n.attr == name)
+        for n in ast.walk(module)
+    )
+```
+
+```python
+    def test_the_m5_error_exemption_is_derived_from_djangos_source(self):
+        raising = {t for t in M5_TAGS if compile_function_mentions(t, "TemplateSyntaxError")}
+        self.assertEqual(M5_TAGS - raising, {"ifchanged"})
+```
+
+**The first attempt at this was wrong and the failure was informative.** It looked
+the function up by a `do_<tag>` naming convention and found no top-level
+`do_url` — because the convention does not hold: `cycle` (`defaulttags.py:612`)
+and `url` (`:1515`) are top-level functions under their own names with no prefix.
+A guess that had *not* crashed would have reported "raises nothing" for both and
+quietly widened the exempt set from one tag to three, which is precisely the class
+of error this project keeps paying for — a plausible convention standing in for a
+measurement. Hence the registry lookup, and the AST rather than a substring
+search so a name in a comment is not a raise.
+
+Measured, it yields exactly the ten tags §D gives message literals for; `ifchanged`
+is the only M5 tag whose compile function never raises `TemplateSyntaxError`
+itself, every failure it can produce coming from the base parser M3 already pins.
 
 - [ ] **Step 6: A4 — the static `NODE_CLASSES` check, in `test_materialise.py`.**
+
+The draft's helper cut each file at its first `#[cfg(test)]`
+(`body = path.read_text().split("#[cfg(test)]")[0]`). **That is wrong, and the
+measurement is the reason:** the markers are interleaved with production code —
+`tags/mod.rs` puts its stand-ins under `#[cfg(test)]` from `:207` onward while
+real helper code sits at `:48-59` and beyond — so a prefix cut drops a region
+silently, and a silently dropped region is a class name the check cannot see. The
+replacement is a brace-matching scan:
+
+```python
+_CFG_TEST = "#[cfg(test)]"
+
+def strip_cfg_test(source):
+    lines = source.splitlines()
+    kept: list[str] = []
+    index = 0
+    while index < len(lines):
+        if lines[index].strip() != _CFG_TEST:
+            kept.append(lines[index])
+            index += 1
+            continue
+        index += 1
+        depth = 0
+        saw_brace = False
+        while index < len(lines):
+            line = lines[index]
+            index += 1
+            depth += line.count("{") - line.count("}")
+            saw_brace = saw_brace or "{" in line
+            if saw_brace and depth <= 0:
+                break
+            if not saw_brace and line.rstrip().endswith(";"):
+                break
+    return "\n".join(kept)
+```
+
+Its correctness is asserted rather than assumed, and the two assertions bracket it
+from both sides: `TEST_ONLY_CLASSES` (`StandinBlockNode`, `StandinFirstNode`,
+`StandinRefNode`, `HostNode`) must be *absent* after the strip, which a no-op
+stripper fails; and `test_every_node_class_is_emitted_somewhere` fails if it cut
+real code. A stripper wrong in either direction reddens one of the two.
 
 ```python
 TAG_MODULES = PROJECT_ROOT / "crates" / "template-core" / "src" / "parser" / "tags"
 _CLASS = re.compile(r'NodeDesc::(?:new|with_nodelist)\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)"')
 _TEXT = re.compile(r"NodeDesc::text\s*\(")
 
-# Emitted by the parse core, not by a tag module: `TextNode` by
-# `desc.rs::NodeDesc::text`, `VariableNode` by `parser/mod.rs`.
+# `TextNode` by `desc.rs::NodeDesc::text`, `VariableNode` by `parser/mod.rs:186`.
 CORE_EMITTED_CLASSES = {"TextNode", "VariableNode"}
+TEST_ONLY_CLASSES = {"StandinBlockNode", "StandinFirstNode", "StandinRefNode", "HostNode"}
 
 
 def tag_emitted_class_names():
     names = set()
-    for path in TAG_MODULES.glob("*.rs"):
-        body = path.read_text(encoding="utf-8").split("#[cfg(test)]")[0]
-        body = "\n".join(
-            line for line in body.splitlines() if not line.lstrip().startswith("//")
-        )
+    for path in sorted(TAG_MODULES.glob("*.rs")):
+        body = strip_cfg_test(path.read_text(encoding="utf-8"))
         names.update(_CLASS.findall(body))
         if _TEXT.search(body):
             names.add("TextNode")
@@ -726,14 +869,13 @@ def tag_emitted_class_names():
 then:
 
 ```python
-    def test_every_tag_emitted_class_is_materialisable(self):
-        """No tag can name a node class Python cannot build.
+    def test_the_stripper_removes_only_test_code(self):
+        self.assertEqual(
+            {n for n in TEST_ONLY_CLASSES if n not in tag_emitted_class_names()},
+            TEST_ONLY_CLASSES,
+        )
 
-        Today the only guard is `materialise_node`'s runtime `LookupError`, which
-        fires only for a node the corpus actually builds. The class name is a
-        string literal in the Rust source, so the check is static and the corpus
-        cannot hide a typo.
-        """
+    def test_every_tag_emitted_class_is_materialisable(self):
         missing = tag_emitted_class_names() - set(materialiser.NODE_CLASSES)
         self.assertEqual(missing, set(), f"NODE_CLASSES is missing {sorted(missing)}")
 
@@ -742,35 +884,58 @@ then:
         self.assertEqual(dead, set(), f"unreachable NODE_CLASSES entries: {sorted(dead)}")
 ```
 
+`\s*` spans newlines, which is not incidental: `tags/mod.rs:182` starts a
+`NodeDesc::with_nodelist(` whose class-name literal is on the following line.
+
 - [ ] **Step 7: Run the new guards, and confirm the *first* one fails for its
   intended reason — then run each mutation and restore with `cp`, never
   `git checkout` (§ the work is uncommitted).**
 
 Run: `source scripts/env.sh && maturin develop && ./scripts/check.sh`
-Expected: `test_no_m5_tag_is_still_a_stub` **FAILS**, naming all eleven tags.
-That failure is the milestone's red. `test_every_tag_emitted_class_is_materialisable`
-and `test_the_corpus_covers_every_implemented_tag_with_a_success_path` are green
-(no M5 body exists yet, so nothing is demanded of the corpus).
+Expected: **two reds, not one** — `test_no_m5_tag_is_still_a_stub` naming all
+eleven tags, and `test_the_error_corpus_covers_every_m5_tag_that_can_fail_to_compile`
+naming ten (all but `ifchanged`). The draft said the switch was the only expected
+failure; keying A3 to the plan rather than to the stub set makes it red too, and
+that is the intended shape rather than a defect. Ten is the right number because
+§D gives exactly ten of the eleven a compile-time message literal, and the derived
+exemption test above is what establishes `ifchanged` as the eleventh.
+
+`test_every_tag_emitted_class_is_materialisable` and
+`test_the_corpus_covers_every_implemented_tag_with_a_success_path` are green (no
+M5 body exists yet, so nothing is demanded of the success corpus).
 
 Then, in turn, each mutation, run and restored:
 
 ```bash
 cp python/django_rust_templates/_impl/parser.py /tmp/parser.py.bak
-# delete the "DebugNode": DebugNode, line  -> A4-reds (DebugNode is tag-emitted)
+# delete the `"DebugNode": DebugNode,` line -> A4-reds, naming DebugNode
 # restore
 ```
 
 ```bash
 cp tests/parser_corpus.py /tmp/corpus.py.bak
-# delete the "{% csrf_token %}" row -> coverage-reds, naming csrf_token
+# delete EVERY `{% csrf_token` row, not one -> coverage-reds, naming csrf_token
 # restore
 ```
 
+**Not "the `{% csrf_token %}` row".** The draft's mutation removed one row and
+the test stayed green — correctly, because the gate is "at least one row mentions
+the tag" and eight other rows mention `csrf_token`. Recorded because the mutation
+not reddening is information: it says the gate's granularity is per-tag coverage,
+not per-row presence, which is the claim its docstring makes and the reason its
+failure message distinguishes "gaps that are not the declared exemption" from
+"declared gaps now covered".
+
 ```bash
 cp tests/test_tag_inventory.py /tmp/inv.py.bak
-# drop "url" from the M5_TAGS literal -> derivation-equality reds
+# drop "url" from the M5_TAGS literal -> derivation-equality reds, naming url
 # restore
 ```
+
+The `M5_TAGS` edit must be anchored past `NEEDS_FILTER_EXPRESSION`, which ends
+with the same four names on one line; unanchored, `str.replace(…, 1)` hits that
+set first and reddens `test_the_filter_expression_partition` instead — a mutation
+that proves something about a different test.
 
 - [ ] **Step 8: Commit.**
 
@@ -1528,10 +1693,19 @@ def test_cycle_reuse_and_resetcycle_share_one_object():
   template` message and the identity mechanism are the same parser state.
 - [ ] **Step D: commit.**
 
+This is also the step that **empties `deferred` in
+`test_parser_parity.py`** — `{"resetcycle"}` → `set()`, in this same commit. The
+corpus rows above are what make the old value false: `{% cycle 'a' 'b' as c
+%}{% resetcycle %}` is the first template in which `resetcycle` has a success
+path at all, because every other one raises `"No cycles in template."`. Task 1
+declared the pin; this is where it moves, and leaving it would keep a finished
+tag reported as an unfinished one.
+
 ```bash
 git add crates/template-core/src/parser/tags/cycle.rs \
         crates/template-core/src/parser/tags/resetcycle.rs \
-        tests/parser_corpus.py tests/parser_error_corpus.py tests/test_ref_table.py
+        tests/parser_corpus.py tests/parser_error_corpus.py tests/test_ref_table.py \
+        tests/test_parser_parity.py
 git commit -m "tags: cycle's five shapes, and the one object they must all share"
 ```
 
@@ -1611,8 +1785,24 @@ git commit -m "tags: if, and the real compile_filter behind its condition"
 
 Run: `./scripts/check.sh`
 Expected: `test_no_m5_tag_is_still_a_stub` **PASS** — `builtin_tag_stubs()`
-still names `block`, `load`, `partial`, `partialdef` (M6/M7/M13) and no longer
+still names **`load`, `partial`, `partialdef`, `querystring`** and no longer
 names any of M5's eleven. `Ran <N> tests … OK (skipped=6)`.
+
+**That is four names and the earlier draft's list was wrong:** it said "`block`,
+`load`, `partial`, `partialdef`". `block` can never appear here — it is one of
+the three names `registry.rs` deliberately does *not* register (§6 assigns it to
+Python), and `builtin_tag_stubs()` iterates the registry, so a name outside it is
+not merely absent but unrepresentable. The fourth name is `querystring`, which
+§D1 moves to M6 and which therefore stays a stub through M5.
+
+This step also moves the two pins Task 1 declared, and both must move *here*:
+the `stubs` literal in
+`registry.rs::every_entry_is_reachable_and_every_unimplemented_one_is_a_stub`
+from fifteen names to these four, and `deferred` in
+`test_parser_parity.py` from `{"resetcycle"}` to `set()` — the latter in Task 6's
+commit, with the `{% cycle %}` corpus row. A pin that did not have to move would
+not have been a pin, and leaving either unmoved is a red `check.sh`, which is the
+point.
 
 ---
 

@@ -87,10 +87,11 @@
 //! change in both places at once rather than a silent drift.
 
 use crate::parser::desc::NodeDesc;
-use crate::parser::error::Error;
+use crate::parser::error::{Error, ErrorKind};
+use crate::parser::host::NoHost;
 use crate::parser::tags;
 use crate::parser::Parser;
-use crate::token::Token;
+use crate::token::{Token, TokenType};
 
 /// A tag's compile function: Django's `Parser.compile_func(self, token)`.
 ///
@@ -159,6 +160,52 @@ pub fn builtin_tag_names() -> Vec<&'static str> {
     REGISTRY.iter().map(|(name, _)| *name).collect()
 }
 
+/// The registered names whose compile function is **still a milestone stub**,
+/// ascending.
+///
+/// Derived from the table by **asking it**, not from a second list: a name is a
+/// stub iff compiling it returns [`ErrorKind::Unimplemented`]. Every stub body is
+/// exactly `Err(unimplemented(name, milestone))` and reads neither the parser nor
+/// the token, so a probe token that no real tag accepts is enough to tell the two
+/// apart — a *real* tag answers the same probe with `Syntax`/`Internal`/`Ok`
+/// (measured: `autoescape` → `Syntax`, `comment` → `Internal`, `csrf_token` →
+/// `Ok`) and never with `Unimplemented`, because `unimplemented` is only ever
+/// called from a stub.
+///
+/// **Why not a list, or an `is_stub` column.** Both are the same defect one layer
+/// down: right until they are not, with nothing to fail when they drift from the
+/// bodies they describe. This is the set M5's gate is a set-difference against —
+/// `builtin_tag_stubs() & M5_TAGS == set()` — so it has to be the engine's own
+/// answer. It also makes the milestone *progress* derivable: a tag lands, and its
+/// name leaves this list, demanding a corpus row from
+/// `test_the_corpus_covers_every_implemented_tag_with_a_success_path`.
+///
+/// The probe is well-formed and minimal (`{% x %}`), so a panic here would mean
+/// the tag panics on ordinary input — already a defect, and not one this
+/// function should hide.
+pub fn builtin_tag_stubs() -> Vec<&'static str> {
+    let probe = Token {
+        token_type: TokenType::Block,
+        contents: "x".to_string(),
+        lineno: 1,
+        position: None,
+    };
+    REGISTRY
+        .iter()
+        .filter(|(_, compile)| {
+            let mut parser = Parser::new(Vec::new(), &NoHost);
+            matches!(
+                compile(&mut parser, &probe),
+                Err(Error {
+                    kind: ErrorKind::Unimplemented(_),
+                    ..
+                })
+            )
+        })
+        .map(|(name, _)| *name)
+        .collect()
+}
+
 /// The error a stub compile function returns.
 ///
 /// An `Unimplemented` rather than a `Syntax`: the tag is real and Django would
@@ -173,7 +220,6 @@ pub fn unimplemented(name: &str, milestone: &str) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::error::ErrorKind;
 
     #[test]
     fn the_registry_is_sorted_and_has_no_duplicates() {
@@ -222,9 +268,20 @@ mod tests {
 
     #[test]
     fn every_entry_is_reachable_and_every_unimplemented_one_is_a_stub() {
-        // The registry's own invariant: a name it lists must resolve, and the
-        // fifteen that no milestone before this one implements must be the
-        // stubs rather than an M2 tag registered under a second name.
+        // Two independent statements of the same set, and the independence is the
+        // point: the literal below is a **pin** on the derivation in
+        // `builtin_tag_stubs`, so a stub body that stopped returning
+        // `Unimplemented` — the one way that function can drift from the entries
+        // it describes — reddens here instead of silently shrinking the set M5's
+        // gate is a set-difference against. The derivation, not this literal, is
+        // what the Python gate consumes; this is the second opinion it is checked
+        // against.
+        //
+        // M5's last task rewrites this literal. Implementing eleven of the
+        // fifteen here is exactly what makes them stop being `Unimplemented`, so
+        // the pin must shrink to `load`, `partial`, `partialdef` and
+        // `querystring` in the same commit that lands the eleventh tag. A pin
+        // that did not have to move would not have been a pin.
         let stubs = [
             "cycle",
             "filter",
@@ -242,7 +299,12 @@ mod tests {
             "widthratio",
             "with",
         ];
-        assert_eq!(stubs.len(), 15);
+        assert_eq!(
+            builtin_tag_stubs(),
+            stubs,
+            "builtin_tag_stubs() disagrees with the pin above: either a stub body \
+             stopped returning Unimplemented, or the table changed",
+        );
         for name in builtin_tag_names() {
             assert!(builtin_tag(name).is_some(), "{name} does not resolve");
         }
@@ -262,5 +324,31 @@ mod tests {
         .collect();
         expected.sort_unstable();
         assert_eq!(builtin_tag_names(), expected);
+    }
+
+    #[test]
+    fn the_stub_derivation_is_not_a_copy_of_the_table() {
+        // The derivation is only worth having if it can disagree with the table.
+        // `unimplemented` is the single gate every stub body goes through, so a
+        // name is a stub for exactly one reason and the two sets must partition
+        // the table — no name in both, none in neither. If a future milestone
+        // gives a tag a real body, the name leaves `stubs` and this still holds,
+        // which is what makes it useful at every milestone rather than only at
+        // M5's gate.
+        let names = builtin_tag_names();
+        let stubs = builtin_tag_stubs();
+        for name in &stubs {
+            assert!(
+                names.contains(name),
+                "{name} is a stub but is not a registered name",
+            );
+        }
+        let mut both: Vec<&str> = stubs.clone();
+        both.extend(names.iter().copied().filter(|n| !stubs.contains(n)));
+        both.sort_unstable();
+        assert_eq!(
+            both, names,
+            "stubs and implementations do not partition the table"
+        );
     }
 }
