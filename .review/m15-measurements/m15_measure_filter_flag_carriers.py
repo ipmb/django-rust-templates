@@ -75,20 +75,36 @@ for module in (_cache, _i18n, _l10n, _static, _tz):
 
 total = 0
 carriers = []
-safe = 0
+has_safe = 0
+truthy_safe = 0
 for name, registry in registries:
     total += len(registry)
+    has_here = 0
+    true_here = 0
     for key, obj in registry.items():
         if hasattr(obj, "is_safe"):
-            safe += 1
+            has_here += 1
+            if getattr(obj, "is_safe"):
+                true_here += 1
         for flag in FLAGS:
             if hasattr(obj, flag):
                 carriers.append((name, key, flag, repr(getattr(obj, flag))))
-    print(f"{name:46s} {len(registry):4d}")
+    has_safe += has_here
+    truthy_safe += true_here
+    print(f"{name:46s} {len(registry):4d}   is_safe: {has_here:3d} present, {true_here:3d} truthy")
 
-print(f"{'TOTAL':46s} {total:4d}")
+print(f"{'TOTAL':46s} {total:4d}   is_safe: {has_safe:3d} present, {truthy_safe:3d} truthy")
 print(f"carriers of {FLAGS!r}: {carriers!r}")
-print(f"is_safe (positive control): {safe!r}")
+# The control is `hasattr`-shaped, not truth-shaped, because the row's subject is
+# `hasattr` — so the right control number is the "present" one. And it is 57,
+# which *coincides with the 57 builtin filters* while naming a different set:
+# 55 of the builtins plus both of l10n's. A bare "57" here confirms a wrong
+# reading, which is why the per-registry lines above are part of the claim.
+print(
+    f"control reading, stated so it cannot be taken as the builtin count: "
+    f"is_safe is present on {has_safe} of {total} (55 of the 57 builtins plus "
+    f"both of l10n's), and truthy on only {truthy_safe}"
+)
 
 import django.template.base as _base  # noqa: E402
 

@@ -150,6 +150,25 @@ not a reading, and it is re-runnable:
 counts, its carriers, its control, and the tree it read — run twice, stock and
 shimmed, because the registry is one the shim replaces and a count that agrees in
 one tree is a count about that tree. Both give 111 and no carriers.
+
+**The control's 57 is a coincidence trap, and it is the one number in this
+record a reader will get wrong for free.** `is_safe` is present on 57 of the 111
+— and 57 is *also* the size of `defaultfilters.register.filters`, the population
+a reader already has in mind from the row this control defends. The two sets are
+not the same set: 57 = **55 of the 57 builtins plus both of `l10n`'s**. So the
+standing rule that a count must travel with its population is not sufficient
+here, because a bare `57` is not merely uninformative — it matches the size of a
+neighbouring population and *confirms a wrong reading*. The rule the case adds is
+narrow and worth its line: **when a derived count equals a nearby population's
+size, the breakdown is not optional.** The instrument prints every registry's own
+line and a closing sentence naming the composition, so the transcript carries the
+distinction rather than only the totals.
+
+And the control is `hasattr`-shaped, not truth-shaped, because the row's subject
+is `hasattr` — so `57` is the right control number and the truthy count, **36**,
+would have been the wrong one (`is_safe` is a `False` on 21 of the objects that
+carry it). That is M12's present-versus-truth distinction — `<absent>` is not
+`False` — doing load-bearing work inside a control rather than in a filter flag.
 Under §1's membership test the second half is unavailable, so the row moves from
 *uncontrolled* to *instrument-controlled, subject-discrimination unproven*, and
 it is carried in the residue (§8) rather than counted here. The tempting repair —
@@ -245,9 +264,31 @@ Ranked, with the reason each is not closable here.
    Name it; do not close it. It is listed here rather than among the four because
    it is not a §2 clause — it is about the record of the work — and a reader who
    later finds a wrong number in this file should find it predicted rather than
-   discovered. The statement is not one this file can exempt itself from: the
-   paragraph above cites `scripts/check_python_anchors.py:290-300` for the tool's
-   own reason, and that citation is **exactly as unchecked as the others**, since
-   `TREE_ROOTS` is `crates python tests docs/superpowers/specs` and this file is
-   in none of them. The tool's reason for excluding `.review/` is recorded in a
-   directory the tool excludes.
+   discovered.
+
+   **The turn is one deeper than that, and it is measured.** `scripts/` is not in
+   `TREE_ROOTS` either — the scan reads 203 files across `crates`, `docs`,
+   `python` and `tests`, and **none** under `scripts/` — so
+   `check_python_anchors.py` is itself an unscanned file. The tool's reason for
+   excluding `.review/` is therefore recorded in a file the tool excludes, not
+   merely a directory: the citation `check_python_anchors.py:290-300` two
+   paragraphs above is unchecked for a second reason, and it is the same one.
+   That also means **it covers appeals to it**: the reviewer cited that reason as
+   authority at M13's close and again in this review, to argue against widening
+   `TREE_ROOTS`, and both citations are exactly as unverifiable as the `.review/`
+   citations the reason explains. An item about a blind spot has to name the
+   readers who rely on it, or it will be filed as a fact about `.review/` rather
+   than about the gate.
+
+   **And the sentence documenting the blind spot was written inside it.** The
+   spec row's first draft of the paragraph above cited
+   `scripts/run_django_suite.sh:25` — *inside the clause explaining that line
+   numbers do not belong in the spec row*. The anchor gate refused it on the next
+   run, which is the gate operating on its own author in the one place the author
+   was writing about the gate. The refused fragment, verbatim:
+
+   > every number that carries this milestone, `scripts/run_django_suite.sh:25`
+   > included, now lives in `.review/`, which the anchor gate does not scan
+
+   It is quoted rather than described because a reader who sees the defect
+   committed inside its own documentation does not need the argument.
