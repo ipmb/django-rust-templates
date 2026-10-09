@@ -66,10 +66,11 @@ fn too_large() -> Error {
 /// `int(arg)` is the host's (Python's `int`, not a parse) and there is no `try`,
 /// so its error escapes; the padding is Rust's and counts **code points**.
 pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
-    // A Python `None` argument arrives as `Option::None` and is `int(None)`, a
-    // `TypeError` the real host raises (`template-py/src/filters.rs:1028`); a
-    // missing argument never reaches a body because the parser's arity check
-    // fires first (`base.py:819`).
+    // The literal `None` arrives as `Some(Value::None)` and is `int(None)`, a
+    // `TypeError` the real host raises (`template-py/src/filters.rs:1587-1589`);
+    // a missing argument never reaches a body because the parser's arity check
+    // fires first, measured `ljust requires 2 arguments, 1 provided`
+    // (`base.py:819`).
     let width = match call.host.to_int(&arg.unwrap_or(Value::None))? {
         IntValue::Small(width) => width,
         IntValue::Big(_) => return Err(too_large()),
@@ -272,9 +273,9 @@ mod tests {
     }
 
     /// A `None` argument is `int(None)`, a `TypeError` (measured), and `ljust`
-    /// does not catch it. The FFI hands a Python `None` as `Option::None`
-    /// (`template-py/src/filters.rs:1028`), which this body routes to the seam as
-    /// `Value::None`, so the real host raises the same class Django's does.
+    /// does not catch it. The FFI hands the literal `None` as `Some(Value::None)`
+    /// (`template-py/src/filters.rs:1587-1589`), which this body routes to the
+    /// seam as `Value::None`, so the real host raises the class Django's does.
     #[test]
     fn a_none_argument_escapes_as_type_error() {
         let h = host(IntValue::Small(5), "ab");

@@ -56,7 +56,7 @@ DJANGO_ANSWER = "ABCshadowed-abc"
 
 # The same sandwich with its first use inside a `{% with %}`, which reaches a
 # different arm of `_decode_value`: `{% with %}` builds `extra_context` as
-# `AttrValue::Map` (`with.rs:79`), so the value is a `FilterExpr` *inside a
+# `AttrValue::Map` (`with.rs:82`), so the value is a `FilterExpr` *inside a
 # dict* and is decoded by `_impl/parser.py`'s dict comprehension rather than by
 # the top-level `AttrValue::FilterExpr` arm the row above exercises.
 WITH_SOURCE = "{% with v=x|upper %}{{ v }}{% endwith %}{% load shadow %}{{ y|upper }}"
@@ -132,9 +132,9 @@ class FilterRebindingTests(unittest.TestCase):
         it — `{% with %}`'s own tests exercise the tag, not the rebinding
         window, so they agree with Django under the mutation too.
 
-        `{% with %}` is the tag to use because `with.rs:79` puts its
+        `{% with %}` is the tag to use because `with.rs:82` puts its
         `extra_context` in an `AttrValue::Map`. `{% url %}` reaches the same arm
-        (`url.rs:81`) but cannot carry the sandwich, since a URL tag renders no
+        (`url.rs:83`) but cannot carry the sandwich, since a URL tag renders no
         filter to compare.
         """
         ours = render_string(WITH_SOURCE, dict(CONTEXT), engine=shadowing_engine())

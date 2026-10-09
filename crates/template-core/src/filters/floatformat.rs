@@ -446,12 +446,11 @@ fn formatted(
 ///
 /// `arg.unwrap_or(Value::Int(-1))` is `defaultfilters.py:95`'s default, and it applies only to a
 /// **missing** argument: `{{ x|floatformat:None }}` is `int(None)`'s `TypeError`,
-/// measured. **The FFI cannot currently tell the two apart** — it maps an
-/// explicit `None` argument to the same `Option::None` it uses for an absent one
-/// (`template-py/src/filters.rs:1364-1367`) — so that one row answers the default
-/// here instead of raising. A body cannot see the difference; the fix is the
-/// FFI's, and `Some(Value::None)` already reaches `to_int(Value::None)` → the
-/// escaping `TypeError` the moment it is sent. Reported, not worked around.
+/// measured. **The FFI tells the two apart** — a missing argument is `None` and
+/// the literal `None` is `Some(Value::None)`, whose length is the distinction
+/// (`template-py/src/filters.rs:1587-1589`) — so the literal reaches
+/// `to_int(Value::None)` and escapes as that `TypeError`, where the absent
+/// argument answers the default.
 pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
     // `defaultfilters.py:140-151` first, before any parse: an empty-string argument raises here.
     let dispatch = dispatch_suffix(arg)?;

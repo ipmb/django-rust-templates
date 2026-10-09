@@ -320,7 +320,7 @@ mod tests {
 
     /// The body needs the seam, so it cannot be reimplemented in Rust and pass a
     /// bare-shell test by luck. Under [`NoFilterHost`] the refusal is a **panic**
-    /// rather than an `Err`, because `is_tuple` is one of the 17 non-`Result`
+    /// rather than an `Err`, because `is_tuple` is one of the 14 non-`Result`
     /// operations (`filters/host.rs:519-526`), so this observes it the way
     /// `filters/host.rs`'s own tests observe those.
     #[test]

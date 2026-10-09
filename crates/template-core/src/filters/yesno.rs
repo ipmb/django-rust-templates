@@ -514,7 +514,7 @@ mod tests {
     }
 
     /// The body's **first** host call for a missing argument is `gettext`, one of
-    /// the 17 non-`Result` operations that [`NoFilterHost`] refuses by
+    /// the 14 non-`Result` operations that [`NoFilterHost`] refuses by
     /// **panicking** rather than returning `Err` (`filters/host.rs:576-739`), so
     /// the bare-shell test observes the panic the way `stringformat.rs`'s does.
     #[test]

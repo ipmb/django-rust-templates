@@ -147,7 +147,7 @@ fn to_value(int: IntValue) -> Value {
 /// `int("-")` — a `ValueError` the body raises for the one non-digit character
 /// `str(value)` can contain. The operation is named `"int"` because no
 /// [`FilterHost`] method performs it here (the same shape as `cut` naming
-/// `str.replace` in `error.rs:160-165`).
+/// `str.replace` in `error.rs:292-293`).
 ///
 /// [`FilterHost`]: crate::filters::host::FilterHost
 fn invalid_literal(c: char) -> Error {

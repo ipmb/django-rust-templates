@@ -30,14 +30,15 @@
 //!   *type* is observed, which is why it is read as a `Value` and not run through
 //!   `to_str` blind.
 //! * **A `None` argument is the `replace` `TypeError`, not a missing-argument
-//!   error.** The FFI hands this body `Option::None` for a Python `None`
-//!   (`template-py/src/filters.rs:1028`), the same value it uses for a *missing*
-//!   argument, so the two cannot be told apart here. Only one is reachable:
-//!   `{{ x|cut }}` is an arity `TemplateSyntaxError` the parser raises first
-//!   (`base.py:819`) and never reaches a body, whereas `{{ x|cut:None }}` does
-//!   and is `TypeError: replace() argument 1 must be str, not None` (measured).
-//!   The message says `None`, **not** `NoneType` — `Value::None.type_name()`
-//!   would put the wrong word there.
+//!   error.** The FFI tells the two apart: a missing argument is `None` and the
+//!   literal `None` is `Some(Value::None)`, whose *length* is the distinction
+//!   (`template-py/src/filters.rs:1587-1589`). Only the second is reachable here
+//!   — `{{ x|cut }}` is an arity `TemplateSyntaxError` the parser raises first,
+//!   measured `cut requires 2 arguments, 1 provided` (`base.py:819`), so it never
+//!   reaches a body — whereas `{{ x|cut:None }}` does and is
+//!   `TypeError: replace() argument 1 must be str, not None` (measured). The
+//!   message says `None`, **not** `NoneType` — `Value::None.type_name()` would
+//!   put the wrong word there.
 //! * **The result is `mark_safe`d only when the pre-replacement value was
 //!   `SafeData` and `arg != ";"`.** The `!=` compares a **converted primitive**
 //!   (`&str`), per §D1's rule, so a safe `";"` argument behaves as Python's
@@ -86,18 +87,17 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
     let arg_text: &str = match &arg {
         // A `SafeString` is a `str`, so it is a valid `replace` argument.
         Some(Value::Str(text)) | Some(Value::Safe(text)) => text,
-        // A Python `None` argument arrives as `Option::None` — the FFI does not
-        // tell it apart from a *missing* argument
-        // (`template-py/src/filters.rs:1028`), and Django could not either, the
-        // body's `arg` being one object for both. The two Django answers differ,
-        // and only one is reachable: `{{ x|cut }}` is an arity
-        // `TemplateSyntaxError` the parser raises first (`base.py:819`), so it
-        // never reaches a body, while `{{ x|cut:None }}` does and is CPython's
-        // `replace` `TypeError` — measured. This branch answers the reachable
-        // one. CPython's message says **`None`**, not `NoneType`, so the word is
-        // spelled out: `Value::None.type_name()` would put the wrong one here.
-        // `Value::None` is unreachable from the FFI today and is matched anyway
-        // so the two spellings cannot answer differently.
+        // The literal `None` arrives as `Some(Value::None)` — the FFI's length,
+        // not an `Option`, is what separates it from a missing argument
+        // (`template-py/src/filters.rs:1587-1589`) — and only it is reachable:
+        // `{{ x|cut }}` is an arity `TemplateSyntaxError` the parser raises
+        // first, measured `cut requires 2 arguments, 1 provided` (`base.py:819`),
+        // so it never reaches a body, while `{{ x|cut:None }}` does and is
+        // CPython's `replace` `TypeError` — measured. This branch answers the
+        // reachable one. CPython's message says **`None`**, not `NoneType`, so
+        // the word is spelled out: `Value::None.type_name()` would put the wrong
+        // one here. The absent-argument arm is kept so that the two spellings
+        // cannot answer differently if a caller ever reaches it.
         None | Some(Value::None) => return Err(not_a_string("None")),
         Some(other) => return Err(not_a_string(other.type_name())),
     };
