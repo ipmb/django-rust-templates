@@ -82,10 +82,24 @@ MARKER_WINDOW = 4
 # re-runs the instrument and fails if the two disagree. A pinned table with a
 # live re-measurement behind it is the same shape as the module meter.
 #
-# 29 functions, spanning 116-1181 in a file of 1181 lines — nearly the whole
+# 29 functions, spanning 116-1200 in a file of 1200 lines — nearly the whole
 # file, which is the finding.
 # A guard that checked only the named target's own lines would miss a region
 # declared in any of the other 28.
+#
+# **These are the transcription's line numbers, so an insertion moves them, and
+# M11 Task 2's is why eleven of them are not what M10 pinned.** The filter seam
+# adds nineteen lines to `FilterExpression.resolve` (815-833, declared above),
+# which shifts every function below it by nineteen: `args_check` 827-844 →
+# 846-863 through `token_kwargs` 1137-1181 → 1156-1200. Re-measured with the
+# instrument rather than computed, because the instrument is the evidence; the
+# shift is arithmetic anyone can check, and the *set* of functions is the part
+# that could have moved for a real reason (the routing arm is on `resolve`'s own
+# lines, and `resolve` is not in this table — the parse harness never renders).
+# The stale pin did not fail quietly: clause (4) read the old `args_check` span
+# against the new region and reported an overlap that was not there, which is
+# the false *positive* half of the same staleness the re-measurement row catches
+# from the other side.
 #
 # The count was 28 until the instrument learned to see through a descriptor.
 # `FilterExpression.args_check` is bound with `staticmethod(...)`, and the sweep
@@ -121,16 +135,16 @@ COMPARED_PATH = {
         (677, 681, "Parser.compile_filter"),
         (683, 687, "Parser.find_filter"),
         (744, 788, "FilterExpression.__init__"),
-        (827, 844, "FilterExpression.args_check"),
-        (876, 927, "Variable.__init__"),
-        (929, 945, "Variable.resolve"),
-        (1044, 1056, "Node.get_nodes_by_type"),
-        (1064, 1065, "NodeList.render"),
-        (1067, 1072, "NodeList.get_nodes_by_type"),
-        (1078, 1079, "TextNode.__init__"),
-        (1087, 1094, "TextNode.render_annotated"),
-        (1116, 1117, "VariableNode.__init__"),
-        (1137, 1181, "token_kwargs"),
+        (860, 877, "FilterExpression.args_check"),
+        (909, 960, "Variable.__init__"),
+        (962, 978, "Variable.resolve"),
+        (1077, 1089, "Node.get_nodes_by_type"),
+        (1097, 1098, "NodeList.render"),
+        (1100, 1105, "NodeList.get_nodes_by_type"),
+        (1111, 1112, "TextNode.__init__"),
+        (1120, 1127, "TextNode.render_annotated"),
+        (1149, 1150, "VariableNode.__init__"),
+        (1170, 1214, "token_kwargs"),
     ],
     # 8 functions, spans 56-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
@@ -264,6 +278,29 @@ COMPARED_PATH = {
         (293, 314, "do_extends"),
         (317, 372, "do_include"),
     ],
+    # One function, and it is the *decorator* rather than any of the 59 filter
+    # bodies the module exists for. `stringfilter` is reached because
+    # `tests/template_tests/templatetags/custom.py` does
+    # `from django.template.defaultfilters import stringfilter` and then applies
+    # `@stringfilter` **at import time**, and the corpus's `{% load custom %}`
+    # triggers that import. So the reach is a property of the harness's *setup*
+    # rather than of its comparison — and it is in the pin anyway, because the
+    # decorator's body decides what `custom.myfilter` is and the corpus's
+    # expected output depends on that. Clause (4) refusing a region there is the
+    # point, not an accident of the instrument.
+    #
+    # **The reach is import-order sensitive, measured, and that is why it is
+    # recorded here rather than left to be rediscovered.** Whichever of the two
+    # instruments runs *second* in a process reads 0: the import has happened,
+    # `@stringfilter` is applied once per process, and nothing re-applies it.
+    # Cold — which is what a fresh measurement process, and `scripts/check.sh`'s
+    # differential step, actually do — both read 1, and `stringfilter` alone is
+    # the module where the two orderings differ; every other pinned module's
+    # functions are called per parse. The pin is the cold reading, because the
+    # cold reading is the harness's.
+    "defaultfilters.py": [
+        (40, 54, "stringfilter"),
+    ],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])
@@ -358,6 +395,72 @@ DECLARED = {
                 "self.extra_data = parsed.extra_data\n"
                 "return parsed.nodelist",
             ),
+            # M11 Task 2's filter seam: `FilterExpression.resolve`'s loop over
+            # `self.filters` gains one branch, and it is a **pure insertion** —
+            # upstream has no counterpart on these lines, hence `None` on the
+            # upstream side and a snippet that names statements rather than
+            # pairing them. Eleven executable lines: the two imports that reach
+            # the shell, the identity test against the built-in registry, the
+            # call, and the `continue`.
+            #
+            # **That `continue` is the design, not a shortcut.** The arm
+            # *replaces* the loop body below rather than wrapping it, because
+            # `_native.filter` already performs upstream's four steps —
+            # `expects_localtime`, `needs_autoescape`, the call, and
+            # `is_safe`/`mark_safe` — inside itself (design spec §2,
+            # constraint 1). Letting the arm fall through to those four steps
+            # would apply `@stringfilter`'s coercion and `mark_safe` a second
+            # time, and the second `mark_safe` is invisible: it is idempotent
+            # on `SafeString`, so the doubled coercion is what a reader would
+            # have to be watching for.
+            #
+            # **This region is outside clause (4)'s reach, and that is a
+            # measurement rather than an assumption.** `COMPARED_PATH["base.py"]`
+            # holds the 29 names this guard actually compares against the pin;
+            # `FilterExpression.resolve` is not among them — the compared path is
+            # the *parse* harness — so clause (4) permits this region without
+            # examining it, and clause (2) is the only thing standing between
+            # these seventeen lines and nothing at all. What the guard therefore
+            # cannot see is the one failure that matters here: an arm that
+            # delegated to `_native.filter` and then *also* ran the four steps,
+            # or an arm whose identity test were keyed by name rather than
+            # handle. Both keep every filter row in the suite green. The
+            # instruments that would notice are named elsewhere —
+            # `tests/test_interposition.py::FilterRoutingTests` counts the
+            # `_native.filter` calls and asserts the name it was handed — and the
+            # honest statement is that the *transcription* guard is not one of
+            # them.
+            #
+            # Second consequence, and the reason the corpus's own parity harness
+            # moved in the same commit: `resolve` used to be upstream's text, so
+            # `scripts/filter_probe.py`'s Django side *was* Django. It is now a
+            # delegating `resolve`, which would have made
+            # `tests/test_filter_parity.py` a comparison of Rust against Rust —
+            # green for every built-in row. The probe reads the pinned
+            # `FilterExpression` for that reason, and
+            # `test_filter_parity.py::test_the_comparison_target_is_not_rust_owned`
+            # is what watches *that*.
+            (
+                (815, 847),
+                None,
+                "from django_rust_templates import _native\n"
+                "from django_rust_templates.host import (\n"
+                "django_own_filters,\n"
+                "effective_autoescape,\n"
+                "effective_use_tz,\n"
+                ")\n"
+                "if (builtin_name := django_own_filters().get(func)) is not None:\n"
+                "use_tz = effective_use_tz(context, func)\n"
+                "autoescape = effective_autoescape(context, func)\n"
+                "obj = _native.filter(\n"
+                "builtin_name,\n"
+                "obj,\n"
+                "tuple(arg_vals),\n"
+                "autoescape,\n"
+                "use_tz,\n"
+                ")\n"
+                "continue",
+            ),
             # M9's resolver seam: `Variable._resolve_lookup` delegates to Rust,
             # **including Django's outer `except Exception` handler and the
             # `logger.debug` inside it**. The docstring and the `resolve` that
@@ -402,12 +505,12 @@ DECLARED = {
             # not — a non-raising signature carries the bit on an ordinary return
             # value) is what makes the alternative live rather than closed.
             (
-                (962, 1000),
+                (995, 1033),
                 (957, 1021),
                 "from django_rust_templates import _native",
             ),
             (
-                (1002, 1002),
+                (1035, 1035),
                 (1023, 1028),
                 'return _native.resolve(".".join(self.lookups), context)',
             ),
@@ -584,6 +687,23 @@ DECLARED = {
                 (1, 2),
                 None,
                 "# TRANSCRIBED: django/template/loader_tags.py (Django 6.0.9)",
+            ),
+        ],
+    ),
+    "defaultfilters.py": (
+        "django/template/defaultfilters.py",
+        [
+            # The marker and its blank separator — a pure insertion, hence `None`
+            # on the upstream side, and the whole of the difference. **The file
+            # is pin-plus-marker on purpose**: all 59 filter bodies stay
+            # upstream's text, and what makes them reachable from Rust is a
+            # branch in `base.py`'s `FilterExpression.resolve`, which is declared
+            # in *that* file and is where the under-protection note lives. A
+            # delegate per body would be 59 regions here all saying one thing.
+            (
+                (1, 2),
+                None,
+                "# TRANSCRIBED: django/template/defaultfilters.py (Django 6.0.9)",
             ),
         ],
     ),

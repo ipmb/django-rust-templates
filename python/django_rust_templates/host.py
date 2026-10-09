@@ -31,6 +31,7 @@ is the one fact the whole predicate rests on: with
 
 from __future__ import annotations
 
+from django.template import defaultfilters as _defaultfilters
 from django.template import defaulttags as _defaulttags
 from django.template import loader_tags as _loader_tags
 from django.template.base import Token, TokenType
@@ -86,6 +87,132 @@ def django_own_tags():
     exactly the union of these two tables.
     """
     return {**_defaulttags.register.tags, **_loader_tags.register.tags}
+
+
+_DJANGO_OWN_FILTERS = None
+
+
+def django_own_filters():
+    """The filter callables Rust ports, keyed by **handle** — the registry inverted.
+
+    The tag predicate answers "is this callable the one Rust implements?" with a
+    name in hand, because `has_tag(command)` is handed one. `FilterExpression`
+    is not: `_impl/parser.py` stores the `find_filter` *handle* rather than a
+    name, deliberately — the name is what a `{% load %}` rebinds — so the tuple
+    `resolve` walks holds a callable and nothing to look it up by. The map is
+    therefore `defaultfilters.register.filters` inverted, and the inversion is
+    faithful because it is **injective**: measured against `.django` @ 6.0.9,
+    the registry is 57 names over 57 *distinct* handles, so no name is lost and
+    no two collide. (The measurement is a row, not a comment — a Django release
+    that aliased two names to one function would otherwise pick a winner
+    silently, and Rust would run the wrong body for one of them.)
+
+    **Handle identity, not name identity, is the same decision as the tags',
+    restated for the table that has no names.** Two cases the name-keyed form
+    could not express, both of them correct here:
+
+    * A `{% load %}`ed library rebinding `lower` — `add_library` is
+      `self.filters.update(lib.filters)` (`base.py:670`) — puts a *different*
+      object in `parser.filters`, which is absent from this map, so the
+      library's callable runs. That is Review Focus 1, and it is why the arm
+      cannot be decided by name.
+    * A library registering a name *for a built-in's own object*
+      (`lib.add_filter("shout", lower)`) is *present*, so Rust runs. That is also
+      correct: the library asked for the function Rust ports, and Rust's `lower`
+      is a faithful implementation of it. A name-keyed arm would have had to
+      guess which of the two names to pass Rust.
+
+    Read once, at first use, and cached: the source is a `Library`'s registry,
+    which `{% load %}` does not touch (`add_library` merges into the *parser*),
+    so a frozen copy and a live read differ only if something mutates
+    `defaultfilters.register` itself — the case `django_own_tags`'s import-time
+    freeze guards against for the same reason. Reading it per filter instead
+    would rebuild the 57-entry dict on every filter of every rendered variable.
+    """
+    global _DJANGO_OWN_FILTERS
+    if _DJANGO_OWN_FILTERS is None:
+        _DJANGO_OWN_FILTERS = {
+            func: name for name, func in _defaultfilters.register.filters.items()
+        }
+    return _DJANGO_OWN_FILTERS
+
+
+def effective_autoescape(context, func):
+    """The ``bool`` ``_native.filter`` must be handed for ``func``, upstream's laziness kept.
+
+    The same rule as ``effective_use_tz`` and for the same reason, on upstream's
+    *other* guarded branch: ``context.autoescape`` is read only inside
+    ``if getattr(func, "needs_autoescape", False):`` (``base.py:812-815``), so
+    every filter whose flag is unset must be handed a value without ``context``
+    being touched at all.
+
+    **Measured, and it is the acceptance suite that found it.** `resolve` is
+    called with a plain ``dict`` by Django's own tests —
+    ``.django/tests/template_tests/test_parser.py:207`` is
+    ``FilterExpression(f"0|default:{num}", p).resolve({})`` — which is legal
+    precisely because upstream's loop never reaches into ``context`` for a filter
+    that sets neither flag. Reading ``context.autoescape`` for all 57 turned that
+    one row into ``AttributeError: 'dict' object has no attribute 'autoescape'``
+    while the other 1546 stayed green, so nothing smaller than the real suite
+    would have shown it.
+
+    The value for the fifty filters that do not read it is ``False``, which is
+    not a guess: ``FilterCall::autoescape`` is documented in
+    ``crates/template-core/src/filters/host.rs:44-46`` as "the ``autoescape`` in
+    force, which the seven ``needs_autoescape`` filters" read, and the seven are
+    the only Rust bodies that mention it (``join``, ``linebreaks``,
+    ``linebreaksbr``, ``linenumbers``, ``unordered_list``, ``urlize``,
+    ``urlizetrunc``).
+
+    The ``getattr`` default is upstream's own, so a library filter registered
+    without the flag behaves here as it does there.
+    """
+    if getattr(func, "needs_autoescape", False):
+        return context.autoescape
+    return False
+
+
+def effective_use_tz(context, func):
+    """The ``bool`` ``_native.filter`` must be handed for ``func``, upstream's laziness kept.
+
+    ``Context.use_tz`` is **three-valued**, and the third value is the one that
+    matters: ``None`` means "ask ``settings.USE_TZ``". Upstream's
+    ``template_localtime`` (``django/utils/timezone.py:146-161``) is where that
+    fallback happens — ``settings.USE_TZ if use_tz is None else use_tz`` — and
+    ``_native.filter``'s ``use_tz`` is a ``bool``, so the fallback has to happen
+    before the FFI. Collapsing ``None`` to ``False`` instead is **not** the same
+    value: with ``settings.USE_TZ`` true and the context's ``use_tz`` unset,
+    upstream localizes and ``False`` would not.
+
+    **The attribute is read only for a filter that asks for it, and the guard
+    comes first for that reason.** Upstream reaches ``template_localtime`` — and
+    so ``context.use_tz`` — only under
+    ``if getattr(func, "expects_localtime", False):`` (``base.py:810-811``).
+    Writing the test the other way round (``context.use_tz is None and
+    getattr(...)``) reads ``context.use_tz`` for all 57 filters, which raises on
+    the ``dict`` context Django's own suite passes; measured, that and the
+    ``autoescape`` read next to it are what failed
+    ``test_filter_numeric_argument_parsing``.
+
+    **The read order between the two branches is upstream's and is observable.**
+    ``base.py`` tests ``expects_localtime`` before ``needs_autoescape``, so for a
+    ``dict`` context ``{{ x|date }}`` raises ``AttributeError: ... 'use_tz'``
+    while ``{{ x|join }}`` raises ``... 'autoescape'`` — measured on the pinned
+    tree. The arm therefore computes this one *first* and hands the results to
+    the FFI in the FFI's own argument order, rather than writing the two calls
+    as arguments.
+
+    For every other filter the value is ``False`` and Rust never reads it:
+    ``FilterCall::use_tz`` is documented in ``filters/host.rs`` as being "for the
+    two ``expects_localtime`` filters", and no other body branches on it.
+    """
+    if not getattr(func, "expects_localtime", False):
+        return False
+    if context.use_tz is None:
+        from django.conf import settings
+
+        return settings.USE_TZ
+    return bool(context.use_tz)
 
 
 def _wire_token(token):

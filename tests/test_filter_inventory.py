@@ -20,8 +20,10 @@ Five things are pinned here:
    the third was added after `phone2numeric` scored clean on the first two and
    was still not Rust's — a helper's result-changing decorator is invisible to a
    metric that measures what the body references;
-4. the Rust registry's names and flags against Django's live registry, including
-   `cut`'s and `escapejs`'s **absent** `is_safe`;
+4. the Rust registry's names and flags against Django's registry — read from the
+   pinned file since M11 interposed the name, which is also why the last row
+   asserts the *interposed* module registers that same set — including `cut`'s
+   and `escapejs`'s **absent** `is_safe`;
 5. the Rust registry's `stringfilter` column against the decorators — the one
    place the 29 can be disagreed with, since a Rust-side test of that column
    would be the same list read twice.
@@ -50,7 +52,19 @@ DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
-from django.template import defaultfilters  # noqa: E402
+# **Django's file, not the one this name now resolves to.** Until M11 Task 2
+# `from django.template import defaultfilters` *was* Django's file, and every
+# metric in this module was read off it — the docstring above says so, and says
+# the reason: those metrics "answer a question about **Django**". The
+# interposition moves the name, so the import that used to deliver Django's file
+# now delivers a verbatim transcription of it, and continuing to read through it
+# would make Metrics A–C silent about upstream — the self-comparison the guard
+# row at the end of this file exists to refuse. `load_pinned` is the established
+# way to hold Django's copy under a name the shim has taken (see
+# `tests/pinned_module.py`), and it restores the sentence above to a fact.
+from tests.pinned_module import load_pinned  # noqa: E402
+
+defaultfilters = load_pinned("defaultfilters.py")
 
 SOURCE = Path(defaultfilters.__file__)
 
@@ -988,11 +1002,25 @@ class FilterInventoryTests(unittest.TestCase):
         self.assertIn("upper", CODE_POINT_LOCAL_STR_METHODS)
 
     def test_the_parity_target_is_genuinely_djangos_registry(self):
-        """Guard against self-comparison once M9 interposes the shim.
+        """Guard against self-comparison, restated for the file it now names.
 
-        The same trap `test_lexer_parity`'s source-file guard exists for: after
-        M9, `django.template.defaultfilters` resolves to our shell, and any
-        inventory read from it would be measuring our registry against itself.
+        M9 wrote this row against a hazard that had not arrived: once the shim
+        interposes `defaultfilters`, the name resolves to our shell and "any
+        inventory read from it would be measuring our registry against itself".
+        M11 Task 2 is that arrival, and the row's answer is the import at the top
+        of this module — `defaultfilters` is now `load_pinned("defaultfilters.py")`,
+        so the object this asserts about is Django's file and not a transcription
+        of it. That is the strongest available form of the claim, and it is why
+        the row's *body* did not have to change: the fix is the subject, not the
+        assertion.
+
+        `tests/parity_target.py` gives the weaker form for targets that cannot be
+        re-read this way (a class or function the harness has to hold live): the
+        file is Django's *or* a transcription gated against it. That form does not
+        apply here and is not used, because the whole inventory — Metrics A–C, the
+        `def`/decorator tables, the registered-name map — is read off `SOURCE`, and
+        reading all of it from the pinned file is both simpler and stronger than
+        warranting a copy.
         """
         source_file = inspect.getsourcefile(defaultfilters)
         self.assertTrue(
@@ -1000,9 +1028,61 @@ class FilterInventoryTests(unittest.TestCase):
             f"inventory target is not the pinned checkout: {source_file}",
         )
 
+    def test_the_interposed_module_registers_the_pinned_registry(self):
+        """The other direction: the module that ships registers Django's set.
+
+        Reading the inventory from the pin (above) makes Metrics A–C honest about
+        upstream, and it opens the gap this row closes. The interposition made
+        "the source the pin names" and "the registry the engine dispatches
+        through" two different objects for the first time — the file under
+        `_impl/` is still exactly the pin plus a marker, so the two *should*
+        agree, but nothing in this module would have noticed if the shim's
+        registration were broken, since every read above now goes to the pin.
+
+        This is the module's own "from both directions" rule applied to the
+        interposition: `_registered` is read off the pinned file, `_live` off
+        `django.template.defaultfilters` *as the shim serves it*, and the row is
+        that the two agree name for name and flag for flag. It fails loudly if
+        the interposition moves, which is the property `parity_target.py` asks of
+        a comparison target.
+
+        **It calls `install()` rather than assuming the shim.** Every other row
+        in this class is a read of the pin and needs no shim; this one is about
+        the module that ships, and the suite's own runner installs the shim at
+        interpreter start (`scripts/run_unit_tests.sh`), so the call is a no-op
+        there. It is written anyway because the alternative is a row that, run
+        by hand in an unshimmed interpreter, asserts Django's registry equals
+        Django's registry and passes — the `install()` raises instead, which is
+        what a precondition should do.
+        """
+        import importlib
+
+        from django_rust_templates import _shim
+
+        _shim.install()
+
+        live = importlib.import_module("django.template.defaultfilters")
+        self.assertIn("_impl", live.__file__, live.__file__)
+        self.assertEqual(
+            set(live.register.filters), set(defaultfilters.register.filters)
+        )
+        for name, pinned_func in defaultfilters.register.filters.items():
+            with self.subTest(name=name):
+                ours = live.register.filters[name]
+                for flag in ("is_safe", "needs_autoescape", "expects_localtime"):
+                    self.assertEqual(
+                        getattr(ours, flag, None),
+                        getattr(pinned_func, flag, None),
+                        f"{name}.{flag}",
+                    )
+
 
 class RustFilterRegistryTests(unittest.TestCase):
-    """The Rust registry against Django's live one.
+    """The Rust registry against Django's, read from the pinned file.
+
+    "Django's" was the live module until M11 interposed the name; the row above
+    this class is what keeps the two equal, so which copy is read here does not
+    change the claim.
 
     This is the file's half of §10.3's "incl. `FilterFlags` round-tripping": the
     flags are read back out of the Rust table and compared to the attributes

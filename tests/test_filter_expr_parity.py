@@ -431,6 +431,19 @@ class FilterExpressionParityTests(unittest.TestCase):
         the class's span now covers two declared regions, so the guard's
         region-overlap clause reports the comparison as Rust against Rust.
 
+        **`FilterExpression` is now `FilterExpression.__init__` and
+        `FilterExpression.args_check`, and the same sentence is the reason.**
+        M11 Task 2 put a region on `FilterExpression.resolve` (its loop over
+        `self.filters`), so the class span again covers Rust and the guard again
+        says so. The two names are the methods this harness actually runs:
+        `__init__` parses the token, and `args_check` is reached through
+        `compile_filter` for every filter with arguments — measured by the
+        compared-path instrument as **85 calls over the parity corpus**, which
+        is also why the instrument had to learn to see through
+        `staticmethod(...)` to find it. `resolve` is not among them: nothing
+        here renders a filtered variable, and the harness's own render oracle
+        is a separate module (`tests/filter_cases.py`).
+
         Narrowing rather than suppressing, because the widened claim is the
         false one now. This harness compares *parses*: it builds Django's
         `FilterExpression` and inspects the `Variable` objects that construction
@@ -442,7 +455,8 @@ class FilterExpressionParityTests(unittest.TestCase):
         `__init__.__name__` is `"__init__"`, which names no class.
         """
         targets = (
-            (FilterExpression, "FilterExpression"),
+            (FilterExpression.__init__, "FilterExpression.__init__"),
+            (FilterExpression.args_check, "FilterExpression.args_check"),
             (Parser, "Parser"),
             (Variable.__init__, "Variable.__init__"),
         )

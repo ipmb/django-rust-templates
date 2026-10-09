@@ -66,8 +66,15 @@ DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
+# `tests.pinned_module` is reached from `django_base()`, so the project root has
+# to be importable when this script is run on its own. Added alongside the
+# checkout rather than at the top because both exist for the same reason: a
+# module this script imports by name lives outside `scripts/`.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from django.template import Context, Engine  # noqa: E402
-from django.template.base import FilterExpression, Parser  # noqa: E402
+from django.template.base import Parser  # noqa: E402
 from django.template.exceptions import TemplateSyntaxError  # noqa: E402
 from django.utils.safestring import SafeData, mark_safe  # noqa: E402
 
@@ -129,18 +136,37 @@ def ensure_settings() -> None:
         django.setup()
 
 
-def effective_use_tz(context) -> bool:
+def effective_use_tz(context, func):
     """The `use_tz` the loop's `template_localtime` call actually acts on.
 
-    `None` on the context means "ask the settings", which
-    `django.utils.timezone.template_localtime` does in its own first two lines.
-    Resolving it here rather than passing `None` on is what keeps this an FFI
-    for a `bool`: the Rust side must not have to know that Django's context has
-    a tri-state where it looks like it has one.
-    """
-    from django.conf import settings
+    The live implementation is `django_rust_templates.host.effective_use_tz` —
+    M11 Task 2 needed the same translation on the render path, and two copies of a
+    rule this subtle is the drift this harness exists to prevent one level up. It
+    takes `func` because upstream reads `settings` **only** for a filter whose own
+    `expects_localtime` is set (measured: stock renders `{{ x|lower }}` with
+    `settings` unconfigured); the probe passes the row's registered callable, the
+    same object `find_filter` hands the loop.
 
-    return settings.USE_TZ if context.use_tz is None else context.use_tz
+    Kept as a name here because `ensure_settings`' docstring points at it and
+    because the probe's callers speak of "the loop's `use_tz`" — the two names
+    are one function.
+    """
+    from django_rust_templates.host import effective_use_tz as impl
+
+    return impl(context, func)
+
+
+def registered_filter(name: str):
+    """The callable `name` is registered as — the object the loop would run.
+
+    Looked up in the live registry because that is the table `Parser.find_filter`
+    reads (`add_library` copies the entries, not the functions), so it is the same
+    object identity-routing in `resolve` compares against. `None` for a name no
+    library registers, which only a hand-typed probe invocation can produce.
+    """
+    from django.template import defaultfilters
+
+    return defaultfilters.register.filters.get(name)
 
 
 def template_literal(value) -> str:
@@ -227,6 +253,16 @@ def django_answer(
     is a `var_arg`, so `resolve` hands it over **unmarked**, where a quoted
     constant is `mark_safe`d (`base.py:788-792`). A row that wanted
     `mark_safe([1])` has no template that produces it.
+
+    **The `FilterExpression` is the *pinned* one, and M11 Task 2 is why.** This
+    docstring's claim was "the parse and the arity check are Django's" and the
+    import made it true for free: `_impl/base.py` was upstream's text, so the
+    live name *was* upstream's `resolve`. Task 2 puts a built-in filter's arm on
+    Rust inside that method, so the live name is now a *delegating* `resolve` and
+    this harness would be comparing Rust against Rust — and passing — for every
+    built-in row in the corpus. `django_base()` below is the fix, and
+    `tests/test_filter_parity.py`'s guard row is what keeps it fixed. See
+    `tests/parity_target.py` for the general statement of the failure.
     """
     engine = Engine()
     parser = Parser(
@@ -235,9 +271,32 @@ def django_answer(
         builtins=engine.template_builtins,
     )
     token = f"x|{name}" if given is NO_ARG else f"x|{name}:{given}"
-    expression = FilterExpression(token, parser)
+    expression = django_base().FilterExpression(token, parser)
     context = context_for(value, context_kwargs, extra)
     return expression.resolve(context), expression, context
+
+
+_PINNED_BASE = None
+
+
+def django_base():
+    """The **pinned** `django.template.base`, read out of `.django` on first use.
+
+    `tests.pinned_module.load_pinned` is the mechanism, and it is imported here
+    rather than at module scope so that this script stays loadable without the
+    test package on `sys.path` (the probe's own CLI does not need it until it
+    answers a case). Lazily cached because it executes a 1,200-line module.
+
+    The live name cannot be used, for the reason `django_answer`'s docstring
+    gives: M11 Task 2 made `FilterExpression.resolve` reach Rust for built-in
+    filters, so a comparison built on it is Rust against Rust.
+    """
+    global _PINNED_BASE
+    if _PINNED_BASE is None:
+        from tests.pinned_module import load_pinned
+
+        _PINNED_BASE = load_pinned("base.py")
+    return _PINNED_BASE
 
 
 def rust_answer(name: str, value, arg, context):
@@ -290,7 +349,11 @@ def rust_answer(name: str, value, arg, context):
     else:
         resolved_args = (arg,)
     return _native.filter(
-        name, value, resolved_args, context.autoescape, effective_use_tz(context)
+        name,
+        value,
+        resolved_args,
+        context.autoescape,
+        effective_use_tz(context, registered_filter(name)),
     )
 
 

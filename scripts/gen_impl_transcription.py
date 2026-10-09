@@ -73,6 +73,12 @@ MODULES = {
     # its own task, in the same commit as the file it generates — measured, in
     # the commit that interposed `loader_tags` alone.
     "loader_tags.py": "django/template/loader_tags.py",
+    # M11's second. Its 59 filter bodies stay verbatim — the routing that puts
+    # them on Rust's path is a single branch in `base.py`'s
+    # `FilterExpression.resolve`, and a delegate per body would be 59 declared
+    # regions all saying the same thing. So this file is pin-plus-marker and the
+    # generator owns it, which is the opposite of `base.py` (see HAND_WRITTEN).
+    "defaultfilters.py": "django/template/defaultfilters.py",
 }
 
 # Transcriptions this generator must **not** write, because their difference from

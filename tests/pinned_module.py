@@ -16,10 +16,22 @@ reads off the returned module is the class or function objects it defines
 ``import_module`` is deliberately not used: it would hand back ours and the
 comparison would be against itself, which is the failure ``tests/parity_target.py``
 exists to refuse one level up.
+
+**The module is registered in ``sys.modules`` under that private name, and the
+private name is why that is safe.** Without the entry, ``inspect.getsourcefile``
+on a *class* read out of the pin raises ``TypeError: is a built-in class``:
+``getfile`` resolves a class through ``sys.modules[cls.__module__]``, and
+``cls.__module__`` is ``pinned_base``. That reads as a bug in the guard rather
+than as a fact about the target, so ``tests/test_filter_parity.py``'s guard —
+which has to name a pinned class — could not use
+``assert_target_is_not_rust_owned`` at all when the entry was missing. The name
+is ``pinned_*``, which the shim does not serve and ``unshimmed()`` does not
+count, so nothing in the tree resolves through it.
 """
 
 import importlib.util
 import pathlib
+import sys
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 CHECKOUT = PROJECT_ROOT / ".django"
@@ -43,5 +55,11 @@ def load_pinned(relative: str):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     module.__package__ = package
+    # Registered before executing, the order `importlib` itself uses, so a
+    # module that imported *itself* (none does today) would find the partial
+    # object rather than re-executing. Replaced on a second call for the same
+    # file, which is harmless: `inspect` reads `__file__` off whichever entry is
+    # current, and both name the same path.
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module

@@ -4,6 +4,21 @@ Both sides run on the pinned tree. Django's side is its real `FilterExpression`
 over a real `Context`, driven by its real filter registry; ours is
 `_native.filter`, which is the seam the fan-out's bodies are written against.
 
+**"Django's side" took two readings to get right, and the first one was the
+trap.** Until M11 Task 2 the probe built `django.template.base.FilterExpression`
+— which has been *our* file since M9 — and the comparison was still honest for a
+reason nothing in this file asserted: `resolve` was upstream's text, so the code
+that ran was Django's. Task 2's routing arm lands on `resolve`'s own lines, after
+which that import compares Rust against Rust and passes for every row. The probe
+now reads the **pinned** `FilterExpression` out of `.django` (through the same
+`load_pinned` mechanism the other parity harnesses use), and
+`test_the_comparison_target_is_not_rust_owned` is what watches it.
+
+The filter **callables** are a different story and are still the interposed
+module — `_impl/defaultfilters.py`, pin plus a marker, so their bodies are
+upstream's text. That file is transcribed rather than pristine, so it is
+warranted by `tests/parity_target.py` instead of by a path check.
+
 **The comparison is `(type name, value)` and a separate safety flag**, per §D5,
 and the type half is compared *here* rather than in Rust on purpose: a Rust
 `Value` cannot name a Python class, and the classes that matter —
@@ -456,6 +471,61 @@ class FilterParityTests(unittest.TestCase):
             f"last group has landed, so the stub set should be empty; a stub "
             f"here means a body has been reverted or a registry row lost.",
         )
+
+
+    def test_the_comparison_target_is_not_rust_owned(self):
+        """The Python half is the *pinned* `base`, and the callables are checked.
+
+        **This row is the one M11 Task 2 needed and did not have.** Until that
+        task the probe's Python side was `django.template.base.FilterExpression`
+        and the sentence in this module's docstring — "Django's side is its real
+        `FilterExpression`" — was already false, in the direction that does not
+        fail. `base` has been ours since M9, but `resolve` was still upstream's
+        text, so the comparison was still stock and nothing looked wrong. Task 2
+        put a delegation on `resolve`'s own lines, and from that commit on a
+        probe reading `django.template.base` would compare `_native.filter`
+        against a `resolve` that *calls* `_native.filter`: green for all 454
+        rows, for every filter, whatever Rust did.
+
+        Two claims, and neither implies the other:
+
+        * the `FilterExpression` the probe builds is the **pinned** file's. It
+          reads it through `load_pinned`, and the first assertion below is what
+          notices a probe that went back to the plain import — which after M9 is
+          a comparison of Rust with Rust.
+        * the callables the loop runs are the interposed `defaultfilters`, which
+          is a transcription. `parity_target` warrants it: the marker is present,
+          `check_transcriptions.check()` is clean when this runs, and no declared
+          region sits on the compared path. That last clause is the one with
+          teeth — `COMPARED_PATH["defaultfilters.py"]` is `stringfilter` at
+          40-54, so a region declared over a filter body the corpus calls would
+          be refused here.
+
+        The three names are the ones the *parser* holds, not three chosen here:
+        `self.parser.find_filter(name)` is the exact object the loop will call,
+        which is why the lookup goes through the parser rather than the registry.
+        """
+        import inspect
+
+        from tests.parity_target import assert_target_is_not_rust_owned
+
+        pinned = probe.django_base()
+        source = Path(inspect.getsourcefile(pinned.FilterExpression)).resolve()
+        self.assertTrue(
+            source.is_relative_to(DJANGO_CHECKOUT),
+            f"the probe's `FilterExpression` came from {source}. M9 interposed "
+            "`django.template.base`, so a plain import is our file, and the "
+            "comparison would be Rust against Rust.",
+        )
+        assert_target_is_not_rust_owned(
+            self, pinned.FilterExpression, "FilterExpression"
+        )
+
+        for name in ("date", "lower", "join"):
+            with self.subTest(name=name):
+                assert_target_is_not_rust_owned(
+                    self, self.parser.find_filter(name), f"defaultfilters.{name}"
+                )
 
 
 if __name__ == "__main__":

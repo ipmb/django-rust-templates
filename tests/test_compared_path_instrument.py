@@ -11,7 +11,7 @@ an ``lru_cache``. Four of those were invisible.
 
 Measured on the pinned tree before anything changed, by the reviewer's
 reproduction: ``FilterExpression.args_check`` is a ``staticmethod``, the parity
-corpus calls it **85** times, and its lines 827-844 sat in the *gap* between
+corpus calls it **85** times, and its lines 860-877 sat in the *gap* between
 two pinned spans — so no pin would have moved if it had stayed invisible, and a
 declared transcription region placed on those lines would have been accepted by
 clause (4) with both sides of the comparison running Rust. The defect was
@@ -191,7 +191,7 @@ class DescriptorCountingTests(unittest.TestCase):
         from tests.compared_path import definitions
 
         base_defs = definitions(base)
-        self.assertEqual(base_defs["FilterExpression.args_check"], (827, 844))
+        self.assertEqual(base_defs["FilterExpression.args_check"], (860, 877))
         self.assertEqual(base_defs["Origin.loader_name"][0], 134)
         self.assertIsNone(base_defs.get("TokenType.__new__"))
 
@@ -240,7 +240,7 @@ class DescriptorCountingTests(unittest.TestCase):
         ``scripts/check_transcriptions.py``'s clause (4) refuses a transcription
         whose declared regions cover the code the parity harness executes, and
         before this fix ``args_check`` was not in the table it consults — so a
-        region placed on 827-844 was accepted, and the parity comparison then
+        region placed on 860-877 was accepted, and the parity comparison then
         ran Rust against Rust with both sides agreeing. That is the whole reason
         this module exists.
 
@@ -253,7 +253,7 @@ class DescriptorCountingTests(unittest.TestCase):
         import scripts.check_transcriptions as guard
 
         self.assertIn(
-            (827, 844, "FilterExpression.args_check"),
+            (860, 877, "FilterExpression.args_check"),
             guard.COMPARED_PATH["base.py"],
             "the span this row is about is not in the table any more",
         )
@@ -262,7 +262,7 @@ class DescriptorCountingTests(unittest.TestCase):
         # Same length as ours, so clause (5) — which requires prose for a
         # region whose two spans differ in length — has nothing to say and the
         # only clause with anything to report is the one under test.
-        synthetic = ((827, 844), (822, 839), "args_check")
+        synthetic = ((860, 877), (855, 872), "args_check")
         guard.DECLARED["base.py"] = (upstream, regions + [synthetic])
         try:
             failures = guard.check()
@@ -271,7 +271,7 @@ class DescriptorCountingTests(unittest.TestCase):
 
         self.assertTrue(
             any(
-                "FilterExpression.args_check (827-844)" in failure
+                "FilterExpression.args_check (860-877)" in failure
                 and "Rust against Rust" in failure
                 for failure in failures
             ),

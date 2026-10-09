@@ -489,3 +489,77 @@ observes execution rather than reachability-by-binding, and it is structurally
 immune to this whole family. Replacing the sweep with it is a larger change — a
 profiler in the guard's path, and a way to attribute frames to spans — so it is
 raised with the reviewer rather than decided inside Task 1.
+
+---
+
+## Task 2 amendment: two of Step 8's four discriminators do not discriminate
+
+*Appended after Task 2 was executed. Step 8 asked for "the inputs that
+discriminate" a doubled wrapper, and listed four. Measured, **two of them cannot
+see a wrapper at all** — and one of those two was the bullet the plan argued
+hardest for. The plan's bullet text is left as written; this is what the
+measurements say instead.*
+
+**Bullet 1 names the wrong function, and the error is in the reasoning.**
+Step 8's first bullet is:
+
+> `{{ x|escape }}` with `x = "&"` — `escape("&")` is `&amp;` and
+> `escape(escape("&"))` is `&amp;amp;`, so an arm applied on both sides is
+> visible in the output rather than silent.
+
+Both equations are true **of `django.utils.html.escape`** and the second is false
+**of the filter registered as `escape`**, whose body is `conditional_escape`
+(`defaultfilters.py:457-461`). `conditional_escape` returns `text.__html__()`
+untouched when the input bears one (`utils/html.py:115-125`), and a `SafeString`
+does — so the second application never reaches `escape()`. The plan reasoned from
+the function's *name* without reading which function the filter body calls.
+
+Measured on the pin: `'&amp;'` for both `{{ x|escape }}` and
+`{{ x|escape|escape }}`; `str(SafeString("&amp;"))` returns the **same object**
+(`type` is `SafeString`, `isinstance(..., SafeData)` is `True`), so the flag is
+not even lost between the two applications. Measured through the render path with
+the arm doubled — the `continue` deleted, so `_native.filter` runs and upstream's
+loop runs on top of it — still `'&amp;'` for both. **`escape` sees nothing.**
+
+**The bullet is repairable, and the repair is `force_escape`**, the filter whose
+body *is* the unconditional `escape(str(value))`
+(`@register.filter(is_safe=True) @stringfilter`, `defaultfilters.py:474-476`).
+Measured on the pinned body: `'&amp;'` once, `'&amp;amp;'` twice. Measured
+through the render path: `'&amp;'` correctly and `'&amp;amp;'` under the doubled
+arm. The row now asserts that pair, with the doubled *filter expression* kept as
+the premise that the filter is non-idempotent — which is the part the plan's
+sentence was reaching for, and the part `escape` passes while proving nothing.
+
+**Bullet 3 is not achievable, and the count is a meter that reads the same in
+every world.** Step 8 asks for "a `stringfilter` filter over a non-`str` whose
+`__str__` is observable, so a second coercion is countable". The doubling is
+invisible to that counter by construction: the second `str()` is applied to the
+first one's *result*, which is already a `str`, so the counting `__str__` is
+never called again. Measured under the doubled arm: `1`, the same as correct.
+The row was rewritten to claim only what it can see — the flag travelled, since
+`lower` cannot lowercase a `Counted` in either language — and to name the
+`force_escape` row as the one that sees the wrapper. Its `theirs` was also a
+second `Engine()`, which in this suite is our own implementation, so the old
+"both engines" comparison was ours against ours; the stock number is now read
+from the pinned `lower` body.
+
+**Bullet 2 was uncovered and is now covered, by `join`.** Step 8's second bullet
+(`{% autoescape off %}`, "`needs_autoescape` being applied twice changes the
+answer") had no row. It does discriminate, on a *different* step than
+`force_escape` — `needs_autoescape` is the arm that calls
+`func(obj, autoescape=..., *args)`, which `force_escape` never touches. `join` is
+not idempotent under a second call because it joins the *characters* of the
+string it just produced: measured `'a-b'` correctly, `'a---b'` doubled, and
+`'a---b'` from the pinned body directly. The added row also pins
+`context.autoescape` itself — the fourth of `_native.filter`'s five arguments,
+which nothing had pinned — with `["a<b", "c"]`: `'a&lt;b-c'` on, `'a<b-c'` off.
+
+**Bullet 4 stands, unmodified**, and `tests/test_filter_inventory.py` is where it
+lives: the 29 `stringfilter` names are compared against
+`_native.stringfilter_filters()` **by name**, count and membership both asserted.
+
+**Verified by mutation, as a set.** With the arm's `continue` deleted, exactly
+two rows in `FilterRoutingTests` redden — the `force_escape` row and the `join`
+row — and the other four stay green. That is the measurement behind "these inputs
+discriminate"; the plan's list, taken as written, would have shipped a row that
+passed under the defect it was written to catch.

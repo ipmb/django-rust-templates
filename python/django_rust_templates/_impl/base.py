@@ -812,6 +812,39 @@ class FilterExpression:
                     arg_vals.append(mark_safe(arg))
                 else:
                     arg_vals.append(arg.resolve(context))
+            # A built-in filter's arm runs in Rust, and it *replaces* the loop
+            # body below rather than wrapping it: upstream's four steps —
+            # `expects_localtime`, `needs_autoescape`, the call, and
+            # `is_safe`/`mark_safe` — are what `_native.filter` does inside, so
+            # running them here as well would apply `@stringfilter`'s coercion
+            # and `mark_safe` twice. Decided by handle identity, so a
+            # `{% load %}`ed filter that merely shares a name keeps this arm.
+            from django_rust_templates import _native
+            from django_rust_templates.host import (
+                django_own_filters,
+                effective_autoescape,
+                effective_use_tz,
+            )
+
+            if (builtin_name := django_own_filters().get(func)) is not None:
+                # Upstream's order, so that a context attribute it never reads
+                # for this filter is never read here either: `expects_localtime`
+                # is tested first (`base.py:810-811`), then `needs_autoescape`
+                # (`base.py:812-815`), and a `dict` context — which Django's own
+                # suite passes (`test_parser.py:207`) — sees exactly the one
+                # `AttributeError` upstream sees. Written as call arguments
+                # instead, the FFI's order would decide it and `date` would blame
+                # `autoescape`.
+                use_tz = effective_use_tz(context, func)
+                autoescape = effective_autoescape(context, func)
+                obj = _native.filter(
+                    builtin_name,
+                    obj,
+                    tuple(arg_vals),
+                    autoescape,
+                    use_tz,
+                )
+                continue
             if getattr(func, "expects_localtime", False):
                 obj = template_localtime(obj, context.use_tz)
             if getattr(func, "needs_autoescape", False):

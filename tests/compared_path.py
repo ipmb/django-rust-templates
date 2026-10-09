@@ -749,14 +749,54 @@ def instrumented(module):
             rebind_registries(wrapper, invoked)
 
 
+LAZY_FIXTURES = "template_tests.templatetags."
+
+
+def _cold():
+    """Forget the corpus's fixture libraries, so this window imports them itself.
+
+    **Without this the measurement is a function of what ran before it, measured
+    rather than argued.** ``tests/template_tests/templatetags/custom.py`` does
+    ``from django.template.defaultfilters import stringfilter`` and applies
+    ``@stringfilter`` *at import time*, and the corpus's ``{% load custom %}`` is
+    what imports it. That decorator call is executed **once per process**: the
+    window that triggers the import sees ``stringfilter`` run, and every window
+    after it sees nothing. So the same corpus read ``stringfilter`` in a fresh
+    process and read zero in a process that had already parsed it —
+    ``tests/test_interposition.py``'s re-measurement row iterates every pinned
+    module in one process, so it was warm for all but the first and would have
+    disagreed with the pin for ``defaultfilters.py`` while the pin was right.
+
+    Popping the package makes every window cold and therefore identical, and it
+    is the *cold* reading that is the honest one: a fresh process is how the
+    pin's own regeneration script is run, and how the differential harness runs
+    the corpus. The alternative — pinning the warm reading — would define the
+    metric by the accident of what a caller happened to have imported, which is
+    the failure ``instrumented``'s docstring already records for
+    ``token_kwargs`` ("a reach set that depends on import order is not a
+    measurement").
+
+    Scoped to the checkout's fixture package and not to Django's, because that is
+    where the corpus's ``{% load %}`` targets live and everything else the corpus
+    imports is imported per parse or not at all.
+    """
+    for name in list(sys.modules):
+        if name.startswith(LAZY_FIXTURES):
+            del sys.modules[name]
+
+
 def measure(module, sources, calls) -> dict:
     """``{qualified name: (first, last)}`` for the functions ``calls`` reached.
 
     ``sources`` is the corpus and ``calls`` is the harness entry point, one
     call per source. A source that raises still walked whatever path it walked,
     so the exception is swallowed deliberately: the counters already recorded it.
+
+    :func:`_cold` runs first, so the measurement does not depend on what the
+    caller imported before calling this.
     """
     defs = definitions(module)
+    _cold()
     with instrumented(module) as counts:
         for source in sources:
             try:

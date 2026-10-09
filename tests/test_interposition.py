@@ -305,12 +305,12 @@ class InterpositionTests(unittest.TestCase):
         equal = sum(i2 - i1 for tag, i1, i2, _j1, _j2 in opcodes if tag == "equal")
         differing = [op for op in opcodes if op[0] != "equal"]
 
-        # The structure, which is what the guard reads: five edits — the marker
+        # The structure, which is what the guard reads: six edits — the marker
         # and its blank line as one pure insertion of ours, then two pairs for
-        # `compile_nodelist`'s delegation and two more for
-        # `Variable._resolve_lookup`'s. Asserted here too because a
-        # re-alignment that merged two edits into one would move `equal` in a
-        # way this row could not explain on its own.
+        # `compile_nodelist`'s delegation, then M11 Task 2's filter seam as a
+        # second pure insertion, then two more for `Variable._resolve_lookup`'s.
+        # Asserted here too because a re-alignment that merged two edits into
+        # one would move `equal` in a way this row could not explain on its own.
         #
         # Five rather than three since M9's Task 5, and the pair that grew is
         # the one worth reading: `difflib` splits the resolver's single
@@ -319,9 +319,19 @@ class InterpositionTests(unittest.TestCase):
         # the line that follows the loop. Both spans are declared, so the guard
         # is satisfied either way; this row is what would notice if a future
         # edit merged them and the declaration stopped describing the diff.
+        #
+        # **Six rather than five since M11 Task 2, and the sixth is a `delete`.**
+        # That is the filter seam: nineteen lines of ours — a comment block, two
+        # imports, the identity test, the call and its `continue` — against none
+        # of upstream's, because the arm *replaces* `resolve`'s loop body with a
+        # call rather than wrapping it. `difflib` names a run that only one side
+        # has `delete` when it is ours and `insert` when it is theirs, so the
+        # shape of this list is also the check that the seam stayed an insertion:
+        # an arm that had been written as a *rewrite* of the loop would show up
+        # as a `replace` here and as a declared region with two spans.
         self.assertEqual(
             [op[0] for op in differing],
-            ["delete", "replace", "replace", "replace", "replace"],
+            ["delete", "replace", "replace", "delete", "replace", "replace"],
         )
 
         self.assertEqual(
@@ -1233,6 +1243,378 @@ class ResolverDelegationTests(unittest.TestCase):
         self.assertEqual(len(ours), 1, [r.getMessage() for r in records])
         self.assertIsNotNone(ours[0].exc_info[1], "exc_info held no exception")
         self.assertIn("Failed lookup for key [author]", str(ours[0].exc_info[1]))
+
+class FilterRoutingTests(unittest.TestCase):
+    """M11 Task 2: a built-in filter's *body* is reached through Rust.
+
+    This is the milestone's load-bearing claim, and the reason it needs a row of
+    its own is that **nothing else in the tree can see it**. `filter_tests` is
+    454 rows and all of them are green today — against Django's filter bodies,
+    because `defaultfilters` is not interposed and the render path never asked
+    Rust for a filter (`.review/m11-recon.md` §1). The suite going green at M0 is
+    the same finding from the other end.
+
+    So the row is a **counter**, the shape `test_variable_resolution_reaches_rust`
+    uses and `scripts/differential.py` uses for the whole `_native` surface:
+    render a template that applies a built-in filter and assert `_native.filter`
+    ran, with the name it was handed. The premise is asserted separately below,
+    because a row like this passes for a *true* reason and a false one — if the
+    module were still Django's, the counter would read zero and the row would
+    fail, which is right; but if it passed while `defaultfilters` was Django's,
+    that would be M9's finding 3 and the row would be measuring nothing.
+    """
+
+    def setUp(self):
+        _shim.install()
+
+    def test_a_built_in_filter_reaches_rust(self):
+        from django.template import Context, Engine
+
+        from django_rust_templates import _native
+
+        calls = []
+        original = _native.filter
+
+        def counting(*args, **kwargs):
+            calls.append(args[0])
+            return original(*args, **kwargs)
+
+        _native.filter = counting
+        try:
+            rendered = Engine().from_string("{{ x|lower }}").render(
+                Context({"x": "ABC"})
+            )
+        finally:
+            _native.filter = original
+
+        self.assertEqual(rendered, "abc")
+        self.assertEqual(calls, ["lower"], calls)
+
+    def test_the_parser_finds_our_defaultfilters(self):
+        """The premise, on its own, so a green counter cannot be the whole story.
+
+        `Parser.find_filter(name)` is the handle the parse keeps
+        (`_impl/parser.py:501`) and the object the routing compares against, so
+        this asserts the *identity* the routing will test — ours, from our file —
+        rather than a name. Two claims, because interposing the file is not the
+        same as the registry being the one the parser reads: `register` could be
+        ours while the parser's table still held Django's copies, and that is the
+        `django_own_tags()` defect one level over (`host.py`'s docstring records
+        its first version snapshotting `parser.tags` *after* `Parser.__init__`
+        merged the builtins).
+        """
+        import importlib
+        import inspect
+
+        from django_rust_templates.render import parser_for
+
+        defaultfilters = importlib.import_module("django.template.defaultfilters")
+        self.assertIn("_impl", defaultfilters.__file__)
+
+        func = parser_for("").find_filter("lower")
+        self.assertIs(func, defaultfilters.register.filters["lower"])
+        self.assertIn("_impl", inspect.getfile(func))
+
+    def test_a_loaded_library_that_rebinds_a_builtin_filter_runs_its_own_body(self):
+        """Review Focus 1: the handler is the **handle**, so a rebinding wins.
+
+        The decision this task makes is identity of the callable, and the input
+        that discriminates it from a decision by *name* is a `{% load %}`ed
+        library registering `lower`. A name-keyed arm reads `"lower"`, finds it
+        in Rust's registry, and runs Rust's body — silently, with the library's
+        function never called and the output still looking like a lowercased
+        string. So the row asserts three things, and the third is the one no
+        output comparison can make: the library's callable ran, the value it
+        received was the resolved one, and `_native.filter` was **not** reached.
+
+        The library is injected into `engine.template_libraries` rather than
+        imported from a file (`tests/test_filter_rebinding.py`'s idiom, and for
+        its reason): `find_library` reads `parser.libraries`, which
+        `Template.compile_nodelist` fills from the engine's map, so no module on
+        disk and no `sys.path` entry is needed to make a loadable name.
+        """
+        from django.template import Context, Engine, Library
+
+        from django_rust_templates import _native
+
+        library = Library()
+        ran = []
+
+        @library.filter("lower")
+        def shadowing_lower(value):
+            ran.append(value)
+            return f"shadow({value})"
+
+        engine = Engine()
+        engine.template_libraries["m11_shadow"] = library
+
+        calls = []
+        original = _native.filter
+
+        def counting(*args, **kwargs):
+            calls.append(args[0])
+            return original(*args, **kwargs)
+
+        _native.filter = counting
+        try:
+            rendered = engine.from_string(
+                "{% load m11_shadow %}{{ x|lower }}"
+            ).render(Context({"x": "ABC"}))
+        finally:
+            _native.filter = original
+
+        self.assertEqual(ran, ["ABC"], "the library's callable did not run")
+        self.assertEqual(rendered, "shadow(ABC)")
+        self.assertEqual(
+            calls,
+            [],
+            "Rust's arm ran for a name the library had rebound; the routing "
+            "decided by name rather than by the handle the parse bound",
+        )
+
+    def test_the_stringfilter_flag_travels_and_coerces_once(self):
+        """Review Focus 4: the coercion happens inside, on our side of the FFI.
+
+        `@stringfilter` is a *Python* decorator, so the coercion `{{ x|lower }}`
+        performs for an `int` or an arbitrary object is one of the four steps the
+        arm takes over — and the flag that says which filters get it is a Rust
+        table (`FilterEntry.stringfilter`) the parse never sees. So the input that
+        catches a lost flag is a filter reached through a rendered template with
+        a non-`str`. `lower` cannot lowercase a `Counted` in either language, so
+        `'mixed'` out of the render is Rust having been handed the `str`; the
+        value is `str`-convertible rather than hostile on purpose, since a body
+        handed the raw object would fail and the row would then be about the
+        error rather than about the coercion.
+
+        **The count is here because the plan asked for it, and it is recorded as
+        the weak meter it measured out to be.** A counting `__str__` is the
+        natural way to ask "once or twice?", and the answer is `1` in *all three*
+        worlds: the correct arm, an arm that also fell through to the loop, and
+        no arm at all. Measured, by deleting the arm's `continue` so it wraps
+        instead of replacing — still `1`. The doubling is invisible to it by
+        construction: the second `str()` is applied to the first one's *result*,
+        which is already a `str`, so the counting `__str__` is not called again.
+        The docstring used to claim this count caught the wrapper; the row that
+        actually does is the `force_escape` one below.
+
+        **`theirs` is the pinned body, not a second `Engine()`.** `Engine()`
+        inside this suite resolves to our own implementation, so the previous
+        version's `ours == theirs` compared our engine to itself and its
+        `"Django coerces once"` label was attached to our answer. The stock
+        number is measured where stock code can be reached at all — the pinned
+        `lower` called directly.
+        """
+        from django.template import Context, Engine
+
+        from tests.pinned_module import load_pinned
+
+        class Counted:
+            def __init__(self, text):
+                self.text = text
+                self.calls = 0
+
+            def __str__(self):
+                self.calls += 1
+                return self.text
+
+        value = Counted("MiXeD")
+        rendered = Engine().from_string("{{ x|lower }}").render(Context({"x": value}))
+
+        self.assertEqual(rendered, "mixed")
+        self.assertEqual(
+            value.calls,
+            1,
+            "coerced more than once at this boundary, which the `lower` body "
+            "cannot do through Rust's own `str()`",
+        )
+
+        pinned_value = Counted("MiXeD")
+        self.assertEqual(
+            load_pinned("defaultfilters.py").register.filters["lower"](pinned_value),
+            "mixed",
+        )
+        self.assertEqual(pinned_value.calls, 1, "stock Django coerces once")
+
+    def test_the_arm_replaces_the_loop_rather_than_wrapping_it(self):
+        """Review Focus 6: `force_escape`, the input that can see a wrapper.
+
+        `_native.filter` performs upstream's four steps inside itself, so an arm
+        that *also* fell through to the loop would run them a second time. Three
+        of the four are invisible: `template_localtime` is a no-op for a `str`,
+        `needs_autoescape` is passed the same flag twice, and `mark_safe` is
+        idempotent on a `SafeString`. The fourth is `@stringfilter`'s `str()`
+        coercion, and **it is not visible either** — which is where this row's
+        first version went wrong, and the plan with it.
+
+        The plan named `escape` and reasoned from the bare functions:
+        `escape("&")` is `&amp;` and `escape(escape("&"))` is `&amp;amp;`.
+        That is true of `django.utils.html.escape` and **false of the filter
+        registered as `escape`**, whose body is `conditional_escape`
+        (`defaultfilters.py:457-461`), and `conditional_escape` returns
+        `text.__html__()` untouched for a `SafeData` input
+        (`utils/html.py:115-125`). So the second application never reaches
+        `escape()` at all, and the flag is not even lost on the way: measured
+        against `.django` @ 6.0.9, `str(SafeString("&amp;"))` returns the *same
+        object* (`type` is `SafeString`, `isinstance(..., SafeData)` is `True`).
+        Measured through the render path, `'&amp;'` for both `{{ x|escape }}`
+        and `{{ x|escape|escape }}` — and `'&amp;'` for both under a doubled
+        wrapper too, so `escape` sees nothing.
+
+        `force_escape` is the filter whose body is that unconditional
+        `escape(str(value))` — `@register.filter(is_safe=True) @stringfilter`,
+        `defaultfilters.py:474-476` — and it is non-idempotent in the render
+        path: `'&amp;'` once, `'&amp;amp;'` twice, measured on the pinned body
+        directly and through the engine.
+
+        So the row asserts the literal for the single application, which is what
+        a doubled wrapper changes, and the doubled *filter expression* as the
+        premise that this filter is non-idempotent — without that premise the
+        first assertion proves nothing about the wrapper, and it is exactly the
+        premise `escape` would have passed while seeing nothing.
+
+        **Verified by mutation rather than by argument**: with the arm's
+        `continue` deleted, so `_native.filter` runs and the loop body runs on
+        top of it, the first assertion fails as
+        `AssertionError: '&amp;amp;' != '&amp;'` — and it is one of exactly two
+        rows in `FilterRoutingTests` that redden. The other three stay green,
+        which is the measurement behind the claim that these inputs
+        discriminate and the rest do not.
+        """
+        from django.template import Context, Engine
+
+        engine = Engine()
+        self.assertEqual(
+            engine.from_string("{{ x|force_escape }}").render(Context({"x": "&"})),
+            "&amp;",
+            "the escaped form of `&`; `&amp;amp;` here is the arm running the "
+            "body a second time",
+        )
+        self.assertEqual(
+            engine.from_string("{{ x|force_escape|force_escape }}").render(
+                Context({"x": "&"})
+            ),
+            "&amp;amp;",
+            "the premise: this filter is non-idempotent, so a doubled wrapper "
+            "is visible in the text rather than silent",
+        )
+
+    def test_a_dict_context_is_read_only_where_upstream_reads_it(self):
+        """The arm's two scalars are computed as lazily as upstream reads them.
+
+        `FilterExpression.resolve` is called with a plain `dict` by Django's own
+        suite — `.django/tests/template_tests/test_parser.py:207`, against
+        `0|default:{num}` — and that is legal because upstream's loop touches
+        `context` only inside its two `getattr`-guarded branches
+        (`base.py:810-815`). The arm has to compute the same two FFI scalars
+        before the call, so this row is what says it computed them under the same
+        guards. Measured before the fix: `AttributeError: 'dict' object has no
+        attribute 'autoescape'` for **all five** expressions below, while every
+        other row of the 1547 stayed green — the acceptance suite is what found
+        it, and this row is so the unit suite finds it next time.
+
+        **Which attribute the error names is part of the claim**, because
+        upstream's two branches have an order: `expects_localtime` is tested
+        first, so `date` must blame `use_tz` and `join` — which has
+        `needs_autoescape` only — must blame `autoescape`. Computed as arguments
+        to the FFI call, where `autoescape` comes first positionally, `date`
+        would blame the wrong attribute and a row asserting only "an
+        AttributeError was raised" would not notice.
+
+        Two registries, one per engine, so nothing of ours is the comparator's
+        input: the pinned `defaultfilters` for the pinned parser and ours for
+        ours. The five answers are asserted one by one rather than in aggregate,
+        since the two error cases carry different text.
+        """
+        import importlib
+
+        from django.template.base import FilterExpression, Parser
+
+        from tests.pinned_module import load_pinned
+
+        ours_registry = importlib.import_module("django.template.defaultfilters").register
+        pinned = load_pinned("base.py")
+        pinned_registry = load_pinned("defaultfilters.py").register
+
+        ours_parser = Parser("", builtins=[ours_registry])
+        theirs_parser = pinned.Parser("", builtins=[pinned_registry])
+
+        for expression, expected in [
+            ("0|default:1", "1"),
+            ("0|lower", "'0'"),
+            ("0|force_escape", "'0'"),
+        ]:
+            self.assertEqual(
+                repr(FilterExpression(expression, ours_parser).resolve({})),
+                expected,
+                expression,
+            )
+            self.assertEqual(
+                repr(pinned.FilterExpression(expression, theirs_parser).resolve({})),
+                expected,
+                expression,
+            )
+
+        for expression, blame in [
+            ("0|date:'Y'", "use_tz"),
+            ("0|join:'-'", "autoescape"),
+        ]:
+            with self.assertRaises(AttributeError) as ours_error:
+                FilterExpression(expression, ours_parser).resolve({})
+            with self.assertRaises(AttributeError) as theirs_error:
+                pinned.FilterExpression(expression, theirs_parser).resolve({})
+            self.assertEqual(
+                str(ours_error.exception), str(theirs_error.exception), expression
+            )
+            self.assertIn(blame, str(ours_error.exception), expression)
+
+    def test_the_autoescape_flag_travels_and_the_needs_autoescape_arm_is_not_doubled(self):
+        """Review Focus 6's second input: `join`, the filter that reads the flag.
+
+        `_native.filter`'s fourth argument is `context.autoescape`, and until
+        this row nothing pinned it. `join` is one of the six `needs_autoescape`
+        filters (`defaultfilters.py:611-621` in the pin), so its body escapes or
+        does not escape *because* of that flag — and the flag is not a constant
+        a Rust side could guess, since it is the `Context`'s. Measured on the
+        pinned body with `["a<b", "c"]` and the separator `-`: `'a&lt;b-c'` for
+        `autoescape=True`, `'a<b-c'` for `False`. A Rust arm that hard-coded
+        either answer passes one of the two assertions and fails the other, so
+        the pair is what is asserted rather than either literal alone.
+
+        **The same filter is the wrapper's second discriminator, and on a
+        different step than `force_escape`.** `needs_autoescape` is the step
+        that calls `func(obj, autoescape=..., *args)`; `force_escape` is not a
+        `needs_autoescape` filter at all, so it says nothing about this arm.
+        `join` is not idempotent under a second call — it joins the *characters*
+        of the string it just produced. Measured with `["a", "b"]`: `'a-b'`
+        correctly, `'a---b'` under a doubled wrapper (the arm's `continue`
+        deleted, the same mutation the row above records), and measured on the
+        pinned body as `'a---b'` too, so the doubled value is the body's own
+        answer and not an artifact of ours.
+        """
+        from django.template import Context, Engine
+
+        engine = Engine()
+        self.assertEqual(
+            engine.from_string("{{ x|join:'-' }}").render(Context({"x": ["a", "b"]})),
+            "a-b",
+            "`a---b` here is the arm running the body a second time",
+        )
+
+        # The flag itself, on a value where it changes the answer.
+        escaped = ["a<b", "c"]
+        self.assertEqual(
+            engine.from_string("{{ x|join:'-' }}").render(Context({"x": escaped})),
+            "a&lt;b-c",
+            "the body did not escape with autoescape on",
+        )
+        self.assertEqual(
+            engine.from_string(
+                "{% autoescape off %}{{ x|join:'-' }}{% endautoescape %}"
+            ).render(Context({"x": escaped})),
+            "a<b-c",
+            "the flag did not travel: the body escaped with autoescape off",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

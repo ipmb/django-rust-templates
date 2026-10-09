@@ -91,6 +91,7 @@ base.py:651	django/template/base.py	651	-	-	-
 base.py:668-670	django/template/base.py	668	670	def add_library(self, lib):	self.filters.update(lib.filters)
 base.py:669-670	django/template/base.py	669	670	self.filters.update(lib.filters)	-
 base.py:669	django/template/base.py	669	-	self.tags.update	-
+base.py:670	django/template/base.py	670	-	self.filters.update(lib.filters)	-
 base.py:676	django/template/base.py	676	-	return FilterExpression(token, self)	-
 base.py:678-682	django/template/base.py	678	682	def find_filter(self, filter_name):	raise TemplateSyntaxError("Invalid filter: '%s'" % filter_name)
 base.py:682	django/template/base.py	682	-	raise TemplateSyntaxError("Invalid filter: '%s'" % filter_name)	-
@@ -647,11 +648,13 @@ timesince.py:67-68	django/utils/timesince.py	67	68	-	-
 timesince.py:67-70	django/utils/timesince.py	67	70	if not now:	now = now.astimezone(d.tzinfo)
 timesince.py:83	django/utils/timesince.py	83	-	total_months = (now.year - d.year) * 12 + (now.month - d.month)	-
 timesince.py:138-143	django/utils/timesince.py	138	143	timeuntil	-
+django/utils/timezone.py:146-161	django/utils/timezone.py	146	161	settings.USE_TZ if use_tz is None else use_tz	-
 timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)
 python/django_rust_templates/_impl/base.py:1161	python/django_rust_templates/_impl/base.py	1161	-	-	-
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
+_impl/parser.py:501	python/django_rust_templates/_impl/parser.py	501	-	func = parser.find_filter(name)	-
 _shim.py:75	python/django_rust_templates/_shim.py	75	-	TARGET = "django.template"	-
-_shim.py:406	python/django_rust_templates/_shim.py	406	-	if installed():	-
+_shim.py:407	python/django_rust_templates/_shim.py	407	-	if installed():	-
 python/django_rust_templates/host.py:243	python/django_rust_templates/host.py	243	-	-	-
 tests/parity_target.py:62	tests/parity_target.py	62	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
 tests/parity_target.py:170	tests/parity_target.py	170	-	So this is the replacement Python side	-
@@ -682,3 +685,11 @@ tests/test_host_tags.py:32-37	tests/test_host_tags.py	32	37	PROJECT_ROOT = Path(
 test_render_parity.py:533	tests/test_render_parity.py	533	-	def test_a_silent_variable_failure_is_substituted(self):	-
 test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
 .django/tests/utils_tests/test_html.py:204-217	tests/utils_tests/test_html.py	204	217	-	-
+utils/html.py:115-125	django/utils/html.py	115	125	if hasattr(text, "__html__"):	-
+defaultfilters.py:474-476	django/template/defaultfilters.py	474	476	def force_escape(value):	-
+base.py:810-811	django/template/base.py	810	811	if getattr(func, "expects_localtime", False):	-
+base.py:812-815	django/template/base.py	812	815	new_obj = func(obj, autoescape=context.autoescape, *arg_vals)	-
+base.py:810-815	django/template/base.py	810	815	if getattr(func, "needs_autoescape", False):	-
+test_parser.py:207	tests/template_tests/test_parser.py	207	-	FilterExpression(f"0|default:{num}", p).resolve({})	-
+.django/tests/template_tests/test_parser.py:207	tests/template_tests/test_parser.py	207	-	FilterExpression(f"0|default:{num}", p).resolve({})	-
+crates/template-core/src/filters/host.rs:44-46	crates/template-core/src/filters/host.rs	44	46	The `autoescape` in force, which the seven `needs_autoescape` filters	-
