@@ -1283,6 +1283,20 @@ watch the "unset means error" assertion go green wrongly; move the `calls()` pus
 below the field read and watch a test that asserts the call happened on an
 unset field fail. Restore both.
 
+**A third property is a limit rather than a feature, and Task 5 is where it was
+measured: `calls` records the operation's *name* and never its arguments.** The
+four truncation filters and `wordwrap` are bodies whose distinguishing behaviour
+lives entirely in the arguments they pass — `truncate`'s `words`/`html`/
+`truncate_text` triple and `wrap`'s width — so a module test cannot see it:
+flipping `truncatewords_html`'s `html: true` to `false` leaves all six of its
+unit tests green. **That makes a rule for every remaining group, not just Task 5:
+for each delegating filter the corpus carries at least one row per distinct
+argument set, named for the argument it protects.** And because a row can *look*
+like an observer of an argument without being one — Task 5's two `html`-flag
+mutations, on two filters sharing one host call, moved 1 and 3 rows — the number
+of rows that actually observe each argument is measured by mutating the argument
+and counting, never inferred from the filter's shape.
+
 - [ ] **Step 3: Write the 57 stubs**
 
 `crates/template-core/src/filters/mod.rs` declares all 57 modules and the
@@ -1797,6 +1811,34 @@ to detect, and neither half alone would have caught it.
   *text* was identical in all 49 rows, so a corpus comparing `==` would have been
   entirely green while the thing it was built to catch was inverted. That is
   recorded here as a rule with its measurement rather than as a preference.
+
+  **Task 5's run, and the finding that the count must be measured per filter
+  rather than inferred from the shape.** Three mutations against the 90-row
+  corpus, each restored from a `cp` backup and md5-verified before the next:
+
+  | mutation | rows moved | which |
+  |---|---|---|
+  | `center`'s `left = margin / 2` → `str.center`'s `margin & width & 1` | **1** | `center/both-odd-width` |
+  | `truncatewords_html`'s `html: true` → `false` | **1** | `truncatewords_html/unbalanced-tag-is-synthesised` |
+  | `truncatechars_html`'s `html: true` → `false` | **3** | all three of its rows |
+
+  The last two are the *same kind* of mutation on two filters that share one
+  host call, and they differ by a factor of three: `"<b>one two</b> three"` at
+  two words answers identically with the flag off, because the join of
+  `"<b>one"` and `"two</b>"` is the same string the html path produces. So a row
+  can look like an observer of an argument and not be one, and the only way to
+  know which rows observe which argument is to move the argument and count. That
+  is why the corpus's `truncatewords_html` rows now say out loud which of the two
+  observes the flag and which does not.
+
+  **The count also caught a row that observed two things at once.** Mutation A
+  moved **2** rows on its first run, not 1: `center/safe-input-stays-safe` was
+  written at width 5 on a two-code-point value, which is a both-odd margin — so
+  it was silently a second observer of the split rule. Its argument is now width
+  4, where the two rules agree, and the mutation moves exactly the one named row.
+  A count that says "2" for a defect with one named observer is the ambiguity this
+  project has paid for four times; the corpus row carries the measurement in its
+  comment so the next reader does not re-introduce it.
 
 ---
 

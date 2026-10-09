@@ -457,4 +457,367 @@ CASES: list[dict] = [
         "filter": "wordcount",
         "value": 5,
     },
+
+    # --- Task 5: padding and truncation, all is_safe=True --------------------
+    #
+    # **This group's rows carry a weight the earlier ones did not.** The four
+    # truncation filters and `wordwrap` are *delegating* bodies: they compute
+    # integers in Rust and hand the text to a host call, and `TestFilterHost`
+    # records the method **name** and not its arguments. Measured by mutation —
+    # flipping `html: true` to `false` in `truncatewords_html` leaves all six of
+    # its unit tests green. So the arguments that distinguish the four
+    # `truncate` filters from each other are pinned *here* or nowhere: one row
+    # per distinct triple, plus one for `wrap`'s width, and each is named for
+    # the argument it protects.
+    #
+    # Safety: all eight are `is_safe=True`, so the loop's `mark_safe` applies to
+    # each. Four rows below cover it — one per distinct call shape a body has
+    # (padding, `truncate` words=false, `truncate` words=true, `wrap`) — rather
+    # than eight, because the flag reaches the loop by the same line for every
+    # `is_safe=True` filter and the remaining four share a shape with one of
+    # these. That is the one place in this file where a row stands for another.
+    # --- center (`:431-438`): the format spec `^`, NOT `str.center` ----------
+    {
+        # **The row the plan mandates, and the only one that separates the two
+        # rules.** CPython's format spec puts the extra space on the **right**
+        # when the margin and the width are both odd (`left = margin // 2`);
+        # `str.center` carries a `margin & width & 1` term that moves it left.
+        # Django answers `' ab  '` and `'ab'.center(5)` answers `'  ab '` — a
+        # body written from the builtin's name passes every even-margin row
+        # above and fails only here. Measured against the pinned 6.0.9.
+        "name": "center/both-odd-width",
+        "filter": "center",
+        "value": "ab",
+        "arg": 5,
+    },
+    {
+        # The control: margin 3 at width 6, where both rules agree. Kept beside
+        # the row above so a future reader can see which one carries the
+        # discriminating power rather than having to re-derive it.
+        "name": "center/even-margin",
+        "filter": "center",
+        "value": "abc",
+        "arg": 6,
+    },
+    {
+        # A 1-code-point, 2-byte value at width 4 → margin 3 → `' é  '`. A body
+        # counting bytes gets margin 2 and answers 3 wide.
+        "name": "center/counts-code-points-not-bytes",
+        "filter": "center",
+        "value": "é",
+        "arg": 4,
+    },
+    {
+        "name": "center/empty-value",
+        "filter": "center",
+        "value": "",
+        "arg": 5,
+    },
+    {
+        # `width <= 0` returns the value **unchanged** (`:435`), and the guard
+        # runs *after* `int(arg)`, so `center("abc", 0)` is `'abc'` and
+        # `center("abc", "x")` raises rather than returning. The pair below
+        # pins the value half; the raising half is a Rust body test, because a
+        # corpus row has no exception path to compare.
+        "name": "center/zero-width-is-the-value",
+        "filter": "center",
+        "value": "abc",
+        "arg": 0,
+    },
+    {
+        "name": "center/negative-width-is-the-value",
+        "filter": "center",
+        "value": "abc",
+        "arg": -3,
+    },
+    {
+        # The `@stringfilter` coercion, as in the `upper` rows but through a
+        # body that also parses the argument: `center(5, 3)` is `' 5 '`.
+        "name": "center/int-coerces",
+        "filter": "center",
+        "value": 5,
+        "arg": 3,
+    },
+    {
+        # Width **4**, deliberately: at width 5 this row would be a second
+        # both-odd case and would silently share the split-rule observation with
+        # `center/both-odd-width` above. Measured — the §11 mutation of
+        # `left = margin / 2` into `str.center`'s rule moved exactly two rows
+        # until this argument was changed, and exactly one after. A row that
+        # observes two things makes the mutation count say "2" for a defect with
+        # one named observer, which is the ambiguity this project has paid for
+        # four times already.
+        "name": "center/safe-input-stays-safe",
+        "filter": "center",
+        "value": mark_safe("ab"),
+        "arg": 4,
+    },
+    # --- ljust / rjust (`:417-430`): the builtins, with no `<= 0` guard ------
+    {
+        # **The argument is Python's `int`, not Rust's `str::parse`.** `int`
+        # accepts PEP 515 underscores, so `ljust("abc", "5_0")` is a 50-wide
+        # string. A body using `parse::<usize>()` answers `'abc'` here and
+        # agrees on every row where the argument is a plain number — which is
+        # every other row in this file.
+        "name": "ljust/argument-is-python-int",
+        "filter": "ljust",
+        "value": "abc",
+        "arg": "5_0",
+    },
+    {
+        # `int(" 5 ")` is 5: Python strips whitespace, `parse` does not.
+        "name": "ljust/argument-tolerates-whitespace",
+        "filter": "ljust",
+        "value": "abc",
+        "arg": " 5 ",
+    },
+    {
+        # **This row is what makes `filter_probe.rust_answer`'s argument-shape
+        # rule observable.** A non-`str` argument is a bare token and arrives as
+        # the `float` 5.0, which `int()` converts; a harness that `mark_safe`d
+        # every argument would hand the Rust side `SafeString('5.0')`, whose
+        # `to_int` raises `ValueError` — and `ljust` has **no** `try`, so the
+        # row fails loudly instead of comparing two different inputs. It is the
+        # only row here whose argument is a `float` rather than an `int`.
+        "name": "ljust/float-argument-is-resolved-not-quoted",
+        "filter": "ljust",
+        "value": "abc",
+        "arg": 5.0,
+    },
+    {
+        # Code points, not bytes: `"e" + U+0301` is one grapheme, two code
+        # points, three bytes, and pads to 5 as two code points plus three
+        # spaces. Written with the escape because an invisible combining mark is
+        # exactly what an editor mangles.
+        "name": "ljust/counts-code-points-not-bytes",
+        "filter": "ljust",
+        "value": "éé",
+        "arg": 5,
+    },
+    {
+        # `str.ljust` returns the string unchanged for any width at or below the
+        # length — the reason `ljust` needs no `<= 0` guard where `center` has
+        # one. Three rows, because the three cases reach that clamp by different
+        # arithmetic and a body that clamped only one would pass the others.
+        "name": "ljust/width-below-length-is-the-value",
+        "filter": "ljust",
+        "value": "abc",
+        "arg": 2,
+    },
+    {
+        "name": "ljust/zero-width-is-the-value",
+        "filter": "ljust",
+        "value": "abc",
+        "arg": 0,
+    },
+    {
+        "name": "ljust/negative-width-is-the-value",
+        "filter": "ljust",
+        "value": "abc",
+        "arg": -1,
+    },
+    {
+        "name": "ljust/empty-value-at-a-negative-width",
+        "filter": "ljust",
+        "value": "",
+        "arg": -5,
+    },
+    {
+        "name": "rjust/pads-on-the-left",
+        "filter": "rjust",
+        "value": "abc",
+        "arg": 6,
+    },
+    {
+        "name": "rjust/zero-width-is-the-value",
+        "filter": "rjust",
+        "value": "abc",
+        "arg": 0,
+    },
+    {
+        "name": "rjust/negative-width-is-the-value",
+        "filter": "rjust",
+        "value": "abc",
+        "arg": -5,
+    },
+    {
+        "name": "rjust/empty-value-at-a-negative-width",
+        "filter": "rjust",
+        "value": "",
+        "arg": -5,
+    },
+    # --- truncatechars / truncatewords (`:305-314`, `:330-337`) --------------
+    {
+        # The ellipsis **counts toward the length**: 3 gives two characters plus
+        # `…`. A body that truncated to `length` and then appended would be one
+        # character long here.
+        "name": "truncatechars/ellipsis-counts-toward-the-length",
+        "filter": "truncatechars",
+        "value": "abcdefgh",
+        "arg": 3,
+    },
+    {
+        "name": "truncatechars/ascii",
+        "filter": "truncatechars",
+        "value": "abcdefgh",
+        "arg": 5,
+    },
+    {
+        # `Truncator` normalises to NFC and does not count combining marks
+        # (`text.py:205`), so the decomposed pair answers as the composed one:
+        # `'éé'` at length 2, not the ellipsis. A Rust `chars()` count answers
+        # `'…'` — the third Unicode table the plan declines to write.
+        "name": "truncatechars/combining-marks-do-not-count",
+        "filter": "truncatechars",
+        "value": "éé",
+        "arg": 2,
+    },
+    {
+        # `int(arg)` in a `try/except ValueError` that **returns the value
+        # unchanged**. It is a corpus row rather than a body test precisely
+        # because the failure is silent: there is no exception to compare, and
+        # the silence *is* the observable.
+        "name": "truncatechars/non-integer-argument-is-silent",
+        "filter": "truncatechars",
+        "value": "abcdefgh",
+        "arg": "x",
+    },
+    {
+        "name": "truncatechars/zero-length-is-empty",
+        "filter": "truncatechars",
+        "value": "abcdefgh",
+        "arg": 0,
+    },
+    {
+        "name": "truncatechars/negative-length-is-empty",
+        "filter": "truncatechars",
+        "value": "abcdefgh",
+        "arg": -1,
+    },
+    {
+        "name": "truncatechars/int-coerces",
+        "filter": "truncatechars",
+        "value": 5,
+        "arg": 3,
+    },
+    {
+        "name": "truncatechars/safe-input-stays-safe",
+        "filter": "truncatechars",
+        "value": mark_safe("abcdefgh"),
+        "arg": 5,
+    },
+    {
+        # The `words=true` half of the triple, and the row that separates this
+        # filter's arguments from `truncatechars`'s: the truncation text is
+        # `" …"` with a leading space, where `chars` uses a bare `"…"`.
+        "name": "truncatewords/ascii",
+        "filter": "truncatewords",
+        "value": "one two three",
+        "arg": 2,
+    },
+    {
+        "name": "truncatewords/zero-words-is-empty",
+        "filter": "truncatewords",
+        "value": "one two three",
+        "arg": 0,
+    },
+    {
+        "name": "truncatewords/non-integer-argument-is-silent",
+        "filter": "truncatewords",
+        "value": "one two three",
+        "arg": "x",
+    },
+    {
+        "name": "truncatewords/safe-input-stays-safe",
+        "filter": "truncatewords",
+        "value": mark_safe("one two three"),
+        "arg": 2,
+    },
+    # --- the html pair: the same host call with `html: true` -----------------
+    {
+        # The `html=true` half of the triple. Measured by the §11 mutation of
+        # `truncatechars_html`'s `html: true` to `false`: **all three** rows
+        # below move, because truncating the raw string and truncating its text
+        # while re-closing tags differ on every one of these inputs. Not so for
+        # `truncatewords_html`, where only one of the two moves — which is why
+        # each count was measured rather than assumed from this one.
+        "name": "truncatechars_html/balanced-tag-is-closed",
+        "filter": "truncatechars_html",
+        "value": "<b>abcdef</b>",
+        "arg": 5,
+    },
+    {
+        # An unbalanced tag: `HTMLParser` synthesises the closing `</b>`.
+        "name": "truncatechars_html/unbalanced-tag-is-synthesised",
+        "filter": "truncatechars_html",
+        "value": "<b>abcdef",
+        "arg": 4,
+    },
+    {
+        # A `<` in the *text* where no tag is open: not a tag, so not closed.
+        # A body that counted `<` would answer `'a…'` or worse.
+        "name": "truncatechars_html/lone-angle-bracket-is-text",
+        "filter": "truncatechars_html",
+        "value": "a<b>",
+        "arg": 3,
+    },
+    {
+        # **This row does not observe the `html` flag, and saying so is the
+        # point.** Measured by the §11 mutation of `truncatewords_html`'s
+        # `html: true` to `false`: this row stayed **green**, because with the
+        # flag off the first two words of `"<b>one two</b> three"` are
+        # `"<b>one"` and `"two</b>"` and their join is the same string the html
+        # path produces. It is kept for the `words=true` half of the triple —
+        # it fails if `words` is wrong — but the flag's observer is the row
+        # below, and only that one.
+        "name": "truncatewords_html/balanced-tag-is-closed",
+        "filter": "truncatewords_html",
+        "value": "<b>one two</b> three",
+        "arg": 2,
+    },
+    {
+        # The `words=true, html=true` triple, and **the flag's only observer**:
+        # the unbalanced tag is where the html path's synthesised `</p>` shows.
+        # Measured by the same mutation — flipping the flag moves this row and
+        # no other. It is also the row the whole argument-blindness argument
+        # rests on: flipping it leaves every one of the six Rust unit tests
+        # green, because `TestFilterHost` records the method name and not its
+        # arguments.
+        "name": "truncatewords_html/unbalanced-tag-is-synthesised",
+        "filter": "truncatewords_html",
+        "value": "<p>one two",
+        "arg": 1,
+    },
+    # --- wordwrap (`:410-415`): `textwrap` with `break_long_words=False` -----
+    {
+        # The `wrap` width argument, which no unit test can see. A body passing
+        # a different width answers differently on every row below.
+        "name": "wordwrap/wraps-at-the-given-width",
+        "filter": "wordwrap",
+        "value": "a b c d",
+        "arg": 3,
+    },
+    {
+        # `break_long_words=False`: a word longer than the width is *not* split,
+        # so a 7-character word at width 3 comes back whole. A body that used
+        # Rust's `textwrap`-equivalent default breaks it into three lines.
+        "name": "wordwrap/long-word-is-not-broken",
+        "filter": "wordwrap",
+        "value": "abcdefg",
+        "arg": 3,
+    },
+    {
+        # `textwrap` collapses the run of spaces (and `replace_whitespace`
+        # normalises them), so the doubled space does not survive as padding.
+        "name": "wordwrap/collapses-whitespace-runs",
+        "filter": "wordwrap",
+        "value": "a  b c",
+        "arg": 3,
+    },
+    {
+        "name": "wordwrap/safe-input-stays-safe",
+        "filter": "wordwrap",
+        "value": mark_safe("a b c d"),
+        "arg": 3,
+    },
 ]

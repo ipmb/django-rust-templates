@@ -635,21 +635,22 @@ mod tests {
         "yesno",
     ];
 
-    /// The filters whose bodies are still stubs: the 49 of the 57 that M4 has
+    /// The filters whose bodies are still stubs: the 41 of the 57 that M4 has
     /// not landed yet.
     ///
     /// A literal rather than an alias of [`MEASURED_NAMES`] now that groups have
     /// landed, because the two are no longer the same set and an alias would have
-    /// to be trimmed in place to say so. The 49 are the 57 minus `lower` and
-    /// `upper` (Task 3's corpus seed) and minus Task 4's six — `capfirst`,
-    /// `title`, `cut`, `addslashes`, `make_list`, `wordcount`.
+    /// to be trimmed in place to say so. The 41 are the 57 minus `lower` and
+    /// `upper` (Task 3's corpus seed), minus Task 4's six — `capfirst`,
+    /// `title`, `cut`, `addslashes`, `make_list`, `wordcount` — and minus
+    /// Task 5's eight: `center`, `ljust`, `rjust`, `truncatechars`,
+    /// `truncatechars_html`, `truncatewords`, `truncatewords_html`, `wordwrap`.
     ///
     /// **The central commit that lands a group moves that group's names out of
     /// this list**, in the same commit — and the assertion below is what makes
     /// forgetting fail rather than pass.
-    const STILL_STUBBED: [&str; 49] = [
+    const STILL_STUBBED: [&str; 41] = [
         "add",
-        "center",
         "date",
         "default",
         "default_if_none",
@@ -672,12 +673,10 @@ mod tests {
         "linebreaks",
         "linebreaksbr",
         "linenumbers",
-        "ljust",
         "phone2numeric",
         "pluralize",
         "pprint",
         "random",
-        "rjust",
         "safe",
         "safeseq",
         "slice",
@@ -687,15 +686,10 @@ mod tests {
         "time",
         "timesince",
         "timeuntil",
-        "truncatechars",
-        "truncatechars_html",
-        "truncatewords",
-        "truncatewords_html",
         "unordered_list",
         "urlencode",
         "urlize",
         "urlizetrunc",
-        "wordwrap",
         "yesno",
     ];
 
