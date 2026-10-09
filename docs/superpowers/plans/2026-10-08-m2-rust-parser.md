@@ -3627,11 +3627,21 @@ ERRORS = [
     # --- autoescape --------------------------------------------------------
     ("{% autoescape %}", "'autoescape' tag requires exactly one argument."),
     ("{% autoescape on off %}", "'autoescape' tag requires exactly one argument."),
-    # An *unmatched* quote, where the raw split and `split_contents` disagree:
-    # the raw split counts three arguments here, `split_contents` two. Both
-    # reject, with different messages, and only the raw split's is Django's.
-    ('{% autoescape "on" %}', "'autoescape' tag requires exactly one argument."),
+    # A *matched* quoted phrase containing a space: the raw split counts three
+    # arguments here, `split_contents` two. Only the raw split reaches the count
+    # error, so this is the raw-vs-smart discriminator — NOT
+    # `{% autoescape "on" %}` below, which an earlier draft of this plan called
+    # "an *unmatched* quote ... the raw split counts three arguments here". That
+    # was wrong against Django 6.0.9: `'autoescape "on"'.split()` is
+    # `['autoescape', '"on"']`, two arguments exactly as `smart_split` gives,
+    # and the template fails on the *value*, not the count.
+    ('{% autoescape "on off" %}', "'autoescape' tag requires exactly one argument."),
+    # An unmatched quote: `smart_split` does not treat it as opening a phrase, so
+    # both splitters split it identically and it is rejected on the count.
     ('{% autoescape a"b c %}', "'autoescape' tag requires exactly one argument."),
+    # A matched quoted single word is two arguments to both splitters, so this
+    # one fails on the value: `'"on"'` is not `'on'`.
+    ('{% autoescape "on" %}', "'autoescape' argument should be 'on' or 'off'"),
     ("{% autoescape maybe %}", "'autoescape' argument should be 'on' or 'off'"),
     (
         "{% autoescape on %}",
@@ -3719,9 +3729,18 @@ if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
 from django.template.base import DebugLexer, Lexer, Parser  # noqa: E402
+from django.template.engine import Engine  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 from tests.parser_error_corpus import ERRORS  # noqa: E402
+
+# A bare `Parser(tokens)` registers **no** tags — Django's built-ins live in
+# `defaulttags`/`loader_tags` libraries, which `Engine` passes to `Parser` as
+# `template_builtins` (`base.py:522-523`; `builtins=None` defaults to `[]` at
+# `base.py:518-519`). The plan's original helper omitted them, so every built-in
+# tag reported `Invalid block tag` and the comparison was against the wrong
+# Django. This is the path `Engine.compile_template` itself takes.
+_ENGINE = Engine()
 
 
 def lexer(source, debug):
@@ -3730,8 +3749,13 @@ def lexer(source, debug):
 
 def django_failure(source, debug=False):
     """The exception Django's own parser raises, or None."""
+    parser = Parser(
+        lexer(source, debug).tokenize(),
+        _ENGINE.template_libraries,
+        _ENGINE.template_builtins,
+    )
     try:
-        Parser(lexer(source, debug).tokenize()).parse()
+        parser.parse()
     except Exception as exc:  # noqa: BLE001  (StopIteration is deliberate)
         return exc
     return None
@@ -3862,8 +3886,10 @@ corpus's expectation is wrong (Django is the oracle); a failure on
 
 Temporarily change one implementation message — `unclosed_block_tag`'s, say —
 and confirm both `test_the_corpus_matches_django` still passes (Django is
-unaffected) and `test_every_case_raises_the_same_message` fails on exactly the
-four unclosed-tag cases. Revert.
+unaffected) and `test_every_case_raises_the_same_message` fails on the
+unclosed-tag cases and nothing else. It is **seven** cases, not the four an
+earlier draft claimed, across four distinct tags (`autoescape` ×3, `comment` ×2,
+`spaceless`, `verbatim`) — verified by running it. Revert.
 
 This is the check that the corpus tests the implementation rather than testing
 itself, and it is the reason the two assertions are separate tests.
@@ -3874,7 +3900,7 @@ itself, and it is the reason the two assertions are separate tests.
 git add -A tests/parser_error_corpus.py tests/test_parser_errors.py
 git commit -m "M2 Task 6: syntax-error parity with Django's parser
 
-A 30-case corpus of failing templates compared against Django's real Parser for
+A 32-case corpus of failing templates compared against Django's real Parser for
 message, token and debug position, plus the StopIteration path and the
 innermost-token case. The corpus's own expectations are verified against
 Django, so the oracle is Django rather than this file's author."
