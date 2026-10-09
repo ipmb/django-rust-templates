@@ -1842,6 +1842,60 @@ reviewer's remark that `builtin_tag_names()` / `builtin_tag_stubs()` confusion
 has now happened three times is right and is not fixed here; subtraction at the
 call site is the workaround, and Task 7 owns the rename.
 
+### Task 6's Step 3 predicted teeth the rows do not have, and the pairs are invariant under them
+
+The rows landed in `tests/test_base_parity.py::RenderAnnotationTests`, three of
+them, from `m9_measure_render_annotated.py`'s technique. What the *plan* said
+about them was wrong in a way worth recording, because it is the third
+"asserted teeth" near-miss in M9 and the first one caught before commit.
+
+**(1) Step 3's mutation does not make the row it names fail.** Step 3 says:
+remove `hasattr(e, "_culprit_node")` in `_impl/base.py`'s `Node.render_annotated`
+"making the outermost node win instead of the innermost", re-run, and confirm
+the innermost-culprit row fails. Measured: removing it **does** move
+`_culprit_node` from the inner `{% for %}` node to the outer one — and leaves
+`template_debug`'s `(38, 57)` **unchanged**, because the second guard
+(`context.render_context.template.origin == e._culprit_node.origin`) still picks
+the same frame. A row asserting only the span therefore stays green, and the
+mutation is invisible to it. Step 3 was written for a different row than Step 1
+produces.
+
+The first probe of this appeared to show *no* change at all, and that was the
+probe's fault, not the guard's: the `hasattr` line had been left inside the
+monkeypatched replacement, so the mutation under test was never applied.
+Re-measured with the guard genuinely removed.
+
+**(2) What the rows assert instead is node identity.** Row 1 asserts
+`assertIs(error._culprit_node, loops[1])` and `assertIsNot(…, loops[0])` — the
+*nested* node, not the outer one — alongside the spans. Two mutations were run
+against the finished rows and restored byte-identical (`cmp`):
+**A**, removing the `hasattr` guard, fails rows 1 and 2 (row 2 with
+`'parent.html' != 'child.html'`); **B**, removing only the origin comparison's
+*choice of frame*, fails row 2 alone. Row 1 is the mutation-A row; row 2 is the
+row that needs both guards; the flat case and the `debug=False` case carry the
+other half of each comparison.
+
+**(3) The plan's sharpening needs one more notch.** It says "the ratio is not the
+assertion; the pairs are". Measured, the pairs are **also** invariant under both
+guards — so for the guard question they are not teeth either. What they *are* is
+exactly what Django's own `ErrorIndexTest` (`tests/template_tests/test_nodelist.py:44-86`)
+already pins, which is why the accepted 1547-test suite is blind to both guards:
+the suite asserts the same `(start, end)` pairs and passes with either guard
+removed. These rows exist for the part the suite cannot see, and the part that
+can see it is identity plus the frame the origin comparison picks.
+
+**(4) The fixtures are the tree's, not invented.** `NESTED` and `FLAT` are cases
+4 and 5 of `test_correct_exception_index` (`(38, 57)` and `(18, 37)`), and the
+extends/block fixtures `PARENT`/`CHILD` reproduce the natural origin-mismatch
+case, where the **third** frame annotates and the innermost is skipped — the
+case where a port that annotated at the innermost frame would look right on the
+spans and be wrong on the origin.
+
+**(5) `ErrorIndexTest`'s five rows were also transcribed into the anchor
+manifest** (`tests/template_tests/test_nodelist.py:44-86`, now carrying a start
+and end snippet rather than the bare span it had), because these fixtures are
+only defensible if they can be re-read off the tree.
+
 ### Task 4's four predictions, all four of them measured and three of them false
 
 Task 4 is `render_value_in_context`, which §5.2 leaves as an open obligation
@@ -2088,23 +2142,41 @@ channel. The signature was **chosen**; the constraint was not found. This is the
 same error the milestone keeps recording, one level up: not a wrong number or a
 wrong premise, but a *reason reached for* and then used as a proof.
 
-The decision survives on a different argument, and the argument is about what
-`_native.resolve` is: the Rust mirror of `_resolve_lookup`, built so the five
+The decision survives, but **the second argument the corrections first reached
+for was false too, and this one was falsified after it had been written down** —
+the reviewer caught it in the same pass as the first. It said rerouting the five
+harnesses through the shell's `_resolve_lookup` would be refused by
+`tests/parity_target.py`. That guard's subject is the *target* — its own
+docstring at `tests/parity_target.py:41` describes `target` as a class or
+function whose source file is the comparison's Python side, Django's — and
+rerouting changes **our** side, not the target, which stays
+the ast-extraction out of the pinned checkout (`tests/parity_target.py:147`).
+That is the whole job of `pinned_resolve_lookup()`, so the guard would be
+satisfied and unmoved. The sentence conflated the side under test with the
+oracle.
+
+What does hold is smaller, and it is about **when**, not **whether**.
+`_native.resolve` is the Rust mirror of `_resolve_lookup`, built so the five
 comparison harnesses can compare a lookup against Django's **at the method**,
-with the arm that failed named in the report. Moving the handler does not take
-the handler out of that comparison; it moves the comparison's *ours* side.
-`tests/test_render_parity.py:529` (`test_a_silent_variable_failure_is_substituted`)
-and `tests/test_resolve_callarm.py:86` (`test_a_silent_type_error_is_substituted`)
+with the arm that failed named in the report. `tests/test_render_parity.py:529`
+(`test_a_silent_variable_failure_is_substituted`) and
+`tests/test_resolve_callarm.py:86` (`test_a_silent_type_error_is_substituted`)
 exercise `silent_variable_failure` against `_native.resolve`, so a version that
 returned the raw failure would diverge from the pinned method on precisely the
-rows they were built for; and rerouting them through the shell's
-`_resolve_lookup` puts them back inside a declared region, which is the
-Rust-against-Rust comparison `tests/parity_target.py` refuses. So the trade is
-**a complete mirror of the method, compared at the method** against **the
-handler verbatim in the shell, with five harnesses moved up to
-`Variable.resolve`** — not "possible" against "impossible". It goes to Task 7
-below as a live decision with its cost measured, because a decision is only as
-good as the alternative it was checked against.
+rows they were built for. The trade is therefore **one comparison point against
+two**, not a mirror against a verbatim handler: an arm-level row calling
+`_native.resolve` directly still gets the arm-named report with no handler in
+Rust, because it needs the *outcome*, which `(value, bit, error)` carries more
+explicitly than an applied handler does, and a behaviour row at the method covers
+the silent-failure branch. Two granularities is what every other seam here
+already has.
+
+So the handler stays in Rust **for sequencing**: the five harnesses' teeth were
+established by mutation, and reworking them inside a commit whose job is to
+correct a false reason is the "redesign bundled into a fix" shape that has made a
+premise false twice already — the new teeth would be asserted rather than
+measured, in a commit nobody is reading for that. Task 7 owns the design question
+with this corrected cost, and not with the cost as first written.
 
 One consequence is already fixed and one is not. Fixed: `outcome_to_py`'s
 docstring and the shell's comment now state the trade rather than an
@@ -2114,7 +2186,8 @@ hunk of the loop, while the whole of `_resolve_lookup`'s exception semantics
 left `base.py` — a body replaced by a call is one hunk however much body went
 with it, so the diff cannot show it and prose is the only place that can. The
 declared region now says so, and whether the guard should be able to see a moved
-*handler* rather than only a moved line is Task 7's.
+*handler* rather than only a moved line is Task 7's — restated there as the
+achievable half of that question.
 
 ### Obligations M9 is handing to Task 7
 
@@ -2133,7 +2206,10 @@ arrived as someone else's summary.
    `TokenType`); a captured **class** makes every `isinstance` `False`
    (`django/template/defaulttags.py:30-38` captures nine names including `Node`
    and `NodeList`). **The `i18n.py` line numbers are the reviewer's and have not
-   been re-read off the tree — read them before they go in.**
+   been re-read off the tree — read them before they go in.** The flag stays even
+   though the reviewer has since confirmed measuring them: from the message alone
+   you cannot tell which kind of number it is, the carrier looks identical either
+   way, and the flag costs one file-open at close-out.
 2. **`builtin_tag_names()` / `builtin_tag_stubs()` need two names.** The
    confusion has now happened three times; the rename is the fix, subtraction at
    the call site is the workaround.
@@ -2145,14 +2221,24 @@ arrived as someone else's summary.
    by alphabet.** Task 4's correction (6) is the third M9 instance of a row
    being green or red because of a module's *name*. One explicit suite-wide
    configuration is the question; five guards is the current answer.
-5. **The handler's side of the seam — this section's (7).** A complete Rust
-   mirror of `_resolve_lookup` (today) against the handler verbatim in the shell
-   with `tests/differential/cases.py`, `tests/test_render_parity.py`,
+5. **The handler's side of the seam — this section's (7).** One comparison point
+   (today) against two: move the handler verbatim into the shell and split the
+   five harnesses — `tests/differential/cases.py`, `tests/test_render_parity.py`,
    `tests/test_resolve_invalid.py`, `tests/test_resolve_callarm.py` and
-   `tests/test_m8_side_effects.py` retargeted to `Variable.resolve`. Its cost is
-   those five harnesses' retargeting, twice done already in this milestone.
-6. **Should the transcription guard be able to see a moved handler?** Today it
-   sees a moved *line*; a body replaced by a call is one hunk whatever moved
-   with it, and only prose can carry the difference.
+   `tests/test_m8_side_effects.py` — into an arm-level row calling
+   `_native.resolve` directly and a behaviour row at `Variable.resolve`.
+   `tests/parity_target.py` does **not** forbid this: it guards the *target*,
+   which stays `pinned_resolve_lookup()`. The cost is the retargeting, and the
+   reason it is not paid now is sequencing — new teeth would be asserted rather
+   than measured, inside a commit whose job is a correction.
+6. **The transcription guard cannot see a moved handler, and should not try.**
+   It sees a moved *line*; a body replaced by a call is one hunk whatever moved
+   with it. Seeing the handler would take comparing semantics, which is not
+   obviously achievable. The achievable half is the **asymmetry**: a region where
+   upstream has forty lines and ours has two is a relocation *by construction*,
+   and the guard already holds both spans — reporting that ratio, and requiring a
+   declared note above a threshold, is mechanical and would have flagged this
+   hunk. It does not say *what* moved; it says something did, which is currently
+   prose's only witness.
 7. **The acceptance label's M9 caveat** (Task 7 Step 7) and the spec's §10.3/§10.4
    rows, still owed.
