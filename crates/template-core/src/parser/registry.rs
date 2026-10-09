@@ -21,27 +21,54 @@
 //! set of tags whose `CompileFn` is a function of **the token and the parser's
 //! structural cursor alone** — the cursor being `Parser::parse`, `next_token`
 //! and the end-tag names. A tag is subtracted when its compile reads or writes
-//! **host-side parser state**, which a `NodeDesc` cannot carry across the wire:
+//! **host-side parser state whose lifetime is the parse, not the node**: a
+//! `NodeDesc` is one node's worth of data and cannot carry a value that
+//! accumulates across siblings, which is what all three of these are.
 //!
 //! - `block` writes `parser.__loaded_blocks` (`loader_tags.py:227-232`), a Python
-//!   attribute the duplicate-name check is built on.
+//!   attribute the duplicate-name check is built on, and the check *raises*, so
+//!   the accumulated value changes the parse. Note the discrimination is not the
+//!   field's type — a `Vec<String>` would hold those names — it is that no
+//!   per-node value can carry state that the *second* `{% block %}` needs to see.
+//!   `do_block` also recurses through `parser.parse(("endblock",))`.
 //! - `extends` reads `parser.origin.template_name` (`:308`) and inspects the
 //!   just-parsed nodelist through `get_nodes_by_type` (`:311`) — a query over
 //!   *materialised* nodes, which do not exist at compile time.
 //! - `include` reaches `parser.compile_filter` and the loader machinery.
 //!
+//! **A separate bucket, and `load` is its only member — it is in the table for
+//! now, and M6 must decide.** `do_load` writes host state too
+//! (`parser.add_library` → `self.tags.update`, `base.py:668`), and the effect
+//! must be visible to a *later* compile: `Parser::parse` consults
+//! `self.host.has_tag(&command)` **first** (`parser/mod.rs:210`), so a tag
+//! registered by `{% load %}` reaches Rust only through the host. Under the rule
+//! above that is a subtraction, and the table currently keeps it as a stub
+//! anyway, because M6 has a real choice the rule does not make for it: subtract
+//! it (host tag), or give it a Rust compile function that calls one host seam
+//! (`add_library`). `tags/load.rs`'s own doc records the same measurement and
+//! the same deferral. Flagged rather than resolved, because M3 must not
+//! pre-empt M6.
+//!
 //! Note what the rule is **not**: it is not "the node's `render` needs the
 //! host". Every node is materialised as Django's own class and renders in
 //! Python, so that test would subtract all 24 — `NowNode.render` reads
 //! `settings.USE_TZ` and `timezone.get_current_timezone()`
-//! (`defaulttags.py:404-405`) and `now` is one of M2's nine. The discriminator is
-//! on the **compile** side.
+//! (`defaulttags.py:404-405`) and `now` is one of M2's nine. It is also not
+//! "`__init__` takes arguments Rust cannot build": `BlockNode.__init__(name,
+//! nodelist, parent=None)` is descriptor-shaped, and `block` is still
+//! subtracted. The discriminator is on the **compile** side, and specifically on
+//! the lifetime of the state it touches.
 //!
 //! **Flagged, not resolved: `partial` and `partialdef` are the rule's next two
 //! candidates, and M13 must place them.** Both touch `parser.extra_data`
 //! (`defaulttags.py:1251`, `:1279`), the same *kind* of host parse state the rule
-//! subtracts, so neither can be compiled from a token alone as written. They stay
-//! in this table for now because their stubs make the milestone visible and
+//! subtracts, so neither can be compiled from a token alone as written. `partial`
+//! is the stronger of the two and it is worth recording what it actually does:
+//! `partial_func` constructs `DeferredSubDict(extra_data, "partials")` — a **live
+//! view over the parser's dict** — and hands it to `PartialNode`, so the compiled
+//! node closes over parse state that outlives the parse. That is not "reads host
+//! state at compile"; it is a value a `NodeDesc` cannot represent at all. They
+//! stay in this table for now because their stubs make the milestone visible and
 //! because M13 has a real choice — widen the seam, or grow the wire an
 //! `extra_data` channel — that M3 must not pre-empt. The reviewer's argument
 //! distinguished the pair (only `partial`'s *render* re-enters host state); that
