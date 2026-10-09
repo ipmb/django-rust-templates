@@ -369,5 +369,211 @@ class RenderValueInContextTests(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
+class RenderAnnotationTests(unittest.TestCase):
+    """``Node.render_annotated``'s two attachments, entered directly.
+
+    Interposing ``base`` interposes ``Node``, and every node class in
+    ``defaulttags``/``loader_tags`` inherits from whatever ``django.template.base``
+    binds, so this protocol is ours for the whole suite the moment the module is
+    interposed — including nodes Rust did not build, because Rust materialises
+    its descriptors into those same Django classes. At M9 it holds by
+    transcription. The rows exist because §5.5 has Rust rendering interior
+    subtrees from its own compiled form later, and an interior node rendered
+    without a Python frame is exactly what would stop ``_culprit_node`` being
+    attached at the right level.
+
+    **The plan's Task 6 predicted the ``(start, end)`` pairs would be the
+    assertion that discriminates and the ratio would not. Measured: the pairs do
+    not discriminate either guard.** Both guards are idempotence guards on the
+    exception, and the frame that wins is the innermost either way:
+
+    * removing ``if not hasattr(e, "_culprit_node")`` moves ``_culprit_node``
+      from the inner loop to the outer, and leaves ``template_debug``'s
+      ``(38, 57)`` **unchanged** — because ``template_debug`` is attached by the
+      innermost frame, whose ``_culprit_node`` is still itself, before any outer
+      frame can overwrite the attribute;
+    * removing ``if not hasattr(e, "template_debug")`` re-derives the same dict
+      from the same token, because the culprit guard pinned the same node.
+
+    So the plan's Step 3 — "remove the ``hasattr`` guard, confirm the innermost
+    row fails naming the wrong culprit" — would have left the row **green** and
+    drawn a conclusion from a mutation nothing could observe. What discriminates
+    is node *identity* (first row) and the origin comparison's choice of frame
+    (second row), and both were measured by mutation before being written.
+    """
+
+    # ``tests/template_tests/test_nodelist.py:44-86``'s nested case: the outer loop
+    # iterates and the inner one does not, so the culprit is a node nested in
+    # another node. The flat case is the same exception from the same node class
+    # with no nesting at all, which is what makes the pair a comparison.
+    NESTED = (
+        "{% load bad_tag %}{% for i in range %}{% for j in five %}"
+        "{% badsimpletag %}{% endfor %}{% endfor %}"
+    )
+    FLAT = "{% load bad_tag %}{% for j in five %}{% badsimpletag %}{% endfor %}"
+
+    PARENT = "A{% block body %}x{% endblock %}Z"
+    CHILD = (
+        "{% extends 'parent.html' %}{% load bad_tag %}{% block body %}"
+        "{% badsimpletag %}{% endblock %}"
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        # The suite's settings helper and the shim install, for the reason
+        # ``RenderValueInContextTests`` records: settings are first-writer-wins
+        # and ``discover`` decides by alphabet.
+        from scripts.filter_probe import ensure_settings
+
+        ensure_settings()
+        _shim.install()
+
+    def _engine(self, debug=True, **kwargs):
+        from django.template import Engine
+
+        options = {"libraries": {"bad_tag": "template_tests.templatetags.bad_tag"}}
+        options.update(kwargs)
+        return Engine(debug=debug, **options)
+
+    def _render_error(self, template, data=None):
+        """The exception the fixture raises, or an assertion failure if it does not."""
+        from django.template import Context
+
+        try:
+            template.render(Context({} if data is None else data))
+        except Exception as error:  # the fixture's whole purpose
+            return error
+        raise AssertionError("the fixture is supposed to raise")
+
+    def test_culprit_node_is_the_innermost_raising_node(self):
+        """The culprit is the *inner* loop, asserted by identity and not by span.
+
+        The span alone cannot see this guard: measured, deleting
+        ``if not hasattr(e, "_culprit_node")`` leaves ``template_debug`` at
+        ``(38, 57)`` because the annotation was already taken by the frame that
+        caught the exception first. The identity does see it — the outer loop
+        takes the attribute when the guard is gone — so ``assertIs`` against the
+        node object is the assertion, and the span is kept beside it as the part
+        that pins *which* text the annotation describes.
+        """
+        from django.template.defaulttags import ForNode
+
+        engine = self._engine()
+        template = engine.from_string(self.NESTED)
+        loops = template.nodelist.get_nodes_by_type(ForNode)
+        self.assertEqual(len(loops), 2, "the fixture needs an outer loop and an inner one")
+        self.assertEqual(loops[0].token.position, (18, 38), "the outer loop's tag")
+        self.assertEqual(loops[1].token.position, (38, 57), "the inner loop's tag")
+
+        error = self._render_error(template, {"range": range(5), "five": 5})
+
+        self.assertEqual(type(error), TypeError, error)
+        self.assertIs(
+            error._culprit_node,
+            loops[1],
+            "the culprit is the inner loop; the outer one raised only because the "
+            "inner one's exception passed through it",
+        )
+        self.assertIsNot(error._culprit_node, loops[0])
+        debug = error.template_debug
+        self.assertEqual((debug["start"], debug["end"]), (38, 57))
+        self.assertEqual((debug["start"], debug["end"]), loops[1].token.position)
+
+        # The same exception from the same node class with no nesting, so the
+        # row above is a claim about the innermost node rather than about loops.
+        flat = engine.from_string(self.FLAT)
+        (only,) = flat.nodelist.get_nodes_by_type(ForNode)
+        other = self._render_error(flat, {"five": 5})
+        self.assertIs(other._culprit_node, only)
+        self.assertEqual(
+            (other.template_debug["start"], other.template_debug["end"]), (18, 37)
+        )
+
+    def test_template_debug_is_attached_only_when_the_origin_matches(self):
+        """The frame that annotates is not the innermost one, and that is the point.
+
+        ``{% extends %}`` renders the child's ``{% block %}`` while
+        ``context.render_context.template`` is the **parent** — measured, three
+        frames receive the exception (``SimpleNode``, ``BlockNode``,
+        ``ExtendsNode``) and only the third attaches, because the first two see
+        the parent's origin against the child's culprit.
+
+        Teeth, measured rather than argued: delete the origin comparison and the
+        *first* frame attaches instead, producing ``name`` ``parent.html`` with
+        ``during`` empty and a ``(start, end)`` that is a span of the child's
+        source — an annotation that is present, wrong in every field a caller
+        reads, and indistinguishable from a correct one by presence alone. That
+        is why this row asserts ``name`` and ``during`` and not merely that
+        ``template_debug`` exists.
+
+        The controlled half renders the same child block with only the parent's
+        state pushed, which is exactly the state the real render passes through
+        at its innermost frame: ``_culprit_node`` is attached and
+        ``template_debug`` is withheld, because it is the comparison and not the
+        ``hasattr`` guard that withholds it.
+        """
+        from django.template import Context
+        from django.template.library import SimpleNode
+        from django.template.loader_tags import BlockNode
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "parent.html").write_text(self.PARENT)
+            (root / "child.html").write_text(self.CHILD)
+            engine = self._engine(dirs=[directory])
+            child = engine.get_template("child.html")
+            parent = engine.get_template("parent.html")
+
+            error = self._render_error(child)
+            debug = error.template_debug
+            start = self.CHILD.index("{% badsimpletag %}")
+            self.assertEqual(Path(debug["name"]).name, "child.html")
+            self.assertEqual(
+                (debug["start"], debug["end"]),
+                (start, start + len("{% badsimpletag %}")),
+            )
+            self.assertEqual(debug["during"], "{% badsimpletag %}")
+            self.assertEqual(str(debug["message"]), "I am a bad simpletag")
+
+            # The innermost frame, entered alone: the comparison withholds the
+            # annotation, and the culprit is attached anyway.
+            (block,) = child.nodelist.get_nodes_by_type(BlockNode)
+            context = Context({})
+            context.template = child
+            withheld = None
+            with context.render_context.push_state(parent):
+                try:
+                    block.nodelist.render(context)
+                except RuntimeError as error:
+                    withheld = error
+            self.assertIsNotNone(withheld, "the fixture is supposed to raise")
+            self.assertIs(
+                withheld._culprit_node,
+                block.nodelist.get_nodes_by_type(SimpleNode)[0],
+                "the culprit is still attached by the innermost frame",
+            )
+            self.assertFalse(
+                hasattr(withheld, "template_debug"),
+                "the innermost frame must not annotate; its template is the parent",
+            )
+
+    def test_nothing_is_attached_when_debug_is_off(self):
+        """``engine.debug`` gates both attributes, and it is the outer gate.
+
+        Not a row about ``hasattr``: with ``debug=False`` the branch never runs,
+        so the exception arrives bare even though the origin would have matched
+        and no outer frame has annotated it. A port that moved the branch out of
+        the ``if`` — or that attached from Rust, where ``engine.debug`` is one
+        more object to reach — produces a ``template_debug`` on a non-debug
+        engine, which no Django-side caller would expect.
+        """
+        engine = self._engine(debug=False)
+        template = engine.from_string(self.NESTED)
+        error = self._render_error(template, {"range": range(5), "five": 5})
+
+        self.assertFalse(hasattr(error, "_culprit_node"))
+        self.assertFalse(hasattr(error, "template_debug"))
+
+
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

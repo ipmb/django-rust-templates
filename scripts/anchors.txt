@@ -650,6 +650,8 @@ _shim.py:52	python/django_rust_templates/_shim.py	52	-	TARGET = "django.template
 _shim.py:239	python/django_rust_templates/_shim.py	239	-	if installed():	-
 test_render_parity.py:529	tests/test_render_parity.py	529	-	def test_a_silent_variable_failure_is_substituted(self):	-
 test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
+tests/parity_target.py:41	tests/parity_target.py	41	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
+tests/parity_target.py:147	tests/parity_target.py	147	-	So this is the replacement Python side	-
 python/django_rust_templates/host.py:243	python/django_rust_templates/host.py	243	-	-	-
 filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-
 test_unordered_list.py:143	tests/template_tests/filter_tests/test_unordered_list.py	143	-	unordered_list(item_generator()),	-
@@ -665,7 +667,7 @@ custom.py:396-399	tests/template_tests/templatetags/custom.py	396	399	parser.ext
 custom.py:398	tests/template_tests/templatetags/custom.py	398	-	parser.extra_data["extra_data"] = "CUSTOM_DATA"	-
 tag_27584.py:8-9	tests/template_tests/templatetags/tag_27584.py	8	9	delete_first_token	-
 tag_27584.py:13-15	tests/template_tests/templatetags/tag_27584.py	13	15	class BadNode(template.Node):	raise template.TemplateSyntaxError("error")
-tests/template_tests/test_nodelist.py:44-86	tests/template_tests/test_nodelist.py	44	86	-	-
+tests/template_tests/test_nodelist.py:44-86	tests/template_tests/test_nodelist.py	44	86	def test_correct_exception_index(self):	debug = e.template_debug
 test_parser.py:36	tests/template_tests/test_parser.py	36	-	-	-
 test_parser.py:49	tests/template_tests/test_parser.py	49	-	<Lexer template_string="{% for i in 1 %}{{ a...", verbatim=False>	-
 test_partials.py:171	tests/template_tests/test_partials.py	171	-	def test_template_without_extra_data_attribute(self):	-

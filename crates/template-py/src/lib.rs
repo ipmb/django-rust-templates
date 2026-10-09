@@ -2166,29 +2166,53 @@ fn log_resolution_failure(
 /// `tests/differential/cases.py`, `tests/test_render_parity.py`,
 /// `tests/test_resolve_invalid.py`, `tests/test_resolve_callarm.py` and
 /// `tests/test_m8_side_effects.py` can compare a lookup against Django's **at
-/// the method**, with the arm that failed named in the report. Moving the
-/// handler to Python does not take the handler out of that comparison; it moves
-/// the comparison's "ours" side. Those five harnesses exercise
-/// `silent_variable_failure` — `test_render_parity.py:529` and
-/// `test_resolve_callarm.py:86` are named for it — so an `_native.resolve` that
-/// returned the raw failure would diverge from the pinned method on exactly the
-/// rows they were built for; and routing them through the shell's
-/// `_resolve_lookup` instead puts them back inside a declared region, which is
-/// the Rust-against-Rust comparison `tests/parity_target.py` exists to refuse.
+/// the method**, with the arm that failed named in the report. Those five
+/// harnesses exercise `silent_variable_failure` — `test_render_parity.py:529`
+/// and `test_resolve_callarm.py:86` are named for it — so an `_native.resolve`
+/// that returned the raw failure would diverge from the pinned method on exactly
+/// the rows they were built for.
 ///
-/// So the trade is **not** possible against impossible. It is a complete mirror
-/// of the method, compared at the method, against the handler verbatim in the
-/// shell with the five harnesses moved up to `Variable.resolve`. The second is
-/// not obviously worse — it restores the handler to the transcription diff —
-/// and it is carried forward rather than dismissed, because a decision is only
-/// as good as the alternative it was measured against. Task 7 owns it.
+/// **A second version of this paragraph added that moving the handler to Python
+/// would be refused by `tests/parity_target.py:41`, and that was false too.**
+/// That guard's subject is the *target* — its own docstring at that line
+/// describes `target` as a class or function whose source file is the
+/// comparison's Python side, Django's — and routing the five harnesses through
+/// the shell's `_resolve_lookup` changes **our** side, not the target, which
+/// stays the ast-extraction out of the pinned checkout
+/// (`tests/parity_target.py:147`). That is the whole job of
+/// `pinned_resolve_lookup()`, so the guard would be satisfied and unmoved. The
+/// sentence conflated the side under test with the oracle.
+///
+/// So the trade is **one comparison point against two**, not a complete mirror
+/// against a verbatim handler. Comparing at `Variable._resolve_lookup` rather
+/// than at `_native.resolve` costs the arm-named report, and that is
+/// recoverable rather than lost: an arm-level row calling `_native.resolve`
+/// directly still gets the arm name with no handler living in Rust, because it
+/// needs the *outcome*, which a `(value, bit, error)` return carries more
+/// explicitly than an applied handler does, and a behaviour row at the method
+/// covers the `silent_variable_failure` branch. Two granularities, which is what
+/// every other seam in this project already has.
+///
+/// The reason this file keeps the handler is therefore about **when**, not
+/// **whether**: the five harnesses' teeth were established by mutation, and
+/// reworking them inside a commit whose job is to correct a false reason is the
+/// "redesign bundled into a fix" shape that has made a premise false twice
+/// already — the new teeth would be asserted rather than measured, in a commit
+/// nobody is reading for that. Task 7 owns the design question, and now owns it
+/// with the corrected cost.
 ///
 /// What this choice costs today is written down rather than hidden: the shell's
 /// `_resolve_lookup` is no longer upstream's text, and — the sharper half — the
 /// *handler* moved while the transcription diff shows only a hunk of the loop.
-/// The declared region in `scripts/check_transcriptions.py` says so in prose.
-/// Whether the guard should be able to see a moved *handler* rather than only a
-/// moved line is a question Task 7 inherits, not one this file can answer.
+/// The declared region in `scripts/check_transcriptions.py` says so in prose,
+/// and prose is the only place that can: a body replaced by a call is one hunk
+/// however much body went with it. That is a limit of a line-diff guard rather
+/// than a defect in this declaration — seeing a moved handler would take
+/// comparing semantics, which is not obviously achievable. What *is* achievable
+/// is the asymmetry: a region where upstream has forty lines and ours has two is
+/// a relocation **by construction**, and the guard already holds both spans.
+/// Reporting that ratio, and requiring a declared note above some threshold, is
+/// mechanical, and it would have flagged this hunk. Task 7 inherits that.
 fn outcome_to_py(
     py: Python<'_>,
     outcome: LookupOutcome,
