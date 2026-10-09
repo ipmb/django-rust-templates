@@ -15,7 +15,7 @@ two different *times*, which is why the table has two fillers:
   ``{% resetcycle c %}`` resets it (``defaulttags.py:1437``).
 
 Identity is a render-time invariant, not a tree-shape one: ``CycleNode.render``
-keys ``context.render_context`` by the node object (``defaulttags.py:106-112``),
+keys ``context.render_context`` by the node object (``defaulttags.py:104-114``),
 so two equal-but-distinct nodes get separate ``itertools.cycle`` iterators and
 the second mention restarts the sequence instead of continuing it.
 

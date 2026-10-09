@@ -109,7 +109,7 @@ never reaches the two-file threshold.
 | 3 | `defaultfilters.py:757-775` | django/template/defaultfilters.py | `@register.filter(is_safe=False)` |
 | 3 | `defaultfilters.py:854-857` | django/template/defaultfilters.py | `@register.filter(is_safe=False)` |
 | 3 | `defaultfilters.py:996` | django/template/defaultfilters.py | `return "Error in formatting: %s: %s" % (e.__class__.__name__, e)` |
-| 3 | `defaulttags.py:106-112` | django/template/defaulttags.py | `# First time the node is rendered in template` |
+| 3 | `defaulttags.py:104-114` | django/template/defaulttags.py | `def render(self, context):` |
 | 3 | `defaulttags.py:265` | django/template/defaulttags.py | `self._varlist = varlist` |
 | 3 | `defaulttags.py:693-696` | django/template/defaulttags.py | `node = CycleNode(values, name, silent=silent)` |
 | 3 | `library.py:211-212` | django/template/library.py | `nodelist = parser.parse((end_name,))` |

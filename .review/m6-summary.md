@@ -231,13 +231,18 @@ the reviewer's side.
   fail — the metric is real, the rows are not defects, and they will never
   redden anything.
 - **Agreement is not evidence.** Two files citing one construct at the same wrong
-  number are one reader's choice copied twice. Two instances: `base.py:774`
-  (cited from `parser/host.rs:73` and `parser/filter_expr.rs:665`; 774 is
-  `upto = match.end()`, the remainder check is 775) and `defaulttags.py:106-112`
-  (three files; 106 is a comment, the unit is `CycleNode.render`, 104-114 — held
-  back rather than named, because three files must be corrected together and
-  correcting them one at a time would leave two asserting a span the first had
-  already disowned). The count does **not** say agreement is a detector: the
+  number are one reader's choice copied twice. Two instances, both corrected:
+  - `base.py:774`, cited from `parser/host.rs:73` and
+    `parser/filter_expr.rs:665`. 774 is `upto = match.end()`; the remainder check
+    is 775. Both sites now say 775 (`217a094`).
+  - `defaulttags.py:106-112`, cited from three files. Its quoted snippet was the
+    **comment** on 106 and its end was `if self.silent:` on 112, so neither end
+    was a unit and the row asserted nothing. The sentences name
+    `CycleNode.render`, so the span is `104-114`. Held back until all three
+    could be corrected in one commit, because correcting them one at a time
+    would leave two asserting a span the first had already disowned.
+
+  The count does **not** say agreement is a detector: the
   most-agreed anchors are agreed-upon and right.
 - **Publish the denominator with the ratio.** "28 rows / 12 wrong" is a fact only
   when the 28 is the row count that entered the list and the 12 is how many of
@@ -270,7 +275,6 @@ occurring in the discussion of the sweep, one instance in each direction.
 - `parser.__loaded_blocks`, for free, once the handle *is* Django's `Parser` —
   but only if the handle raises `AttributeError` for what it does not have.
 - `InclusionTagTests`, and `{% include %}`'s loader machinery with it.
-- The held-back `defaulttags.py:106-112` row: three files, one correction.
 - `.review/m6-verification-order.md` is valid as written, because the census is
   invariant under naming. Verify by citation count, not by file.
 

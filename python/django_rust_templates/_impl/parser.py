@@ -277,7 +277,7 @@ def materialise_node(desc, origin=None, resolve_ref=None, register_ref=None, par
     # `{% cycle … as c %}` and every later `{% cycle c %}` are one node in Django:
     # `do_cycle` returns the *identical* object the second time
     # (`defaulttags.py:669-671`), and `CycleNode.render` keys `context.render_context`
-    # by that object (`defaulttags.py:106-112`), so two equal-but-distinct nodes would
+    # by that object (`defaulttags.py:104-114`), so two equal-but-distinct nodes would
     # cycle separately. The table is what makes them one: the first mention reserves
     # the slot and stores what it built, and every later mention finds it here and
     # returns it.

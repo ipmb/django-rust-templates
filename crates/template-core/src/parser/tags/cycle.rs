@@ -28,7 +28,7 @@
 //! under the name (`defaulttags.py:693-696`). A later `{% cycle c %}` returns it again
 //! (`defaulttags.py:669-671`) — Django's own comment calls it out ("This returns the exact
 //! same node on each `{% cycle name %}` call"). `CycleNode.render` keys
-//! `context.render_context` by the node object (`defaulttags.py:106-112`), so two
+//! `context.render_context` by the node object (`defaulttags.py:104-114`), so two
 //! equal-but-distinct nodes get separate `itertools.cycle` iterators and the
 //! second mention restarts the sequence instead of continuing it.
 //!

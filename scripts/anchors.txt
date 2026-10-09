@@ -305,7 +305,7 @@ defaultfilters.py:984-987	django/template/defaultfilters.py	984	987	def phone2nu
 defaultfilters.py:990-996	django/template/defaultfilters.py	990	996	def pprint(value):	return "Error in formatting: %s: %s" % (e.__class__.__name__, e)
 defaultfilters.py:996	django/template/defaultfilters.py	996	-	"Error in formatting: %s: %s" % (e.__class__.__name__, e)	-
 defaulttags.py:99	django/template/defaulttags.py	99	-	def __init__(self, cyclevars, variable_name=None, silent=False):	-
-defaulttags.py:106-112	django/template/defaulttags.py	106	112	# First time the node is rendered in template	if self.silent:
+defaulttags.py:104-114	django/template/defaulttags.py	104	114	def render(self, context):	return render_value_in_context(value, context)
 defaulttags.py:144	django/template/defaulttags.py	144	-	with context.push(var=output):	-
 defaulttags.py:149-150	django/template/defaulttags.py	149	150	def __init__(self, variables, asvar=None):	self.vars = variables
 defaulttags.py:176-179	django/template/defaulttags.py	176	179	if nodelist_empty is None:	self.nodelist_empty = nodelist_empty

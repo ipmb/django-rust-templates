@@ -1155,3 +1155,33 @@ looked at.
 The point made above about `parser/error.rs` and `parser/tags/with.rs` holds at
 the close of M6 and is the one number that should travel with the defect total:
 the tree is not uniformly bad, and a count of defects alone cannot say that.
+
+### Resolution, same day: both agreement instances are closed, and one of them taught the same lesson twice
+
+The two constructs this file records under "Agreement is not evidence" are both
+corrected now, and the second correction is the one that mattered:
+
+- **`base.py:774` was already right.** Both citing sites — `parser/host.rs:73`
+  and `parser/filter_expr.rs:665` — said `base.py:775`, and the manifest row is
+  `base.py:775`; it was corrected in `217a094` ("Correct four line numbers in the
+  filter-loop prose, all read off the tree"), which is *before* this close-out.
+  I wrote it into `.review/m6-summary.md` as a live defect anyway, because I took
+  it from this file's table rather than re-measuring it. Same shape as the M6
+  plan's `LibraryParseError` instruction: a claim read out of a record instead of
+  measured against the tree, in a document whose entire argument is that claims
+  must be measured. Both are now recorded as instances rather than as footnotes.
+- **`defaulttags.py:106-112` → `104-114`.** The row quoted the **comment** on 106
+  as its snippet and ended on `if self.silent:` at 112, so neither end was a unit
+  and `--check` had nothing to falsify — the quoted-snippet rule cannot see a
+  span whose claim is a comment. All three citing files changed in one commit, as
+  the hold-back required: `crates/template-core/src/parser/tags/cycle.rs`,
+  `python/django_rust_templates/_impl/parser.py`, `tests/test_ref_table.py`. The
+  sentences name `CycleNode.render`, so the span is the method, `104-114`, and
+  the edit is width-neutral (`106-112` → `104-114`). The manifest row was
+  replaced rather than added, so the count stays 545 — and the checker was run
+  frozen afterwards, which is what proves no row was left dead.
+
+The lesson the pair teaches is narrower than "re-measure": the census is a
+**prior**, and `.review/m6-verification-order.md` and this file are records of a
+date. A record that says a defect is open has to be re-measured before it is
+copied into a summary, because nothing in a document ages itself.
