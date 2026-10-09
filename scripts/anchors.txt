@@ -117,9 +117,12 @@ defaultfilters.py:78-83	django/template/defaultfilters.py	78	83	-	-
 defaultfilters.py:85-91	django/template/defaultfilters.py	85	91	-	-
 defaultfilters.py:94-220	django/template/defaultfilters.py	94	220	-	-
 defaultfilters.py:95	django/template/defaultfilters.py	95	-	def floatformat(text, arg=-1):	-
+defaultfilters.py:146-148	django/template/defaultfilters.py	146	148	elif last_char == "g":	arg = arg[:-1] or -1
+defaultfilters.py:149-151	django/template/defaultfilters.py	149	151	elif last_char == "u":	arg = arg[:-1] or -1
 defaultfilters.py:152-159	django/template/defaultfilters.py	152	159	-	-
 defaultfilters.py:153-154	django/template/defaultfilters.py	153	154	str(text)	-
 defaultfilters.py:153	django/template/defaultfilters.py	153	-	str(text)	-
+defaultfilters.py:157-159	django/template/defaultfilters.py	157	159	d = Decimal(str(float(text)))	return ""
 defaultfilters.py:158-159	django/template/defaultfilters.py	158	159	except (ValueError, InvalidOperation, TypeError):	-
 defaultfilters.py:161	django/template/defaultfilters.py	161	-	p = int(arg)	-
 defaultfilters.py:163	django/template/defaultfilters.py	163	-	return input_val	-

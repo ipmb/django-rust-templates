@@ -2445,9 +2445,9 @@ CASES: list[dict] = [
     },
     {
         # `'g'` sets `force_grouping=True` *and* leaves `use_l10n=True`
-        # (`:142-144`), so the separator appears **whatever the settings say** —
-        # which is why no `USE_THOUSAND_SEPARATOR` row sits on this shape and one
-        # sits on the no-flag shape below.
+        # (`defaultfilters.py:146-148`), so the separator appears **whatever the
+        # settings say** — which is why no `USE_THOUSAND_SEPARATOR` row sits on
+        # this shape and one sits on the no-flag shape below.
         "name": "floatformat/g-flag-groups-thousands",
         "filter": "floatformat",
         "value": 6666.6666,
@@ -2482,10 +2482,11 @@ CASES: list[dict] = [
         "arg": "g0",
     },
     {
-        # `'u'` turns localization off (`:148-151`), and the row exists to be
-        # compared with `g-flag-groups-thousands` above: same value, same digits,
-        # and the separator is the difference. It is also the row that would move
-        # under `LANGUAGE_CODE` if `use_l10n` were not being passed through.
+        # `'u'` turns localization off (`defaultfilters.py:149-151`), and the row
+        # exists to be compared with `g-flag-groups-thousands` above: same value,
+        # same digits, and the separator is the difference. It is also the row
+        # that would move under `LANGUAGE_CODE` if `use_l10n` were not being
+        # passed through.
         "name": "floatformat/u-flag-suppresses-grouping",
         "filter": "floatformat",
         "value": 6666.6666,
@@ -2519,10 +2520,11 @@ CASES: list[dict] = [
         "arg": "2u",
     },
     {
-        # The argument will not parse (`int('x')` at `:160`), so the value comes
-        # back as `str(value)` and **unmarked** where every row above is a
-        # `SafeString`. The text is the one a safe arm could have produced, which
-        # is exactly why the flag and not the string is this row's content.
+        # The argument will not parse (`int('x')` at `defaultfilters.py:161`), so
+        # the value comes back as `str(value)` and **unmarked** where every row
+        # above is a `SafeString`. The text is the one a safe arm could have
+        # produced, which is exactly why the flag and not the string is this
+        # row's content.
         "name": "floatformat/unparseable-argument-returns-the-value",
         "filter": "floatformat",
         "value": 6666.6666,
@@ -2538,9 +2540,9 @@ CASES: list[dict] = [
         "arg": "2.5",
     },
     {
-        # `Decimal(str(text))` raises at `:159` and `float(text)` raises as well,
-        # so `.pop()` leaves `input_val` empty: `''`, unmarked, and the shortest
-        # of the five exits.
+        # `Decimal(str(text))` raises inside `defaultfilters.py:157-159` and
+        # `float(text)` raises as well, so `.pop()` leaves `input_val` empty:
+        # `''`, unmarked, and the shortest of the five exits.
         "name": "floatformat/non-numeric-value-returns-empty",
         "filter": "floatformat",
         "value": "abc",
