@@ -7,12 +7,16 @@ filters/host.rs:576-739	crates/template-core/src/filters/host.rs	576	739	-	-
 linebreaks.rs:130	crates/template-core/src/filters/linebreaks.rs	130	-	call.autoescape && !call.host.is_safe(&value)	-
 slugify.rs:99	crates/template-core/src/filters/slugify.rs	99	-	pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {	-
 wordwrap.rs:73	crates/template-core/src/filters/wordwrap.rs	73	-	unwrap_or(Value::None)	-
+desc.rs:407	crates/template-core/src/parser/desc.rs	407	-	pub must_be_first: bool,	-
+desc.rs:445	crates/template-core/src/parser/desc.rs	445	-	must_be_first: false,	-
 error.rs:292-293	crates/template-core/src/parser/error.rs	292	293	str.replace	-
 parser/mod.rs:267	crates/template-core/src/parser/mod.rs	267	-	NodeDesc::new("VariableNode")	-
 crates/template-core/src/parser/mod.rs:341	crates/template-core/src/parser/mod.rs	341	-	self.extend_nodelist(&mut nodelist, node, &token)?;	-
 parser/mod.rs:369-373	crates/template-core/src/parser/mod.rs	369	373	token.or_else	-
 crates/template-core/src/parser/mod.rs:429	crates/template-core/src/parser/mod.rs	429	-	pub fn extend_nodelist(	-
+parser/mod.rs:435	crates/template-core/src/parser/mod.rs	435	-	if node.must_be_first && nodelist.contains_nontext {	-
 tags/mod.rs:180	crates/template-core/src/parser/tags/mod.rs	180	-	Ok(NodeDesc::with_nodelist(	-
+parser/tags/mod.rs:195	crates/template-core/src/parser/tags/mod.rs	195	-	fn standin_first	-
 url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
 with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
 filters.rs:69-71	crates/template-py/src/filters.rs	69	71	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
@@ -30,6 +34,7 @@ base.py:60	django/template/base.py	60	-	-	-
 base.py:75	django/template/base.py	75	-	-	-
 django/template/base.py:97-101	django/template/base.py	97	101	-	-
 base.py:109-110	django/template/base.py	109	110	def __str__(self):	return self.msg % self.params
+base.py:148	django/template/base.py	148	-	from .engine import Engine	-
 base.py:198-200	django/template/base.py	198	200	parser.parse()	-
 django/template/base.py:390-403	django/template/base.py	390	403	-	-
 base.py:472	django/template/base.py	472	-	-	-
@@ -38,6 +43,7 @@ base.py:514	django/template/base.py	514	-	-	-
 base.py:518-519	django/template/base.py	518	519	if builtins is None:	builtins = []
 base.py:521	django/template/base.py	521	-	self.libraries = libraries	-
 base.py:522-523	django/template/base.py	522	523	for builtin in builtins:	self.add_library(builtin)
+base.py:523	django/template/base.py	523	-	self.add_library(builtin)	-
 base.py:529-591	django/template/base.py	529	591	token.contents.split()[0]	-
 base.py:549-551	django/template/base.py	549	551	-	-
 base.py:561-564	django/template/base.py	561	564	command = token.contents.split()[0]	if command in parse_until:
@@ -47,6 +53,7 @@ base.py:573	django/template/base.py	573	-	(command, token)	-
 base.py:583-585	django/template/base.py	583	585	except Exception as e:	raise self.error(token, e)
 base.py:585	django/template/base.py	585	-	-	-
 base.py:587-588	django/template/base.py	587	588	self.command_stack.pop()	-
+base.py:600-617	django/template/base.py	600	617	def extend_nodelist(self, nodelist, node, token):	-
 base.py:611	django/template/base.py	611	-	-	-
 base.py:615	django/template/base.py	615	-	node.token = token	-
 base.py:619-630	django/template/base.py	619	630	def error(self, token, e):	return e
@@ -64,6 +71,7 @@ base.py:695	django/template/base.py	695	-	-	-
 base.py:696	django/template/base.py	696	-	-	-
 base.py:701-775	django/template/base.py	701	775	-	-
 base.py:701-719	django/template/base.py	701	719	-	-
+base.py:703-719	django/template/base.py	703	719	filter_re = _lazy_re_compile	-
 base.py:705	django/template/base.py	705	-	(?P<filter_name>\w+)	-
 django/template/base.py:705	django/template/base.py	705	-	(?P<filter_name>\w+)	-
 base.py:706-711	django/template/base.py	706	711	(?:%(arg_sep)s	)?
@@ -90,6 +98,7 @@ base.py:793	django/template/base.py	793	-	string_if_invalid = context.template.e
 base.py:800-806	django/template/base.py	800	806	-	-
 base.py:803-819	django/template/base.py	803	819	expects_localtime	-
 base.py:804-809	django/template/base.py	804	809	arg_vals = []	arg_vals.append(arg.resolve(context))
+base.py:805-820	django/template/base.py	805	820	if getattr(func, "expects_localtime", False):	-
 base.py:806-807	django/template/base.py	806	807	-	-
 base.py:811	django/template/base.py	811	-	obj = template_localtime(obj, context.use_tz)	-
 base.py:813	django/template/base.py	813	-	func(obj, autoescape=context.autoescape, *arg_vals)	-
@@ -107,6 +116,7 @@ base.py:906	django/template/base.py	906	-	self.literal = mark_safe(unescape_stri
 base.py:910	django/template/base.py	910	-	if VARIABLE_ATTRIBUTE_SEPARATOR + "_" in var or var[0] == "_":	-
 base.py:926-928	django/template/base.py	926	928	if self.lookups is not None	-
 base.py:932-939	django/template/base.py	932	939	gettext_lazy(msgid)	-
+base.py:948-1028	django/template/base.py	948	1028	def _resolve_lookup(self, context):	-
 base.py:959-1028	django/template/base.py	959	1028	for bit in self.lookups:	return current
 base.py:960-992	django/template/base.py	960	992	try:  # dictionary lookup	)  # missing attribute
 base.py:963	django/template/base.py	963	-	hasattr(type(current), "__getitem__")	-
@@ -131,8 +141,13 @@ base.py:1023	django/template/base.py	1023	-	getattr(e, "silent_variable_failure"
 base.py:1023-1024	django/template/base.py	1023	1024	if getattr(e, "silent_variable_failure", False):	current = context.template.engine.string_if_invalid
 base.py:1024	django/template/base.py	1024	-	current = context.template.engine.string_if_invalid	-
 base.py:1036	django/template/base.py	1036	-	-	-
+base.py:1044-1070	django/template/base.py	1044	1070	def render_annotated(self, context):	-
 base.py:1054	django/template/base.py	1054	-	if context.template.engine.debug:	-
 base.py:1060-1063	django/template/base.py	1060	1063	and context.render_context.template.origin == e._culprit_node.origin	context.render_context.template.get_exception_info(
+base.py:1060	django/template/base.py	1060	-	context.render_context.template.origin == e._culprit_node.origin	-
+base.py:1091	django/template/base.py	1091	-	SafeString("".join(	-
+base.py:1113	django/template/base.py	1113	-	def render_annotated	-
+base.py:1113-1120	django/template/base.py	1113	1120	return self.s	-
 base.py:1139	django/template/base.py	1139	-	-	-
 base.py:1160	django/template/base.py	1160	-	kwarg_re = _lazy_re_compile(r"(?:(\w+)=)?(.+)")	-
 base.py:1163-1207	django/template/base.py	1163	1207	token_kwargs	-
@@ -366,6 +381,7 @@ defaulttags.py:993	django/template/defaulttags.py	993	-	condition = TemplateIfPa
 defaulttags.py:993-995	django/template/defaulttags.py	993	995	condition = TemplateIfParser(parser, bits).parse()	conditions_nodelists = [(condition, nodelist)]
 defaulttags.py:993-996	django/template/defaulttags.py	993	996	condition = TemplateIfParser(parser, bits).parse()	token = parser.next_token()
 defaulttags.py:995	django/template/defaulttags.py	995	-	conditions_nodelists = [(condition, nodelist)]	-
+defaulttags.py:995-1020	django/template/defaulttags.py	995	1020	conditions_nodelists = [(condition, nodelist)]	-
 defaulttags.py:996	django/template/defaulttags.py	996	-	token = parser.next_token()	-
 defaulttags.py:999-1006	django/template/defaulttags.py	999	1006	while token.contents.startswith("elif"):	# {% else %} (optional)
 defaulttags.py:1001-1004	django/template/defaulttags.py	1001	1004	condition = TemplateIfParser(parser, bits).parse()	token = parser.next_token()
@@ -422,18 +438,23 @@ defaulttags.py:1678-1680	django/template/defaulttags.py	1678	1680	"%r expected a
 defaulttags.py:1682-1684	django/template/defaulttags.py	1682	1684	"%r received an invalid token: %r"	-
 defaulttags.py:1683	django/template/defaulttags.py	1683	-	remaining_bits[0]	-
 defaulttags.py:1687	django/template/defaulttags.py	1687	-	return WithNode(None, None, nodelist, extra_context=extra_context)	-
+engine.py:7	django/template/engine.py	7	-	from .base import Template	-
 engine.py:15-16	django/template/engine.py	15	16	filters	-
 engine.py:63	django/template/engine.py	63	-	self.template_builtins = self.get_template_builtins(self.builtins)	-
 engine.py:194	django/template/engine.py	194	-	-	-
+library.py:85	django/template/library.py	85	-	for attr in ("expects_localtime", "is_safe", "needs_autoescape"):	-
 library.py:211-212	django/template/library.py	211	212	delete_first_token	-
 library.py:388-473	django/template/library.py	388	473	def parse_bits(	return args, kwargs
 library.py:421	django/template/library.py	421	-	-	-
 library.py:454	django/template/library.py	454	-	parser.compile_filter	-
+loader_tags.py:63	django/template/loader_tags.py	63	-	block = type(self)(block.name, block.nodelist)	-
 loader_tags.py:87	django/template/loader_tags.py	87	-	-	-
 loader_tags.py:227-232	django/template/loader_tags.py	227	232	-	-
+loader_tags.py:233-234	django/template/loader_tags.py	233	234	parser.__loaded_blocks = [block_name]	-
 loader_tags.py:305	django/template/loader_tags.py	305	-	bits[1] = construct_relative_path(parser.origin.template_name, bits[1])	-
 loader_tags.py:308	django/template/loader_tags.py	308	-	if nodelist.get_nodes_by_type(ExtendsNode):	-
 loader_tags.py:347	django/template/loader_tags.py	347	-	-	-
+loader_tags.py:356	django/template/loader_tags.py	356	-	"Unknown argument for %r tag: %r." % (bits[0], option)	-
 smartif.py:22-26	django/template/smartif.py	22	26	-	-
 smartif.py:40-42	django/template/smartif.py	40	42	def __repr__(self):	return "(" + " ".join(out) + ")"
 smartif.py:51	django/template/smartif.py	51	-	class Operator(TokenBase):	-
@@ -455,6 +476,7 @@ smartif.py:179-183	django/template/smartif.py	179	183	OPERATORS[token]	-
 smartif.py:198-200	django/template/smartif.py	198	200	-	-
 smartif.py:200	django/template/smartif.py	200	-	display()	-
 smartif.py:214-215	django/template/smartif.py	214	215	def create_var(self, value):	return Literal(value)
+django/test/utils.py:108-114	django/test/utils.py	108	114	def instrumented_test_render(self, context):	-
 dateformat.py:42	django/utils/dateformat.py	42	-	-	-
 dateformat.py:44-48	django/utils/dateformat.py	44	48	TypeError	-
 dateformat.py:326-329	django/utils/dateformat.py	326	329	-	-
@@ -528,17 +550,24 @@ timesince.py:83	django/utils/timesince.py	83	-	total_months = (now.year - d.year
 timesince.py:138-143	django/utils/timesince.py	138	143	timeuntil	-
 timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
+_shim.py:52	python/django_rust_templates/_shim.py	52	-	TARGET = "django.template"	-
 filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-
 test_unordered_list.py:143	tests/template_tests/filter_tests/test_unordered_list.py	143	-	unordered_list(item_generator()),	-
 test_unordered_list.py:148	tests/template_tests/filter_tests/test_unordered_list.py	148	-	def test_nested_generators(self):	-
 i18n/test_blocktranslate.py:881	tests/template_tests/syntax_tests/i18n/test_blocktranslate.py	881	-	-	-
 tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py:16	tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py	16	-	-	-
+syntax_tests/test_for.py:334	tests/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
+syntax_tests/test_include.py:371-397	tests/template_tests/syntax_tests/test_include.py	371	397	def test_include_cache(self):	-
 bad_tag.py:6-8	tests/template_tests/templatetags/bad_tag.py	6	8	badtag	-
+custom.py:386-393	tests/template_tests/templatetags/custom.py	386	393	self.count = count + 1	-
 custom.py:396-399	tests/template_tests/templatetags/custom.py	396	399	parser.extra_data["extra_data"]	-
 .django/tests/template_tests/templatetags/custom.py:396-399	tests/template_tests/templatetags/custom.py	396	399	parser.extra_data["extra_data"] = "CUSTOM_DATA"	-
+custom.py:398	tests/template_tests/templatetags/custom.py	398	-	parser.extra_data["extra_data"] = "CUSTOM_DATA"	-
 tag_27584.py:8-9	tests/template_tests/templatetags/tag_27584.py	8	9	delete_first_token	-
 tag_27584.py:13-15	tests/template_tests/templatetags/tag_27584.py	13	15	class BadNode(template.Node):	raise template.TemplateSyntaxError("error")
 test_parser.py:36	tests/template_tests/test_parser.py	36	-	-	-
+test_parser.py:49	tests/template_tests/test_parser.py	49	-	<Lexer template_string="{% for i in 1 %}{{ a...", verbatim=False>	-
+test_partials.py:171	tests/template_tests/test_partials.py	171	-	def test_template_without_extra_data_attribute(self):	-
 .django/tests/template_tests/tests.py:114-123	tests/template_tests/tests.py	114	123	assertRaises(RuntimeError)	-
 tests.py:148-155	tests/template_tests/tests.py	148	155	def test_compile_tag_extra_data(self):	self.assertEqual(t.extra_data["extra_data"], "CUSTOM_DATA")
 .django/tests/template_tests/tests.py:148-155	tests/template_tests/tests.py	148	155	-	-

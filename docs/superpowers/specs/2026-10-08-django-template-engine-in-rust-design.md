@@ -147,7 +147,7 @@ reasoning is recorded with each, because these are the shapes most likely to be
 pub trait ValueResolver {
     /// **One path component, not a whole dotted path.**
     ///
-    /// Django's `_resolve_lookup` (`base.py:948-1000`) is a per-bit loop whose
+    /// Django's `_resolve_lookup` (`base.py:948-1028`) is a per-bit loop whose
     /// control flow is Python-exception-driven: it tries `current[bit]`, then
     /// `getattr`, re-raising when a `@property` raised rather than swallowing
     /// it, with `isinstance(current, BaseContext)` special cases that suppress
@@ -284,10 +284,11 @@ Two more requirements on the same handle, both pinned by tests:
   function, and the host does not compile `block` until M7. One half of it is
   not negotiable and travels with the requirement: the handle must *raise*
   `AttributeError` for an attribute it does not have. `do_block`'s `except`
-  branch (`:233-234`) is the only place `__loaded_blocks` is created, so a
-  handle that answered every name would move that list's lifetime out of the
-  parse and into the bag, and Django's duplicate-block-name check would then be
-  asserting something about the bag rather than about the template.
+  branch (`loader_tags.py:233-234`) is the only place `__loaded_blocks` is
+  created, so a handle that answered every name would move that list's lifetime
+  out of the parse and into the bag, and Django's duplicate-block-name check
+  would then be asserting something about the bag rather than about the
+  template.
 - **`extra_data` is absent after a failed parse.** `compile_nodelist`
   (`base.py`) assigns `self.extra_data = parser.extra_data` *inside* its `try`,
   so the attribute never appears on failure, and `test_partials.py:171` tests
@@ -981,7 +982,7 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   variable-versus-tag `contains_nontext`**, the part that was unexercised — and
   the `{% extends %}`-specific case moves to M7. The rule's *machinery* is
   already Rust's and already tested: `extend_nodelist`'s
-  `must_be_first && contains_nontext` check (`parser/mod.rs:336`) is exercised
+  `must_be_first && contains_nontext` check (`parser/mod.rs:435`) is exercised
   against a stand-in `must_be_first` node (`parser/tags/mod.rs:195`). M7
   supplies a tag, not a rule.
 
@@ -1000,8 +1001,8 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   `Library.add_tag` and no `Library.add_library`; a registration updates one
   dict each, and the merge into the parser's tables is `Parser.add_library`
   (`base.py:669-670`, called once per builtin library from `Parser.__init__` at
-  `:523`). §6's own text gets this right — "consumed via `add_library` and
-  **not stored**" — and this sentence contradicted it. M6 pins the behaviour
+  `base.py:523`). §6's own text gets this right — "consumed via `add_library`
+  and **not stored**" — and this sentence contradicted it. M6 pins the behaviour
   with a template that loads a library registering a name already in Django's
   builtins, and asserts the user's definition is the one that runs.
 
@@ -1012,8 +1013,9 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   is 22, `builtin_tag_stubs()` is `['partial', 'partialdef']`. And `block`,
   `extends` and `include` are **excluded from the host** at M6. They are Django's
   builtins but not Rust's, and `NodeDesc.must_be_first` does not cross the seam
-  (`desc.rs:407`, defaulted `false` at `:445`), so a host-compiled `{% extends %}`
-  would be accepted **and** uncheckable — its must-be-first rule silently absent.
+  (`desc.rs:407`, defaulted `false` at `desc.rs:445`), so a host-compiled
+  `{% extends %}` would be accepted **and** uncheckable — its must-be-first rule
+  silently absent.
   Accepting a tag whose ordering rule does not exist here is worse than today's
   honest refusal. **So `{% extends %}` still raises `Invalid block tag` at M6,
   and that is a divergence from Django, not coverage of it.** M7 removes the
