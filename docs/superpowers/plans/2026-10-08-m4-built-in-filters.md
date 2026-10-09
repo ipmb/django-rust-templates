@@ -53,19 +53,24 @@ Copied verbatim from the spec; every task's requirements implicitly include them
 The five inputs and conditions the spec implies but no single task's tests
 exercise. Each is pinned by a test in the task that owns the code.
 
-1. **Python's case mapping is not Rust's, and four of the 57 filters are built
-   on it.** Measured against the pinned tree, over all 1,112,064 code points:
-   **56 code points differ, 28 in each direction**, and every difference is the
-   same shape — Python maps the code point to *itself* where Rust maps it to
-   another character. `U+A7D3` is `Ll` in Python 3.14.4's Unicode 16.0.0 and
-   `.upper()` returns itself, while Rust 1.98's `char::to_uppercase` returns
-   `U+A7D2`; `U+16EBB` (Beria Erfe, new in Unicode 16.0) is a third family.
-   So Rust's tables are **ahead** of Python's here — the opposite of M1's `\w`
-   divergence, where Rust was behind. `upper`, `lower`, `capfirst` and `title`
-   are all wrong without a fixup, and `capfirst` is wrong on
-   `U+A7D3` alone. **Owned by Task 1**, which ports the mapping and pins it with
-   a full-code-point parity test so a `rustc` upgrade that moves Rust's tables
-   fails loudly rather than silently changing what a template renders.
+1. **Python's case mapping is not Rust's — and that is two different findings
+   with two different answers.** Measured against the pinned tree, over all
+   1,112,064 code points: **56 code points diverge, 28 in each direction**, and
+   every difference is the same shape — Python maps the code
+   point to *itself* where Rust maps it to another character. `U+A7D3` is `Ll`
+   in Python 3.14.4's Unicode 16.0.0 and `.upper()` returns itself, while Rust
+   1.98's `char::to_uppercase` returns `U+A7D2`; `U+16EBB` (Beria Erfe, new in
+   Unicode 16.0) is a third family. So Rust's tables are **ahead** of Python's
+   here — the opposite of M1's `\w` divergence, where Rust was behind.
+   **That is the code-point-local half, and it is `upper` and `capfirst`'s
+   problem: ported, in Rust, pinned by an exhaustive parity test (Task 1).**
+   The other half was found later and is not a table at all: `str.lower()` and
+   `str.title()` are *context*-sensitive (Final_Sigma — `"ΟΣ".lower()` is
+   `"ος"`), so no per-code-point fixup expresses them and both filters delegate
+   to the host instead. A first-principles `title` reproduced all 1,112,064
+   single code points and still failed 444 of 400,000 strings. **Owned by
+   Task 1 (the table), Task 2's `str_lower`/`str_title` (the context half), and
+   Task 4.**
 2. **"Rust owns the filter" is a tiered claim and the tiers must be named.**
    `date`/`time` read the active language, `floatformat`/`filesizeformat` read
    `settings` and the **thread-local `decimal` context**
@@ -73,8 +78,10 @@ exercise. Each is pinned by a test in the task that owns the code.
    reads `settings.URLIZE_ASSUME_HTTPS`, `timesince`/`timeuntil` read the wall
    clock and `gettext`. The plan's answer is §D2, and §D2 was **corrected after
    review**: this is a *permanent* delegation, not a stage that M10 ends, and the
-   set is **18 filters, derived** — see §D2 for the derivation and for the three
-   neighbouring counts that are each a right answer to a different question.
+   set is **20 filters, derived** — see §D2 for the derivation, the second
+   independent metric (`lower` and `title`, via CPython's context-sensitive case
+   methods), and the three neighbouring counts that are each a right answer to a
+   different question.
    **Pinned by Task 3's derivation test** (which computes the set rather than
    trusting it) and Task 10's corpus, which renders the settings-sensitive ones
    under two settings states and asserts both sides move together.
@@ -210,31 +217,58 @@ worth writing down rather than quietly deleting.** `_shim.py:52` sets
 `django.utils`. **The finder takes over exactly one namespace, so
 `django.utils.dateformat`, `django.utils.formats`, `django.utils.html`,
 `django.utils.text`, `django.utils.timesince` and `django.utils.translation` are
-unreachable by any milestone in §10.3**, and no future milestone brings those 18
-bodies home. §3 decided this — "We depend on the real Django for everything
-else" — so it is the spec working as written; §6 has been corrected, because it
-said Rust owns "all built-in tags and filters" and that was too strong.
+unreachable by any milestone in §10.3**, so no future milestone brings the 18
+bodies whose answer lives in them home — which is what makes §D2's delegation
+permanent rather than a stage M10 ends. §3 decided this — "We depend on the real
+Django for everything else" — so it is the spec working as written; §6 has been
+corrected, because it said Rust owns "all built-in tags and filters" and that was
+too strong.
 
-**The set is 18, and it is derived rather than enumerated**, because this project
-has now had seven count disputes that were each two right answers to two unstated
-questions. The metric, which Task 3's `test_filter_inventory.py` computes:
+**The set is derived rather than enumerated**, by two metrics, because this
+project has now had seven count disputes that were each two right answers to two
+unstated questions. The first metric, which Task 3's `test_filter_inventory.py`
+computes:
 
 > a filter delegates iff the utility its body references bottoms out, within that
 > utility's own module, in runtime state Rust cannot hold (settings, locale, the
 > active language, the clock) or in a Python-stdlib table-or-parser port
 > (`HTMLParser`, `textwrap`, `json`, `unicodedata`, `pprint`, `urllib.parse`).
 
-Measured against `.django` @ 6.0.9: **18** — `date`, `filesizeformat`,
-`floatformat`, `iriencode`, `json_script`, `slugify`, `striptags`, `time`,
-`timesince`, `timeuntil`, `truncatechars`, `truncatechars_html`, `truncatewords`,
-`truncatewords_html`, `urlize`, `urlizetrunc`, `wordwrap`, `yesno`. The three
-neighbouring counts, each correct for its own question and each wrong for this
-one: **57** registered filters; **31** reference *any* `django.utils` name, which
-sweeps in `mark_safe` (a primitive Rust reimplements as `Value::Safe`); **26**
-reference a utility living in a module that imports something stateful, which
-wrongly sweeps in `escape`, `join`, `escapeseq`, `force_escape`, `linenumbers`
-and `linebreaks` because `strip_tags` shares a file with them. Classifying at
-module granularity is the mistake; the delegation is a property of the utility.
+**A second, independent metric, because this one measures references to
+`django.utils` and a filter can rest on a CPython string method instead:**
+
+> a filter delegates iff its body calls a `str` method whose result is not a
+> function of the code point alone.
+
+The review asked for this as a pre-fan-out verification and it found two more, so
+the set is **20**, not 18. It is the fifth Unicode finding in this project, and the
+first that is **not a table**: after `\w`, whitespace, `combining` and this
+milestone's own per-code-point case fixup, `str.lower()` turns out to depend on
+what surrounds the code point.
+
+Measured against `.django` @ 6.0.9: **18** by the first metric — `date`,
+`filesizeformat`, `floatformat`, `iriencode`, `json_script`, `slugify`,
+`striptags`, `time`, `timesince`, `timeuntil`, `truncatechars`,
+`truncatechars_html`, `truncatewords`, `truncatewords_html`, `urlize`,
+`urlizetrunc`, `wordwrap`, `yesno` — and **2** more by the second, `lower` and
+`title`, for **20**. `slugify` was already in the 18 and its `.lower()` now goes
+through `str_lower` as well.
+
+The three neighbouring counts for the *first* metric, each correct for its own
+question and each wrong for this one: **57** registered filters; **31** reference
+*any* `django.utils` name, which sweeps in `mark_safe` (a primitive Rust
+reimplements as `Value::Safe`); **26** reference a utility living in a module that
+imports something stateful, which wrongly sweeps in `escape`, `join`, `escapeseq`,
+`force_escape`, `linenumbers` and `linebreaks` because `strip_tags` shares a file
+with them. Classifying at module granularity is the mistake; the delegation is a
+property of the utility.
+
+**`upper` and `capfirst` stay Rust's, and that is a measurement rather than an
+assumption.** `str.upper()` has no context rule — the exhaustive diff finds the
+same 28 code points as `char::to_uppercase`, all of them code-point-local — so
+Task 1's per-code-point table is complete for them. `capfirst` is
+`value[0].upper() + value[1:]`, which is one per-code-point `upper` and no
+lowercasing at all, so it is unaffected by the Final_Sigma finding.
 
 One classification in that list looks over-broad and was checked rather than
 assumed: the four `Truncator` filters delegate even on the **non-html** path, so
@@ -357,6 +391,30 @@ The same applies to `filters/mod.rs`, `filters/value.rs`, `filters/host.rs`,
 a report naming, for each guard in its tests, the mutation it was observed
 failing under.
 
+**D7.1 — `&str` or `&Value` for a host parameter, which is a type-safety rule and
+not a style choice.** `&str` is correct exactly when the value has already been
+coerced: a parameter that arrives through `@stringfilter` is `str(first)` by the
+time the body sees it, so the Python function cannot observe anything but a
+string, and `&str` is the honest signature. `&Value` is required wherever the
+Python function observes the argument's **type** rather than its text. The trait
+above is written to that rule and was re-checked end to end for it; exactly one
+parameter violated it, `sort_by_property`'s `prop`, and the measurement is:
+
+```
+dictsort(['abc', 'xyz'], 1)    ->  ['abc', 'xyz']
+dictsort(['abc', 'xyz'], '1')  ->  ''
+```
+
+`_property_resolver` (`:540-575`) tries `float(arg)` first, so an **int** `1`
+takes the `itemgetter` branch and a **string** `'1'` takes the
+`split(".")`-then-subscript branch, where `['abc','xyz']['1']` raises `TypeError`
+— caught by `dictsort`, returning `""`. Same digits, different type, different
+answer; and `filter_tests/test_dictsort.py:93` uses the int literal, so a corpus
+that only ever passes strings never sees the string branch at all. Every other
+`&str` in the trait is `@stringfilter`-wrapped at the call site; `iri_to_uri(text:
+&str)` behind `iriencode` (`:223-227`, whole body `return iri_to_uri(value)`) is
+the case that looks wrong and is right.
+
 ---
 
 ## Task 1: Python's case mapping in `pyunicode`
@@ -369,13 +427,13 @@ failing under.
 
 **Interfaces:**
 - Consumes: nothing from earlier milestones.
-- Produces: `template_core::pyunicode::case::upper(ch: char) -> impl Iterator<Item = char> + '_`, `lower(ch: char) -> impl Iterator<Item = char> + '_`, `upper_str(&str) -> String`, `lower_str(&str) -> String`, and `const UNCASED: [char; 56]`.
+- Produces: `template_core::pyunicode::case::upper(ch: char) -> impl Iterator<Item = char> + '_`, `upper_str(&str) -> String`, and `const UNCASED: [char; 28]`. **No `lower`.** The `lower` filter delegates (Task 4) and `slugify`'s `.lower()` goes through the host (Task 9), so a per-code-point `lower` would have no consumer — and it would be *silently wrong* for the strings that reach it, since Python's `str.lower()` applies Final_Sigma and a `char`-level table cannot. Shipping a function that exists, looks right, and is wrong at its obvious call site is worse than shipping none; the generator still measures the lower divergence and records it in the module doc as the reason there is no `lower`.
 
 **Why this is a task and not a step.** It is the only part of M4 whose correctness
 is a *table*, it has its own generator, and a reviewer could reasonably accept
-the seam (Task 2) while rejecting this. It also has to land before `upper` and
-`lower` can be written at all, which is why it is Task 1 rather than part of the
-group they live in.
+the seam (Task 2) while rejecting this. It also has to land before `upper` can be
+written at all, which is why it is Task 1 rather than part of the group it lives
+in.
 
 - [ ] **Step 1: Write the generator**
 
@@ -387,21 +445,28 @@ there is the convention to follow). It must:
 #!/usr/bin/env python3
 """Regenerate the case-mapping fixup table from the pinned tree.
 
-Rust's `char::to_uppercase`/`to_lowercase` and Python's `str.upper`/`str.lower`
-both apply the Unicode default full case mappings, but they are built from
-different Unicode versions. Measured against the pinned tree on 2026-10-08:
-Rust 1.98's tables are *ahead* of CPython 3.14.4's (unicodedata 16.0.0) on 56
-code points, in both directions, and in every case Python maps the code point to
-itself where Rust maps it to another character.
+Rust's `char::to_uppercase` and Python's `str.upper` both apply the Unicode
+default full case mappings, but they are built from different Unicode versions.
+Measured against the pinned tree on 2026-10-08: Rust 1.98's tables are *ahead*
+of CPython 3.14.4's (unicodedata 16.0.0) on 56 code points, 28 in each
+direction, and in every case Python maps the code point to itself where Rust
+maps it to another character.
+
+Only the **upper** direction becomes a table. The lower direction is measured
+anyway and written into the module doc as a comment: `str.lower()` also applies
+Final_Sigma, so a per-code-point `lower` would be wrong for the strings that
+reach it, and `pyunicode::case` deliberately does not provide one. See Task 4
+and `FilterHost::str_lower`.
 
 Run this after a `rustc` upgrade or a Django pin bump. It writes
-`crates/template-core/src/pyunicode/case.rs`; `tests/test_pyunicode_case_parity.py`
-is what fails loudly if you forget.
+`crates/template-core/src/pyunicode/case.rs`;
+`tests/test_pyunicode_case_parity.py` is what fails loudly if you forget.
 """
 ```
 
 It walks `0..=0x10FFFF`, skips surrogates, and for each code point where
-`chr(c).upper() != rs_upper(chr(c))` or the same for lower, emits the code point.
+`chr(c).upper() != rs_upper(chr(c))` emits the code point; it accumulates the
+same comparison for lower into the doc comment's count.
 **It must obtain Rust's mapping by running the built probe, not by reimplementing
 it**: emit a temporary Rust file, compile it with `rustc`, run it to a temp file,
 and diff. Reimplementing Rust's table in Python is the one thing that would make
@@ -410,24 +475,31 @@ the generator agree with a wrong answer.
 The emitted module:
 
 ```rust
-//! Python's case mapping, which is not Rust's. **Generated** by
+//! Python's **uppercase** mapping, which is not Rust's. **Generated** by
 //! `scripts/gen_python_case_fixups.py` — do not edit by hand.
 //!
 //! …the measurement and the direction, as the generator's docstring has it…
+//!
+//! There is deliberately no `lower` here. The generator measures the lower
+//! divergence too (28 code points, the same shape) and it is *not* a
+//! counter-argument: `str.lower()` also applies Unicode's Final_Sigma, so
+//! `"ΟΣ".lower()` is `"ος"` and a per-code-point `lower` would be wrong for
+//! real strings. The `lower` filter and `slugify` go through
+//! `FilterHost::str_lower` instead — see §D2's second metric and Task 4.
 
-/// Code points whose case mapping Python 3.14.4 (Unicode 16.0.0) leaves as the
-/// identity where Rust's tables map them elsewhere.
+/// Code points whose **uppercase** mapping Python 3.14.4 (Unicode 16.0.0)
+/// leaves as the identity where Rust's tables map them elsewhere.
 ///
 /// Sorted, so a binary search is the lookup and a stray edit is visible.
-pub const UNCASED: [char; 56] = [/* … */];
+pub const UNCASED: [char; 28] = [/* … */];
 ```
 
 - [ ] **Step 2: Write the failing parity test**
 
 `tests/test_pyunicode_case_parity.py`, in the shape of
 `tests/test_pyregex_parity.py`. It imports `_native`, and compares
-`_native.python_upper(ch)` / `_native.python_lower(ch)` against Python's own
-`chr(c).upper()` / `.lower()` for **every** code point, not a sample:
+`_native.python_upper(ch)` against Python's own `chr(c).upper()` for **every**
+code point, not a sample:
 
 ```python
 class CaseMappingParityTests(unittest.TestCase):
@@ -440,10 +512,14 @@ class CaseMappingParityTests(unittest.TestCase):
                 _native.python_upper(ch), ch.upper(),
                 f"upper differs at U+{cp:04X}",
             )
-            self.assertEqual(
-                _native.python_lower(ch), ch.lower(),
-                f"lower differs at U+{cp:04X}",
-            )
+
+    def test_there_is_no_lower_accessor(self):
+        # The closed half of the obligation. `lower` is delegated because
+        # `str.lower()` is context-sensitive, and the guard against someone
+        # helpfully adding a per-code-point `lower` back is that its only
+        # consumers stay on the host side: Task 3's derived delegate set names
+        # both of them.
+        self.assertFalse(hasattr(_native, "python_lower"))
 ```
 
 Run: `source scripts/env.sh && maturin develop && .venv/bin/python -m unittest tests.test_pyunicode_case_parity -v`
@@ -469,15 +545,15 @@ pub fn upper(ch: char) -> impl Iterator<Item = char> + '_ {
 }
 ```
 
-Name the enum (do not nest a module), and give `upper_str`/`lower_str` a single
-`String` allocation. Then add `pub mod case;` to `pyunicode.rs` and the two
-`#[pyfunction]`s (`python_upper`, `python_lower`) to `crates/template-py/src/lib.rs`,
-returning `String`.
+Name the enum (do not nest a module), and give `upper_str` a single `String`
+allocation. Then add `pub mod case;` to `pyunicode.rs` and one `#[pyfunction]`
+(`python_upper`) to `crates/template-py/src/lib.rs`, returning `String`. **Not
+`python_lower`** — see the Interfaces block above.
 
 - [ ] **Step 4: Run the parity test to verify it passes**
 
 Run: `maturin develop && .venv/bin/python -m unittest tests.test_pyunicode_case_parity -v`
-Expected: PASS, 1 test, over 1,112,064 code points.
+Expected: PASS, 2 tests, the first over 1,112,064 code points.
 
 - [ ] **Step 5: Observe the guard failing**
 
@@ -494,6 +570,10 @@ docstring, and add an assertion that `UNCASED` is exactly the generated set, by
 count and by hash of its contents, so an edit that changes its meaning without
 changing its length is still caught.
 
+Then the second guard: add a `python_lower` `#[pyfunction]` returning `String`,
+rebuild, and confirm `test_there_is_no_lower_accessor` fails. That is the
+observation that the closed half of the obligation is live; delete it again.
+
 - [ ] **Step 6: Run the gate and commit**
 
 ```bash
@@ -501,7 +581,7 @@ source scripts/env.sh && bash scripts/check.sh
 git add crates/template-core/src/pyunicode crates/template-core/src/pyunicode.rs \
         crates/template-py/src/lib.rs scripts/gen_python_case_fixups.py \
         tests/test_pyunicode_case_parity.py
-git commit -m "pyunicode: Python's case mapping, which is not Rust's"
+git commit -m "pyunicode: Python's uppercase mapping, which is not Rust's"
 ```
 
 ---
@@ -599,9 +679,35 @@ pub trait FilterHost {
     /// exception classification — the thing this seam exists to avoid. Sorting
     /// arbitrary `Opaque` objects by an extracted key is not expressible in Rust
     /// at all.
+    ///
+    /// `prop` is `&Value` and not `&str`, per **§D7.1**: `arg` is *not*
+    /// `@stringfilter`-coerced, and `float(arg)` sends `1` and `'1'` down
+    /// different branches (`dictsort(x, 1)` is the list, `dictsort(x, '1')` is
+    /// `""`). Coercing here would silently pick one branch for both.
     fn sort_by_property(
-        &self, value: &Value, prop: &str, reverse: bool,
+        &self, value: &Value, prop: &Value, reverse: bool,
     ) -> Result<Value, Error>;
+
+    // --- CPython string-method semantics ------------------------------------
+    /// `str.lower()`. **Not a per-code-point table**, which is this project's
+    /// fifth Unicode-table finding after `\w`, whitespace, `combining` and the
+    /// case fixup. Measured: `"ΟΣ".lower()` is `"ος"`, not `"οσ"` — Unicode's
+    /// **Final_Sigma** rule, which is *context*-dependent, so Task 1's
+    /// exhaustive per-code-point diff provably cannot see it. Rust's
+    /// `str::to_lowercase` implements the rule, but the fixup table needs
+    /// `char::to_lowercase` per code point, and the two cannot be combined
+    /// without either replicating Final_Sigma (guardable only by sampling) or
+    /// leaving a silent divergence on strings containing both a suppressed code
+    /// point and a context-sensitive Σ. Delegating is complete by construction.
+    fn str_lower(&self, text: &str) -> String;
+    /// `str.title()`. Needs three things Rust has no equivalent of: Unicode's
+    /// `Cased` property (4,578 code points, and `unicodedata` does not expose
+    /// it), a **135-entry** titlecase mapping table distinct from uppercase, and
+    /// the same Final_Sigma context rule when lowercasing the remainder of each
+    /// run. Measured: a first-principles rule reproduced all 1,112,064 single
+    /// code points and still got 444 of 400,000 random strings wrong, every one
+    /// of them final sigma.
+    fn str_title(&self, text: &str) -> String;
 
     // --- engines whose state is not the filter's argument -------------------
     /// `django.utils.html.strip_tags` — `HTMLParser`-based (`html.py:238-272`).
@@ -882,18 +988,20 @@ and asserts the three-way relationship against `ast` over
 defaultfilters.register.filters["escape"]`, because that is the trap the
 inventory found and it is free to pin.
 
-- [ ] **Step 1b: Derive the delegation set, do not assert a list of 18**
+- [ ] **Step 1b: Derive the delegation set, do not assert a list of 20**
 
 The same file carries `DELEGATING_FILTERS` and the test that **computes** it, in
 the shape `test_tag_inventory.py` uses for 27. The reviewer's brief for M4 was
 explicit that the deliverable is not the number but the test that says the number,
 because this project has had seven count disputes and every one was two right
-answers to two unstated questions. The derivation, measured to give 18 against
-`.django` @ 6.0.9:
+answers to two unstated questions. **Two metrics, because the first one measures
+references to `django.utils` and cannot see a filter built on a CPython string
+method** — the second is what found `lower` and `title`. They are computed and
+asserted separately, so the failure message names which filter moved:
 
 ```python
-def delegating_filters():
-    """Filters whose body's answer comes from a django.utils ENGINE.
+def delegating_filters_by_utils():
+    """Filters whose body's answer comes from a django.utils ENGINE — 18.
 
     The metric, written down because three neighbouring ones are each correct
     for a different question: 57 filters are registered; 31 reference *any*
@@ -912,18 +1020,39 @@ def delegating_filters():
     through a package __init__ that rebinds it, so a name lookup bottoms out
     empty and falsely reads as pure.
     """
+
+def delegating_filters_by_string_method():
+    """Filters calling a `str` method whose result is not a function of the
+    code point alone — 2, `lower` and `title`.
+
+    Found by walking each filter body's AST for `.lower()`/`.title()`/`.upper()`
+    across the pinned tree, then comparing what each one costs: `str.upper()`
+    and `str.title()`'s *uppercase* half are per-code-point (Task 1's table);
+    `str.lower()` is Final_Sigma, so `"ΟΣ".lower()` is `"ος"` and no
+    per-code-point table can express it. `str.title()`'s lowercasing of each
+    run's remainder is Final_Sigma too. So the two `.lower()`-family callers
+    delegate, and Task 1's per-code-point table is *not* their answer — there is
+    deliberately no `lower` in `pyunicode::case` for them to reach for.
+
+    This is the metric that moved the set from 18 to 20 after the plan's first
+    review, which is why the two are counted separately rather than merged into
+    a hand-checked list of 20.
+    """
 ```
 
-It asserts the computed set equals the literal 18 **and** that each delegating
-filter's `FilterHost` method is actually reached by the corpus, so a filter cannot
-be reclassified into or out of the set by editing one line.
+`DELEGATING_FILTERS` is the union of the two, asserted to equal the literal
+**20**; each half is asserted separately against its own literal (18 and 2), and
+the failure message prints the computed set plus both halves, so a future drift
+reports "19 by utils, 2 by string method" rather than just red. It also asserts
+that each delegating filter's `FilterHost` method is actually reached by the
+corpus, so a filter cannot be reclassified into or out of the set by editing one
+line.
 
 Run: `.venv/bin/python -m unittest tests.test_filter_inventory -v`
-Expected: PASS, with the derived set printed in the failure message so a mismatch
-shows which filter moved.
-
-Run: `.venv/bin/python -m unittest tests.test_filter_inventory -v`
-Expected: FAIL — `_native` has no `filter_names`.
+Expected: FAIL — `_native` has no `filter_names`. Both derivations are Python-side
+and already run, and they print their counts (`utils=18`, `string_method=2`,
+`union=20`) before the attribute error, which is what makes the numbers visible
+while the Rust side is still a stub.
 
 - [ ] **Step 2: Write the FFI**
 
@@ -1003,6 +1132,36 @@ git commit -m "filters: the FFI surface, the corpus harness and the inventory te
 Each is a fan-out dispatch under §D7 and each ends with a central rebuild, the
 central corpus addition, and one commit.
 
+**The split was re-derived after the case-method finding, and it holds.** The
+sizing input is not the filter count per task but **how many bodies are Rust's**
+— a delegating filter is a thin wrapper, its flags and its corpus rows, while a
+pure one is the work. Computed against §D2's 20 (the union of both metrics, not a
+hand-checked list):
+
+| task | filters | delegated | **Rust-owned** |
+|---|---|---|---|
+| 4 case and simple text | 8 | `lower`, `title` | **6** |
+| 5 padding and truncation | 8 | the four `truncate*`, `wordwrap` | **3** |
+| 6 sequences | 9 | — | **9** |
+| 7 numbers and logic | 10 | `yesno`, `floatformat`, `filesizeformat` | **7** |
+| 8 escaping and safety | 12 | `striptags`, `iriencode` | **10** |
+| 9 URLs and markup | 6 | `urlize`, `urlizetrunc`, `json_script`, `slugify` | **2** |
+| 10 dates and elapsed time | 4 | all four | **0** |
+
+Task 4 is the only group whose composition the finding changed — it went from
+eight ports to six plus two host calls — and the change *strengthens* it: it is
+still the group that proves the seam end-to-end, and now it does so on the same
+filters that used to be pure, with `"ΟΣ"` and `"ΟΣΑ"` side by side on one row.
+The remaining asymmetry between the groups is deliberate and is not a sizing
+error: Tasks 9 and 10 are nearly all delegation, but their cost is the corpus
+machinery, not the bodies — two settings states for `urlize`'s
+`URLIZE_ASSUME_HTTPS`, a `RemovedInDjango2028Warning` to decide about, a
+time-dependent row that must be a property rather than an equality, and
+`floatformat`'s thread-local decimal context. And `floatformat` — 128 lines, the
+longest body in M4 — is dispatched as its **own unit inside Task 7 and reviewed
+alone**, which is what "worth its own review round within the group" below means
+concretely.
+
 ### The shared task shape
 
 - [ ] **Step 1: Measure.** For each filter in the group, run
@@ -1037,25 +1196,35 @@ central corpus addition, and one commit.
 
 The group that Task 1 unblocks, and the one that proves the seam end-to-end.
 
-- `upper` (`:358-362`), `lower` (`:247-252`) — `@stringfilter`, `is_safe=False`,
-  body is `value.upper()`/`value.lower()` over `pyunicode::case`. **The parity
-  test is Task 1's, over all code points; this task's tests are the three
-  interesting shapes** — `"ß"` (Rust and Python both give `SS`), `U+A7D3`
-  (Python gives itself, Rust gives `U+A7D2`), and a non-`str` input
-  (`upper(5)` is `"5"`, because `@stringfilter` coerces).
+- `upper` (`:358-362`) — `@stringfilter`, `is_safe=False`, body is
+  `pyunicode::case::upper_str`. **The parity test is Task 1's, over all code
+  points; this task's tests are the three interesting shapes** — `"ß"` (Rust and
+  Python both give `SS`), `U+A7D3` (Python gives itself, Rust gives `U+A7D2`),
+  and a non-`str` input (`upper(5)` is `"5"`, because `@stringfilter` coerces).
+- `lower` (`:247-252`) — `@stringfilter`, `is_safe=False`, body is **the host's
+  `str_lower`** — not `pyunicode::case`, because there is no per-code-point
+  `lower` to call (Task 1). `str.lower()` is
+  context-sensitive: `"ΟΣ"|lower` is `"ος"` (Final_Sigma), and no per-code-point
+  table can express that. **Put the three context shapes in the corpus** —
+  `"ΟΣ"` → `"ος"`, `"ΟΣΑ"` → `"οσα"`, `"Σ1"` → `"σ1"` — because they differ only
+  by context and a per-character implementation gets two of the three right by
+  accident.
 - `capfirst` (`:71-76`) — `value and value[0].upper() + value[1:]`. The empty
   string returns itself, not `""`-built-from-nothing; `value[0]` is a **code
   point**, so `capfirst("ßx")` is `"SSx"` and the string grows by one character.
   Measured, not derived.
-- `title` (`:297-303`) — **the trap of this group.** It is Python's `str.title()`
-  followed by two regexes: `re.sub("([a-z])'([A-Z])", lambda m: m[0].lower(), …)`
-  then `re.sub(r"\d([A-Z])", lambda m: m[0].lower(), …)`. `str.title()` is *not*
-  a titlecase algorithm: it uppercases the first cased character after any
-  non-cased character and lowercases everything else, so `title("x1y")` is
-  `"X1Y"`. Rust has no equivalent, so this is a port of Python's rule over
-  `pyunicode::case`'s predicates and it needs a `is_cased(ch)` helper — the one
-  new predicate this group adds, and it belongs in `pyunicode/case.rs` (Task 1's
-  file, edited centrally before dispatch, **not by the agent**).
+- `title` (`:297-303`) — `@stringfilter`, `is_safe=True`, body is **the host's
+  `str_title`**, followed by two Rust regexes:
+  `re.sub("([a-z])'([A-Z])", lambda m: m[0].lower(), …)` then
+  `re.sub(r"\d([A-Z])", lambda m: m[0].lower(), …)`, each lowercasing the whole
+  match. An earlier revision of this plan called `title` "the trap of this
+  group" and planned to port Python's rule over `pyunicode::case`; measurement
+  killed that. The rule needs Unicode's `Cased` property (4,578 code points), a
+  **135-entry** titlecase table distinct from uppercase, and Final_Sigma when
+  lowercasing each run's remainder. A from-first-principles version reproduced
+  every one of the 1,112,064 single code points and still failed **444 of
+  400,000** random strings, every failure a final sigma. So it is a host call,
+  and Task 1's `is_cased` helper is **not** written.
 - `cut` (`:441-450`) — `@stringfilter`, `is_safe` **absent**. Body carries three
   measured subtleties: `arg` is **not** coerced by `str()` (only `value` is, by
   the wrapper), `str.replace` of an empty `arg` raises `ValueError` — measured,
@@ -1280,7 +1449,10 @@ its own task rather than folded into Task 8.
   (`unicode_normalize_nfkd`) because NFKD is a large Unicode table and §D2's rule
   covers it; **the two regexes and the ordering are Rust's**, and the `\w` class
   is M1's Python-faithful one, which is why `slugify("á")` and `slugify("²")`
-  differ.
+  differ. **The `.lower()` is the host's `str_lower`** — same reason as the
+  `lower` filter (Final_Sigma), and it is the second of the two consumers §D7.1
+  and Task 1's "no `lower`" note point at. The corpus needs a slug that reaches
+  it: `slugify("ΟΣ")` → `"ος"`, not `"οσ"`.
 
 ### Task 10: dates and elapsed time — 4 filters
 
@@ -1337,10 +1509,12 @@ an earlier revision of this plan said the 18 delegating bodies would come home a
 M10. Both are corrected in the spec, because a reader at M10 would otherwise hunt
 for filter bodies nobody scheduled. (e) **The delegation count had no derivation**
 and was given three different values across two sessions before being measured;
-Task 3 Step 1b computes it.
+Task 3 Step 1b computes it — and computing it found a **second metric the first
+one cannot see**, which moved the set from 18 to 20 (`lower` and `title`, via
+CPython's context-sensitive case methods). Both are asserted separately.
 
-**Four things in this plan were wrong on first writing, and review caught three of
-them.** The M10 `utils` claim in §D2 was a factual error about which module a
+**Five things in this plan were wrong on first writing, and review caught all
+five.** The M10 `utils` claim in §D2 was a factual error about which module a
 milestone interposes. The `stringfilter`-versus-`base.py:816` question in §D3 was
 answered by the wrong measurement — "they converge" is true of a `SafeString` and
 false of a lazy proxy. The `FilterHost` trait was written from a reading of the 57
@@ -1348,11 +1522,16 @@ bodies rather than derived from them, and five filters had no expressible method
 the fix is in Task 2 and the derivations are tabulated there. The fourth I found
 while checking the review's `PartialEq` question: no body compares two `Value`s,
 but `cut` compares one against the literal `";"`, which structural equality gets
-wrong for a safe argument.
+wrong for a safe argument. The fifth is the largest: the trait's case operations
+were sized for a *table*, and the four-method exhaustive diff the review asked for
+showed two of them are **context**-sensitive, so `lower` and `title` left the pure
+side and `sort_by_property`'s `prop` turned out to need `&Value` where it had
+`&str`.
 
-All four had the same shape — a plausible claim that nobody had executed — and
+All five had the same shape — a plausible claim that nobody had executed — and
 each was settled by running something (an AST walk for the imports, a probe for
-the proxy, a closure walk for the trait's gaps, an AST walk for the `==` uses).
+the proxy, a closure walk for the trait's gaps, an AST walk for the `==` uses, a
+four-method full-range diff plus 400,000 random strings for the case methods).
 That is the discipline the earlier milestones established and it is the reason the
 errors were cheap.
 
@@ -1363,5 +1542,6 @@ errors were cheap.
 task shape. `Error::unimplemented_filter` is named in Task 2 and used in Tasks
 4–10.
 
-**Review Focus.** 1 → Task 1. 2 → Task 10's corpus and Task 3's loop. 3 → Task 2's
-§D3 and Task 3's flag tests. 4 → Task 6. 5 → Task 9.
+**Review Focus.** 1 → Tasks 1, 2 (`str_lower`/`str_title`) and 4; the exhaustive
+half is Task 1's. 2 → Task 10's corpus, Task 3's loop and Task 3 Step 1b's two
+derivations. 3 → Task 2's §D3 and Task 3's flag tests. 4 → Task 6. 5 → Task 9.
