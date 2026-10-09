@@ -48,10 +48,10 @@ base.py:714	django/template/base.py	714	-	"var_chars": r"\w\.\+-",	-
 base.py:722-783	django/template/base.py	722	783	class FilterExpression:	self.is_var = isinstance(var_obj, Variable)
 base.py:747-749	django/template/base.py	747	749	-	-
 base.py:747-750	django/template/base.py	747	750	if upto != start:	"%s|%s|%s" % (token[:upto], token[upto:start], token[start:])
+base.py:747-772	django/template/base.py	747	772	if upto != start:	self.args_check(filter_name, filter_func, args)
 base.py:752	django/template/base.py	752	-	if var_obj is None:	-
 base.py:755	django/template/base.py	755	-	var_obj = Variable(constant).resolve({})	-
 base.py:757-761	django/template/base.py	757	761	-	-
-base.py:757-772	django/template/base.py	757	772	-	-
 base.py:763	django/template/base.py	763	-	var_obj = Variable(var)	-
 base.py:768	django/template/base.py	768	-	args.append((False, Variable(constant_arg).resolve({})))	-
 base.py:770	django/template/base.py	770	-	args.append((True, Variable(var_arg)))	-
@@ -59,7 +59,7 @@ base.py:771	django/template/base.py	771	-	-	-
 base.py:771-772	django/template/base.py	771	772	-	-
 base.py:771-773	django/template/base.py	771	773	filter_func = parser.find_filter(filter_name)	filters.append((filter_func, args))
 base.py:773	django/template/base.py	773	-	filters.append((filter_func, args))	-
-base.py:774	django/template/base.py	774	-	-	-
+base.py:775	django/template/base.py	775	-	if upto != len(token):	-
 base.py:783	django/template/base.py	783	-	self.is_var = isinstance(var_obj, Variable)	-
 base.py:788-792	django/template/base.py	788	792	-	-
 base.py:793	django/template/base.py	793	-	string_if_invalid = context.template.engine.string_if_invalid	-

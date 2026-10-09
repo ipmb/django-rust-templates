@@ -662,7 +662,7 @@ mod tests {
 
     #[test]
     fn a_rejected_arity_preempts_the_remainder_check() {
-        // The remainder check is *after* the loop (`base.py:774`), and
+        // The remainder check is *after* the loop (`base.py:775`), and
         // `args_check` is inside it, so an arity error wins over a trailing
         // character the loop could not match. Measured.
         let host = Rejecting::for_arity("upper", 1);

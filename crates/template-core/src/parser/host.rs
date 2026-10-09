@@ -70,7 +70,7 @@ pub trait Host {
     /// calls them (`base.py:771-772`). Deferring the check to the shell is not an
     /// option, and the reason is an order rather than a preference: the loop
     /// checks the *gap* before it compiles a filter and *after* it (`upto !=
-    /// start` at `:743`, `upto != len(token)` at `:774`), so measured,
+    /// start` at `:747`, `upto != len(token)` at `:775`), so measured,
     /// `x|does_not_exist||upper` reports `Invalid filter: 'does_not_exist'`
     /// while `x||does_not_exist` reports `Could not parse some characters`. No
     /// batched ordering produces both. The second reason is larger: an error
@@ -126,9 +126,9 @@ pub trait Host {
     ///
     /// **Called after the argument's `Variable` is built, not before.** Django's
     /// per-iteration order is gap → argument `Variable` → `find_filter` →
-    /// `args_check` (`base.py:757-772`), and the first two are separable in
+    /// `args_check` (`base.py:747-772`), and the first two are separable in
     /// outcome: measured, `x|does_not_exist:_bad` reports the *underscore* error
-    /// because `Variable('_bad')` raises at `:768` and `find_filter` is never
+    /// because `Variable('_bad')` raises at `:770` and `find_filter` is never
     /// reached, while `x|does_not_exist:-5` reports `Invalid filter` because
     /// `-5` parses as a literal and control does reach it. An implementation that
     /// asked the host first — tempting, since the filter name is known earlier —
