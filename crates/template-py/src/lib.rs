@@ -608,7 +608,7 @@ fn attr_value_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
         AttrValue::None => py.None(),
         AttrValue::Ref(r) => Py::new(py, NodeRef::new(r.0))?.into_any(),
         AttrValue::Variable(v) => variable_desc_to_py(py, v)?,
-        AttrValue::FilterExpr(expr) => filter_expr_desc_to_py(py, expr)?,
+        AttrValue::FilterExpr(expr) => filter_expr_desc_to_py(py, expr, None)?,
         AttrValue::List(items) => {
             let items: Vec<Py<PyAny>> = items
                 .iter()
@@ -770,10 +770,10 @@ fn filter_var_to_py(py: Python<'_>, var: &FilterVar) -> PyResult<Py<PyAny>> {
 /// A `FilterExpression` as it crosses the wire.
 ///
 /// Three readable attributes, and the shapes are Django's with the filter
-/// *function* replaced by its name: `filters` is a list of `(name, args)` pairs,
-/// each `args` a list of `(lookup, Variable)` pairs — Django's
-/// `filters.append((filter_func, args))` (`base.py:773`) with the lookup left to
-/// the shell, which is the only side that can do it.
+/// *function* replaced by its name: `filters` is a list of `((name, args),
+/// handle)` pairs, each `args` a list of `(lookup, Variable)` pairs — Django's
+/// `filters.append((filter_func, args))` (`base.py:773`), with the lookup left
+/// to the shell and the function itself carried beside the name as a handle.
 #[pyclass(frozen)]
 #[derive(Debug)]
 pub struct FilterExpr {
@@ -783,9 +783,27 @@ pub struct FilterExpr {
     /// `FilterExpression.var` **before materialisation**, as `(lookup, Variable)`.
     #[pyo3(get)]
     pub var: Py<PyAny>,
-    /// `FilterExpression.filters`, as `[(name, [(lookup, Variable), …]), …]`.
+    /// `FilterExpression.filters`, as `[((name, [(lookup, Variable), …]), handle), …]`.
+    ///
+    /// The handle is a `NodeRef` into [`Self::refs`], or `None` when the host ran
+    /// no filter check. See `FilterCall::handle` for why the name on its own is
+    /// not enough.
     #[pyo3(get)]
     pub filters: Py<PyAny>,
+    /// The reference table this descriptor's handles index into, or `None` for a
+    /// descriptor built outside a parse that owns one.
+    ///
+    /// **Carried on the descriptor and not only in `_native.parse`'s tuple,
+    /// because `parse_filter_expression` is a parse with a table of its own.**
+    /// That entry point builds a `FilterCheckHost`, asks it for handles and used
+    /// to drop the table on return, which would leave every handle it produced
+    /// dangling — an index into nothing. A handle is meaningless outside the
+    /// pair (the table is the parse's, the handle is an index into it), so the
+    /// pair travels together. The whole-template path is unaffected:
+    /// `materialise` derives `resolve_ref` from the parse's table, which is the
+    /// same list, so a nested `FilterExpr` resolves against one table either way.
+    #[pyo3(get)]
+    pub refs: Option<Py<PyAny>>,
 }
 
 #[pymethods]
@@ -801,7 +819,16 @@ impl FilterExpr {
 }
 
 /// A [`FilterExprDesc`] as Python sees it.
-pub fn filter_expr_desc_to_py(py: Python<'_>, desc: &FilterExprDesc) -> PyResult<Py<PyAny>> {
+///
+/// `refs` is the table the descriptor's handles index into — the parse's own, or
+/// `None` for a descriptor that carries no handles (every nested one: a `{{ … }}`
+/// inside a node's attributes resolves through `materialise`'s `resolve_ref`,
+/// which is the same table).
+pub fn filter_expr_desc_to_py(
+    py: Python<'_>,
+    desc: &FilterExprDesc,
+    refs: Option<Py<PyAny>>,
+) -> PyResult<Py<PyAny>> {
     let filters = desc
         .filters
         .iter()
@@ -811,7 +838,15 @@ pub fn filter_expr_desc_to_py(py: Python<'_>, desc: &FilterExprDesc) -> PyResult
                 .iter()
                 .map(|arg| filter_var_to_py(py, arg))
                 .collect::<PyResult<_>>()?;
-            pair_to_py(py, &call.name, PyList::new(py, args)?.into_any().unbind())
+            // Django's `(filter_func, args)` pair, with the name in the
+            // function's place and the function itself beside it: the pair
+            // stays one thing, because it is one thing that renders.
+            let named = pair_to_py(py, &call.name, PyList::new(py, args)?.into_any().unbind())?;
+            let handle = match call.handle {
+                Some(handle) => Py::new(py, NodeRef::new(handle.0))?.into_any(),
+                None => py.None(),
+            };
+            Ok(PyTuple::new(py, [named, handle])?.into_any().unbind())
         })
         .collect::<PyResult<Vec<Py<PyAny>>>>()?;
 
@@ -821,6 +856,7 @@ pub fn filter_expr_desc_to_py(py: Python<'_>, desc: &FilterExprDesc) -> PyResult
             token: desc.token.clone(),
             var: filter_var_to_py(py, &desc.var)?,
             filters: PyList::new(py, filters)?.into_any().unbind(),
+            refs,
         },
     )?
     .into_any())
@@ -1057,12 +1093,24 @@ impl Host for FilterCheckHost<'_> {
         unreachable!("FilterCheckHost::call_tag is never reached: has_tag always returns false")
     }
 
-    fn check_filter(&self, name: &str, arg_count: usize) -> Result<(), Error> {
+    fn check_filter(&self, name: &str, arg_count: usize) -> Result<Option<CoreNodeRef>, Error> {
         let Some(check) = &self.check_filter else {
-            return Ok(());
+            return Ok(None);
         };
+        // The shell's callable *returns* the function it found — it is
+        // `parser.find_filter(name)` with its result handed back rather than
+        // discarded — and the `args_check` still runs inside it, at Django's
+        // line, so the error ordering the M5 measurements pinned is unchanged.
         match check.call1((name, arg_count)) {
-            Ok(_) => Ok(()),
+            Ok(func) => {
+                // The same table `alloc_slot` reserves into, for `{% cycle %}`'s
+                // reason: a handle is an index into the parse's table, and this
+                // is the parse. Reserved-and-filled in one step, so no `None`
+                // placeholder is ever visible for this producer.
+                let mut refs = self.refs.borrow_mut();
+                refs.push(Some(func.unbind()));
+                Ok(Some(CoreNodeRef((refs.len() - 1) as u64)))
+            }
             // The callable raises Django's own exception, so its message is
             // already Django's; flattening it is what `ErrorKind::Host` asks for
             // at M2/M3.
@@ -1172,7 +1220,11 @@ fn parse_filter_expression(
         refs: RefCell::new(Vec::new()),
     };
     match template_core::parser::filter_expr::parse_filter_expression(token, &host) {
-        Ok(desc) => filter_expr_desc_to_py(py, &desc),
+        // The table goes out **with** the descriptor, because this entry point's
+        // handles index into it and nothing else will ever see it: returning the
+        // descriptor alone would leave every handle pointing into a dropped
+        // `Vec`. See `FilterExpr::refs`.
+        Ok(desc) => filter_expr_desc_to_py(py, &desc, Some(host.ref_list(py)?)),
         Err(error) => Err(parse_error(py, &error)?),
     }
 }

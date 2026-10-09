@@ -49,18 +49,14 @@ pub trait Host {
     /// a `{{ x|bad }}` on an earlier line would lose to a later line's unmatched
     /// tag.
     ///
-    /// **Validate-only: the return value is `()` and Django's is not, and that
-    /// is known to be wrong for `{% load %}`.** Stated as a defect rather than a
-    /// trade-off, because the sentence that used to stand here — "nothing mutates
-    /// `parser.filters` between a token's compile and its materialisation" — was
-    /// true about the wrong interval and would have been believed at M6.
-    ///
-    /// `find_filter`'s result is retained — `filters.append((filter_func, args))`
-    /// (`base.py:773`) is what renders — so the shell looks the name up a second
-    /// time when it materialises the `FilterExpression`. That lookup is a dict
-    /// read, but not a *stable* one: `Parser.add_library` is
-    /// `self.filters.update(lib.filters)` (`base.py:669-670`), and `update`
-    /// **rebinds** a name that is already there. Measured on the pinned tree:
+    /// **Returns the filter Django bound, by handle, and that is not
+    /// optional.** `find_filter`'s result is what renders —
+    /// `filters.append((filter_func, args))` (`base.py:773`) — and looking the
+    /// *name* up again when the `FilterExpression` is built is a different
+    /// answer whenever a `{% load %}` sits between the two moments:
+    /// `Parser.add_library` is `self.filters.update(lib.filters)`
+    /// (`base.py:669-670`), and `update` **rebinds** a name that is already
+    /// there. Measured on the pinned tree:
     ///
     /// ```text
     /// parser.filters["upper"] before load: the builtin
@@ -74,20 +70,24 @@ pub trait Host {
     /// {{ x|upper }}{% load custom %}{{ y|upper }}
     /// ```
     ///
-    /// binds token 1 to custom's `upper` here, where Django bound it to the
-    /// builtin at `:771`. Unobservable today only because `{% load %}` is M6's —
-    /// so this is a prerequisite of M6, not a bug in the committed tree: **the
-    /// return type becomes a handle before `{% load %}` ships.**
+    /// binds token 1 to custom's `upper` under a late lookup, where Django bound
+    /// it to the builtin at `:771`. Measured end-to-end with a library that
+    /// rebinds `upper` to `shadowed-%s`: Django renders `'ABCshadowed-abc'` —
+    /// builtin, then shadow — and `tests/test_filter_rebinding.py` is that row.
     ///
-    /// The handle is cheap because the table already exists. The shell keeps the
-    /// function it looked up in the same arena that holds `{% resetcycle %}`'s
-    /// `Ref` and puts its index on the wire as `AttrValue::Ref`, so the
-    /// descriptor carries the *function* Django would have carried and the name
-    /// is looked up exactly once, at `:771`. The M6 test is a sandwich — a
-    /// builtin use, a `{% load %}` that shadows the name, then a shadowed use,
-    /// asserting the **first** rendered with the builtin. A test with the
-    /// shadowed use alone passes under either design, because its token is after
-    /// the load.
+    /// This seam is called at `base.py:771`, so it is where the binding is still
+    /// Django's; the shell stores the object it found in the same arena
+    /// `{% cycle %}`'s slot lives in ([`Host::alloc_slot`]) and returns its
+    /// index, which the descriptor carries as [`FilterCall::handle`]. The name is
+    /// therefore looked up exactly once, at Django's line.
+    ///
+    /// `None` means "no host, accept and carry no handle" — the permissive
+    /// default the old `Ok(())` was, and the shape
+    /// `_native.parse(source, check_filter=None)` already relies on. A host with
+    /// no registry has no `{% load %}` either, so the shell's late lookup is
+    /// Django's own answer on that path.
+    ///
+    /// [`FilterCall::handle`]: crate::parser::desc::FilterCall::handle
     ///
     /// `arg_count` rather than the arguments themselves, because it is all
     /// `args_check` reads: it does `provided = list(provided)`, then
@@ -104,8 +104,8 @@ pub trait Host {
     /// `-5` parses as a literal and control does reach it. An implementation that
     /// asked the host first — tempting, since the filter name is known earlier —
     /// swaps those two.
-    fn check_filter(&self, _name: &str, _arg_count: usize) -> Result<(), Error> {
-        Ok(())
+    fn check_filter(&self, _name: &str, _arg_count: usize) -> Result<Option<NodeRef>, Error> {
+        Ok(None)
     }
 
     /// Python's `repr()` of a `str`, for the messages Django builds with `%r`.

@@ -357,11 +357,22 @@ def check_filter(parser):
     ``[None] * arg_count`` is honest rather than a shortcut: ``args_check``
     reads only ``len(provided)`` (`base.py:822-826`), which is why the seam
     carries a count and not a list of arguments.
+
+    **The function is returned, not discarded**, and that return value is the
+    point of the seam: ``filters.append((filter_func, args))`` (`base.py:773`)
+    is what renders, and the *name* is not a stable way to reach it again —
+    ``Parser.add_library`` is ``self.filters.update(lib.filters)``
+    (`base.py:669-670`), which rebinds. So the parse keeps this function by
+    handle, at the position of the token that named it, and materialisation
+    resolves the handle instead of asking for the name a second time. The
+    observable difference is a ``{% load %}`` between the two: see
+    ``tests/test_filter_rebinding.py``.
     """
 
     def check(name, arg_count):
         func = parser.find_filter(name)
         FilterExpression.args_check(name, func, [None] * arg_count)
+        return func
 
     return check
 
@@ -393,19 +404,32 @@ def compile_filter(parser):
     return parser.compile_filter
 
 
-def _materialise_filter_expression(desc, parser=None):
+def _materialise_filter_expression(desc, parser=None, resolve_ref=None):
     """A real :class:`FilterExpression` from a descriptor, without re-parsing.
 
     ``FilterExpression.__slots__`` is ``("token", "filters", "var", "is_var")``
     and ``__init__`` parses and computes all four, so the constructor is out of
     the question for the same reason as ``Variable``'s.
 
-    The filter *functions* are looked up a second time here — Rust asked the
-    host for them during the parse and kept only the names. **That double lookup
-    is wrong for `{% load %}`** and is scheduled to become a handle at M6:
-    `add_library` is `self.filters.update(...)` (`base.py:669-670`), so a load
-    *after* this token's position rebinds the name, and this call happens after
-    the whole parse. ``Host::check_filter`` carries the measurement and the fix.
+    **The filter function comes from the handle the parse carried, not from a
+    second lookup by name.** ``find_filter``'s result is what renders
+    (``base.py:773``) and ``Parser.add_library`` is
+    ``self.filters.update(lib.filters)`` (``base.py:669-670``), so a
+    ``{% load %}`` after this token's position *rebinds* the name — and this
+    call happens after the whole parse, which is when a late lookup would go
+    wrong. ``Host::check_filter`` carries the measurement and
+    ``tests/test_filter_rebinding.py`` is the sandwich.
+
+    ``resolve_ref`` is therefore required whenever a handle is present, and it
+    is the same callback ``_decode_value`` uses for every other reference in the
+    tree. When the desc carries no handle — a host with no registry, which is
+    what the descriptor-shape tests and the parity corpus's "no host" rows use —
+    the name is looked up here, with ``args_check``, exactly as Django would:
+    the host that ran no check has no ``{% load %}`` to rebind a name either.
+
+    A handle with no way to resolve it is **loud rather than silently
+    late-looked-up**, because the silent version of that mistake is the rebinding
+    bug this function exists to avoid.
 
     ``is_var`` is recomputed as ``isinstance(self.var, Variable)`` rather than
     carried on the wire, because that expression is Django's own definition
@@ -416,18 +440,32 @@ def _materialise_filter_expression(desc, parser=None):
             "materialising a FilterExpression needs the Parser that owns the "
             "filter registry; none was passed"
         )
+    if resolve_ref is None and getattr(desc, "refs", None) is not None:
+        # A descriptor from `parse_filter_expression`, which owns a table of its
+        # own and hands it over attached to the desc. The whole-template path
+        # passes `resolve_ref` explicitly, from the parse's own table.
+        resolve_ref = desc.refs.__getitem__
 
     expression = FilterExpression.__new__(FilterExpression)
     expression.token = desc.token
 
     filters = []
-    for name, wire_args in desc.filters:
+    for (name, wire_args), handle in desc.filters:
         args = [
             _materialise_operand(lookup, value, parser) for lookup, value in wire_args
         ]
-        # `find_filter`, then `args_check`, then append — `base.py:771-774`.
-        func = parser.find_filter(name)
-        FilterExpression.args_check(name, func, args)
+        if handle is None:
+            # `find_filter`, then `args_check`, then append — `base.py:771-774`.
+            func = parser.find_filter(name)
+            FilterExpression.args_check(name, func, args)
+        elif resolve_ref is None:
+            raise LookupError(
+                f"the filter {name!r} arrived as {handle!r} but no resolve_ref was "
+                "passed to materialise, so the function Django bound at "
+                "base.py:771 cannot be reached"
+            )
+        else:
+            func = resolve_ref(handle.index)
         filters.append((func, args))
 
     expression.filters = filters
@@ -520,7 +558,10 @@ def _decode_value(value, resolve_ref=None, parser=None, child_lists=None):
     # `isinstance(value, list)` first would be passed through as an object
     # rather than materialised, and nothing would report it.
     if isinstance(value, _native.FilterExpr):
-        return _materialise_filter_expression(value, parser)
+        # `resolve_ref` is what reaches the *function* Django bound for each
+        # filter, by the handle the parse carried: see
+        # `_materialise_filter_expression`.
+        return _materialise_filter_expression(value, parser, resolve_ref)
     if isinstance(value, _native.Variable):
         return _materialise_variable(value, parser)
     if isinstance(value, _native.IfCondition):

@@ -211,8 +211,12 @@ pub fn parse_filter_expression(token: &str, host: &dyn Host) -> Result<FilterExp
                 args.push((true, variable_of(name.as_str())?));
             }
 
-            host.check_filter(&name, args.len())?;
-            filters.push(FilterCall { name, args });
+            // The handle comes back from the same call, at the same point:
+            // Django binds `filter_func` here (`base.py:771`) and it is what
+            // renders, so the name is never looked up again. `None` is a host
+            // with no registry — see `Host::check_filter`.
+            let handle = host.check_filter(&name, args.len())?;
+            filters.push(FilterCall { name, args, handle });
         }
 
         upto = whole.end();
@@ -297,7 +301,7 @@ mod tests {
             unreachable!("Rejecting compiles no tags")
         }
 
-        fn check_filter(&self, name: &str, arg_count: usize) -> Result<(), Error> {
+        fn check_filter(&self, name: &str, arg_count: usize) -> Result<Option<NodeRef>, Error> {
             self.seen.borrow_mut().push((name.to_string(), arg_count));
             if self.unknown == Some(name) {
                 return Err(Error::host(format!("Invalid filter: '{name}'")));
@@ -310,7 +314,10 @@ mod tests {
                     )));
                 }
             }
-            Ok(())
+            // No handle: this host is a filter *rejector*, and `alloc_slot`
+            // reserves nothing for it. A real host returns the function it
+            // looked up — see `Host::check_filter`.
+            Ok(None)
         }
 
         fn alloc_slot(&self) -> usize {
@@ -335,6 +342,56 @@ mod tests {
             // a path no test here walks.
             Ok(NodeRef(0))
         }
+    }
+
+    /// A host that hands back a handle, and nothing else.
+    ///
+    /// The counterpart of [`Rejecting`]: one asks what the host *refused*, this
+    /// asks what it *bound*. `check_filter`'s return value is the binding itself
+    /// — `filters.append((filter_func, args))` (`base.py:773`) is what renders —
+    /// so a host that returns a handle must have it arrive on the descriptor.
+    struct Binding;
+
+    impl Host for Binding {
+        fn has_tag(&self, _command: &str) -> bool {
+            false
+        }
+
+        fn call_tag(
+            &self,
+            _command: &str,
+            _token: &Token,
+        ) -> Result<crate::parser::desc::NodeDesc, Error> {
+            unreachable!("Binding compiles no tags")
+        }
+
+        fn check_filter(&self, _name: &str, _arg_count: usize) -> Result<Option<NodeRef>, Error> {
+            Ok(Some(NodeRef(7)))
+        }
+
+        fn alloc_slot(&self) -> usize {
+            0
+        }
+
+        fn compile_filter(&self, _token: &str) -> Result<NodeRef, Error> {
+            Ok(NodeRef(0))
+        }
+    }
+
+    #[test]
+    fn the_handle_the_host_bound_is_what_the_descriptor_carries() {
+        let bound = parse_filter_expression("x|upper", &Binding).expect("accepted");
+        assert_eq!(bound.filters[0].handle, Some(NodeRef(7)));
+        assert_eq!(
+            bound.filters[0].name, "upper",
+            "the name is still carried: it is what Django's messages say"
+        );
+
+        // And the permissive host carries no handle rather than a fabricated one,
+        // which is what tells the shell to look the name up instead.
+        let unbound = ok("x|upper");
+        assert_eq!(unbound.filters[0].handle, None);
+        assert_eq!(unbound.filters[0].name, "upper");
     }
 
     /// Parse a token that must succeed.

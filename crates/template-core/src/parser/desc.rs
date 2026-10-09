@@ -314,17 +314,36 @@ pub type FilterVar = (bool, AttrValue);
 /// One `|name:arg` of a `FilterExpression`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilterCall {
-    /// The filter's name. **A name, never a handle.** The function is Python's
-    /// and `FilterExpression.args_check` inspects its signature
-    /// (`base.py:822-833`), so no Rust type can carry one — and the shell will
-    /// look it up again at materialisation, which is where Django's own
-    /// `filters.append((filter_func, args))` (`base.py:773`) keeps it.
+    /// The filter's name as written — what Django's messages name
+    /// (`Invalid filter: 'x'`) and what [`crate::parser::tags::filter`] reads.
+    ///
+    /// **Not what renders.** The function is Python's and
+    /// `FilterExpression.args_check` inspects its signature (`base.py:822-833`),
+    /// so no Rust type can carry one; it crosses as [`Self::handle`] instead.
     pub name: String,
     /// At most one, because `filter_re`'s argument group allows zero or one
     /// (`base.py:703-712`). A `Vec` rather than an `Option` because it *is*
     /// Django's list, and a future Django that allowed more would otherwise need
     /// a wire change.
     pub args: Vec<FilterVar>,
+    /// The function Django bound to this name **at this token's position**, by
+    /// handle into the per-parse reference table.
+    ///
+    /// `filters.append((filter_func, args))` (`base.py:773`) is what renders, and
+    /// the name is not a stable way to reach it: `Parser.add_library` is
+    /// `self.filters.update(lib.filters)` (`base.py:669-670`), which **rebinds**
+    /// a name already in the table. Our materialisation runs after the whole
+    /// parse, so without this a `{% load %}` later in the template would change
+    /// what an earlier `{{ x|name }}` renders. `tests/test_filter_rebinding.py`
+    /// is the sandwich; `Host::check_filter` carries the measurement.
+    ///
+    /// `None` means the host ran no check — the permissive default
+    /// `_native.parse(source)` without a `check_filter` callable takes, which is
+    /// what the descriptor-shape tests and the parity corpus's "no host" rows
+    /// want. A host with no registry has no `{% load %}` to rebind a name
+    /// either, so the shell's lookup at materialisation is Django's own answer
+    /// on that path.
+    pub handle: Option<NodeRef>,
 }
 
 /// A `FilterExpression` as it crosses the wire (`base.py:722-775`).
@@ -635,6 +654,7 @@ mod tests {
             filters: vec![FilterCall {
                 name: "default".to_string(),
                 args: vec![(true, variable("y"))],
+                handle: None,
             }],
         }));
 

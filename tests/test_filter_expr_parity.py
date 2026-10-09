@@ -253,7 +253,17 @@ def _django_operand(lookup, value):
 
 
 def ours(token):
-    """Our parse as `("ok", is_var, var, filters)` or `("error", message)`."""
+    """Our parse as `("ok", is_var, var, filters)` or `("error", message)`.
+
+    Each `filters` entry is reduced to its `(name, args)` half. The wire carries
+    the *function* Django bound beside the name, as a handle — that is what
+    renders, and the name is not a stable way back to it once a `{% load %}`
+    can rebind it (`Host::check_filter`, `tests/test_filter_rebinding.py`). A
+    handle is a table index, so `theirs` has nothing to compare it against; what
+    the two sides are comparable on is the name and the arguments, and the
+    handle is asserted where it can be — `test_ref_table.py` and the rebinding
+    sandwich.
+    """
     try:
         wire = _native.parse_filter_expression(token, check_filter)
     except _native.ParseError as error:
@@ -268,7 +278,7 @@ def ours(token):
                 name,
                 [_ours_operand(arg_lookup, arg) for arg_lookup, arg in args],
             )
-            for name, args in wire.filters
+            for (name, args), _handle in wire.filters
         ],
     )
 
@@ -459,8 +469,12 @@ class FilterExpressionParityTests(unittest.TestCase):
         with_host = ours("x|nope:1")
         self.assertEqual(with_host[0], "error")
         without = _native.parse_filter_expression("x|nope:1")
-        self.assertEqual(without.filters[0][0], "nope")
-        self.assertEqual(len(without.filters[0][1]), 1)
+        # The wire entry is `((name, args), handle)`: the name is still carried,
+        # and the handle is `None` here because no host ran a lookup to bind.
+        (name, args), handle = without.filters[0]
+        self.assertEqual(name, "nope")
+        self.assertEqual(len(args), 1)
+        self.assertIsNone(handle)
 
 
 if __name__ == "__main__":
