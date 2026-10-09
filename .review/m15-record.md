@@ -186,9 +186,10 @@ Measured on this tree, `bash scripts/check.sh`:
 | differential | 48 cases, identical |
 | meter, both scopes | `unshimmed()` is `[]` over `django.template` and `django.templatetags` |
 
-Two new gates, 23 new rows, one script deleted (the weaker pre-flight copy in
-`scripts/run_unit_tests.sh`), and no production code changed: this milestone
-touched only the instruments that establish §2.
+Two new gates, 23 new rows, one weaker pre-flight collapsed into the extracted
+script (the inline block in `scripts/run_unit_tests.sh`, which named the meter and
+did not refuse on it), and no production code changed: this milestone touched only
+the instruments that establish §2.
 
 ## 8. Not owed — carried to M16
 
