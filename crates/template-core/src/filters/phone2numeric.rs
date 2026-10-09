@@ -1,4 +1,4 @@
-//! `phone2numeric` — `defaultfilters.py:984-987`.
+//! `phone2numeric` — `defaultfilters.py:984-987`, delegated whole.
 //!
 //! ```python
 //! @register.filter("phone2numeric", is_safe=True)
@@ -7,7 +7,7 @@
 //!     return phone2numeric(value)
 //! ```
 //!
-//! and the helper it calls, `django.utils.text.phone2numeric`
+//! The helper it calls, `django.utils.text.phone2numeric`
 //! (`.django/django/utils/text.py:313-344`), is a 26-entry a–z table and one
 //! expression — **not** a `str.translate`:
 //!
@@ -19,138 +19,76 @@
 //!     return "".join(char2number.get(c, c) for c in phone.lower())
 //! ```
 //!
-//! **No `@stringfilter`** — it is one of the four the 29 exclude (see
-//! `tests/test_filter_inventory.py`'s `STRINGFILTER`), so the argument is the raw
-//! [`Value`] and its *type* is observed rather than coerced. `phone.lower()`
-//! (`text.py:344`) is a `str` method, so `phone2numeric(5)` is an
-//! `AttributeError` and not `"5"`; the body reads `Value::Str`/`Value::Safe`
-//! directly and refuses everything else, the same shape `cut`'s argument takes
-//! (§D7.1's `&Value` case: the Python function observes the argument's type).
+//! **The whole helper is the host's, and this module's first version was wrong
+//! to split it.** That version owned the table and delegated only the `.lower()`,
+//! on the reasoning that the table is a pure function of a code point while the
+//! lowercasing is Final_Sigma and therefore the host's. The table *is* pure. The
+//! helper is not, because it is `@keep_lazy_text`-decorated and **the wrapped
+//! function is the decorated one, not the `def` body** — so a Rust body reading
+//! the `def` line is right about the table and the argument, and wrong about the
+//! wrapper. Two consequences, neither expressible from inside a body that owns
+//! the table:
 //!
-//! **The lowercasing is the host's, and the plan's "pure, so it is Rust's" is
-//! wrong.** `phone.lower()` is the same Final_Sigma / 28-suppressed-code-point
-//! operation [`FilterHost::str_lower`] exists for — measured, `phone2numeric("ΟΣ")`
-//! is `"ος"`, not `"οσ"` — so the body delegates it and owns only the table. A
-//! Rust `str::to_lowercase` would agree with Python on this input and disagree at
-//! the 28 code points, which is exactly why that method's doc says delegating is
-//! "complete by construction". The plan's "`str.translate` over a fixed
-//! 26-letter table" is wrong twice: the pinned helper is a generator over
-//! `.lower()`, and `str.translate` would not lowercase at all.
+//! * a lazy argument yields a lazy *result* — measured, a `lazy(...)` proxy in
+//!   gives a `__proxy__` out, which the corpus sees as a type difference even
+//!   though the rendered text matches;
+//! * a non-`str` is refused by `phone.lower()` **with its own class named** —
+//!   `'dict' object has no attribute 'lower'` — where a Rust-side
+//!   classification can only say `'object'`, because [`Value::Opaque`] cannot
+//!   name its Python class and its `type_name` doc says as much.
 //!
-//! Measured rows (pinned 6.0.9, through `FilterExpression.resolve`):
+//! §D2's third clause is the rule this is the instance of: **a filter whose
+//! helper carries a result-changing decorator is delegated regardless of what
+//! its body references.** `phone2numeric` references nothing stateful and calls
+//! no string method whose Rust and CPython answers diverge — the two axes that
+//! classified it as pure — and was still not pure, because neither axis can see
+//! a decorator that changes the *result*. Swept over all fourteen
+//! `@keep_lazy`/`@keep_lazy_text` helpers in `django/utils`, this is the only
+//! filter that reaches one with no `@stringfilter` in between (every other such
+//! filter has `str(first)` run first, resolving the `Promise` before the helper
+//! sees it), so the class is closed at one rather than open at the head of a
+//! family.
+//!
+//! No `@stringfilter` — it is one of the four the 29 exclude (see
+//! `tests/test_filter_inventory.py`'s `STRINGFILTER`), which is the other half
+//! of why the [`Value`] goes in uncoerced: `{{ x|phone2numeric }}` over an `int`
+//! must raise, not answer `str(value)`.
+//!
+//! Measured rows, through `FilterExpression.resolve` on the pinned tree:
 //!
 //! ```text
-//! '800-COLLECT'    -> '800-2655328'
-//! '1-800-FLOWERS'  -> '1-800-3569377'
-//! 'aBc'            -> '222'
-//! 'abcXYZ'         -> '222999'
-//! 'a-b_c'          -> '2-2_2'      (punctuation is not in the table)
-//! '123-456'        -> '123-456'
-//! ''               -> ''
-//! 'éè'             -> 'éè'         (not a–z, so not mapped)
-//! mark_safe('800-COLLECT') -> (SafeString, '800-2655328') safe=True
+//! '800-COLLECT'            -> '800-2655328'
+//! '1-800-FLOWERS'          -> '1-800-3569377'
+//! 'aBc'                    -> '222'
+//! 'abcXYZ'                 -> '222999'
+//! 'a-b_c'                  -> '2-2_2'      (punctuation is not in the table)
+//! '123-456'                -> '123-456'
+//! ''                       -> ''
+//! 'éè'                     -> 'éè'         (not a–z, so not mapped)
+//! 'ΟΣ'                     -> 'ος'         (CPython's Final_Sigma)
+//! "꟎"                 -> "꟎"     (Rust maps this code point; CPython does not)
+//! mark_safe('800-COLLECT') -> '800-2655328'   a plain str — the marker does NOT survive
+//! lazy(...)                -> __proxy__       the decorator, visible as a type
+//! 5 / True / 5.0 / None / [1] / {'a': 1} / (1, 2)
+//!     -> AttributeError: '<its own class>' object has no attribute 'lower'
 //! ```
 //!
-//! The non-`str` rows, verbatim from the pinned tree — the class name is the
-//! argument's `type(value).__name__`:
-//!
-//! ```text
-//! 5     -> AttributeError: 'int' object has no attribute 'lower'
-//! True  -> AttributeError: 'bool' object has no attribute 'lower'
-//! 5.0   -> AttributeError: 'float' object has no attribute 'lower'
-//! None  -> AttributeError: 'NoneType' object has no attribute 'lower'
-//! [1]   -> AttributeError: 'list' object has no attribute 'lower'
-//! {'a': 1} -> AttributeError: 'dict' object has no attribute 'lower'   (Opaque — see below)
-//! (1, 2)   -> AttributeError: 'tuple' object has no attribute 'lower'  (Opaque — see below)
-//! ```
-//!
-//! **One gap the seam cannot close, and it is reported rather than papered
-//! over.** `@keep_lazy_text` (`text.py:313`) makes a lazy argument produce a
-//! lazy *result* in Django (measured: a `lazy(...)` proxy in gives a
-//! `__proxy__` out), and a `Markup`/`Promise`/`dict`/`tuple` argument is an
-//! `Opaque` whose Python class this crate cannot name — `Value::type_name`
-//! returns `"object"` for every `Opaque` and its own doc says that is not an
-//! answer. So for a `tuple`/`dict`/arbitrary object this body writes `'object'
-//! object has no attribute 'lower'` where Django writes `'dict'`/`'tuple'`/…,
-//! and for a `Markup` it refuses where Django *answers*. Both halves are one
-//! missing operation: a host method that performs `phone.lower()` on a `&Value`
-//! (or names an `Opaque`'s class). The trait has neither — `to_str` would
-//! `str()` a `dict` and *answer* where Django raises — so the body takes the
-//! `&Value`-shaped half it can and the residue is stated here, in the same shape
-//! as `cut`'s argument message.
+//! `tests/filter_cases.py` carries the first, tenth, eleventh, twelfth and last
+//! of those; the two lazy rows are the ones that failed for the split version.
 
 use crate::filters::host::FilterCall;
 use crate::filters::value::Value;
 use crate::parser::error::Error;
-use crate::parser::error::PyErrorKind;
 
-/// The `AttributeError` CPython's `str.lower` raises for an object without the
-/// method. Django's own text is `'<type(value).__name__>' object has no
-/// attribute 'lower'` — measured as `'int'`, `'bool'`, `'float'`, `'NoneType'`,
-/// `'list'`, `'dict'`, `'tuple'`. Synthesised here rather than raised across the
-/// seam because no [`FilterHost`] method performs `str.lower` on a whole value:
-/// [`FilterHost::str_lower`] takes a `&str` that only a `str` can supply, and
-/// [`FilterHost::to_str`] is `str(v)`, which *answers* where this filter must
-/// refuse.
+/// `phone2numeric`'s body: the helper, whole, and nothing else.
 ///
-/// `name` is the caller's `Value::type_name()`, which is exact for every
-/// variant of [`Value`] except `Opaque` — `"object"` there, the one gap the
-/// module doc reports.
-///
-/// `operation` is `"str.lower"` — the CPython operation this stands in for —
-/// and **not** a `FilterHost` method's name, because none ran: naming `"to_str"`
-/// would put a call in the diagnostic that the body never made.
-///
-/// [`FilterHost`]: crate::filters::host::FilterHost
-fn not_a_string(name: &str) -> Error {
-    Error::filter_host(
-        PyErrorKind::AttributeError,
-        "str.lower",
-        format!("'{name}' object has no attribute 'lower'"),
-    )
-}
-
-/// `char2number.get(c, c)` — the 26-entry table at `text.py:316-343`, in the
-/// source's own order. Only ASCII a–z are mapped, so `'123'`, `'_'` and any
-/// non-ASCII code point come back unchanged, which is measured above.
-fn digit_or_self(c: char) -> char {
-    match c {
-        'a' | 'b' | 'c' => '2',
-        'd' | 'e' | 'f' => '3',
-        'g' | 'h' | 'i' => '4',
-        'j' | 'k' | 'l' => '5',
-        'm' | 'n' | 'o' => '6',
-        'p' | 'q' | 'r' | 's' => '7',
-        't' | 'u' | 'v' => '8',
-        'w' | 'x' | 'y' | 'z' => '9',
-        other => other,
-    }
-}
-
-/// `phone2numeric`'s body: `"".join(char2number.get(c, c) for c in phone.lower())`.
-///
-/// The table is Rust's; the `.lower()` is the host's. The value is **not**
-/// coerced, so it is matched as a [`Value`] — a `str` (or `SafeString`) supplies
-/// the text, anything else gets the `AttributeError` CPython would raise.
+/// Nothing is decided here — not the table, not the lowercasing, not the
+/// refusal's class name — because the decorator behind the seam observes the
+/// argument's *type* and its *laziness*, and a body that recognised either would
+/// be reconstructing the wrapper from the `def` line. The [`Value`] is passed
+/// through as it is.
 pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
-    // `phone.lower()` (`text.py:344`) requires a `str`, and this filter has no
-    // `@stringfilter`, so `phone2numeric(5)` raises instead of becoming `"5"`.
-    // Read as a `Value` rather than through `to_str`, which would coerce — the
-    // `&Value` shape §D7.1 asks for wherever the argument's *type* is observed.
-    let text: &str = match &value {
-        Value::Str(text) | Value::Safe(text) => text,
-        other => return Err(not_a_string(other.type_name())),
-    };
-    // `str.lower()`, not Rust's `str::to_lowercase`: measured, `"ΟΣ".lower()` is
-    // `"ος"` (Final_Sigma), and the two halves cannot be combined without a
-    // silent divergence at the 28 suppressed code points — see
-    // `FilterHost::str_lower`. The body has no lowercasing of its own.
-    let lowered = call.host.str_lower(text);
-    let digits: String = lowered.chars().map(digit_or_self).collect();
-    // `is_safe=True` and a `SafeData` input are the loop's marking, not the
-    // body's — measured, `mark_safe('800-COLLECT')|phone2numeric` is a
-    // `SafeString` while a plain input is a plain `str`.
-    Ok(Value::Str(digits.into()))
+    call.host.phone2numeric(&value)
 }
 
 #[cfg(test)]
@@ -158,6 +96,7 @@ mod tests {
     use super::*;
     use crate::filters::host::TestFilterHost;
     use crate::parser::error::ErrorKind;
+    use crate::parser::error::PyErrorKind;
 
     fn call(host: &TestFilterHost) -> FilterCall<'_> {
         FilterCall {
@@ -167,129 +106,81 @@ mod tests {
         }
     }
 
-    /// The host's `str.lower` answer, scripted. The body's own input is the
-    /// first argument, so a test that wants a mapping pins which characters the
-    /// table saw.
-    fn lowering(lowered: &str) -> TestFilterHost {
+    /// A host whose one scripted answer is `answer`.
+    fn answering(answer: Value) -> TestFilterHost {
         TestFilterHost {
-            str_lower: Some(lowered.to_string()),
+            phone2numeric: Some(answer),
             ..TestFilterHost::default()
         }
     }
 
-    /// Every letter of the table, and the letters-only input keeps the row
-    /// unambiguous: `'abcXYZ'` → `'222999'` is measured on the pinned tree.
+    /// The body is the seam call and nothing else: the host's answer comes back
+    /// unmodified. The table that produced it lives in `text.py`, and a body
+    /// that still held its own would have to be asked for the answer rather than
+    /// given it — which is what `assert_called` catches.
     #[test]
-    fn it_maps_the_26_letters_through_the_table() {
-        let h = lowering("abcxyz");
+    fn it_returns_the_hosts_answer() {
+        let h = answering(Value::Str("800-2655328".into()));
         assert_eq!(
-            run(Value::Str("abcXYZ".into()), None, &call(&h)).unwrap(),
-            Value::Str("222999".into())
+            run(Value::Str("800-COLLECT".into()), None, &call(&h)).unwrap(),
+            Value::Str("800-2655328".into())
         );
-        h.assert_called("str_lower");
+        h.assert_called("phone2numeric");
     }
 
-    /// Punctuation and digits are not in the table, so `char2number.get(c, c)`
-    /// returns them unchanged — measured, `'a-b_c'` → `'2-2_2'`.
+    /// The input goes in **as it is** — not `to_str`d, not lowered, not
+    /// classified — because every one of those is something the decorator
+    /// observes. `str_lower` and `to_str` are not scripted, so reaching either
+    /// would panic rather than pass quietly.
     #[test]
-    fn a_character_outside_the_table_is_left_alone() {
-        let h = lowering("a-b_c");
+    fn the_value_reaches_the_host_uncoerced() {
+        let h = answering(Value::Str("222".into()));
         assert_eq!(
-            run(Value::Str("a-b_c".into()), None, &call(&h)).unwrap(),
-            Value::Str("2-2_2".into())
+            run(Value::Safe("aBc".into()), None, &call(&h)).unwrap(),
+            Value::Str("222".into())
         );
+        assert_eq!(h.calls(), vec!["phone2numeric"], "no other seam call");
     }
 
-    /// **The lowercasing is the host's**, and this is the test a Rust
-    /// `to_lowercase` fails: the scripted answer is Python's Final_Sigma answer
-    /// `"ος"`, which the body must return verbatim (`ο` and `ς` are not in the
-    /// table). The body never lowercases on its own — `str_lower` is the only
-    /// seam call, and `to_str` is not scripted, so reaching it would panic.
+    /// The answer is the host's **including its marking**: `@keep_lazy_text`
+    /// does not preserve a `SafeString`, so a host answering with a plain `str`
+    /// must not have it `mark_safe`d on the way out. Measured on the pinned
+    /// tree — `mark_safe('800-COLLECT')` answers a plain `str`.
     #[test]
-    fn the_lowercase_is_the_hosts() {
-        let h = lowering("ος");
+    fn the_hosts_marking_is_the_answer() {
+        let h = answering(Value::Str("800-2655328".into()));
         assert_eq!(
-            run(Value::Str("ΟΣ".into()), None, &call(&h)).unwrap(),
-            Value::Str("ος".into())
+            run(Value::Safe("800-COLLECT".into()), None, &call(&h)).unwrap(),
+            Value::Str("800-2655328".into())
         );
-        assert_eq!(h.calls(), vec!["str_lower"], "no other seam call");
     }
 
-    /// A `SafeString` is a `str`, so it is answered — and the result is a plain
-    /// `str`, because the marking is the loop's. `Value::Safe` and `Value::Str`
-    /// are structurally unequal, so a body that kept the marker fails here.
+    /// **The row the split version could not produce.** A lazy answer stays a
+    /// distinct `Value`; the body does not flatten it, and cannot — the
+    /// `__proxy__` is the decorator's doing and it is opaque to Rust on purpose.
     #[test]
-    fn a_safe_string_is_answered_and_not_marked() {
-        let h = lowering("abc");
-        let result = run(Value::Safe("aBc".into()), None, &call(&h)).unwrap();
-        assert_eq!(result, Value::Str("222".into()));
-        assert_ne!(result, Value::Safe("222".into()));
+    fn a_lazy_answer_is_not_flattened() {
+        let h = answering(Value::Opaque(1));
+        assert_eq!(
+            run(Value::Str("aBc".into()), None, &call(&h)).unwrap(),
+            Value::Opaque(1)
+        );
     }
 
-    /// The five measured refusals whose class name `Value::type_name` gets
-    /// exactly right. Each is the class Django's own `type(value).__name__`
-    /// produces, and the body must not have touched the host first.
+    /// **The other row it could not produce**: a refusal arrives from the host,
+    /// carrying the class name the host's own Python produced — `'dict'` for a
+    /// `dict`, which a Rust classification of the `Value` cannot say. The body
+    /// synthesises nothing, so the only thing to assert here is that it passed
+    /// the host's error through untouched.
     #[test]
-    fn a_non_string_is_the_measured_attribute_error() {
-        for (value, name, expected) in [
-            (
-                Value::Int(5),
-                "int",
-                "'int' object has no attribute 'lower'",
-            ),
-            (
-                Value::Bool(true),
-                "bool",
-                "'bool' object has no attribute 'lower'",
-            ),
-            (
-                Value::Float(5.0),
-                "float",
-                "'float' object has no attribute 'lower'",
-            ),
-            (
-                Value::None,
-                "NoneType",
-                "'NoneType' object has no attribute 'lower'",
-            ),
-            (
-                Value::List(vec![Value::Int(1)]),
-                "list",
-                "'list' object has no attribute 'lower'",
-            ),
-        ] {
-            let h = TestFilterHost::default();
-            let error = run(value, None, &call(&h)).expect_err("must refuse");
-            match &error.kind {
-                ErrorKind::FilterHost(host) => {
-                    assert_eq!(host.kind, PyErrorKind::AttributeError, "{name}");
-                    assert_eq!(host.operation, "str.lower", "{name}");
-                    assert_eq!(host.message, expected, "{name}");
-                }
-                other => panic!("{name}: not a FilterHost error: {other:?}"),
-            }
-            assert_eq!(
-                h.calls(),
-                Vec::<&str>::new(),
-                "{name}: the host must not be reached"
-            );
-        }
-    }
-
-    /// `BigInt` reports `"int"`, which is the class Python would name for an
-    /// `int` outside `i64` — the same fact `Value::type_name`'s doc records.
-    #[test]
-    fn a_big_int_is_named_int() {
+    fn a_host_refusal_propagates() {
         let h = TestFilterHost::default();
-        let error = run(
-            Value::BigInt("123456789012345678901234567890".into()),
-            None,
-            &call(&h),
-        )
-        .expect_err("must refuse");
+        h.raise_on("phone2numeric", PyErrorKind::AttributeError);
+        let error = run(Value::Int(5), None, &call(&h)).expect_err("must refuse");
         match &error.kind {
             ErrorKind::FilterHost(host) => {
-                assert_eq!(host.message, "'int' object has no attribute 'lower'");
+                assert_eq!(host.operation, "phone2numeric");
+                assert_eq!(host.kind, PyErrorKind::AttributeError);
             }
             other => panic!("not a FilterHost error: {other:?}"),
         }

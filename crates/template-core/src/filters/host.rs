@@ -436,6 +436,33 @@ pub trait FilterHost {
     /// `unicode_normalize_nfkd` would have had `slugify` as its only caller,
     /// which is the `repr` mistake one method along.
     fn slugify(&self, text: &str) -> String;
+    /// `django.utils.text.phone2numeric` (`text.py:313-344`), **whole** — the
+    /// 26-entry table and the `.lower()` both.
+    ///
+    /// **The one helper in this trait reached through a decorator with no
+    /// `@stringfilter` in between**, and the argument's shape follows from that
+    /// rather than from the table: `phone2numeric` carries `@keep_lazy_text`
+    /// (`text.py:313`), so the function the registry holds is not the `def`
+    /// body. A `Promise` argument yields a *lazy* result (`__proxy__` out,
+    /// measured), and any other non-`str` is refused by `phone.lower()` **with
+    /// its own class named** — `'dict' object has no attribute 'lower'`, where a
+    /// Rust-side classification can only say `'object'`. Neither is expressible
+    /// through a `&str`, so this takes a [`Value`] and returns one: a `str` in
+    /// gives a plain `str` out, a `SafeString` marker does **not** survive
+    /// (measured), and no `Opaque` class name is ever needed because Python does
+    /// the naming.
+    ///
+    /// Whole rather than a [`FilterHost::str_lower`] the body would drive, per
+    /// §D2's third clause: **a filter whose helper carries a result-changing
+    /// decorator is delegated regardless of what its body references.** The two
+    /// axes that classified `phone2numeric` as pure — no stateful reference, no
+    /// divergent string method — are both blind to a decorator that changes the
+    /// *result*, which is why a classification that asked only those two
+    /// questions said this filter's Rust body was safe to write. Swept over all
+    /// fourteen `@keep_lazy`/`@keep_lazy_text` helpers in `django/utils`, this is
+    /// the **only** filter that reaches one without `@stringfilter` in between,
+    /// so the class is closed at one rather than open at the start of a family.
+    fn phone2numeric(&self, value: &Value) -> Result<Value, Error>;
     /// `django.utils.html.urlize` — a regex over `settings.URLIZE_ASSUME_HTTPS`,
     /// so the setting and the regex engine are both the host's.
     fn urlize(&self, text: &str, limit: Option<usize>, autoescape: bool) -> String;
@@ -779,6 +806,10 @@ impl FilterHost for NoFilterHost {
         refused_panic("slugify")
     }
 
+    fn phone2numeric(&self, _value: &Value) -> Result<Value, Error> {
+        Err(refused("phone2numeric"))
+    }
+
     fn urlize(&self, _text: &str, _limit: Option<usize>, _autoescape: bool) -> String {
         refused_panic("urlize")
     }
@@ -946,6 +977,9 @@ pub struct TestFilterHost {
     pub str_title: Option<String>,
     pub strip_tags: Option<String>,
     pub slugify: Option<String>,
+    /// A `Value` rather than a `String`, because the helper's answer can be a
+    /// lazy proxy — the one place a filter's host answer is not already text.
+    pub phone2numeric: Option<Value>,
     pub urlize: Option<String>,
     pub truncate: Option<String>,
     pub wrap: Option<String>,
@@ -1178,6 +1212,13 @@ impl FilterHost for TestFilterHost {
         self.slugify
             .clone()
             .unwrap_or_else(|| refused_panic("slugify"))
+    }
+
+    fn phone2numeric(&self, _value: &Value) -> Result<Value, Error> {
+        self.record("phone2numeric")?;
+        self.phone2numeric
+            .clone()
+            .ok_or_else(|| refused("phone2numeric"))
     }
 
     fn urlize(&self, _text: &str, _limit: Option<usize>, _autoescape: bool) -> String {

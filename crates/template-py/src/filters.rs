@@ -870,6 +870,24 @@ impl FilterHost for PyFilterHost<'_> {
         self.utility_text("slugify", "django.utils.text", "slugify", text)
     }
 
+    fn phone2numeric(&self, value: &Value) -> Result<Value, Error> {
+        let py = self.py;
+        let outcome = (|| {
+            // The helper, whole, and the `Value` goes in as it is:
+            // `@keep_lazy_text` has to see the actual object for a `Promise` to
+            // yield a lazy result, and CPython has to see a `dict` as a `dict` to
+            // name it in its own `AttributeError`. A `to_str` here, or a
+            // Rust-side classification, would destroy both — which is why this
+            // method takes a `Value` where its neighbours take a `&str`.
+            let digits = py
+                .import("django.utils.text")?
+                .getattr("phone2numeric")?
+                .call1((self.object(value)?,))?;
+            self.classify(&digits)
+        })();
+        outcome.map_err(|e| self.host_error("phone2numeric", e))
+    }
+
     fn urlize(&self, text: &str, limit: Option<usize>, autoescape: bool) -> String {
         let py = self.py;
         let outcome = (|| {

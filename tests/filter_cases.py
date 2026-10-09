@@ -3656,6 +3656,17 @@ CASES: list[dict] = [
         "value": mark_safe("800-COLLECT"),
     },
     {
+        # **The decorator, visible as a type.** A `Promise` in gives a *lazy*
+        # result out — measured, `phone2numeric(lazy(...)())` is a `__proxy__`
+        # and not a `str` — so both sides answer a proxy here rather than text.
+        # This is the row a split body cannot produce: owning the table means
+        # returning `Value::Str`, whose class name is `str`, and no amount of
+        # table-correctness reaches the wrapper.
+        "name": "phone2numeric/lazy-input",
+        "filter": "phone2numeric",
+        "value": LAZY_SAFE_PROXY,
+    },
+    {
         # **Final_Sigma**: CPython's `str.lower()` answers `"ος"` (final form),
         # where Rust's `char::to_lowercase` answers `"οσ"`. The scripted test in
         # `phone2numeric.rs` pins the same input; this row pins it through the
@@ -4257,5 +4268,26 @@ ERROR_CASES: list[dict] = [
         "value": ["a"],
         "raises": "AttributeError",
         "message": "'list' object has no attribute 'lower'",
+    },
+    {
+        # **The class name a Rust classification cannot produce.** Every object
+        # this crate cannot name is `Value::Opaque`, and `type_name` answers
+        # `"object"` for all of them — its own doc says that is "not an answer".
+        # So a body that matched `Value` itself and synthesised the message
+        # writes `'object' object has no attribute 'lower'` here; only asking
+        # Django's helper lets CPython name the class. This row and the next are
+        # the reason the helper is delegated whole (§D2's third clause).
+        "name": "phone2numeric/dict",
+        "filter": "phone2numeric",
+        "value": {"a": 1},
+        "raises": "AttributeError",
+        "message": "'dict' object has no attribute 'lower'",
+    },
+    {
+        "name": "phone2numeric/tuple",
+        "filter": "phone2numeric",
+        "value": (1, 2),
+        "raises": "AttributeError",
+        "message": "'tuple' object has no attribute 'lower'",
     },
 ]
