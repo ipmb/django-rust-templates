@@ -165,7 +165,7 @@ class RenderParityTests(_ParityTest):
         # The missing-key substitution is `Variable.resolve`'s, one frame out
         # from the resolver, and runs on Django's side here — which is exactly
         # why it matches. This is the case that needs `context.template` bound,
-        # and `_native.render` binds it by rendering through a real `Template`.
+        # and the shell binds it by rendering through a real `Template`.
         self.assert_renders_like_django("{{ nope }}", {"name": "Ada"})
 
     def test_the_engine_the_caller_passes_is_the_one_that_renders(self):

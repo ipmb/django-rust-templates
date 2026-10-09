@@ -15,18 +15,19 @@ for `delete_first_token` (`base.py:564-569`), so a callback that does
 Every one of Django's built-ins is in that dict, so Rust would be told to compile
 nothing and the host would run Django's `do_for` etc. The identity clause below is
 the whole of the discrimination: a name is the host's to compile when its entry is
-*not* Django's own builtin callable, or when it is a built-in Rust does not own
-(`block`, `extends`, `include`, `load`, `querystring`).
+*not* the callable `django.template.defaulttags` registered for it, or when it is a
+built-in Rust does not own (`block`, `extends`, `include`, `load`, `querystring`).
 
 Measured on the pinned tree before the identity clause was written down, since it
 is the one fact the whole predicate rests on: with
 ``p = Parser(tokens, builtins=Engine().template_builtins)``,
-``p.tags["comment"] is <the engine's builtin>`` is ``True``; after
+``p.tags["comment"] is defaulttags.register.tags["comment"]`` is ``True``; after
 ``p.add_library(lib)`` for a library registering ``comment`` it is ``False``.
 """
 
 from __future__ import annotations
 
+from django.template import defaulttags as _defaulttags
 from django.template.base import Token, TokenType
 
 from django_rust_templates import _native
@@ -47,18 +48,36 @@ __all__ = ("ShellHost",)
 _M7_OWNED = frozenset({"block", "extends", "include"})
 
 
-def _engine_builtin_tags(parser):
-    """The tag callables `Parser.__init__` merged from `builtins`.
+def django_own_tags():
+    """The tag callables Rust ports — read from the module it ports, once.
 
-    Taken as a **snapshot of the parser's table at construction**, not rebuilt
-    from `Engine()`. Two reasons, and the second is a bug the first draft had:
-    `parser_for` is handed the *caller's* engine, so a caller that registered
-    its own library in `builtins` would have its tags mistaken for Django's; and
-    a library is merged into `parser.tags` only by `{% load %}` (`base.py:521`
-    stores `libraries` and does not merge it), so at construction the table
-    **is** the builtins and nothing else.
+    The predicate's question is *"is this callable the one Rust implements?"*,
+    and the only configuration-independent answer names the module Rust ports:
+    `django.template.defaulttags`. Frozen at import, so neither a `{% load %}`
+    nor a caller mutating `defaulttags.register` mid-parse can move it.
+
+    **This replaced a snapshot of `parser.tags`, and the reason is measured.**
+    The snapshot was taken at `ShellHost` construction, which is *after*
+    `Parser.__init__` merged the engine's `builtins` — so it captured whatever
+    the caller configured, not Django's own table. A caller whose
+    `OPTIONS["builtins"]` registers a library providing `for` then got the
+    opposite of the intent: `parser.tags["for"] is snapshot["for"]` was True, so
+    `has_tag` said "Rust's" and Rust's `do_for` ran while the caller's tag was
+    silently ignored. Measured against `.django` @ 6.0.9, and the inversion was
+    the *stated reason* for the snapshot: the docstring justified it by a
+    misattribution the snapshot itself causes and the defaulttags comparison
+    does not — `mine is not defaulttags.do_for` routes to the host, correctly.
+
+    Not reachable through the 1547 today (the only `builtins` use in
+    `template_tests` is a *filter* library in `test_parser.py`), but
+    `OPTIONS["builtins"]` is public, documented Django and M9 ships it.
+
+    `loader_tags` is not here because its three names are `_M7_OWNED` and are
+    refused before the identity clause; `load`/`querystring` are not in
+    `_rust_owned` and return True before it. Measured: the 22 Rust-owned names
+    are exactly `defaulttags.register.tags` minus `load` and `querystring`.
     """
-    return dict(parser.tags)
+    return dict(_defaulttags.register.tags)
 
 
 def _wire_token(token):
@@ -89,7 +108,7 @@ class ShellHost:
     def __init__(self, parser):
         self.parser = parser
         self._rust_owned = set(_native.builtin_tag_names())
-        self._builtins = _engine_builtin_tags(parser)
+        self._django_tags = django_own_tags()
 
     def has_tag(self, command):
         func = self.parser.tags.get(command)
@@ -104,10 +123,12 @@ class ShellHost:
         if command not in self._rust_owned:
             # `load`, `querystring`, and everything a `{% load %}` brought in.
             return True
-        # Rust's, unless a `{% load %}` replaced Django's own callable for the
+        # Rust's, unless something replaced `defaulttags`' callable for the
         # name — `add_library` is `self.tags.update(lib.tags)`
-        # (`base.py:669-670`), so the load wins and this is where we notice.
-        return func is not self._builtins.get(command)
+        # (`base.py:669-670`), so a `{% load %}` wins, and a caller's
+        # `OPTIONS["builtins"]` wins at construction, which is the case the
+        # parser-snapshot predicate got backwards. See `django_own_tags`.
+        return func is not self._django_tags.get(command)
 
     def call_tag(self, command, token_wire, tokens):
         """Run Django's own compile function for `command`.
@@ -127,8 +148,28 @@ class ShellHost:
             for kind, contents, lineno, position in reversed(tokens)
         ]
         kind, contents, lineno, position = token_wire
-        node = parser.tags[command](
-            parser, Token(TokenType(kind), contents, position, lineno)
-        )
-        left = [_wire_token(token) for token in reversed(parser.tokens)]
+        token = Token(TokenType(kind), contents, position, lineno)
+        # Django's `Parser.parse` pushes `(command, token)` *before* dispatching
+        # (`base.py:573`) and pops after the compile returns (`:587-588`). Rust
+        # drives the outer loop and keeps its own stack
+        # (`crates/template-core/src/parser/mod.rs:52,304,343`), so Django's is
+        # empty here — and a host block tag whose body is unclosed reaches
+        # `Parser.unclosed_block_tag`, which is `self.command_stack.pop()`
+        # (`base.py:651`) and raises `IndexError: pop from empty list` in place
+        # of Django's message. **Measured** before this was written: `{% wrap %}`
+        # with no `{% endwrap %}` gave `ParseError('pop from empty list')` where
+        # stock Django gives "Unclosed tag on line 1: 'wrap'. Looking for one of:
+        # endwrap." Five assertions in the 1547 depend on that text
+        # (`test_custom.py:418,422`, `test_partials.py:317,373,379`), all
+        # unreachable until M9 routes the suite through this seam.
+        #
+        # One entry is the whole of it: `unclosed_block_tag` pops only the
+        # innermost, which is this tag — Rust's enclosing entries are not
+        # mirrored and are not read. Popped on success only, as Django does: an
+        # exception out of the compile leaves the entry and the parse dies with
+        # it, and the `Parser` is per-parse.
+        parser.command_stack.append((command, token))
+        node = parser.tags[command](parser, token)
+        parser.command_stack.pop()
+        left = [_wire_token(tok) for tok in reversed(parser.tokens)]
         return node, left

@@ -1,4 +1,4 @@
-"""The shell entry ``_native.render`` needs (D5), and the loader for its tree.
+"""The shell entry ``_native.compile_template`` needs (D5), and the loader for it.
 
 Rust parses; Python owns the node tree (§6, §5.5). Materialising a
 ``FilterExpression`` calls ``parser.find_filter(name)`` and the real
@@ -52,7 +52,7 @@ from django.template.engine import Engine
 from django_rust_templates import _native
 from django_rust_templates.host import ShellHost
 
-__all__ = ("materialiser", "parser_for", "render_string")
+__all__ = ("materialiser", "parse_template", "parser_for", "render_string")
 
 # `django_rust_templates._impl.parser`, as a file. Resolved from this module's
 # own location rather than from the working directory, so importing this from
@@ -65,12 +65,12 @@ _CACHED = None
 def materialiser():
     """The module that turns Rust's node descriptors into Django's nodes.
 
-    Returned as a module rather than as two functions because ``_native.render``
-    wants both halves — ``check_filter(parser)`` for the parse and
+    Returned as a module rather than as three functions because
+    ``_native.compile_template`` wants all three — ``check_filter(parser)`` for
+    the parse, ``compile_filter(parser)`` for each ``{% if %}`` operand (M5's
+    ``if``, which Django also builds during the parse), and
     ``materialise(desc, None, None, parser)`` for the tree — and handing over one
-    object keeps the seam to a single argument. It wants a third since M5's
-    ``if``: ``compile_filter(parser)``, the ``FilterExpression`` behind each
-    ``{% if %}`` operand, which Django also builds during the parse.
+    object keeps the seam to a single argument.
 
     Idempotent: both branches go through ``sys.modules``, so the file is executed
     once however many times this is called.
@@ -111,8 +111,9 @@ def parser_for(source, engine=None):
     `engine` defaults to a fresh `Engine()` — which reads settings — because most
     callers have none to offer; when they do, it is the *caller's* engine whose
     `template_builtins` are used, so a filter library the caller registered is
-    visible to the parse. That is the same reason `_native.render` takes the
-    parser rather than building one: Python knows which engine, and Rust cannot.
+    visible to the parse. That is the same reason `_native.compile_template` takes
+    the parser rather than building one: Python knows which engine, and Rust
+    cannot.
 
     `libraries` is the third thing the caller's engine decides, and it was
     missing until M6 — measured, `{% load custom %}` raised
@@ -127,6 +128,36 @@ def parser_for(source, engine=None):
         Lexer(source).tokenize(),
         builtins=engine.template_builtins,
         libraries=engine.template_libraries,
+    )
+
+
+def parse_template(source, engine=None):
+    """Parse `source` with the Rust engine and return Django's `Template`.
+
+    This is the shell's one source-to-`Template` path, and it is the shape
+    `Engine.from_string` needs at M9 — hence returning the object rather than a
+    rendered string. `render_string` is this plus `Template.render`.
+
+    The `Parser` and the `ShellHost` are built here, before the parse, for the
+    reason `render_string` records: the host snapshots `parser.tags` at
+    construction to tell Django's own builtin callables from anything a
+    `{% load %}` puts there.
+
+    `extra_data` is **not** set here. It belongs to
+    `_impl/parser.py::template_for`, which owns the whole attribute list because
+    a `Template` built by `__new__` never runs `Template.__init__`'s
+    `self.extra_data = parser.extra_data` (`base.py:198-200`); the parser reaches
+    it as an argument. Setting it in two places is how the two would drift.
+    """
+    if engine is None:
+        engine = Engine()
+    parser = parser_for(source, engine)
+    return _native.compile_template(
+        source,
+        parser,
+        materialiser(),
+        engine,
+        ShellHost(parser),
     )
 
 
@@ -151,23 +182,7 @@ def render_string(source, context, engine=None):
     No exception handling: the parse's `TemplateSyntaxError` and the render's
     own exceptions must both reach the caller as themselves, because
     `tests/test_render_parity.py` compares types and messages as well as output.
-
-    **The `ShellHost` is built here, before the parse, and that timing is
-    load-bearing**: it snapshots `parser.tags` at construction to tell Django's
-    own builtin callables from anything a `{% load %}` puts there. Built after
-    the parse it would see the post-load table and every loaded tag would read as
-    a builtin.
     """
-    if engine is None:
-        engine = Engine()
     if isinstance(context, dict):
         context = Context(context)
-    parser = parser_for(source, engine)
-    return _native.render(
-        source,
-        context,
-        parser,
-        materialiser(),
-        engine,
-        ShellHost(parser),
-    )
+    return parse_template(source, engine).render(context)

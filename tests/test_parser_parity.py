@@ -106,8 +106,8 @@ def filter_parser():
 
 
 def ours_parse(source, debug=False):
-    # **One** parser, handed to both halves — the same shape `_native.render`
-    # uses. It is the filter registry the parse builds each `{% if %}` operand
+    # **One** parser, handed to both halves — the same shape
+    # `_native.compile_template` uses. It is the filter registry the parse builds each `{% if %}` operand
     # from (`compile_filter`) *and* the one materialisation turns the wire
     # filter names back into functions with, and `find_filter` reads one
     # `self.filters` dict, so two instances would be two registries where Django

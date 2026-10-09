@@ -375,11 +375,11 @@ def _materialise_operand(lookup, value, parser=None):
     return (lookup, variable if lookup else variable.resolve({}))
 
 
-def template_for(nodelist, engine=None):
+def template_for(nodelist, engine=None, parser=None):
     """A real :class:`~django.template.base.Template` around a materialised tree.
 
-    ``_native.render`` renders through this rather than calling
-    ``nodelist.render(context)``, because **rendering a nodelist requires a
+    The render goes through this rather than calling ``nodelist.render(context)``
+    directly, because **rendering a nodelist requires a
     bound context** and binding is a `Template`-level act: Django's
     `Template.render` enters `context.bind_template(self)`, and the render path
     reads `context.template.engine` in five places — `string_if_invalid` for a
@@ -400,6 +400,20 @@ def template_for(nodelist, engine=None):
     * ``origin``, ``source`` — only the debug exception path
       (`get_exception_info`, `:1060-1063`). Set so that path fails on Django's
       terms rather than on an `AttributeError` from here.
+    * ``extra_data`` — ``self.extra_data = parser.extra_data``, but **not** in
+      `Template.__init__`: it is inside `compile_nodelist`'s `try`, immediately
+      after `parser.parse()` and before the `return nodelist`
+      (`base.py:198-200`). Nothing at M6 reads it; `{% partial %}` does at M13
+      (`engine.py:194`, a `getattr(..., {})`). It is the sixth name on this list
+      because a shell that builds the Template by `__new__` skips the line, and
+      the failure would be silent — a partial lookup that always misses.
+
+    ``parser`` is a parameter rather than this function reaching for one,
+    because the parser is per-parse and this function has no other way to see
+    it. ``None`` means "there was no parser", which is the hand-built-fixture
+    case in `tests/test_materialise.py`, and gives `{}` — the value
+    `Parser.__init__` sets (`base.py:514`) and therefore what Django's own
+    `Template` carries for a parse in which no tag wrote anything.
 
     ``engine`` is the caller's, or a fresh `Engine()`, which is the same object
     `parser_for` already needed: `Engine.__init__` reads settings, and any caller
@@ -419,6 +433,7 @@ def template_for(nodelist, engine=None):
     template.name = None
     template.origin = None
     template.source = ""
+    template.extra_data = {} if parser is None else parser.extra_data
     return template
 
 
@@ -475,8 +490,8 @@ def compile_filter(parser):
 
     ``None`` is not a permissive default for this one, unlike ``check_filter``'s
     — see ``Host::compile_filter`` in ``template-core``. A caller that has a
-    ``Parser`` should pass it; ``_native.render`` builds its own from the parser
-    it was handed, so the shell's end-to-end path cannot forget.
+    ``Parser`` should pass it; ``_native.compile_template`` builds its own from
+    the parser it was handed, so the shell's end-to-end path cannot forget.
     """
     return parser.compile_filter
 

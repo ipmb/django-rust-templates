@@ -1983,7 +1983,17 @@ fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>
     )
 }
 
-/// Parse, materialise and render — M3's end-to-end entry.
+/// Parse, materialise, and build the `Template` — M3's end-to-end entry.
+///
+/// **This returns the `Template` rather than rendering it, and that is M6 Task
+/// 4's change.** Django's `Template.__init__` sets `self.extra_data =
+/// parser.extra_data` inside `compile_nodelist`'s `try`, right after
+/// `parser.parse()` (`base.py:198-200`), and a shell that builds the `Template`
+/// by `__new__` skips that line. Handing the object back lets
+/// `_impl/parser.py::template_for` own the whole attribute list in one place —
+/// which is what its own docstring has always claimed — instead of a second
+/// source-to-`Template` path existing for the shell to keep in step. The caller
+/// renders it, which is also what `Engine.from_string` needs at M9.
 ///
 /// **Two Python arguments, not one, and the second is a defect the plan did not
 /// anticipate.** D5 settled that the `Parser` comes from the caller, because
@@ -2031,21 +2041,20 @@ fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>
 /// same argument D5 makes for the parser: Python knows which engine, and Rust
 /// cannot construct one.
 ///
-/// Nothing is caught. A `TemplateSyntaxError` from the parse and an exception
-/// from the render must both propagate as themselves, because
-/// `tests/test_render_parity.py` compares exception *types and messages* as well
-/// as output.
+/// Nothing is caught. A `TemplateSyntaxError` from the parse propagates as
+/// itself, and the caller's `Template.render` propagates the render's own
+/// exceptions the same way, because `tests/test_render_parity.py` compares
+/// exception *types and messages* as well as output.
 #[pyfunction]
-#[pyo3(signature = (source, context, parser, tree, engine, host = None))]
-fn render(
+#[pyo3(signature = (source, parser, tree, engine, host = None))]
+fn compile_template(
     py: Python<'_>,
     source: &str,
-    context: Py<PyAny>,
     parser: Py<PyAny>,
     tree: Py<PyAny>,
     engine: Py<PyAny>,
     host: Option<Bound<'_, PyAny>>,
-) -> PyResult<String> {
+) -> PyResult<Py<PyAny>> {
     let tree = tree.bind(py);
     let check = tree.getattr("check_filter")?.call1((parser.bind(py),))?;
     // `{% if %}`'s other half, from the same module and for the same reason:
@@ -2079,12 +2088,14 @@ fn render(
         register_ref,
         parser.bind(py),
     ))?;
-    let template = tree
-        .getattr("template_for")?
-        .call1((nodelist, engine.bind(py)))?;
-    template
-        .call_method1("render", (context,))?
-        .extract::<String>()
+    // `parser` is the third argument because `template_for` reads
+    // `parser.extra_data` there (`base.py:198-200`). Passing the parser rather
+    // than the dict keeps the two in step: there is no way to hand over one
+    // parse's state with another parse's tree.
+    let template =
+        tree.getattr("template_for")?
+            .call1((nodelist, engine.bind(py), parser.bind(py)))?;
+    Ok(template.unbind())
 }
 
 #[pymodule]
@@ -2105,7 +2116,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_variable, m)?)?;
     m.add_function(wrap_pyfunction!(parse_filter_expression, m)?)?;
     m.add_function(wrap_pyfunction!(resolve, m)?)?;
-    m.add_function(wrap_pyfunction!(render, m)?)?;
+    m.add_function(wrap_pyfunction!(compile_template, m)?)?;
     m.add_class::<NodeRef>()?;
     m.add_class::<NodeListRef>()?;
     m.add_class::<NodeSlot>()?;

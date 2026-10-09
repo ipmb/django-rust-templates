@@ -74,6 +74,19 @@ def _shadowing_engine():
     return engine
 
 
+def _builtin_shadowing_engine():
+    """The same library, but configured as the caller's `OPTIONS["builtins"]`.
+
+    Not the same thing as `{% load %}`: `Parser.__init__` merges `builtins`
+    before anything is parsed (`base.py:522-523`), so this is the path
+    `Engine(..., builtins=[...])` / `OPTIONS["builtins"]` takes and it never
+    touches `parser.libraries` or the lexer.
+    """
+    engine = Engine()
+    engine.template_builtins.append(_shadow_library())
+    return engine
+
+
 class LoadShadowingTests(unittest.TestCase):
     def test_a_loaded_library_replaces_a_builtin_of_the_same_name(self):
         """`{% load %}` updates the parser's one tag dict, so the load wins.
@@ -98,6 +111,36 @@ class LoadShadowingTests(unittest.TestCase):
         """
         output = render.render_string("{% comment %}x{% endcomment %}ok", {}, Engine())
         self.assertEqual(output, "ok")
+
+    def test_a_callers_own_builtin_outranks_rusts_builtin(self):
+        """The predicate must be about *defaulttags*, not about the engine.
+
+        A caller whose `OPTIONS["builtins"]` provides `comment` has replaced
+        Django's `do_comment` in `parser.tags` at construction. Django runs the
+        caller's tag; so must we. The discriminating assertion is the output:
+        Rust's own `{% comment %}` renders `"ok"`, the caller's renders
+        `"shadowedok"`.
+
+        **This row is a correction, and the defect it corrects was measured.**
+        `ShellHost` used to compare against `dict(parser.tags)` taken at
+        construction — which is *after* `Parser.__init__` merged the engine's
+        builtins, so it captured the caller's library as if it were Django's.
+        `parser.tags["comment"] is snapshot["comment"]` was True, `has_tag`
+        answered "Rust's", and Rust's `do_comment` ran while the caller's tag was
+        silently dropped. Found by review against the pinned tree, not by the
+        suite: the only `builtins` use anywhere in `template_tests` is a *filter*
+        library in `test_parser.py`, so nothing in the 1547 reaches it.
+        """
+        source = "{% comment %}x{% endcomment %}ok"
+
+        ours = render.render_string(source, {}, _builtin_shadowing_engine())
+        theirs = _builtin_shadowing_engine().from_string(source).render(Context({}))
+
+        self.assertEqual(theirs, "shadowedok", "the fixture stopped shadowing")
+        self.assertEqual(ours, theirs, f"template: {source!r}")
+        # The value Rust's own `comment` would have produced, so that the
+        # equality above cannot be satisfied by both sides taking the Rust path.
+        self.assertNotEqual(ours, "ok")
 
     def test_the_sandwich_binds_each_filter_at_its_own_token(self):
         """Review Focus 3, end to end, now that `{% load %}` exists.
