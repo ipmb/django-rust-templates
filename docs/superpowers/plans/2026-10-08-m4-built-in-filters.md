@@ -784,6 +784,22 @@ A Python analogue was checked and there is no live instance: `check.sh` discover
 `parser_error_corpus.py` — are corpora rather than tests, so the pattern is doing
 its job. Worth knowing a future `corpus_tests.py` would be skipped in silence.
 
+**A third instance of the same shape, found while declining a test-only probe
+filter.** `cargo test -p template-py --no-run` *succeeds* and prints a path under
+`target/debug/deps/`, which reads as "the binding crate's tests link". The binary
+it produces holds `0 tests, 0 benchmarks`: with no `#[test]` rooting a pyo3 call,
+`-Wl,-dead_strip` collects every reference and the undefined `_Py*` symbols never
+have to resolve. The check is green for a reason unrelated to the claim, and it
+stays green until the first test that actually attaches — which fails the link
+with `Undefined symbols for architecture arm64: _Py_InitializeEx,
+_PyGILState_Ensure, …`, because `extension-module` adds the dynamic-lookup flag to
+the **cdylib** link only, never to a test executable. So `template-py` has no
+Rust-side test surface as declared, and moving `extension-module` behind a default
+feature to create one would change what `maturin develop` ships — the artifact
+every Python-side test in this project depends on, which is the wrong thing to
+reconfigure in order to test it. Recorded rather than fixed: the wrapper's
+coercion half is pinned by `cut`'s lazy-proxy corpus row instead (§D3, Task 4).
+
 - [ ] **Step 6: Run the gate and commit**
 
 ```bash
@@ -1798,6 +1814,17 @@ entirely the host's.
   the wrapper ever stops replacing the value the body receives. Reuse the
   module-scope `LAZY_SAFE_PROXY` in `tests/filter_cases.py` rather than building
   a second one.
+
+  **Two of those three rows are controls and the third is the guard, which is
+  why the set cannot be trimmed for speed.** With a `mark_safe`d `SafeString`,
+  `was_safe` is already true, so handing the body `current` instead of `coerced`
+  gives byte-identical output; with a plain `str` both values are unsafe, and
+  likewise. The lazy `__proxy__` is the only one of the three where the pre- and
+  post-coercion values differ in safety — the loop's own test is `False` on it and
+  the wrapper's is `True` — so it alone fails when the replacement is removed. The
+  other two exist to prove the ordinary paths still answer correctly, and deleting
+  them would cost correctness coverage; deleting the proxy row would cost the
+  guard.
 - `addslashes` (`:60-69`) — three `replace`s in the order backslash, `"`, `'`.
 - `make_list` (`:254-263`) — `list(str(value))`, so **code points**: a combining
   sequence is two elements. An integer becomes a list of its digit characters.
