@@ -70,7 +70,10 @@ MARKER_WINDOW = 4
 # transcription — measured by `.review/m9-measurements/m9_measure_parse_path.py`
 # over both parity corpora (the hand-written one and the generator; the
 # generator reaches `Parser.error` and `Parser.invalid_block_tag`, which the
-# hand-written corpus does not, so both passes are needed).
+# hand-written corpus does not, so both passes are needed). That script takes
+# the module as an argument — `m9_measure_parse_path.py context.py engine.py` —
+# so one instrument regenerates any entry here, and it prints the entry ready to
+# paste. It lives under `m9-` because M9 wrote it; nothing about it is M9's.
 #
 # The table is pinned rather than re-measured on every run because measuring
 # means installing the shim and parsing ~566 templates, which is the parity
@@ -157,6 +160,13 @@ COMPARED_PATH = {
         (197, 204, "IfParser.parse"),
         (206, 214, "IfParser.expression"),
     ],
+    # 0 functions, measured rather than assumed: the parity harness executes
+    # nothing in this file. `EngineHandler` is entered through `engines.all()`,
+    # which no parity source calls — the harness parses, it does not render.
+    # Measured with `.review/m10-measurements/m10_measure_compared_path.py`,
+    # which interposes all nine M10 files verbatim in a scratch universe and
+    # runs both corpora through `django_parse`.
+    "utils.py": [],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])
@@ -329,6 +339,21 @@ DECLARED = {
             # exists the claim it makes is that it is upstream's, which is what
             # this declaration states and what the diff above measures.
             ((2, 3), None, "# TRANSCRIBED: django/template/smartif.py (Django 6.0.9)"),
+        ],
+    ),
+    "utils.py": (
+        "django/template/utils.py",
+        [
+            # The marker and its blank separator, ours only — a pure insertion
+            # (`None` upstream). Upstream has no docstring here, so the marker
+            # is a comment on line 1 rather than a docstring's first line, which
+            # is why this region is `(1, 2)` where `smartif.py`'s is `(2, 3)`;
+            # `MARKER_WINDOW` accepts both. No executable line either way, so
+            # the snippet is clause (5)'s required note.
+            #
+            # Like `smartif`, and unlike `base.py`, **that is the entire file**:
+            # no delegation, nothing to read past the marker.
+            ((1, 2), None, "# TRANSCRIBED: django/template/utils.py (Django 6.0.9)"),
         ],
     ),
 }

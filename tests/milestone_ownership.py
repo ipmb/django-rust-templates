@@ -38,7 +38,6 @@ OWNERS = {
     # because `origin` is not in `django_modules()`.
     "context": "M10",
     "engine": "M10",
-    "utils": "M10",
     "loaders": "M10",
     "loaders.base": "M10",
     "loaders.filesystem": "M10",
@@ -102,7 +101,7 @@ UNDECIDED = {
 INTERPOSED = {
     "M0": ["exceptions"],
     "M9": ["base", "smartif"],
-    "M10": [],
+    "M10": ["utils"],
 }
 
 

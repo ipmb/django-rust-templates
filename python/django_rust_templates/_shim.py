@@ -110,6 +110,7 @@ SHADOWING = {
     "base.py": "transcribed",
     "exceptions.py": "fresh",
     "smartif.py": "transcribed",
+    "utils.py": "transcribed",
 }
 
 

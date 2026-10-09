@@ -18,8 +18,21 @@ that is not ours — the drift class this project has spent two milestones
 removing, reintroduced in the one place where it would look like a legitimate
 regeneration.
 
+Not every transcribed module opens with a docstring, and M10's nine are where
+that stopped being hypothetical: ``context.py``, ``engine.py``, ``utils.py`` and
+``loaders/base.py`` open with imports, and ``loaders/__init__.py`` is 0 bytes
+upstream. For those the marker is a comment on line 1 followed by a blank line —
+:data:`render` picks the form from the source, and ``check_transcriptions.py``'s
+``MARKER_WINDOW`` accepts both. **Either way the insertion is exactly two
+lines**, which is what the declared regions and every measured ``COMPARED_PATH``
+span for these files are written against.
+
+Keys are file names (``"base.py"``), not module stems, because that is the
+spelling ``DECLARED``, ``COMPARED_PATH`` and ``_shim.SHADOWING`` all use: four
+tables, one spelling of a file's identity.
+
 Usage:
-    python -I scripts/gen_impl_transcription.py base smartif
+    python -I scripts/gen_impl_transcription.py base.py smartif.py
     python -I scripts/gen_impl_transcription.py --check
 """
 
@@ -31,7 +44,27 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 CHECKOUT = ROOT / ".django"
 IMPL = ROOT / "python" / "django_rust_templates" / "_impl"
 
-MODULES = {"base": "django/template/base.py", "smartif": "django/template/smartif.py"}
+MODULES = {
+    "smartif.py": "django/template/smartif.py",
+    "utils.py": "django/template/utils.py",
+}
+
+# Transcriptions this generator must **not** write, because their difference from
+# the pin is more than the marker: `base.py` delegates `Template.compile_nodelist`
+# to Rust, in a declared region. Regenerating it would silently replace that
+# delegation with upstream's text — a change `check_transcriptions.py` permits
+# only because it is declared, and one this tool cannot express.
+#
+# That is the whole partition, and it is why this list exists rather than a
+# per-file flag: **this tool produces "the pin plus a marker", and a file whose
+# difference is more than that is the guard's, not this one's.** Keeping
+# `base.py` in `MODULES` is what made this script stale for two milestones
+# without anyone noticing — `--check` had been failing on `base.py` since M9
+# wrote the delegation by hand, and nothing invoked it. M10 measured it and puts
+# it on the fast path, which is why the failure could no longer be ignored.
+HAND_WRITTEN = {
+    "base.py": "django/template/base.py",
+}
 
 # The pinned version, so a transcription says which upstream it transcribes and
 # a bump has one place to change rather than one per file.
@@ -39,17 +72,27 @@ DJANGO_VERSION = "6.0.9"
 
 
 def render(name: str) -> str:
-    """The exact contents ``_impl/<name>.py`` must have."""
+    """The exact contents ``_impl/<name>`` must have."""
+    if name in HAND_WRITTEN:
+        raise SystemExit(
+            f"{name} differs from the pin by more than the marker — its declared "
+            "region carries code upstream does not have, so this generator would "
+            "overwrite it. Edit it by hand and let check_transcriptions.py check it."
+        )
     if name not in MODULES:
         raise SystemExit(f"{name}: not a transcription; known: {sorted(MODULES)}")
     source = (CHECKOUT / MODULES[name]).read_text()
     marker = f"# TRANSCRIBED: {MODULES[name]} (Django {DJANGO_VERSION})\n"
-    if not source.startswith('"""\n'):
-        raise SystemExit(
-            f"{MODULES[name]} does not open with a bare docstring; the marker's "
-            "insertion point is text-anchored and needs fixing by hand"
-        )
-    return '"""\n' + marker + "\n" + source[4:]
+    if source.startswith('"""\n'):
+        return '"""\n' + marker + "\n" + source[4:]
+    # No docstring to sit in, so the marker is a comment on line 1 with a blank
+    # line after it — the same shape the docstring form has, two lines either
+    # way, which is the property the span arithmetic depends on. This branch
+    # used to be a SystemExit reading "does not open with a bare docstring; the
+    # marker's insertion point is text-anchored and needs fixing by hand", which
+    # was right while `base.py` was the only transcription and M10 made wrong:
+    # four of its nine files open with imports and one is empty.
+    return marker + "\n" + source
 
 
 def main() -> int:
@@ -62,16 +105,17 @@ def main() -> int:
     failures = 0
     for name in args.module:
         want = render(name)
-        path = IMPL / f"{name}.py"
+        path = IMPL / name
         if args.check:
             got = path.read_text() if path.is_file() else ""
             if got != want:
                 failures += 1
-                print(f"{name}.py is not what the generator produces "
+                print(f"{name} is not what the generator produces "
                       f"(run: scripts/gen_impl_transcription.py {name})")
             else:
-                print(f"{name}.py matches the generator")
+                print(f"{name} matches the generator")
         else:
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(want)
             print(f"wrote {path.relative_to(ROOT)} ({len(want.splitlines())} lines)")
     return 1 if failures else 0

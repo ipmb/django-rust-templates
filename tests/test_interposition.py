@@ -13,12 +13,36 @@ delegation that quietly called Django's own implementation is green too
 
 Rows arrive with the commit that makes them true, so every commit is green:
 ``base``'s here, ``compile_nodelist`` in Task 2, ``smartif`` in Task 3, the
-resolver in Task 5.
+resolver in Task 5, and M10's ``ModuleInterpositionTests`` below.
+
+``ModuleInterpositionTests`` carries M10's rows, one group per module, and each
+module gets three kinds of claim that do not imply one another — see that
+class's docstring. It uses :func:`render_through`, defined here because Task 7's
+loader rows and Task 8's case-sensitivity rows both need the same construction.
 """
 
+import pathlib
+import tempfile
 import unittest
 
+from django.template import Context, Engine
 from django_rust_templates import _shim
+
+
+def render_through(tmpdir, source, name="index.html", **context):
+    """Write ``source`` into ``tmpdir`` and render it through a real ``Engine``.
+
+    A real ``Engine``, with the loader spelled as a dotted path, because that is
+    the route every Django project and the suite itself take:
+    `find_template_loader` does `import_string` on the string, which is the path
+    Review Focus 4 is about. ``dirs`` is not passed alongside it —
+    `Engine.__init__` raises `ImproperlyConfigured` when `loaders` and `app_dirs`
+    are both given — and the tuple form `(path, dirs)` is how Django's own loader
+    tests spell the same thing.
+    """
+    pathlib.Path(tmpdir, name).write_text(source)
+    engine = Engine(loaders=[("django.template.loaders.filesystem.Loader", [tmpdir])])
+    return engine.get_template(name).render(Context(dict(context)))
 
 
 class InterpositionTests(unittest.TestCase):
@@ -364,11 +388,88 @@ class InterpositionTests(unittest.TestCase):
                     sorted(pinned),
                     f"the functions the parity harness executes in {name} have "
                     f"changed, so COMPARED_PATH['{name}'] is stale — regenerate "
-                    "it with .review/m9-measurements/m9_measure_parse_path.py",
+                    "it with .review/m9-measurements/m9_measure_parse_path.py "
+                    f"{name} (the module is an argument; it prints the entry "
+                    "ready to paste)",
                 )
             for label in sorted(pinned):
                 with self.subTest(module=name, function=label):
                     self.assertEqual(measured[label], pinned[label])
+
+
+class ModuleInterpositionTests(unittest.TestCase):
+    """Every module M10 interposes, with the evidence that it is ours.
+
+    Three claims per module, and none of them implies the others:
+
+    * **resolution** — importing the dotted name gives our file. This is what
+      the meter and `check.sh`'s pre-flight read.
+    * **identity** — the class a caller gets is not the pinned copy's. Resolution
+      and identity differ: a module can be ours while a consumer that imported
+      the name earlier still holds Django's object, and `isinstance` is then
+      false across the boundary.
+    * **reach** — the code path the milestone is about actually enters it.
+      Measured with `tests/compared_path.instrumented`, over the parity harness
+      the `COMPARED_PATH` table was measured with, so the row and the pin are one
+      spelling of the question. Where a module is on the *render* path rather
+      than the parse path, the row renders through a real `Engine` instead, and
+      the pinned copy is instrumented alongside as a positive control: a
+      non-zero count only shows the instrument counted something.
+
+    Rows arrive with the commit that makes them true, so every commit is green.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _shim.install()
+
+    def test_utils_resolves_to_our_file(self):
+        import django.template.utils as utils
+
+        self.assertIn("_impl", utils.__file__, utils.__file__)
+
+    def test_the_engine_handler_class_is_not_djangos(self):
+        import django.template.utils as utils
+
+        from tests.pinned_module import load_pinned
+
+        pinned = load_pinned("utils.py")
+        self.assertIsNot(utils.EngineHandler, pinned.EngineHandler)
+        self.assertIsNot(
+            utils.InvalidTemplateEngineError, pinned.InvalidTemplateEngineError
+        )
+
+    def test_the_package_built_its_handler_from_our_class(self):
+        """The discriminating row: ``django.template.engines`` is *our* handler.
+
+        ``_impl/__init__.py`` is a transcription and does ``from .utils import
+        EngineHandler``, then ``engines = EngineHandler()``. So the singleton that
+        ``loader.py`` reaches through ``engines.all()`` is built from whichever
+        class that import bound — and if the interposition were absent it would be
+        Django's, while the two rows above stayed green.
+        """
+        import django.template as package
+        import django.template.utils as utils
+
+        self.assertIs(package.engines.__class__, utils.EngineHandler)
+
+    def test_the_engine_lookup_runs_our_code(self):
+        """``engines.all()`` is the route out of ``utils`` into a template load.
+
+        The suite's settings have ``TEMPLATES = []`` — the project's own
+        ``tests/__init__.py`` configures with ``USE_I18N`` only, so the global
+        default applies — which makes ``all()`` an empty list and a *safe* call.
+        The count is what the row reads, not the result.
+        """
+        import django.template as package
+        import django.template.utils as utils
+
+        from tests.compared_path import instrumented
+
+        with instrumented(utils) as counts:
+            self.assertEqual(list(package.engines.all()), [])
+
+        self.assertIn("EngineHandler.all", counts)
 
 
 class ShadowingTests(unittest.TestCase):

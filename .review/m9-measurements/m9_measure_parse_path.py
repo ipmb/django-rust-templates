@@ -1,4 +1,12 @@
-"""Which functions in `base.py` does the parity harness actually execute?
+"""Which functions in an interposed module does the parity harness execute?
+
+The module is an argument (``base.py`` by default), because M10 added nine more
+``COMPARED_PATH`` entries and one re-measurement instrument beats ten scripts.
+It was hardcoded to ``base.py`` when M9 was the only milestone with a pin;
+`tests/test_interposition.py`'s stale-pin failure message names this script for
+every entry now, so it has to be able to answer for every entry.
+
+    python -I .review/m9-measurements/m9_measure_parse_path.py [module ...]
 
 `tests/parity_target.py` asserts that the transcription's declared regions miss
 "the compared path", so that the parity comparison cannot become Rust against
@@ -23,6 +31,7 @@ Run it the way the suite is run, because `django.template.base` must be ours:
         python .review/m9-measurements/m9_measure_parse_path.py
 """
 
+import importlib
 import os
 import random
 import sys
@@ -47,10 +56,7 @@ from django_rust_templates import _shim  # noqa: E402
 if not _shim.installed():
     sys.exit("shim is not installed")
 
-import django.template.base as base  # noqa: E402
-
-if "django.template.base" in _shim.unshimmed():
-    sys.exit("django.template.base is not ours; this measurement is meaningless")
+from scripts.check_transcriptions import module_of  # noqa: E402
 
 from tests.compared_path import definitions, measure  # noqa: E402
 from tests.parser_corpus import (  # noqa: E402
@@ -68,28 +74,39 @@ from tests.test_parser_parity import django_parse  # noqa: E402
 _rng = random.Random(RANDOM_SEED)
 generated = [random_template(_rng) for _ in range(RANDOM_CASES)]
 
-by_hand = measure(base, TEMPLATES, django_parse)
-by_generator = measure(base, generated, django_parse)
+for name in sys.argv[1:] or ["base.py"]:
+    dotted = module_of(name)
+    module = importlib.import_module(dotted)
 
-print(f"hand-written corpus ({len(TEMPLATES)}): {len(by_hand)} function(s)")
-print(f"generated corpus ({len(generated)}): {len(by_generator)} function(s)")
-only_generated = sorted(set(by_generator) - set(by_hand))
-print("reached only by the generator:", only_generated or "none")
-print()
+    # The measurement is meaningless if the module is not ours: `measure` would
+    # count entries into Django's functions and the pin would be a pin on the
+    # fallback. The same guard M9 had, generalised off `base`.
+    if dotted in _shim.unshimmed():
+        sys.exit(f"{dotted} is not ours; this measurement is meaningless")
 
-reached = dict(by_hand)
-reached.update(by_generator)
+    by_hand = measure(module, TEMPLATES, django_parse)
+    by_generator = measure(module, generated, django_parse)
 
-all_defs = definitions(base)
-ours = {name: span for name, span in all_defs.items() if span is not None}
-print(f"{len(reached)} of {len(ours)} function(s) the module defines were executed")
-print()
-print("ours-side span   function")
-for name, span in reached.items():
-    print(f"  {span[0]:5d}-{span[1]:<5d}    {name}")
-print()
-print("for scripts/check_transcriptions.py's COMPARED_PATH['base.py']:")
-print("    [")
-for name, span in reached.items():
-    print(f'        ({span[0]}, {span[1]}, "{name}"),')
-print("    ],")
+    print(f"=== {name} ({dotted}) ===")
+    print(f"hand-written corpus ({len(TEMPLATES)}): {len(by_hand)} function(s)")
+    print(f"generated corpus ({len(generated)}): {len(by_generator)} function(s)")
+    only_generated = sorted(set(by_generator) - set(by_hand))
+    print("reached only by the generator:", only_generated or "none")
+
+    reached = dict(by_hand)
+    reached.update(by_generator)
+
+    all_defs = definitions(module)
+    ours = {label: span for label, span in all_defs.items() if span is not None}
+    print(f"{len(reached)} of {len(ours)} function(s) the module defines were executed")
+    print()
+    print("ours-side span   function")
+    for label, span in sorted(reached.items(), key=lambda kv: kv[1]):
+        print(f"  {span[0]:5d}-{span[1]:<5d}    {label}")
+    print()
+    print(f"for scripts/check_transcriptions.py's COMPARED_PATH['{name}']:")
+    print("    [")
+    for label, span in sorted(reached.items(), key=lambda kv: kv[1]):
+        print(f'        ({span[0]}, {span[1]}, "{label}"),')
+    print("    ],")
+    print()
