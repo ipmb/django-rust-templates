@@ -114,22 +114,22 @@
 //! subtracted. The discriminator is on the **compile** side, and specifically on
 //! the lifetime of the state it touches.
 //!
-//! **Flagged, not resolved: `partial` and `partialdef` are the rule's next two
-//! candidates, and M13 must place them.** Both touch `parser.extra_data`
+//! **Flagged, not resolved: `partialdef` alone is left, and the analysis below
+//! is why `partial` could leave first.** Both touch `parser.extra_data`
 //! (`defaulttags.py:1251`, `defaulttags.py:1279`), the same *kind* of host parse
 //! state the rule subtracts, so neither can be compiled from a token alone as
 //! written. `partial` is the stronger of the two and it is worth recording what
-//! it actually does: `partial_func` constructs
-//! `DeferredSubDict(extra_data, "partials")` — a **live view over the parser's
-//! dict** — and hands it to `PartialNode`, so the compiled node closes over parse
-//! state that outlives the parse. That is not "reads host state at compile"; it
-//! is a value a `NodeDesc` cannot represent at all. They stay in this table for
-//! now because their stubs make the milestone visible and because M13 has a real
-//! choice — widen the seam, or grow the wire an `extra_data` channel — that M3
-//! must not pre-empt. The reviewer's argument distinguished the pair (only
-//! `partial`'s *render* re-enters host state); that distinction does not hold
-//! under this rule, which acts at compile time, where both are the same case.
-//! What is recorded here is the measurement, not a verdict.
+//! it actually does: `partial_func` constructs `DeferredSubDict(extra_data,
+//! "partials")` — a **live view over the parser's dict** — and hands it to
+//! `PartialNode` (`defaulttags.py:1279-1280`), so the compiled node closes over
+//! parse state that outlives the parse. That is not "reads host state at
+//! compile"; it is a value a `NodeDesc` cannot represent at all, and it is what
+//! `Host::partial_node` exists for — Task 3 placed the name when it landed that
+//! method. The reviewer's argument distinguished the pair (only `partial`'s
+//! *render* re-enters host state); that distinction does not hold under this
+//! rule, which acts at compile time, where both are the same case. What is
+//! recorded here is the measurement, which the placement has now vindicated,
+//! and `partialdef` is the second name it applies to.
 //!
 //! The count is 25 = 27 built-ins minus those two, and the metric matters:
 //! `Engine().template_builtins[0].tags` is 24 (`defaulttags` alone), while the
