@@ -17,6 +17,7 @@ pub mod desc;
 pub mod error;
 pub mod filter_expr;
 pub mod host;
+pub mod kwargs;
 pub mod registry;
 pub mod resolve;
 pub mod smartif;
@@ -29,6 +30,7 @@ pub use desc::{
 };
 pub use error::{Error, ErrorKind};
 pub use host::{Host, NoHost};
+pub use kwargs::{kwarg_re, token_kwargs, Kwargs};
 pub use registry::CompileFn;
 
 use std::collections::HashMap;
