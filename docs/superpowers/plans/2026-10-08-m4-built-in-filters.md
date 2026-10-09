@@ -2015,7 +2015,30 @@ entirely the host's.
   trap: on `TypeError` it returns **`value`, the unjoined list**, not `""`. With
   `autoescape=True` it is `conditional_escape(arg).join([conditional_escape(v)
   for v in value])`; with `False` it is a bare `arg.join(value)`. Result is
-  `mark_safe`d. The corpus needs both `autoescape` states.
+  `mark_safe`d. The corpus needs both `autoescape` states — **and it cannot
+  express either one today.** See the harness note below.
+
+**Harness prerequisite for this group, found by reading the render path rather
+than by hitting it: the corpus has no per-row context.** `scripts/filter_probe.py`'s
+`django_answer` builds `Context({"x": value})` with defaults, and
+`tests/test_filter_parity.py`'s `render_django` passes it no knobs at all, so
+every row is scored under `autoescape=True, use_tz=<settings>`. That is fine for
+Tasks 3 and 4 — no filter in them reads either — and it is fine for most of this
+group, but `join` and `unordered_list` are `needs_autoescape` (`:1301`), and the
+date/time groups are `expects_localtime`. So **the central integration for this
+group adds a per-row `context` key** to `tests/filter_cases.py`, honoured by both
+sides: `Context({"x": value}, autoescape=…, use_tz=…)` on the Django side
+(`context.py:144` takes both) and the same two values into `_native.filter`,
+which already takes them.
+
+The key is absent from a row that wants the defaults, and the change is §11'd the
+same way everything else is: `join` with `autoescape=False` must be **observed
+failing for its intended reason** under the old fixed-context path — the row
+would be scored under `autoescape=True` and answer the escaped join, which is a
+different question rather than a crash, exactly the shape of the two harness
+defects Task 4 exposed. Do not add the key before the row that needs it: an
+unused knob is the `repr` pattern at the harness level, and this group's first
+row with `autoescape=False` is what makes it observable.
 - `random` (`:642-648`) — `random_module.choice(value)`, catching `IndexError` →
   `""`. **Review Focus 4**: the corpus row asserts membership, and the test says
   so in its name, because an equality row would be green 1 time in 57.
