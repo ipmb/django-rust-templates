@@ -16,12 +16,22 @@ export PYTHONPATH="$PWD/scripts/shimpath:$PWD/.django:${PYTHONPATH:-}"
 .venv/bin/python .review/m11-measurements/m11_measure_filter_path.py
 ```
 
-`-I` implies `-s` and ignores `PYTHONPATH`, and the shim is installed by a
-`sitecustomize` on it — so a measurement run under `-I` silently measures stock
-Django and would "prove" the filter path is Django's by measuring a run in which
-our engine was never installed. That is not hypothetical: the first run of this
-script did exactly that, and printed `django.template.base -> .django/...` while
-the conclusion it was written to test was about our `_impl/base.py`.
+`-I` implies both `-s` and `-E`, and it is **`-E`** that ignores `PYTHONPATH` —
+`-s` only drops the user site directory. Measured here:
+
+```
+PYTHONPATH=$PWD/.django .venv/bin/python -s -c "import django"  -> .django/django/__init__.py
+PYTHONPATH=$PWD/.django .venv/bin/python -E -c "import django"  -> ModuleNotFoundError
+```
+
+The narrow flag is therefore not a substitute: someone who reached for `-s` from a
+sentence that named it as the cause would keep the shim on the path, which is the
+failure this paragraph exists to prevent. And because the shim is installed by a
+`sitecustomize` on `PYTHONPATH`, a measurement run under `-I` silently measures
+stock Django and would "prove" the filter path is Django's by measuring a run in
+which our engine was never installed. That is not hypothetical: the first run of
+this script did exactly that, and printed `django.template.base -> .django/...`
+while the conclusion it was written to test was about our `_impl/base.py`.
 
 **The rule is not "never use `-I`" — it is "never use `-I` when you want the
 shim".** An instrument that wants the *opposite* needs the opposite flag, and
