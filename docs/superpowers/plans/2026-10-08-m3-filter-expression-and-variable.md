@@ -198,9 +198,14 @@ than working around:
 So `_native.render` is a Rust `#[pyfunction]` that parses in Rust and then calls
 into the shell's materialiser, and it takes the `Parser` as an argument. The
 shell entry that supplies one is
-`django_rust_templates._impl.engine.render_string(source, context)`, added in
-Task 7, which constructs `Parser(tokens, builtins=Engine().template_builtins)`
-and passes it down. Two consequences worth naming:
+`django_rust_templates.render.render_string(source, context, engine=None)`, added
+in Task 7, which constructs `Parser(tokens, builtins=engine.template_builtins)`
+and passes it down. **The plan put that function at
+`django_rust_templates._impl.engine`, which is impossible** — `_impl` is on the
+shim's search path for `django.template`, so a file named `engine.py` there
+shadows Django's real `engine.py` and installing the shim fails. Task 7's
+corrections section carries the measured `ImportError`. Two consequences worth
+naming:
 
 - **The parser argument is not a seam that outlives M3.** At M9 the shim
   interposes `base`, `Template.render` owns its parser, and `render_string`
@@ -233,8 +238,8 @@ and passes it down. Two consequences worth naming:
 | `crates/template-core/src/parser/kwargs.rs` | **New.** `kwarg_re` and `token_kwargs`. |
 | `crates/template-core/src/parser/resolve.rs` | **New.** The primitive resolver and its `LookupTarget` trait. |
 | `crates/template-py/src/lib.rs` | **Modify.** `_native.builtin_tag_names` (Task 1); `_native.render` and `_native.resolve` (Task 7); the new `AttrValue` arms (Tasks 3, 4, 5); the `Variable` and `FilterExpr` pyclasses with their `_desc_to_py` helpers and `_native.parse_variable` / `_native.parse_filter_expression` (Tasks 3 and 5 — each ships with the parser that produces it). |
-| `python/django_rust_templates/_impl/parser.py` | **Modify.** Materialisers for the new descriptors and the `NodeRef` callback. |
-| `python/django_rust_templates/_impl/engine.py` | **New.** `render_string(source, context)` — the shell entry that constructs the `Parser` `_native.render` needs (D5). |
+| `python/django_rust_templates/_impl/parser.py` | **Modify.** Materialisers for the new descriptors, the `NodeRef` callback, `template_for(nodelist, engine)`, and the `check_filter` callable `_native.parse`/`_native.render` take as the host. |
+| `python/django_rust_templates/render.py` | **New.** `render_string(source, context, engine=None)`, `parser_for(source, engine=None)` and `materialiser()` — the shell entry `_native.render` needs (D5). **Not `_impl/engine.py`**: a file of that name under `_impl` shadows Django's real `django/template/engine.py` through the shim's finder and breaks `_shim.install()` — Task 7's corrections have the measurement. |
 | `tests/pyregex_splices.txt`, `tests/test_pyregex_parity.py` | **New.** The class is compared against Django's *assembled* patterns, not against itself. |
 | `tests/filter_expr_corpus.py`, `tests/test_filter_expr_parity.py` | **New.** |
 | `tests/test_render_parity.py` | **New.** |
@@ -2978,14 +2983,14 @@ after the load. `{% load %}` must not ship before the handle does.
 **Files:**
 - Create: `crates/template-core/src/parser/resolve.rs`
 - Modify: `crates/template-py/src/lib.rs` (`_native.render`, `_native.resolve` — **not** `parse_variable` or `parse_filter_expression`, which Task 3 and Task 5 created)
-- Create: `python/django_rust_templates/_impl/engine.py` — the shell entry that supplies the `Parser` (D5; written in Step 4)
+- Create: `python/django_rust_templates/_impl/engine.py` — the shell entry that supplies the `Parser` (D5; written in Step 4). **This path is a defect and the file was written at `python/django_rust_templates/render.py` instead — see "Task 7 as implemented" below for the measured `ImportError`.**
 - Test: `crates/template-core/src/parser/resolve.rs`, `tests/test_render_parity.py` (**new**), `tests/differential/cases.py` (extend)
 
 **Interfaces:**
 - Consumes: `VariableDesc`, `parse_variable`, the materialiser and its `parser` argument.
 - Produces:
   - `template_core::parser::resolve::{resolve_lookup, LookupOutcome, LookupTarget, Step}`
-  - `template_core::parser::resolve::LookupOutcome` — `Found(NodeRef) | Missing { bit: String, container: NodeRef } | Reraise | Unimplemented(String)`
+  - `template_core::parser::resolve::LookupOutcome` — `Found(NodeRef) | Missing { bit: String, container: NodeRef } | Escaped | Unimplemented(String)`. The variant shipped as `Reraise`; renamed because Django's outer handler substitutes for a `silent_variable_failure` rather than re-raising — see "Task 7 as implemented".
   - `_native.resolve(path: str, context: Any) -> Any` — **no `parser`**, see Step 4
   - `_native.render(source: str, context: Any, parser: Any) -> str`
   - `django_rust_templates._impl.engine.render_string(source: str, context: Any) -> str`
@@ -4070,6 +4075,159 @@ Run: `source scripts/env.sh && scripts/check.sh; echo "exit=$?"` → exit 0, 154
 git add crates/template-core/src crates/template-py/src python tests scripts
 git commit -m "M3 task 7: the primitive resolver and the first _native.render"
 ```
+
+**Task 7 as implemented — eight corrections, and three of them are defects the
+plan's own text would have produced.** Two are in the plan's *file structure*
+rather than in a step, so they are listed first.
+
+- **`python/django_rust_templates/_impl/engine.py` is impossible, and the shell
+  entry lives at `python/django_rust_templates/render.py` instead.** This
+  invalidates the File Structure row (line 237) and the `_impl.engine.render_string`
+  reference above it. The reason is measured, not read: `_shim`'s finder serves
+  **any** `_impl/<name>.py` as `django.template.<name>`, so once the shim is
+  installed, `_impl/__init__.py`'s `from .engine import Engine` resolves to our
+  own file and installing the shim fails with
+
+  ```text
+  ImportError: cannot import name 'Engine' from 'django.template.engine'
+  (/…/python/django_rust_templates/_impl/engine.py)
+  ```
+
+  `_impl/parser.py` gets away with the same trick only because Django has no
+  `template/parser.py` to shadow. The rule is therefore **"no `_impl` file may
+  take the name of a real `django.template` module"**, not "`_impl` is closed",
+  and the shell entry belongs outside the shimmed package. `django_rust_templates.render`
+  costs nothing in the progress meter: `_shim.unshimmed()` is 25 before and after,
+  because the meter compares source trees under `_impl`.
+
+- **`materialiser()` loads `_impl/parser.py` from its file, and that is not
+  laziness either.** The shim's `django.template` *is* `_impl/__init__.py`, and
+  that file imports its own siblings, so importing the module by package name
+  executes it and fails:
+
+  ```text
+  ModuleNotFoundError: No module named 'django_rust_templates._impl.engine'
+  ```
+
+  `render.materialiser()` probes `find_spec("django.template.parser")` first and
+  falls back to `spec_from_file_location`, which makes M9 a no-op there: once the
+  shim is installed for real the first branch is taken. `tests/test_materialise.py`
+  and `tests/test_filter_expr_parity.py` already carried their own copy of the
+  same importlib incantation; both still work and both are now the *second* copy
+  rather than the only one, so folding them onto this loader is a follow-up, not
+  a correctness question.
+
+- **D5's `_native.render` is four Python arguments, not two, and the two extras
+  are `tree` (the materialiser module) and `engine`.**
+  `tree` exists because of the `ModuleNotFoundError` above: Rust cannot import
+  the shell's materialiser by name in M3, so the shell hands over the module and
+  Rust calls `tree.check_filter(parser)`, `tree.materialise(desc, None, None,
+  parser)` and `tree.template_for(nodelist, engine)`. Handing over one object
+  rather than three callables is what keeps the seam to a single argument.
+  `engine` exists because the render path *reads* it — see the next item — and a
+  shell that handed Rust a parser built from one engine while Rust built another
+  for the `Template` would render a different answer than the caller's engine.
+  Both extras are D5's own argument applied twice: Python knows which parser and
+  which engine, and Rust cannot construct either.
+
+- **The render must go through a real `Template`, because rendering a nodelist
+  needs a *bound* context.** Measured on the first smoke run: `{{ nope }}` raised
+  `AttributeError: 'NoneType' object has no attribute 'engine'`, because
+  `context.template` is read on six lines of the render path — `string_if_invalid`
+  at `base.py:793`, `:997`, `:1005`, `:1011`, `:1024` and `engine.debug` at
+  `:1054` — and only `Template.render` binds it (`bind_template`, `:170-176`).
+  `_impl/parser.py` therefore gained `template_for(nodelist, engine)`, built with
+  `Template.__new__` plus explicit attribute assignment for the same reason
+  `_materialise_variable` bypasses `Variable.__init__`: the constructor parses the
+  source a second time in Python and discards the tree Rust just built. That
+  function owns the attribute list, and its docstring names what reads each one.
+
+- **`_native.parse` gained `check_filter`, discharging Task 6's prerequisite.**
+  `render` builds the host itself (`tree.check_filter(parser)`) rather than taking
+  it as an argument, so `render` cannot be called with a parser whose checks were
+  forgotten. `_native.parse` keeps `check_filter=None` as its default for the
+  callers that have no `Parser` — Task 3's and Task 5's parity tests — and the
+  measured pair (`x|nope:1:2` reporting `Invalid filter: 'nope'` with the host and
+  `Could not parse the remainder: ':2'` without) is unchanged by that default
+  being `None`.
+
+- **The statics are `pyo3::sync::PyOnceLock`, not `GILOnceCell`.** pyo3 0.29.3
+  made `GILOnceCell` `pub(crate)`: `error[E0603]: struct GILOnceCell is private`.
+  `PyOnceLock` is the pinned crate's own replacement and its `import(py, module,
+  attr)` collapses the `base_context` lookup to one line.
+
+- **Three corrections inside `resolve.rs`, each measured against the pinned tree
+  rather than reasoned from a reading of `base.py`, and each caught by a
+  measurement after the code was already written and green.**
+  1. **Django's `dir()` rule lives on the attribute arm's *swallowed* exception
+     and nowhere else** (`base.py:963-995`). The first version consulted it for
+     every failed lookup; measured, a `__getattr__` raising `RuntimeError` with
+     the name absent from `dir()` propagates in Django, so the misplaced rule
+     rendered `''` where Django raises. `Step::Raised` is now an unconditional
+     escape and only `Step::Miss` on the attribute arm consults `in_dir`.
+  2. **The callable arm runs inside the loop, after every bit**, not once at the
+     end (`base.py:999`). Measured: `{{ f.b }}` with `f = lambda: {"b": "B"}`
+     renders `'B'`, because Django calls `f` after the first bit and looks `b` up
+     on the result; the end-of-loop placement looked `b` up on the function and
+     reported a missing key.
+  3. **`CallArm { Call, DoNotCall, AltersData }` replaces the plan's
+     `is_callable()`.** A boolean folds three branches that do three different
+     things, and two of them were measured to differ from what the boolean would
+     produce: `do_not_call_in_templates` renders the *function's repr* (Django's
+     branch is `pass`), and `alters_data` substitutes `string_if_invalid`. The
+     third is implemented rather than deferred — `DoNotCall` needs no call at
+     all, so honouring it is free, and `Unimplemented` there would have been
+     loud about something that was never M8's.
+
+- **`LookupOutcome::Reraise` is now `LookupOutcome::Escaped`, and the rename is
+  the finding.** Django's outer `except Exception` (`base.py:1014-1026`) has
+  **two** branches, not one:
+
+  ```text
+  base.py:1023   if getattr(e, "silent_variable_failure", False):
+  base.py:1024       current = context.template.engine.string_if_invalid
+  base.py:1026   else: raise
+  ```
+
+  `Reraise` asserted the second and made the first unreachable, so an exception
+  carrying `silent_variable_failure` — Django's own documented idiom, and what
+  `django.core.exceptions.ObjectDoesNotExist` sets — re-raised where stock Django
+  substitutes. Measured before the fix, with a `@property` raising
+  `class Silent(Exception): silent_variable_failure = True` and a `Context` bound
+  to a template: stock Django rendered `''`, this port raised `Silent`. Both
+  branches are now in `outcome_to_py`, the substitution reads
+  `context.template.engine.string_if_invalid` through three plain attribute reads
+  (so an unbound context still fails on Django's terms rather than quietly
+  substituting `''`), and
+  `tests/test_render_parity.py::ResolverParityTests` pins both arms plus a
+  non-default `string_if_invalid` — a default of `""` makes the substitution and
+  a constant indistinguishable, which is why that last row exists. Django's
+  `logger.debug` on the same lines is deliberately not reproduced; no test reads
+  it.
+
+- **The four resolver probes moved out of `tests/differential/cases.py` and into
+  `ResolverParityTests`.** A differential case is JSON-able template source plus
+  a JSON-able context, rendered through `Engine.from_string(...).render(...)` on
+  both sides — so it cannot carry a `@property`, a `BaseContext` subclass or an
+  exception class, and a *render* never lets a `VariableDoesNotExist` out because
+  `Variable.resolve` substitutes for it first. The corpus gained the JSON-able
+  half instead (a one-bit-in miss, an out-of-range index, a string key reached as
+  an index, a bare number, a filter on a literal, a lookup as a filter argument, a
+  two-filter chain, a chain through a missing variable), and the object-shaped
+  half drives `_native.resolve` against `Variable._resolve_lookup` directly and
+  compares **the exception class object as well as the message**. `cases.py`'s
+  module docstring states the split, so the next reader does not go looking for
+  the probes in the corpus.
+
+- **A divergence the new render test found, fixed by threading the engine.** The
+  shell called `Engine()` itself, so `render_string` ignored a caller's engine:
+  measured, `Engine(string_if_invalid="<<invalid>>")` rendered `{{ nope }}` as
+  `'&lt;&lt;invalid&gt;&gt;'` through stock Django and `''` through the shell.
+  Every other row passed while that one was wrong, because the default
+  `string_if_invalid` is `""`. `render_string`, `parser_for` and `template_for`
+  now take an optional `engine` and pass it on, so one engine is on both halves
+  of the call. `test_the_engine_the_caller_passes_is_the_one_that_renders` is the
+  row, and it was observed failing for that exact reason before the fix.
 
 ---
 

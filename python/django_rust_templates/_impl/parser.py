@@ -21,12 +21,14 @@ from django.template.base import (
     FilterExpression,
     Node,
     NodeList,
+    Template,
     TextNode,
     Token,
     TokenType,
     Variable,
     VariableNode,
 )
+from django.template.engine import Engine
 from django.template.defaulttags import (
     AutoEscapeControlNode,
     CommentNode,
@@ -47,6 +49,7 @@ __all__ = (
     "check_filter",
     "materialise",
     "materialise_node",
+    "template_for",
 )
 
 # An explicit registry rather than `getattr(base, class_name)`: a
@@ -191,6 +194,53 @@ def _materialise_operand(lookup, value, parser=None):
         return (lookup, None)
     variable = _materialise_variable(value, parser)
     return (lookup, variable if lookup else variable.resolve({}))
+
+
+def template_for(nodelist, engine=None):
+    """A real :class:`~django.template.base.Template` around a materialised tree.
+
+    ``_native.render`` renders through this rather than calling
+    ``nodelist.render(context)``, because **rendering a nodelist requires a
+    bound context** and binding is a `Template`-level act: Django's
+    `Template.render` enters `context.bind_template(self)`, and the render path
+    reads `context.template.engine` in five places — `string_if_invalid` for a
+    failed lookup (`base.py:793`, `:997`, `:1005`, `:1011`, `:1024`) and
+    `engine.debug` for the annotated traceback (`:1054`). With `context.template`
+    left `None`, `{{ nope }}` raises `AttributeError: 'NoneType' object has no
+    attribute 'engine'` instead of rendering `string_if_invalid` — measured.
+
+    Built by ``__new__`` and direct assignment rather than by
+    ``Template(source, engine=…)``, for the reason `_materialise_variable` gives:
+    the constructor *parses*, in Python, and would discard the tree Rust just
+    built. The cost of not calling it is that this function owns the attribute
+    list, so here it is, with what reads each one:
+
+    * ``nodelist`` — `Template._render`.
+    * ``engine`` — the five `string_if_invalid`/`debug` reads above.
+    * ``name`` — `Template.render` assigns it to `context.template_name`.
+    * ``origin``, ``source`` — only the debug exception path
+      (`get_exception_info`, `:1060-1063`). Set so that path fails on Django's
+      terms rather than on an `AttributeError` from here.
+
+    ``engine`` is the caller's, or a fresh `Engine()`, which is the same object
+    `parser_for` already needed: `Engine.__init__` reads settings, and any caller
+    of either function must have configured them. It is a parameter rather than a
+    fresh `Engine()` here because the render path *reads* it — `string_if_invalid`
+    on the five lines above and `debug` on the sixth — and a fresh one would
+    render a different answer than the engine the caller chose. Measured:
+    `Engine(string_if_invalid="<<invalid>>")` renders `{{ nope }}` as
+    `'&lt;&lt;invalid&gt;&gt;'` through Django and rendered `''` through a shell
+    that built its own.
+    """
+    if engine is None:
+        engine = Engine()
+    template = Template.__new__(Template)
+    template.nodelist = nodelist
+    template.engine = engine
+    template.name = None
+    template.origin = None
+    template.source = ""
+    return template
 
 
 def check_filter(parser):

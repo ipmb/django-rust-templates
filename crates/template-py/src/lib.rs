@@ -4,9 +4,15 @@
 //! defined in `template-core` are implemented here over `PyObject`.
 
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyStopIteration};
+use pyo3::exceptions::{
+    PyAttributeError, PyException, PyIndexError, PyKeyError, PyNotImplementedError, PyRuntimeError,
+    PyStopIteration, PyTypeError, PyValueError,
+};
 use pyo3::prelude::*;
+use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyDict, PyList, PyTuple};
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 // Aliased to keep the call site readable: `CoreLexer` names the crate's lexer,
 // as opposed to anything Python-side that might later be called a lexer.
@@ -14,7 +20,13 @@ use template_core::lexer::Lexer as CoreLexer;
 use template_core::parser::desc::{
     AttrValue, FilterExprDesc, FilterVar, NodeDesc, NodeListDesc, TokenDesc, VariableDesc,
 };
-use template_core::parser::{Error, ErrorKind, Host, NoHost, Parser as CoreParser};
+// Aliased because this crate already exports a `NodeRef` — the Python-facing
+// handle a *descriptor* carries. The resolver's handles are `template-core`'s
+// and are never the same type.
+use template_core::parser::desc::NodeRef as CoreNodeRef;
+use template_core::parser::resolve::{resolve_lookup, CallArm, LookupOutcome, LookupTarget, Step};
+use template_core::parser::{Error, ErrorKind, Host, Parser as CoreParser};
+use template_core::pynum::IntValue;
 use template_core::token::{Token, TokenType};
 
 /// Every built-in tag command Rust owns a compile function for, ascending.
@@ -634,20 +646,18 @@ fn parse_filter_expression(
     }
 }
 
-/// Parse `source` into a node descriptor tree.
+/// Parse `source` into a node descriptor tree, with `host` at the seam.
 ///
-/// `debug` selects Django's `DebugLexer`, so token positions are recorded.
-/// `origin_template_repr` is Python's `repr()` of `Origin.template_name`, or
-/// `None` when the origin has no template name; it arrives pre-rendered because
-/// a Python `repr` is Python's to produce — the rule §5.2 already records for
-/// `LookupError::Missing::current_repr`.
-#[pyfunction]
-#[pyo3(signature = (source, debug = false, origin_template_repr = None))]
-fn parse(
+/// Shared by `parse` and `render` rather than written twice, because the two
+/// differ only in which host they build — and the host is the whole reason
+/// Task 6's `check_filter` exists. A second copy would be the place a later
+/// caller's host silently went missing.
+fn parse_source(
     py: Python<'_>,
     source: &str,
     debug: bool,
     origin_template_repr: Option<String>,
+    host: &dyn Host,
 ) -> PyResult<Py<PyAny>> {
     let tokens = if debug {
         CoreLexer::debug(source).tokenize()
@@ -655,7 +665,7 @@ fn parse(
         CoreLexer::new(source).tokenize()
     };
 
-    let mut parser = CoreParser::new(tokens, &NoHost);
+    let mut parser = CoreParser::new(tokens, host);
     if let Some(repr) = origin_template_repr {
         parser = parser.with_origin_template_repr(repr);
     }
@@ -664,6 +674,638 @@ fn parse(
         Ok(nodelist) => nodelist_desc_to_py(py, &nodelist),
         Err(error) => Err(parse_error(py, &error)?),
     }
+}
+
+/// Parse `source` into a node descriptor tree.
+///
+/// `debug` selects Django's `DebugLexer`, so token positions are recorded.
+/// `origin_template_repr` is Python's `repr()` of `Origin.template_name`, or
+/// `None` when the origin has no template name; it arrives pre-rendered because
+/// a Python `repr` is Python's to produce — the rule §5.2 already records for
+/// `LookupError::Missing::current_repr`.
+///
+/// `check_filter` is **Task 6's prerequisite, discharged here**: `None` means
+/// "accept every filter name", which is what the descriptor-shape tests want,
+/// but any caller that has a `Parser` in hand must pass
+/// `materialiser.check_filter(parser)`. Without it a filter error defers to
+/// materialisation and the parse-time ordering Django gives it (`find_filter`
+/// then `args_check`, *inside* the match loop, `base.py:771-772`) is lost —
+/// measured, `x|nope:1:2` reports `Invalid filter: 'nope'` with the host and
+/// `Could not parse the remainder: ':2'` without it, and Django reports the
+/// former. `render` passes one; see its comment.
+#[pyfunction]
+#[pyo3(signature = (source, debug = false, origin_template_repr = None, check_filter = None))]
+fn parse(
+    py: Python<'_>,
+    source: &str,
+    debug: bool,
+    origin_template_repr: Option<String>,
+    check_filter: Option<Bound<'_, PyAny>>,
+) -> PyResult<Py<PyAny>> {
+    let host = FilterCheckHost { check_filter };
+    parse_source(py, source, debug, origin_template_repr, &host)
+}
+
+/// Which of Django's three `except` clauses a failed arm is being judged by, so
+/// each swallowed set is read off `base.py` in one place instead of three.
+enum Arm {
+    /// `base.py:964` — `TypeError, AttributeError, KeyError, ValueError,
+    /// IndexError`.
+    Item,
+    /// `base.py:966` — `TypeError, AttributeError`. This is the arm whose
+    /// swallowed exception can still be re-raised, because Django's `dir()` line
+    /// (`:970-977`) sits inside this `except`.
+    Attr,
+    /// `base.py:975` — `IndexError, ValueError, KeyError, TypeError`.
+    Index,
+}
+
+/// Whether `error` is one this arm swallows — the only thing that decides
+/// between falling through to the next arm and leaving the inner `try`.
+///
+/// Django's arms are `except` clauses, so a *subclass* matches and
+/// `PyErr::is_instance_of` (which is `PyErr_GivenExceptionMatches`) is the right
+/// test; comparing type *names* would not be, and would misjudge the two most
+/// common rows — a `KeyError` from a dict-like and a `TypeError` from an
+/// unsubscriptable object.
+fn swallowed(py: Python<'_>, error: &PyErr, arm: Arm) -> bool {
+    match arm {
+        Arm::Item => {
+            error.is_instance_of::<PyTypeError>(py)
+                || error.is_instance_of::<PyAttributeError>(py)
+                || error.is_instance_of::<PyKeyError>(py)
+                || error.is_instance_of::<PyValueError>(py)
+                || error.is_instance_of::<PyIndexError>(py)
+        }
+        Arm::Attr => {
+            error.is_instance_of::<PyTypeError>(py) || error.is_instance_of::<PyAttributeError>(py)
+        }
+        Arm::Index => {
+            error.is_instance_of::<PyIndexError>(py)
+                || error.is_instance_of::<PyValueError>(py)
+                || error.is_instance_of::<PyKeyError>(py)
+                || error.is_instance_of::<PyTypeError>(py)
+        }
+    }
+}
+
+/// A Python object, seen through `LookupTarget`.
+///
+/// **Holds `Py<PyAny>`, not `Bound<'py, PyAny>`, and is therefore `'static`.**
+/// That is forced, not stylistic: `Step::Found` boxes its child, and a boxed
+/// child that borrowed from the container it came from would make
+/// `current = found` in `resolve_lookup` a borrow error — the new `current`
+/// would outlive the old one it borrows from. So each method re-acquires the
+/// token itself with `Python::attach` — the pinned PyO3's spelling
+/// (`pyo3-0.29.3/src/marker.rs:414`; that crate has no `Python::with_gil`), and
+/// acquisition is reentrant, so being called under `_native.resolve`'s own token
+/// is fine).
+struct PyTarget {
+    value: Py<PyAny>,
+    /// Fresh per `resolve` call and shared by every container in it, so a handle
+    /// is dereferenceable within the call that produced it and meaningless
+    /// outside it. Deliberately **not** M2's `resolve_ref` table: that one is
+    /// the shell's and resolves *descriptor* references, while these are values
+    /// the caller asked for. A second persistent table would make `NodeRef`
+    /// ambiguous, which is why this one is per-call and owns nothing on exit.
+    arena: Rc<RefCell<Vec<Py<PyAny>>>>,
+    /// The most recent exception an arm raised, held **by identity** until the
+    /// port decides whether to re-raise it (§5.2 forbids flattening it to a
+    /// string: that would lose `_culprit_node` and `__traceback__`).
+    /// `Rc<Cell<..>>` rather than `Cell<..>` because `get_*` takes `&self` and
+    /// the decision to raise happens in `outcome_to_py`, outside this object.
+    ///
+    /// Stashed on **every** failed arm, including the swallowed ones, because
+    /// `LookupOutcome::Reraise` is returned in two different ways: an arm that
+    /// raised something Django does not swallow, *and* an attribute arm whose
+    /// swallowed `AttributeError` turned out to be one Django re-raises (its
+    /// `dir()` line). The read always follows the failing arm immediately — the
+    /// port never returns `Reraise` twice or later — so the most recent write is
+    /// always the right one.
+    pending: Rc<Cell<Option<PyErr>>>,
+}
+
+/// Hand-written rather than derived, because `Py<PyAny>` is not `Clone`: an
+/// owned Python reference is copied with `clone_ref`, which needs the token.
+/// A derived `Clone` is the one thing about this type that would compile if
+/// `Py` were a plain `Rc`, and it is not — dropping the copy without the token
+/// would be a refcount edit outside the GIL.
+impl Clone for PyTarget {
+    fn clone(&self) -> Self {
+        Python::attach(|py| Self {
+            value: self.value.clone_ref(py),
+            arena: Rc::clone(&self.arena),
+            pending: Rc::clone(&self.pending),
+        })
+    }
+}
+
+impl PyTarget {
+    fn new(
+        value: Py<PyAny>,
+        arena: &Rc<RefCell<Vec<Py<PyAny>>>>,
+        pending: &Rc<Cell<Option<PyErr>>>,
+    ) -> Self {
+        Self {
+            value,
+            arena: Rc::clone(arena),
+            pending: Rc::clone(pending),
+        }
+    }
+
+    /// Classify one arm's result: a swallowed exception is a miss the next arm
+    /// covers, anything else is reported as `Raised`. Both are stashed; see
+    /// `pending`.
+    ///
+    /// Written so the token never leaves its closure — a `Python<'_>` cannot be
+    /// returned out of `Python::attach`, so the classification happens inside.
+    fn step(&self, result: PyResult<Py<PyAny>>, arm: Arm) -> Step {
+        match result {
+            Ok(found) => Step::Found(Box::new(Self::new(found, &self.arena, &self.pending))),
+            Err(error) => {
+                let is_swallowed = Python::attach(|py| swallowed(py, &error, arm));
+                self.pending.set(Some(error));
+                if is_swallowed {
+                    Step::Miss
+                } else {
+                    Step::Raised
+                }
+            }
+        }
+    }
+
+    /// `bit in dir(current)`, **not** `hasattr`: `dir()` lists names statically,
+    /// while `hasattr` invokes `getattr` — which would re-raise the very
+    /// exception this predicate is being asked about. Measured: conflating the
+    /// two turns the `@property` guard into a re-raise in *both* fixtures, which
+    /// is exactly the distinction `resolve.rs`'s pair exists to hold.
+    fn dir(&self, py: Python<'_>, bit: &str) -> bool {
+        let Ok(names) = py
+            .import("builtins")
+            .and_then(|builtins| builtins.getattr("dir"))
+            .and_then(|dir| dir.call1((self.value.bind(py),)))
+        else {
+            // A `dir()` that itself failed cannot be a real answer, and Django
+            // would be raising out of the `except` handler — so "not in dir" is
+            // the reading that keeps the loop's shape.
+            return false;
+        };
+        names.contains(bit).unwrap_or(false)
+    }
+}
+
+impl LookupTarget for PyTarget {
+    /// `hasattr(type(current), "__getitem__")` — the **type**, not the instance.
+    /// A `__getitem__` defined only on the instance is invisible to Django's
+    /// guard (`base.py:963`), which is the classgetitem-versus-getitem rule the
+    /// comment there cites.
+    fn has_getitem(&self) -> bool {
+        Python::attach(|py| {
+            self.value
+                .bind(py)
+                .get_type()
+                .hasattr("__getitem__")
+                .unwrap_or(false)
+        })
+    }
+
+    fn get_item(&self, bit: &str) -> Step {
+        let result = Python::attach(|py| {
+            self.value
+                .bind(py)
+                .get_item(bit)
+                .map(|found| found.unbind())
+        });
+        self.step(result, Arm::Item)
+    }
+
+    fn get_attr(&self, bit: &str) -> Step {
+        let result =
+            Python::attach(|py| self.value.bind(py).getattr(bit).map(|found| found.unbind()));
+        self.step(result, Arm::Attr)
+    }
+
+    fn get_index(&self, index: &IntValue) -> Step {
+        let result = Python::attach(|py| -> PyResult<Py<PyAny>> {
+            let key = match index {
+                IntValue::Small(n) => (*n).into_pyobject(py)?.into_any().unbind(),
+                // `IntValue::Big` exists because Python's `int()` is unbounded,
+                // and its digits are canonical ASCII — the same route
+                // `attr_value_to_py` takes for `AttrValue::BigInt`. Never
+                // `eval`, never a formatted source string. Letting Python's own
+                // `int()` do the conversion is what keeps the arm faithful for
+                // an out-of-range index.
+                IntValue::Big(digits) => py
+                    .import("builtins")?
+                    .getattr("int")?
+                    .call1((digits.as_str(),))?
+                    .unbind(),
+            };
+            Ok(self.value.bind(py).get_item(key)?.unbind())
+        });
+        self.step(result, Arm::Index)
+    }
+
+    fn in_dir(&self, bit: &str) -> bool {
+        Python::attach(|py| self.dir(py, bit))
+    }
+
+    fn context_probes_attribute(&self, bit: &str) -> bool {
+        // `getattr(type(current), bit)` raises for an *absent* attribute, and
+        // that AttributeError is swallowed by Django's inner `except`
+        // (`base.py:977`), so absent and truthy reach the same arm: the instance
+        // attribute is not read. Only a *present and falsy* class attribute does
+        // (`base.py:972-976`). Measured both ways — `{{ c.template }}` on a
+        // `Context` renders `''` even though the instance holds `template=None`,
+        // and a subclass with `zero = 0` renders the instance's `7`.
+        //
+        // `getattr` **walks the MRO**, and that is load-bearing rather than
+        // incidental: `BaseContext` defines `push`, `pop`, `update`, `flatten`
+        // and `__getitem__`, so for a `RequestContext` the class attribute
+        // Django finds is two classes up. A `type(obj).__dict__` probe would
+        // miss every inherited one, the condition would go false, and
+        // `{{ ctx.push }}` would render a bound method instead of the `''` the
+        // guard exists to produce. So this must stay `getattr`; the cheap check
+        // once it exists is `{{ c.push }}` against a `RequestContext`, which
+        // renders `''` here and a `<bound method ...>` repr if the MRO is
+        // skipped.
+        Python::attach(|py| {
+            self.value
+                .bind(py)
+                .get_type()
+                .getattr(bit)
+                .map(|value| !value.is_truthy().unwrap_or(true))
+                .unwrap_or(false)
+        })
+    }
+
+    fn is_context(&self) -> bool {
+        Python::attach(|py| match base_context(py) {
+            Ok(class) => self.value.bind(py).is_instance(class).unwrap_or(false),
+            Err(_) => false,
+        })
+    }
+
+    /// Django's three tests, folded in because only the host can read the two
+    /// flags: `callable(current)`, then `do_not_call_in_templates`, then
+    /// `alters_data` (`base.py:999-1003`).
+    ///
+    /// `None` — not a `CallArm` — when `callable(current)` is false, because
+    /// that is when Django's arm does not run at all; folding it into
+    /// `DoNotCall` would be right for one row and wrong for the reason.
+    fn call_arm(&self) -> Option<CallArm> {
+        Python::attach(|py| {
+            let value = self.value.bind(py);
+            if !value.is_callable() {
+                return None;
+            }
+            let flag = |name: &str| {
+                value
+                    .getattr(name)
+                    .ok()
+                    .and_then(|flag| flag.is_truthy().ok())
+                    .unwrap_or(false)
+            };
+            // Django's order, and it matters: a value with both flags set takes
+            // the `pass` branch, so it is `DoNotCall`.
+            if flag("do_not_call_in_templates") {
+                Some(CallArm::DoNotCall)
+            } else if flag("alters_data") {
+                Some(CallArm::AltersData)
+            } else {
+                Some(CallArm::Call)
+            }
+        })
+    }
+
+    fn node(&self) -> CoreNodeRef {
+        // Register in this call's arena and hand back the index. `template-core`
+        // stores it and never reads it; `outcome_to_py` dereferences it below,
+        // in the same call. The token stays inside the closure, as in `step`.
+        //
+        // A second `node()` on the same object pushes a second handle rather
+        // than reusing the first. That is deliberate: the arena is not a map
+        // keyed by identity, and a lookup that wanted identity would need
+        // `Py::is`, which is the sort of cleverness that makes a per-call arena
+        // into a cache with a lifetime question.
+        Python::attach(|py| {
+            let mut arena = self.arena.borrow_mut();
+            arena.push(self.value.clone_ref(py));
+            CoreNodeRef(arena.len() as u64 - 1)
+        })
+    }
+}
+
+/// Django's `BaseContext`, cached once so `is_context` is not an import per
+/// lookup.
+static BASE_CONTEXT: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+fn base_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
+    BASE_CONTEXT.import(py, "django.template.base", "BaseContext")
+}
+
+/// Django's `VariableDoesNotExist`, cached for the same reason.
+static VARIABLE_DOES_NOT_EXIST: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+/// Django's own `VariableDoesNotExist`, constructed the way Django constructs
+/// it — `(msg, params)`, with the message **left unformatted**.
+///
+/// `VariableDoesNotExist.__str__` does the `%` (`base.py:109-110`), so this
+/// does not call `repr(container)`; measured on the pinned tree, the exception
+/// constructs fine around a parameter whose `__repr__` raises, and raises only
+/// at `str()`. Formatting here would reach back across the seam once per failed
+/// lookup — the hottest failure path in the engine, since `{{ missing }}`
+/// inside a `{% for %}` fails once per iteration — and would produce a message
+/// Django never produces.
+///
+/// The class comes from `django.template.base` through a `GILOnceCell` rather
+/// than from a Rust type, for the same reason `base_context` does: the class is
+/// Python's, and raising a *different* exception class would make a
+/// differential comparison fail on the class rather than on the message.
+fn variable_does_not_exist(py: Python<'_>, bit: &str, container: Py<PyAny>) -> PyResult<PyErr> {
+    let class =
+        VARIABLE_DOES_NOT_EXIST.import(py, "django.template.base", "VariableDoesNotExist")?;
+    // A Rust 2-tuple becomes a Python tuple, which is the shape `params` needs:
+    // `self.msg % self.params`.
+    Ok(PyErr::from_value(class.call1((
+        "Failed lookup for key [%s] in %r",
+        (bit, container),
+    ))?))
+}
+
+/// Whether Django's outer handler substitutes for this exception instead of
+/// re-raising it — `getattr(e, "silent_variable_failure", False)` (`base.py:1023`).
+///
+/// Read off the *instance*, and defaulted to `False` rather than to "missing is
+/// an error": an exception class without the attribute is the common case, and
+/// `getattr` with a default is exactly Django's own expression. A `getattr` that
+/// raises for some other reason is a real failure and propagates rather than
+/// being read as `False`.
+fn silent_variable_failure(py: Python<'_>, error: &PyErr) -> PyResult<bool> {
+    match error.value(py).getattr("silent_variable_failure") {
+        Ok(flag) => Ok(flag.is_truthy()?),
+        // `getattr(e, name, False)` catches `AttributeError` from the lookup —
+        // including one raised by a property — and nothing else, and so does
+        // this arm. A truthiness that raises is Django's `if` raising too, which
+        // is why it is `?` rather than a default.
+        Err(err) if err.is_instance_of::<PyAttributeError>(py) => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
+/// `context.template.engine.string_if_invalid` — Django's substitution for both
+/// `alters_data` and a silent variable failure (`base.py:1024`).
+///
+/// Three plain attribute reads, deliberately not a `getattr` chain with
+/// defaults: stock Django fails with `AttributeError: 'NoneType' object has no
+/// attribute 'engine'` when `context.template` is unbound and
+/// `AttributeError: 'dict' object has no attribute 'template'` when the caller
+/// passed a mapping instead of a `Context`, and a port that substituted `""`
+/// there would be quiet where Django is loud.
+///
+/// Not cached against the context: the engine's `string_if_invalid` is
+/// per-engine, and a cache keyed on the context object would be a second source
+/// of truth for it.
+///
+/// Takes no `Python<'_>`: a `Bound` already carries its interpreter, and a token
+/// the body never reads is a parameter the next reader has to prove is unused.
+fn string_if_invalid(context: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+    Ok(context
+        .getattr("template")?
+        .getattr("engine")?
+        .getattr("string_if_invalid")?
+        .unbind())
+}
+
+/// Turn the port's verdict into Python's: hand back the value behind the
+/// handle, raise Django's `VariableDoesNotExist`, or apply the host half of
+/// Django's outer `except Exception` to the exception it stashed.
+///
+/// `context` is needed only by the [`LookupOutcome::Escaped`] arm, which is the
+/// one place Django's handler reaches for `context.template.engine`.
+fn outcome_to_py(
+    py: Python<'_>,
+    outcome: LookupOutcome,
+    arena: &Rc<RefCell<Vec<Py<PyAny>>>>,
+    pending: &Rc<Cell<Option<PyErr>>>,
+    context: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
+    let value_behind = |handle: CoreNodeRef| -> PyResult<Py<PyAny>> {
+        arena
+            .borrow()
+            .get(handle.0 as usize)
+            .ok_or_else(|| PyRuntimeError::new_err("handle escaped its resolve call"))
+            .map(|value| value.clone_ref(py))
+    };
+
+    match outcome {
+        LookupOutcome::Found(node) => value_behind(node),
+        // The container's handle, which is what Django puts in `params`. It is
+        // already in the arena: `node()` put it there when the loop gave up.
+        LookupOutcome::Missing { bit, container } => {
+            Err(variable_does_not_exist(py, &bit, value_behind(container)?)?)
+        }
+        // `pending` is the reason `LookupOutcome` does not carry the exception:
+        // the enum derives `PartialEq` and is compared in `template-core`'s
+        // tests, where no Python exists.
+        //
+        // Both branches of Django's handler are here, and **the substitution is
+        // the one that was missing**: measured before this arm existed, a
+        // `@property` raising an exception with `silent_variable_failure = True`
+        // re-raised from here where stock Django substituted. Django logs first
+        // (`base.py:1016-1021`); that is deliberately not reproduced — no test
+        // reads it, and a `logger.debug` on the hottest lookup path would be
+        // noise this port has no way to make useful.
+        LookupOutcome::Escaped => {
+            let error = pending
+                .take()
+                .expect("Escaped is only returned after an arm stashed an exception");
+            if silent_variable_failure(py, &error)? {
+                string_if_invalid(context)
+            } else {
+                Err(error)
+            }
+        }
+        LookupOutcome::Unimplemented(message) => Err(PyNotImplementedError::new_err(message)),
+    }
+}
+
+/// The Python object `Variable.literal` holds, for a descriptor that is a
+/// literal rather than a path.
+///
+/// Everything but the quoted string is `attr_value_to_py`'s answer unchanged:
+/// `Int`/`BigInt` are Python `int`s and `Float` is a Python `float`, which is
+/// what `Variable.__init__` stores.
+///
+/// `SafeStr` is the exception, and the difference is a type that rendering
+/// reads: Django stores `mark_safe(unescape_string_literal(var))`
+/// (`base.py:912`), a `SafeString`, and returns it from `resolve` unchanged — so
+/// a `SafeStr` wire object (not a `str` subclass, and not `SafeData`) would make
+/// the value escape-able on a path Django never escapes. `mark_safe` is called
+/// here rather than in the shell because `_native.resolve` returns the value
+/// itself; the shell's `_decode_value` does the same conversion for descriptor
+/// attributes.
+fn literal_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
+    match value {
+        AttrValue::SafeStr(text) => Ok(py
+            .import("django.utils.safestring")?
+            .getattr("mark_safe")?
+            .call1((text.as_str(),))?
+            .unbind()),
+        other => attr_value_to_py(py, other),
+    }
+}
+
+/// Resolve a dotted path against a context, for the differential test.
+///
+/// A separate entry from `render` so the resolver can be compared against
+/// `Variable._resolve_lookup` on paths that no template reaches — a nested
+/// missing key, a `@property` that raises, a `BaseContext` attribute — which is
+/// what makes the resolver *measured* rather than merely unit-tested.
+///
+/// **No `parser` argument**, unlike `render`: this mirrors `_resolve_lookup`,
+/// which needs no filter registry. It raises the two exceptions `_resolve_lookup`
+/// raises — `VariableDoesNotExist` from the arms, and whatever an object's own
+/// code raised — and substitutes `string_if_invalid` in the two places
+/// `_resolve_lookup` itself substitutes it, `alters_data` (M8) and a
+/// `silent_variable_failure` (`base.py:1024`). It does **not** do `resolve`'s
+/// substitution, the one for a missing key, which is one frame out and the
+/// shell's. An unused parameter kept "for symmetry" would be a parameter the next
+/// reader has to prove is unused.
+///
+/// The path is split by Task 3's `parse_variable`, so `a.b`, `5` and `_("x")`
+/// are classified exactly as `Variable.__init__` classifies them, and then:
+///
+/// * `translate` → `Unimplemented`, naming M12 (D4). Checked **before** the
+///   literal, because `_("x")` sets both: `resolve` applies translation to the
+///   value, and returning the untranslated literal is the quiet wrong answer D4
+///   exists to avoid.
+/// * `literal` → the literal, without touching the context. This is
+///   `Variable.resolve`'s first branch, and skipping it would make
+///   `_native.resolve("5", {})` a lookup of the key `5`.
+/// * `lookups` → the port, with one arena and one `pending` shared across the
+///   call.
+#[pyfunction]
+fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    let desc = match template_core::parser::variable::parse_variable(path) {
+        Ok(desc) => desc,
+        Err(error) => return Err(parse_error(py, &error)?),
+    };
+
+    if desc.translate {
+        return Err(PyNotImplementedError::new_err(
+            "resolving a translated variable is M12's",
+        ));
+    }
+
+    if let Some(literal) = &desc.literal {
+        return literal_to_py(py, literal);
+    }
+
+    let Some(lookups) = desc.lookups.as_ref() else {
+        // `Variable.__init__` guarantees one of the two is set: every branch of
+        // its `except ValueError` assigns a literal or the lookups. This is an
+        // invariant of *our* parse, so it is a runtime error and not a template
+        // error.
+        return Err(PyRuntimeError::new_err(
+            "a parsed variable has neither a literal nor lookups",
+        ));
+    };
+
+    let arena = Rc::new(RefCell::new(Vec::new()));
+    let pending = Rc::new(Cell::new(None));
+    // Bound first, because `resolve_lookup` takes the context by value into the
+    // root target and `outcome_to_py` needs it again for the one arm Django's
+    // outer handler reads `context.template.engine` from. `Bound::clone` is a
+    // refcount bump, not a conversion.
+    let context = context.bind(py);
+    let root = PyTarget::new(context.clone().unbind(), &arena, &pending);
+    outcome_to_py(
+        py,
+        resolve_lookup(lookups, Box::new(root)),
+        &arena,
+        &pending,
+        context,
+    )
+}
+
+/// Parse, materialise and render — M3's end-to-end entry.
+///
+/// **Two Python arguments, not one, and the second is a defect the plan did not
+/// anticipate.** D5 settled that the `Parser` comes from the caller, because
+/// materialising a `FilterExpression` calls `parser.find_filter`. It did not
+/// settle how Rust reaches the *materialiser*, and the answer the plan assumed
+/// is impossible: the shell lives in `django_rust_templates/_impl`, whose
+/// `__init__.py` is the shim's `django.template` and imports its own siblings
+/// (`from .engine import Engine`), so `import
+/// django_rust_templates._impl.parser` raises
+/// `ModuleNotFoundError: No module named 'django_rust_templates._impl.engine'`
+/// — measured. Under the shim the name `django.template.parser` would resolve,
+/// and M3 runs unshimmed. So the shell hands its materialiser over, as one
+/// module rather than three callables: `tree.check_filter(parser)`,
+/// `tree.materialise(desc, None, None, parser)` and
+/// `tree.template_for(nodelist)` are the functions this needs, and all three are
+/// already named in that module. Handing over one object also keeps the seam to
+/// a single argument, which is what makes it cheap to widen later.
+///
+/// The parse is driven **with the host**, which is Task 6's prerequisite: the
+/// filter check must run inside the match loop or the error ordering Django
+/// gives it is lost (see `parse`). `check_filter(parser)` is the shell's
+/// `find_filter` + `args_check` pair, built here rather than in the shell so
+/// that `render` cannot be called with a parser whose checks were forgotten.
+///
+/// **The render goes through `tree.template_for(nodelist, engine)`, not
+/// `nodelist.render(context)`, and that is a third thing the plan did not
+/// anticipate.** Rendering a nodelist needs a *bound* context, and binding is a
+/// `Template`-level act: the render path reads `context.template.engine` for
+/// `string_if_invalid` (`base.py:793`, `:997`, `:1005`, `:1011`, `:1024`) and
+/// for `engine.debug` (`:1054`). With `context.template` left `None`, `{{ nope }}`
+/// raises `AttributeError: 'NoneType' object has no attribute 'engine'` —
+/// measured, on this very call. So the shell builds a real `Template` around the
+/// tree (`__new__` plus assignment, because the constructor would parse the
+/// source a second time in Python) and `Template.render` binds it. See
+/// `template_for` in `_impl/parser.py`, which owns the attribute list.
+///
+/// **`engine` is a fifth argument, and it is the caller's for the same reason
+/// the parser is.** The render path reads the engine in six places, so a shell
+/// that handed over a parser built from one engine and let Rust build another
+/// would render a *different answer* than the caller's engine — measured before
+/// this argument existed:
+/// `Engine(string_if_invalid="<<invalid>>")` renders `{{ nope }}` as
+/// `'&lt;&lt;invalid&gt;&gt;'` through stock Django and rendered `''` through the
+/// shell. Passing it keeps one engine on both halves of the call, and it is the
+/// same argument D5 makes for the parser: Python knows which engine, and Rust
+/// cannot construct one.
+///
+/// Nothing is caught. A `TemplateSyntaxError` from the parse and an exception
+/// from the render must both propagate as themselves, because
+/// `tests/test_render_parity.py` compares exception *types and messages* as well
+/// as output.
+#[pyfunction]
+fn render(
+    py: Python<'_>,
+    source: &str,
+    context: Py<PyAny>,
+    parser: Py<PyAny>,
+    tree: Py<PyAny>,
+    engine: Py<PyAny>,
+) -> PyResult<String> {
+    let tree = tree.bind(py);
+    let check = tree.getattr("check_filter")?.call1((parser.bind(py),))?;
+    let host = FilterCheckHost {
+        check_filter: Some(check),
+    };
+
+    let desc = parse_source(py, source, false, None, &host)?;
+    let nodelist =
+        tree.getattr("materialise")?
+            .call1((desc, py.None(), py.None(), parser.bind(py)))?;
+    let template = tree
+        .getattr("template_for")?
+        .call1((nodelist, engine.bind(py)))?;
+    template
+        .call_method1("render", (context,))?
+        .extract::<String>()
 }
 
 #[pymodule]
@@ -677,6 +1319,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(parse_variable, m)?)?;
     m.add_function(wrap_pyfunction!(parse_filter_expression, m)?)?;
+    m.add_function(wrap_pyfunction!(resolve, m)?)?;
+    m.add_function(wrap_pyfunction!(render, m)?)?;
     m.add_class::<NodeRef>()?;
     m.add_class::<NodeListRef>()?;
     m.add_class::<SafeStr>()?;

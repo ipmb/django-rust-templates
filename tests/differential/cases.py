@@ -8,6 +8,20 @@ separate processes without pickling arbitrary objects.
 This corpus is a starter set. As milestones land, cases are added here first:
 a template that reproduces a failure is far faster to iterate on than the
 corresponding Django test module.
+
+**What this corpus cannot carry, and where those cases went instead.** A case is
+JSON-able template source plus a JSON-able context, and the runner renders both
+sides through ``Engine.from_string(...).render(...)``. So a case can only reach
+what a *render* reaches. That rules out the resolver's object-shaped paths — a
+failing ``@property``, a ``BaseContext`` class attribute, an exception carrying
+``silent_variable_failure`` — because they need real Python objects, and it rules
+out exception *behaviour* under lookup, because a render never lets a
+``VariableDoesNotExist`` out (``Variable.resolve`` substitutes
+``string_if_invalid`` first). They live in
+``tests/test_render_parity.py::ResolverParityTests``, which drives
+``_native.resolve`` against ``Variable._resolve_lookup`` and compares the
+exception class as well as the message. The plan put them here; the JSON
+constraint is what moved them.
 """
 
 CASES = [
@@ -32,9 +46,49 @@ CASES = [
         "context": {"a": {"b": {"c": "deep"}}},
     },
     {
+        "name": "dotted_lookup_misses_one_bit_in",
+        "template": "[{{ a.nope }}]",
+        "context": {"a": {"b": "B"}},
+    },
+    {
         "name": "index_lookup",
         "template": "{{ items.1 }}",
         "context": {"items": ["zero", "one", "two"]},
+    },
+    {
+        "name": "index_lookup_off_the_end",
+        "template": "[{{ items.9 }}]",
+        "context": {"items": ["zero"]},
+    },
+    {
+        "name": "index_lookup_finds_a_string_key",
+        "template": "{{ m.0 }}",
+        "context": {"m": {"0": "zero"}},
+    },
+    {
+        "name": "a_bare_number",
+        "template": "{{ n }}",
+        "context": {"n": 1234567},
+    },
+    {
+        "name": "filter_on_a_literal",
+        "template": "{{ 'ada'|capfirst }}",
+        "context": {},
+    },
+    {
+        "name": "filter_argument_is_a_lookup",
+        "template": "{{ missing|default:fallback }}",
+        "context": {"fallback": "F"},
+    },
+    {
+        "name": "two_filter_arguments_in_a_chain",
+        "template": "{{ n|add:1|add:2 }}",
+        "context": {"n": 1},
+    },
+    {
+        "name": "a_filter_chain_through_a_missing_variable",
+        "template": "{{ nope|upper|default:'D' }}",
+        "context": {},
     },
     {
         "name": "autoescape_on",
