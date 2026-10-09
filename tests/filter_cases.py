@@ -2931,6 +2931,219 @@ CASES: list[dict] = [
         "settings": {"LANGUAGE_CODE": "de"},
         "expected": "meh",
     },
+    # --- Task 8, wave A: `escape`, `force_escape`, `escapeseq`, `safe`,
+    #     `safeseq`, `escapejs` ---------------------------------------------
+    #
+    # Two pairs and two singletons, and the rows are chosen for what they
+    # separate rather than for breadth:
+    #
+    # * `escape` and `force_escape` differ in **which escape** they run.
+    #   `escape` is `conditional_escape` — the host *protocol*, which asks
+    #   `__html__` first (`defaultfilters.py:60-66`) — so a `SafeData` input
+    #   passes through it unchanged, while `force_escape` runs
+    #   `django.utils.html.escape`'s five replacements whatever it is handed. The
+    #   safe-input rows are the pair no single body can satisfy, and each
+    #   filter's other rows are the same table reached by the other route.
+    # * `escapeseq` and `safeseq` are the same walk with a different per-element
+    #   operation, so their rows carry an input the two operations treat
+    #   differently: the `int` 5, which `escape`/`escapejs` coerce to the string
+    #   `'5'` and `mark_safe` turns into a `SafeString` `'5'`. A body that walked
+    #   with the other operation, or that marked the *list* rather than its
+    #   items, is caught by the item types the comparison checks separately.
+    # * `escapejs` is a Rust table (§D2) with no host call past the coercion, and
+    #   its rows are the table's edges: `\n`, `\x00` and `\x1f` from the
+    #   `range(32)` update that spells them as **four uppercase** hex digits, the
+    #   twelve entries the explicit dict holds (`\\ "'><&=;-` plus the two line
+    #   terminators, `html.py:63-75`), and text with nothing to escape at all.
+    {
+        # The protocol on a plain `str`: escaped **and** marked, which is the
+        # loop's `is_safe` plus its `mark_safe`, since `escape` is `is_safe=True`.
+        "name": "escape/plain-text-escapes-and-marks",
+        "filter": "escape",
+        "value": 'a<b>&"c',
+    },
+    {
+        # The `__html__` branch, and the row `force_escape` below cannot pass:
+        # a `SafeData` input is returned **unchanged** and marked, so a body that
+        # always ran the table answers `&lt;b&gt;` here.
+        "name": "escape/safe-input-passes-through",
+        "filter": "escape",
+        "value": mark_safe("<b>"),
+    },
+    {
+        # §D3's lazy case: a `__proxy__` whose `str()` is a `SafeString`. The
+        # protocol's `__html__` is reached *through* the proxy, so this is the
+        # same answer as the row above by a different route — and it is the row
+        # that separates "the protocol" from "`isinstance(value, SafeData)`",
+        # which a proxy is not.
+        "name": "escape/lazy-safe-proxy-is-safe",
+        "filter": "escape",
+        "value": LAZY_SAFE_PROXY,
+    },
+    {
+        # The coercion: `@stringfilter`'s `str(value)`, so the table is run over
+        # a `str` even for an `int` input.
+        "name": "escape/non-string-is-coerced",
+        "filter": "escape",
+        "value": 5,
+    },
+    {
+        # The same coercion to the other spelling, and the row that keeps a body
+        # from taking the "nothing to escape" path too early: `None` has no
+        # `__html__` and is not empty.
+        "name": "escape/none-is-the-string-none",
+        "filter": "escape",
+        "value": None,
+    },
+    {
+        # **`force_escape` escapes a safe value**, which is the whole distinction
+        # from `escape`: same input, `&lt;b&gt;` instead of `<b>`.
+        "name": "force_escape/a-safe-input-is-escaped-anyway",
+        "filter": "force_escape",
+        "value": mark_safe("<b>"),
+    },
+    {
+        # `&` is the first replacement, so an entity is escaped *again* rather
+        # than left alone — `escape` behaves the same way, and the pair of rows
+        # says the difference between the two filters is the protocol and not the
+        # table.
+        "name": "force_escape/an-entity-is-escaped-again",
+        "filter": "force_escape",
+        "value": "&lt;",
+    },
+    {
+        # The coercion again, from the side where the table's own output is what
+        # is marked: `force_escape` has no host call to mark it.
+        "name": "force_escape/none-is-the-string-none",
+        "filter": "force_escape",
+        "value": None,
+    },
+    {
+        # One `conditional_escape` per item, and the element types are half the
+        # answer: the items are `SafeString`s while the **list** is not safe.
+        "name": "escapeseq/each-item-is-escaped-and-marked",
+        "filter": "escapeseq",
+        "value": ["a", "<b>"],
+    },
+    {
+        # The empty sequence, which is also the row that fixes the answer's type:
+        # a `list`, never the tuple it may have been handed.
+        "name": "escapeseq/empty-sequence-answers-an-empty-list",
+        "filter": "escapeseq",
+        "value": [],
+    },
+    {
+        # A tuple in, a list out, with the same per-item treatment — so a body
+        # that returned its input unchanged is caught here and not above.
+        "name": "escapeseq/a-tuple-becomes-a-list",
+        "filter": "escapeseq",
+        "value": ("<b>", "c"),
+    },
+    {
+        # `mark_safe` and not a Rust `Value::Safe(to_str(…))`: the `str` case is
+        # where the two are indistinguishable, which is why it is not the row
+        # that settles it.
+        "name": "safe/a-string-is-marked",
+        "filter": "safe",
+        "value": "abc",
+    },
+    {
+        # The row that settles it: `mark_safe` on a non-`str` computes `str(v)`
+        # and answers a `SafeString`, where a body building the value in Rust
+        # would have to reproduce both halves.
+        "name": "safe/a-non-string-is-converted-and-marked",
+        "filter": "safe",
+        "value": 5,
+    },
+    {
+        # `None` is not "nothing": `str(None)` is `'None'`, and a body that
+        # treated a null value as empty would answer `''` here.
+        "name": "safe/none-is-the-string-none",
+        "filter": "safe",
+        "value": None,
+    },
+    {
+        # `mark_safe` per item, and the `int` is the row's point: it becomes the
+        # **`SafeString`** `'5'`, which `escapeseq`'s identical walk would have
+        # left as a plain `'5'` inside an escaped item.
+        "name": "safeseq/each-item-is-marked-including-the-int",
+        "filter": "safeseq",
+        "value": ["a", 5, "<b>"],
+    },
+    {
+        # The empty sequence again: the answer is a `list` here too, so the two
+        # sequence filters are compared on the same shape.
+        "name": "safeseq/empty-sequence-answers-an-empty-list",
+        "filter": "safeseq",
+        "value": [],
+    },
+    {
+        # A `SafeData` input is *not* special to `escapejs`: it has no flags at
+        # all (`@register.filter("escapejs")`), so `str`-coerce and run the table
+        # happens to a marked string exactly as to a plain one — the opposite of
+        # `escape`'s row above, on the same input.
+        "name": "escapejs/a-safe-input-is-escaped-too",
+        "filter": "escapejs",
+        "value": mark_safe("<b>"),
+    },
+    {
+        # Four uppercase hex digits from the `range(32)` update — `\n` is
+        # `\\u000A` and not `\\u000a`, and not the two-character `\\n` a body
+        # writing its own table would reach for.
+        "name": "escapejs/newline-is-the-four-digit-form",
+        "filter": "escapejs",
+        "value": "\n",
+    },
+    {
+        # The bottom and the top of that range, which bound the update: `\x00`
+        # is the first byte it rewrites and `\x1f` the last, so a body whose
+        # table started at 1 or stopped at 31 fails one of the two.
+        "name": "escapejs/the-control-range-has-both-ends",
+        "filter": "escapejs",
+        "value": "\x00\x1f",
+    },
+    {
+        # Five of the dict's ten ASCII entries at once — `&`, `<`, `>`, `=`,
+        # `;`. They are the *dict*'s rather than the range's, which is why they
+        # are pinned as a set: a body that built the table from `range(32)` alone
+        # leaves every one of them unescaped.
+        "name": "escapejs/the-explicit-dict-characters",
+        "filter": "escapejs",
+        "value": "&<>=;",
+    },
+    {
+        # The four that exist because a JavaScript string literal needs them —
+        # backslash, apostrophe, quote, backtick — and the row where a body that
+        # escaped *HTML* instead (or that reused `html_escape`'s table) differs
+        # on all four. `-` rides along in the middle, the fifth of the ten.
+        "name": "escapejs/quote-apostrophe-backslash-backtick",
+        "filter": "escapejs",
+        "value": "'\"\\`-",
+    },
+    {
+        # The two line terminators JavaScript treats as newlines, and the reason
+        # the table cannot be a `range(32)` update alone: they are above 32.
+        "name": "escapejs/the-line-terminators",
+        "filter": "escapejs",
+        "value": "  ",
+    },
+    {
+        # Text with nothing to escape comes back unchanged — the row that fails
+        # for a body that escaped by a rule (say, everything non-alphanumeric)
+        # rather than by the measured table.
+        "name": "escapejs/plain-text-is-unchanged",
+        "filter": "escapejs",
+        "value": "plain text",
+    },
+    {
+        # `escapejs` is `is_safe=False`, so the loop marks nothing and the
+        # `SafeString` here is the **body's** own marking — the row separates
+        # "the loop marked it" from "the table's output was marked".
+        "name": "escapejs/the-marking-is-the-bodys-own",
+        "filter": "escapejs",
+        "value": None,
+    },
+]
 
 
 # The inputs whose answer is an **exception**, kept apart from [`CASES`] because a

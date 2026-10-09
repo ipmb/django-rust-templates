@@ -35,6 +35,10 @@ pub mod value;
 /// it as `crate::filters::padding::…`.
 mod padding;
 
+/// The same, for the one pure table more than one group's bodies need: see
+/// [`html_escape`] for why it is not a helper inside `escape.rs`.
+mod html_escape;
+
 pub mod add;
 pub mod addslashes;
 pub mod capfirst;
@@ -643,32 +647,30 @@ mod tests {
         "yesno",
     ];
 
-    /// The filters whose bodies are still stubs: the 26 of the 57 that M4 has
-    /// not landed yet.
+    /// The filters whose bodies are still stubs: the 57 minus every name a landed
+    /// group already answers.
     ///
     /// A literal rather than an alias of [`MEASURED_NAMES`] now that groups have
     /// landed, because the two are no longer the same set and an alias would have
-    /// to be trimmed in place to say so. The 26 are the 57 minus `lower` and
-    /// `upper` (Task 3's corpus seed), minus Task 4's six — `capfirst`,
-    /// `title`, `cut`, `addslashes`, `make_list`, `wordcount` — minus Task 5's
+    /// to be trimmed in place to say so. Trimmed so far, in the order they landed:
+    /// Task 3's corpus seed (`lower`, `upper`); Task 4's six — `capfirst`,
+    /// `title`, `cut`, `addslashes`, `make_list`, `wordcount` — Task 5's
     /// eight: `center`, `ljust`, `rjust`, `truncatechars`, `truncatechars_html`,
-    /// `truncatewords`, `truncatewords_html`, `wordwrap` — minus Task 6's
+    /// `truncatewords`, `truncatewords_html`, `wordwrap` — Task 6's
     /// nine: `first`, `last`, `length`, `slice`, `join`, `random`, `dictsort`,
-    /// `dictsortreversed`, `unordered_list` — and minus Task 7's three waves:
+    /// `dictsortreversed`, `unordered_list` — Task 7's three waves:
     /// `add`, `divisibleby`, `get_digit`, `stringformat`; then `pluralize`,
     /// `yesno`, `default`, `default_if_none`; then `filesizeformat` and
-    /// `floatformat`. The wave numbering matches
+    /// `floatformat`; and Task 8 wave A's six — `escape`, `escapejs`,
+    /// `escapeseq`, `force_escape`, `safe`, `safeseq`. The wave numbering matches
     /// `tests/test_filter_parity.py`'s, which counts the same three.
     ///
-    /// **The central commit that lands a group moves that group's names out of
-    /// this list**, in the same commit — and the assertion below is what makes
-    /// forgetting fail rather than pass.
-    const STILL_STUBBED: [&str; 22] = [
+    /// **Deliberately no count in this doc**: it said 26 while the array held 22,
+    /// and a number in prose that nothing checks is a defect this project has
+    /// paid for more than once. The array's length is the count, and the
+    /// assertion below is what makes a stale entry fail rather than pass.
+    const STILL_STUBBED: [&str; 16] = [
         "date",
-        "escape",
-        "escapejs",
-        "escapeseq",
-        "force_escape",
         "iriencode",
         "json_script",
         "linebreaks",
@@ -676,8 +678,6 @@ mod tests {
         "linenumbers",
         "phone2numeric",
         "pprint",
-        "safe",
-        "safeseq",
         "slugify",
         "striptags",
         "time",
@@ -828,7 +828,7 @@ mod tests {
                 // non-`Result` methods meets `NoFilterHost`'s `refused_panic`
                 // before it can return anything — `is_tuple` for `stringformat`
                 // (measured; `if isinstance(value, tuple)` is the source's first
-                // line), `mark_safe` for `safe`/`safeseq` when Tasks 9-10 land.
+                // line), `mark_safe` for `safe`/`safeseq` (Task 8 wave A).
                 // That is the designed refusal working and it is **not a stub**:
                 // a stub returns `unimplemented_filter` without touching the host
                 // at all. A panic is caught rather than propagated because this
