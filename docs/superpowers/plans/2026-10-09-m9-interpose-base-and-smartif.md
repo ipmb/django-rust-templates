@@ -1953,3 +1953,120 @@ alphabet — `_shim.py`'s own comment records the second, where
 `unittest discover` happened to run `test_interposition` before `test_shim` — and
 Task 7 should decide whether the suite wants a single explicit settings
 configuration rather than five guarded ones racing.
+
+### Task 5's "two failures, both the same defect" is two defects, and the handler could not stay in Python
+
+Task 5 is the resolver seam, and it is the one task in M9 that recon found a
+*real* defect in rather than an obligation. The defect is real. Everything the
+plan says about it is not, and the corrections below are the difference between
+a fix and a fix that leaves one of the two rows red.
+
+**(1) Recon finding 4's "exactly two failures, both the same defect" — measured,
+they are two defects that share a symptom.** Both are in
+`template_tests.test_logging.VariableResolveLoggingTests`, and both read as "the
+record is wrong", which is why one reading covered them:
+
+  - **`test_log_on_variable_does_not_exist_not_silent`** —
+    `Variable("article.author").resolve({"article": {"section": "News"}})`. The
+    key is *missing*, so Django reaches `raise VariableDoesNotExist(` at
+    `base.py:989` — which is **inside** the outer `try` opened at `base.py:958`.
+    The handler at `base.py:1014` therefore catches it, logs it, and re-raises.
+    A port that treats "missing" as "already decided, nothing left to do"
+    produces the right exception, with the right message, and **no log record at
+    all**: `assertLogs` reports "no logs of level DEBUG or higher triggered on
+    django.template". This defect is a *missing log*.
+  - **`test_log_on_variable_does_not_exist_silent`** — `Variable("article").resolve(TestObject())`,
+    whose `article` property raises `SilentDoesNotExist`. The log fires either
+    way; what fails is `str(log_record.exc_info[1])`, expected to be
+    `"Attribute does not exist."`. This defect is a *wrong `exc_info`*.
+
+Fixing either one leaves the other red, so the plan's Step 5 — written from the
+recon — would have fixed the second and reported the first as a new discovery.
+The two are now separate rows, `ResolverDelegationTests.test_the_failing_bit_is_passed_to_the_logger`
+(the message, which is the `Missing` defect) and
+`test_the_log_record_carries_the_exception_instance` (the instance), so that a
+regression in one cannot hide behind the other.
+
+**(2) Step 6's sketch invents an attribute and a method that do not exist.**
+The step prints:
+
+```python
+        if self.translate:
+            return self._translate(current, context)
+        return current
+```
+
+`_resolve_lookup` has no such tail and `Variable` has no `_translate`. The
+`translate` branch lives in `Variable.resolve`, one frame out, at upstream
+`base.py:932-941` (`isinstance(value, SafeData)`, `value.replace("%", "%%")`,
+`pgettext_lazy`/`gettext_lazy`). Both `_impl/base.py`'s delegation and this plan
+say translation is applied *after* the lookup, which is true; the sketch says it
+by moving it *into* the lookup, which would duplicate a branch that is still
+there and still upstream's. `Variable.resolve` is untouched at M9 and remains
+outside `COMPARED_PATH`'s reach for exactly one reason: it is not declared, and
+the guard's clause on unreached functions is what keeps it honest.
+
+**(3) The handler could not stay in Python, and the bit's transport is why.**
+Step 5 says "find the `resolve` binding and make the escaping path surface the
+bit to the host … the choice must match how `CallFailure::Raised` and the
+`pending` slot already reach Python, since the handler needs the *exception
+object* as well as the bit". There is no such choice to make, because there is
+no transport that carries both. For the Python frame to be *inside* an `except`
+block, Rust must **raise** — and raising is precisely the operation that cannot
+carry a second value alongside the caller's already-constructed exception
+object, which must also be the one held by identity, since `exc_info[1]` is
+asserted *is* the instance the property raised. The only shapes that work are to
+mutate the caller's exception (changing what `str()` returns for user code that
+catches it) or to add an out-parameter whose entire purpose is to move one
+string one frame.
+
+So the handler — the `logger.debug`, the `silent_variable_failure` branch, and
+the re-raise — is `crates/template-py/src/lib.rs::outcome_to_py`, and Rust
+receives the held exception and passes it as `exc_info=<instance>`. **This is a
+deviation from the plan and it is the interesting one**, because it is the only
+place in M9 where the answer to "should this be Python?" was no for a reason
+other than size: the logger is Python's, the handler is Rust's, and
+`logging.getLogger("django.template")` is reached by call so the record lands on
+the object `assertLogs` replaces the handlers of.
+
+**(4) `exc_info=True` is the wrong spelling, and the obvious assertion hides
+that.** Upstream writes `exc_info=True`, which resolves `sys.exc_info()` at call
+time and is `(None, None, None)` in any frame without a live `except`. A port
+carrying the exception in a stash is exactly "held, never active" — so
+`assertIsNotNone(record.exc_info)` passes on a tuple of `None`s while
+`str(record.exc_info[1])` is `'None'`. The `test_the_log_record_carries_the_exception_instance`
+row executes the naive form on the same logger before executing the render, so
+the premise is produced and asserted on rather than described.
+
+**(5) Three of Task 5's own citations were wrong, and `scripts/anchors.txt`
+caught all three.** `base.py:16` was cited for `logger = logging.getLogger("django.template")`,
+which is at **`base.py:94`**; `base.py:994` was cited for the
+`raise VariableDoesNotExist(`, which is at **`base.py:989`**; and
+`base.py:1015-1021` was a loose range whose end line is the closing paren of the
+`logger.debug` call, so its endpoint quoted `)`. All three were written from the
+plan's own prose rather than read off the tree — the plan's Step 4 doc-comment
+itself says "(`base.py:1014-1018`)", which is the handler's `except` line
+followed by the log call's first three lines and omits both `template_name` and
+`exc_info`. The repaired citations are `base.py:94`, `base.py:989`, and
+`base.py:1015-1020`, each with a snippet authored from the sentence's own claim
+(`logging.getLogger("django.template")`, `raise VariableDoesNotExist(`, and
+`exc_info=True,` at the endpoint) rather than left unquoted.
+
+This is the fifth time in M9 that a number copied from a document — this plan
+included — was wrong, and it is the first time every instance was caught before
+commit rather than after, because the guard compares a snippet to a line. The
+plan is not a source. Read the tree.
+
+**(6) The delegation made five harnesses vacuous, and the guard named them.**
+`tests/differential/cases.py`, `tests/test_render_parity.py::ResolverParityTests`,
+`tests/test_resolve_invalid.py`, `tests/test_resolve_callarm.py` and
+`tests/test_m8_side_effects.py` all compared `_native.resolve` against
+`Variable._resolve_lookup`, which after this task *is* `_native.resolve` — the
+"stock vs Rust" self-comparison those harnesses exist to refuse, arriving
+through the front door and green. Their Python side is now the pinned source
+executed out of `.django` (`tests/parity_target.py::pinned_resolve_lookup`), and
+their teeth were proved by mutation rather than asserted: with `step_one`'s
+`bit` replaced by the loop's last bit, and again with the `Missing` arm's log
+call deleted, the 37 resolver rows across the five harnesses produced 28F+1E and
+21F+15E respectively. The transcription guard's declared-region clause is what
+found the five; nothing in the suite would have.
