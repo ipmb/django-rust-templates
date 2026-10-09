@@ -17,7 +17,7 @@
 //!    **`startswith`**, not `==`: `Parser.parse` stops on
 //!    `token.contents.split()[0] in parse_until`, so `{% elif foo %}` terminates
 //!    the body and its contents are `"elif foo"` (`base.py:561-564`).
-//! 4. An optional `else`, then the `endif` check (`defaulttags.py:1009-1018`).
+//! 4. An optional `else`, then the `endif` check (`defaulttags.py:1007-1018`).
 //!
 //! The `endif` check is the only message this file owns, and it is reached by a
 //! construct the plan's draft got wrong. `{% if a %}{% endif %}{% endif %}` does

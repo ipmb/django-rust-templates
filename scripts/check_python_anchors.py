@@ -70,10 +70,12 @@ and leaves the judgement to a reader. Do not treat its silence as approval.
 
 **The loose range is a sub-case of that limit, and it is the one a reader will
 assume is covered.** A range whose endpoints both carry plausible snippets but
-which spans the wrong region passes both `--check` and `--triage`: `if.rs` cites
-`:1009-1018` for a claim about the optional `else` and the `endif` check, whose
-real span is `:1007-1018`. Both ends look right, the anchor *is* a range, the
-tool *does* check ranges — and it still passes.
+which spans the wrong region passes both `--check` and `--triage`: if.rs cited
+1009-1018 for a claim about the optional `else` and the `endif` check, whose real
+span is 1007-1018. Both ends looked right, the anchor *is* a range, the tool
+*does* check ranges — and it passed for as long as it stood, because one line of
+a function looks much like the next. It is in the past tense here because it was
+read and repaired, not because anything below this line would have caught it.
 
 **Two of those limits select for the same anchors, and the largest is not a limit
 of this tool at all.** Unquoted entries — measured 184 of the 349 on 2026-10-09 —

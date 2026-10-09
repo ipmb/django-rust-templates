@@ -215,7 +215,7 @@ defaulttags.py:995-996	django/template/defaulttags.py	995	996	-	-
 defaulttags.py:996	django/template/defaulttags.py	996	-	token = parser.next_token()	-
 defaulttags.py:999-1006	django/template/defaulttags.py	999	1006	while token.contents.startswith("elif"):	# {% else %} (optional)
 defaulttags.py:1002-1003	django/template/defaulttags.py	1002	1003	-	-
-defaulttags.py:1009-1018	django/template/defaulttags.py	1009	1018	-	-
+defaulttags.py:1007-1018	django/template/defaulttags.py	1007	1018	if token.contents == "else":	-
 defaulttags.py:1011	django/template/defaulttags.py	1011	-	-	-
 defaulttags.py:1013-1017	django/template/defaulttags.py	1013	1017	if token.contents != "endif"	-
 defaulttags.py:1023-1073	django/template/defaulttags.py	1023	1073	-	-
