@@ -53,12 +53,25 @@ def render_all() -> dict[str, str]:
         except Exception as exc:
             results[name] = f"!!{type(exc).__name__}: {exc}"
 
-    # A marker so the driver can prove the two runs really did use different
-    # engines. Without it, a shim that failed to install would make every
+    # A marker so the driver can prove the shim installed in one run and not the
+    # other. Without it, a shim that failed to install would make every
     # comparison trivially identical and the harness silently worthless.
+    #
+    # What it does **not** prove is that Rust ran. Measured 2026-10-09: with the
+    # shim installed, spies on `_native.parse` and `_native.compile_template`
+    # record **0 calls** across this whole corpus, because `django.template.base`
+    # and `django.template.engine` are still Django's — the shim only owns the
+    # package `__init__` and `exceptions` until M9 interposes `base`. So
+    # `installed()` truthfully means "the finder is up", and the value below is
+    # named for that. M9's obligation, recorded here so it is declared and not
+    # noticed: replace this with a call counter on the `_native` entry points and
+    # assert `> 0` for the shim run and `== 0` for stock. That is the commit where
+    # the two propositions coincide.
     import django_rust_templates  # noqa: PLC0415
 
-    results[ENGINE_MARKER] = "rust" if django_rust_templates.installed() else "stock"
+    results[ENGINE_MARKER] = (
+        "shim-installed" if django_rust_templates.installed() else "stock"
+    )
     return results
 
 
@@ -97,10 +110,11 @@ def main() -> None:
     shim = render_in_subprocess("shim")
 
     # Prove the harness can detect a difference before trusting it to report
-    # that there isn't one.
+    # that there isn't one. This proves the *shim installed*; see the note in
+    # `render_all` for why that is not yet the same claim as "Rust ran".
     for label, results, expected in (
         ("stock", stock, "stock"),
-        ("shim", shim, "rust"),
+        ("shim", shim, "shim-installed"),
     ):
         actual = results.pop(ENGINE_MARKER, None)
         if actual != expected:
@@ -116,7 +130,7 @@ def main() -> None:
     ]
 
     if not diffs:
-        print(f"differential: {len(shim)} cases, identical (stock vs rust engine)")
+        print(f"differential: {len(shim)} cases, identical (stock vs shim-installed)")
         return
 
     print(f"differential: {len(diffs)} of {len(stock)} cases differ\n")

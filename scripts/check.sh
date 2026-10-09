@@ -60,7 +60,11 @@ if [ "$FAST" -eq 0 ]; then
   "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_python_word_ranges.py" --check
   "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_python_case_fixups.py" --check
 
-  step "django template_tests (rust engine)"
+  # Not "(rust engine)" until M9 interposes `base` — measured 2026-10-09, this
+  # suite calls `_native` zero times, so the label would assert what the run
+  # does not do. Same correction, and same reason, as `differential.py`'s
+  # output string; the two were the only labels in the repo making the claim.
+  step "django template_tests (shim installed)"
   "$HERE/run_django_suite.sh" template_tests
 fi
 
