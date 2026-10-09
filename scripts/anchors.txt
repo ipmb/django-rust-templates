@@ -113,6 +113,7 @@ base.py:771-773	django/template/base.py	771	773	filter_func = parser.find_filter
 base.py:773	django/template/base.py	773	-	filters.append((filter_func, args))	-
 base.py:775	django/template/base.py	775	-	if upto != len(token):	-
 base.py:783	django/template/base.py	783	-	self.is_var = isinstance(var_obj, Variable)	-
+base.py:785-820	django/template/base.py	785	820	def resolve(self, context, ignore_failures=False):	return obj
 base.py:788-792	django/template/base.py	788	792	-	-
 base.py:793	django/template/base.py	793	-	string_if_invalid = context.template.engine.string_if_invalid	-
 base.py:800-806	django/template/base.py	800	806	-	-
@@ -293,6 +294,7 @@ defaultfilters.py:441-449	django/template/defaultfilters.py	441	449	-	-
 defaultfilters.py:445	django/template/defaultfilters.py	445	-	safe = isinstance(value, SafeData)	-
 defaultfilters.py:447-448	django/template/defaultfilters.py	447	448	if safe and arg != ";":	return mark_safe(value)
 defaultfilters.py:457-461	django/template/defaultfilters.py	457	461	-	-
+defaultfilters.py:457-459	django/template/defaultfilters.py	457	459	@register.filter("escape", is_safe=True)	def escape_filter(value):
 defaultfilters.py:464-471	django/template/defaultfilters.py	464	471	escapeseq	-
 defaultfilters.py:474-482	django/template/defaultfilters.py	474	482	force_escape	-
 defaultfilters.py:485-494	django/template/defaultfilters.py	485	494	def linebreaks_filter(value, autoescape=True):	return mark_safe(linebreaks(value, autoescape))
@@ -571,6 +573,7 @@ html.py:106-110	django/utils/html.py	106	110	-	-
 django/utils/html.py:115-127	django/utils/html.py	115	127	isinstance(text, Promise)	-
 html.py:115-127	django/utils/html.py	115	127	def conditional_escape(text):	return escape(text)
 html.py:115-126	django/utils/html.py	115	126	-	-
+html.py:124-125	django/utils/html.py	124	125	if hasattr(text, "__html__"):	return text.__html__()
 html.py:130-140	django/utils/html.py	130	140	-	-
 html.py:140	django/utils/html.py	140	-	-	-
 html.py:169-178	django/utils/html.py	169	178	-	-
