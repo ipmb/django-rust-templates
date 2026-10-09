@@ -450,6 +450,36 @@ stranded list, the naming read (prose and numbers), and this blank-end signal.
 None of the three was in the plan; the plan had only the manifest and its
 `--check`. Worth saying in the M6 write-up.
 
+**The blank shape is a ranged-row phenomenon, and that is the complete
+treatment.** The two mirrors — a range whose *end* is blank and one whose *start*
+is blank — were extended to single-line rows, expecting `firstof.rs`'s `:805` to
+have siblings. It has none: **1 hit in 227 single-line rows**, and it is
+`python/django_rust_templates/_impl/parser.py:285` pointing at a comment
+citation into our own tree, plausibly deliberate. The reason is mechanical and
+worth the line: **a range's end is arrived at by counting, a single line by
+pointing**, and counting lands on blanks while pointing does not. So the
+blank-end and blank-start mirrors are the whole treatment; there is no third
+mirror to build.
+
+**And none of the five detectors can see a shorthand at all.** `firstof.rs`'s
+`:805` — a blank line cited as a `return` — was a *shorthand*: it had no manifest
+row, so the blank mirrors, the AST boundary rule, the stranded list and the
+agreement census are all structurally blind to it. That generalises into the
+scheduling fact this stretch turned on: **the detectors' coverage grows only as
+`unmigrated` falls.** The 22 rows still unmigrated are outside every instrument,
+and the rows named in the last several commits *entered* the detectable
+population without anyone re-running the sweeps over them — the blank mirrors
+were last run against a manifest that held fewer quoted rows, the AST rule
+against a smaller one still. Two consequences. The five detectors want re-running
+at close-out over the **final** manifest, not only once each when they were
+built. And the per-file naming read is doing double duty, being both the
+migration and the only instrument that can see a shorthand — which is why it
+keeps finding what the detectors do not. That is not the detectors
+underperforming; it is them being blind to the half of the tree still
+unmigrated. The cheap version at close-out: re-run all five and publish the
+combined hit count. Zero is the strongest evidence available that the sweep is
+complete; anything else is rows no pass ever read.
+
 ## Naming rewraps, and the wrapper had one bug the numbered lists could show
 
 Every naming pass rewraps the paragraphs it widens — naming costs 14 to 17
@@ -739,7 +769,13 @@ triage queue, not a to-do list, and the read is what divides it.
   on which file cites it, and an anchor with fourteen citers is wrong in
   fourteen places at once. Ordering by citation count puts `base.py:816` (14
   files) and `base.py:813` (7) first, where one correction pays the most, and
-  it is why the agreement census was worth building at all.
+  it is why the agreement census was worth building at all. **The order is
+  computed and published now**, in `.review/m6-verification-order.md` — 163
+  anchors, sorted by citing-file count, with the line each holds — and it needs
+  no recomputation as the migration finishes, because the census is invariant
+  under naming. Its head was verified against the pinned tree on 2026-10-09:
+  `base.py:816`, `:813`, `:669-670`, `:773`, `defaultfilters.py:46`,
+  `defaulttags.py:929`, all six correct.
 
 ## One paragraph, four wrong lines, and where the wrong ones landed
 
@@ -797,9 +833,9 @@ commits rather than the content of one.
 spans that contained their claim, zero corrections. `host.rs` is the second file
 with defects and the first where the defect is a pattern inside one paragraph.
 
-## The tool narrows its input silently, and that is all three holes so far
+## The tool narrows its input silently, and that is all four holes so far
 
-Not one of the three holes found in `check_python_anchors.py` has been a wrong
+Not one of the four holes found in `check_python_anchors.py` has been a wrong
 answer about input the tool saw:
 
 - `ANCHOR_RE` cannot match a decorator, so a decorated `def` is never seen
@@ -807,10 +843,20 @@ answer about input the tool saw:
   `template-core` / `template-py` citation is dropped
 - `_check_entry` slices `source[start - 1 : end]`, and a slice past the end is
   silently *short*, so an anchor naming lines that do not exist is "cited"
+- **and hole #2 does not merely drop its own citation — it hands any bare `:N`
+  after it to a different file.** `filters/striptags.rs:55` cites
+  `crates/template-py/src/filters.rs` as `:871`, `:248`, `:1644-1645`. That path
+  is not an anchor, so the checker resolves the two bare spans against the
+  nearest `.py` anchor above — `html.py`, forty lines up — and reports them as
+  "names no file", which is true but not the interesting part. The interesting
+  part is that they look resolvable. This is also where the hole stops being
+  theoretical: the two numbers into our own tree drifted to 854 and 1528, lines
+  that hold a `split(",")` loop and a doc comment, because **nothing checks our
+  own tree** — Django's is pinned and ours moves every commit.
 
-Each is invisible: no match means not counted, not checked, not reported. Three
+Each is invisible: no match means not counted, not checked, not reported. Four
 instances is enough to call it the tool's characteristic failure mode, and the
-discipline that follows is cheaper than finding the fourth by hand — every place
+discipline that follows is cheaper than finding the fifth by hand — every place
 the tool slices, truncates, or pattern-matches should assert it consumed what it
 was given. A slice that runs past the end should raise; a regex that matches
 nothing where something anchor-shaped exists should report.
@@ -929,27 +975,43 @@ wrong question to have asked. Whether that span is the right *unit* is a separat
 question, and the reviewer measured it when that file's pass reached it:
 
 ```
-1160  tagname = bits[0]                      <- opens two lines before the first pop
-1161  # Random bit
+1160  tagname = bits[0]      <- out: a standalone statement, inside no pop's conditional
+1161  # Random bit          <- out: a comment
+1162  common = bits[-1] != "random"
+1163  if not common:
 1164      bits.pop()
+1166  if bits[-1] in ("w", "p", "b"):
 1167      method = bits.pop()
+1168  else:                  <- not a pop, and in the interior: no span can exclude it
+1169      method = "b"
+1170  # Count bit
+1171  if len(bits) > 1:
 1172      count = bits.pop()
-1173  else:                                   <- closes three lines after the last
+1173  else:
 1174      count = "1"
-1175  count = parser.compile_filter(count)
+1175  count = parser.compile_filter(count)   <- out: a separate statement
 ```
 
-The three pops are 1164, 1167 and 1172, so the span is loose **at both ends** —
-not one line at the front. An earlier note here said "one line wide", which
-would have let a later reader tighten the front, leave the tail, and call the
-span fixed; the reviewer's message gives the tail as one line, but 1175 alone is
-one only if 1173 (`else:`) and 1174 (`count = "1"`) are inside the subject, and
-the same reasoning that puts 1160 outside at the front puts them outside at the
-back. The span stays where it is regardless, because "parsed by popping" can
-reasonably name the parse *region* rather than the three `pop()` calls — and
+The span is loose at the front by **two** (1160, 1161) and at the tail by **one**
+(1175) — not three, which is what this note said before the reviewer's second
+pass. The reason three was wrong is worth more than the correction. It came from
+asking "is this line a `pop()`?" and counting every line that is not: 1173
+(`else:`), 1174 (`count = "1"`) and 1175. But that test fails **on the span's own
+interior** — 1168 (`else:`) and 1169 (`method = "b"`) are not pops either, and no
+contiguous span can exclude its middle. A boundary test that returns an
+actionable verdict at the edges and an impossible one in the middle is not
+measuring the subject; it is measuring position. The rule is the **syntactic
+unit**, and `if len(bits) > 1: … else: …` is one statement, so 1171-1174 are in
+and only 1175 is out.
+
+The span stays where it is regardless, because "parsed by popping" can reasonably
+name the parse *region* rather than the statements that do the popping — and
 **the boundary rule only decides when the subject is unambiguous**. That
 precondition belongs beside the rule: without it, "narrow the span to its
-subject" reads as licence to narrow every span, and somebody will.
+subject" reads as licence to narrow every span, and somebody will. This note is
+its own illustration of the failure it warns about, twice over — first by
+recording the wrong number while citing the rule as the reason, then by
+"correcting" the reviewer with an incoherent test.
 
 And the detector **missed defects it should have caught**. `widthratio.rs:9`'s
 `:543-545` does not contain the raise at 548 — but the quoted message wraps
