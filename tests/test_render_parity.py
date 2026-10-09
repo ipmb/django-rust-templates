@@ -205,10 +205,15 @@ class _ParityTest(unittest.TestCase):
 
     ``Engine()`` reads settings, and rendering a *number* goes through
     ``localize``, which reads ``USE_I18N`` — so an unconfigured settings module
-    raises ``ImproperlyConfigured`` from inside the first numeric render. Set
-    here rather than at import time because the rest of this suite deliberately
-    runs without settings configured, and a module-level ``settings.configure``
-    would change what a test module discovered after this one sees.
+    raises ``ImproperlyConfigured`` from inside the first numeric render.
+
+    The configuration is the suite's own (`scripts.filter_probe.ensure_settings`),
+    not a local ``settings.configure``. Four modules used to configure
+    ``USE_I18N=False`` here and one — whichever ``unittest`` reached first — could
+    win; with the suite's helper there is one configuration and no race. It is
+    reached from ``setUpClass`` rather than at import time for the reason the
+    others give: a module-level ``settings.configure`` would change what a test
+    module discovered after this one sees.
 
     The import is inside the method for a second, unrelated reason, measured:
     ``unittest``'s loader walks the module's attributes and calls
@@ -218,10 +223,9 @@ class _ParityTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from django.conf import settings
+        from scripts.filter_probe import ensure_settings
 
-        if not settings.configured:
-            settings.configure(USE_I18N=False)
+        ensure_settings()
         cls.engine = Engine()
 
 

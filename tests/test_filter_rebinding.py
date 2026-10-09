@@ -75,14 +75,14 @@ def shadowing_engine():
 class FilterRebindingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # `Engine()` reads settings. Configured here rather than at import time
-        # because the rest of this suite deliberately runs without them, and a
-        # module-level `settings.configure` changes what every test module
-        # discovered after this one sees.
-        from django.conf import settings
+        # `Engine()` reads settings. The suite's own configuration, reached here
+        # rather than at import time because a module-level `settings.configure`
+        # changes what every test module discovered after this one sees — and a
+        # *local* `settings.configure(USE_I18N=False)`, which this used to be,
+        # makes the answer depend on which module `unittest` walks first.
+        from scripts.filter_probe import ensure_settings
 
-        if not settings.configured:
-            settings.configure(USE_I18N=False)
+        ensure_settings()
 
     def test_a_load_does_not_rebind_an_earlier_tokens_filter(self):
         """The sandwich: builtin use, `{% load %}`, shadowed use.

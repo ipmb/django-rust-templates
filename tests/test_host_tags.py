@@ -97,13 +97,13 @@ UNCLOSED_RUST_SOURCE = "{% for x in y %}body"
 class HostBlockTagRegionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # `Engine()` reads settings. Configured here rather than at import time
-        # because a module-level `settings.configure` changes what every test
-        # module discovered after this one sees.
-        from django.conf import settings
+        # `Engine()` reads settings. The suite's configuration, reached from
+        # `setUpClass` rather than at import because a module-level
+        # `settings.configure` changes what every test module discovered after
+        # this one sees.
+        from scripts.filter_probe import ensure_settings
 
-        if not settings.configured:
-            settings.configure(USE_I18N=False)
+        ensure_settings()
 
     def test_a_host_block_tags_body_is_parsed_by_django_and_that_is_asserted(self):
         """The nested region is Django-parsed, and this makes that visible.
@@ -154,10 +154,9 @@ class HostParserStateTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from django.conf import settings
+        from scripts.filter_probe import ensure_settings
 
-        if not settings.configured:
-            settings.configure(USE_I18N=False)
+        ensure_settings()
 
     def test_a_user_tags_extra_data_reaches_the_template(self):
         """`.django/tests/template_tests/templatetags/custom.py:396-399` writes

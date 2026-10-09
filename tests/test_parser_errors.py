@@ -192,8 +192,9 @@ class ErrorParityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # Django's own message formatting reads settings for exactly one row of
-        # the corpus. Configured here rather than at import time because a
-        # module-level `settings.configure` changes what every test module
+        # the corpus. The suite's own configuration (`scripts.filter_probe`),
+        # reached here rather than at import time because a module-level
+        # `settings.configure` changes what every test module
         # discovered after this one sees — and without this line the module only
         # passed because some *other* discovered module had configured settings
         # first: an order dependency, which is why the failure appears
@@ -224,10 +225,9 @@ class ErrorParityTests(unittest.TestCase):
         # An earlier version of this comment claimed that default was the reach.
         # Both halves — the call count per row and the raising row — are
         # measured in the script above.
-        from django.conf import settings
+        from scripts.filter_probe import ensure_settings
 
-        if not settings.configured:
-            settings.configure(USE_I18N=False)
+        ensure_settings()
 
     def test_the_corpus_matches_django(self):
         """The corpus's expectations are Django's, not the author's."""
