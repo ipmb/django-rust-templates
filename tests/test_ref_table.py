@@ -11,8 +11,8 @@ two different *times*, which is why the table has two fillers:
   materialiser**: the identity that must survive is a *materialised Python
   object*. ``{% cycle a b as c %}`` returns the node **and** stores that same
   object in ``parser._named_cycle_nodes`` (``defaulttags.py:693-696``), so a
-  later ``{% cycle c %}`` returns it again (``:669-671``) and
-  ``{% resetcycle c %}`` resets it (``:1437``).
+  later ``{% cycle c %}`` returns it again (``defaulttags.py:669-671``) and
+  ``{% resetcycle c %}`` resets it (``defaulttags.py:1437``).
 
 Identity is a render-time invariant, not a tree-shape one: ``CycleNode.render``
 keys ``context.render_context`` by the node object (``defaulttags.py:106-112``),
