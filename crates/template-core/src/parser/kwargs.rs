@@ -62,6 +62,35 @@ fn match_start(s: &str) -> Option<Captures<'_>> {
         .filter(|caps| caps.get(0).is_some_and(|m| m.start() == 0))
 }
 
+/// Django's `name, value = kwarg_re.match(bit).groups()`, for `{% url %}`.
+///
+/// `None` is Python's `kwarg_re.match` finding no match at offset 0 — the branch
+/// `{% url %}` turns into `"Malformed arguments to url tag"`
+/// (`defaulttags.py:1575-1577`). Group 1 is the optional key; group 2 is `(.+)`,
+/// which is mandatory, so it is present whenever the pattern matched at all.
+///
+/// **No bit a token produces reaches the `None` arm.** `kwarg_re`'s value group
+/// is `(.+)`, and Python's `.` does not match `\n` without `DOTALL`, so `match`
+/// can fail only for a bit that is empty or starts with `\n`. Every bit
+/// `token.split_contents` yields starts with a quote or a non-whitespace
+/// character (measured on the pinned tree: `smart_split`'s quoted alternative
+/// starts with `'`/`"`, and its bare alternative is `\S+`), so `match` always
+/// succeeds and Django's own "Malformed arguments" branch is dead code in the
+/// pinned tree. The `None` arm is still ported — it is in Django's source and
+/// its message is part of the tag's surface — and `{% url %}`'s test drives
+/// [`match_kwarg`] with a `\n`-leading bit to exercise it, since no template can.
+///
+/// Also note the anchor: `kwarg_re`'s `(.+)` stops at a newline, so a quoted bit
+/// such as `'a\nb'` classifies as value `'a` and the rest is dropped by Django
+/// too. That is why [`match_start`] exists rather than `Regex::captures`.
+pub fn match_kwarg(bit: &str) -> Option<(Option<&str>, &str)> {
+    let caps = match_start(bit)?;
+    let name = caps.get(1).map(|m| m.as_str());
+    // `(.+)` is mandatory, so group 2 is present whenever the pattern matched.
+    let value = caps.get(2).map_or("", |m| m.as_str());
+    Some((name, value))
+}
+
 /// The kwargs pulled from the front of `bits`, in Python dict insertion order.
 ///
 /// An alias rather than an inline tuple for two reasons: `clippy::type_complexity`

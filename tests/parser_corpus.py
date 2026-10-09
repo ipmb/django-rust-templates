@@ -131,6 +131,26 @@ TEMPLATES = [
     # A lone `w` is the *method*: the method pop runs before the count pop.
     "{% lorem w %}",
     "{% lorem random %}",
+    # --- regroup: the derived expression is `var_name + "." + key` ----------
+    "{% regroup m by k as g %}",
+    # The pin: the compiled `expression` source is `g.k`, not `k`, so the corpus
+    # row's value is the *joined* string and a body that compiled `bits[3]`
+    # would diverge here while parsing cleanly everywhere else.
+    '{% regroup m|dictsort:"k" by k as g %}',
+    "{% regroup m by k as g %}{{ g }}",
+    "{% regroup m by k.v as grouped %}",
+    # --- url: positional and kwarg bits, and the trailing `as` --------------
+    "{% url 'view' %}",
+    "{% url 'view' a b %}",
+    "{% url 'view' k=v %}",
+    "{% url 'view' a k=v %}",
+    "{% url 'view' as u %}",
+    "{% url 'view' a k=v as u %}",
+    "{% url 'view' k=v|default:'x' %}",
+    # A variable view name: `compile_filter` compiles it, nothing resolves it.
+    "{% url url_name a %}",
+    # `\w` admits digits, so `1=2` is a kwarg named `1`.
+    "{% url 'view' 1=2 %}",
     # --- variables, and the `contains_nontext` they set ---------------------
     # M3's half of §10.4's ordering gate. `{{ … }}` is what sets
     # `contains_nontext` — measured: `text{% extends %}` is legal and

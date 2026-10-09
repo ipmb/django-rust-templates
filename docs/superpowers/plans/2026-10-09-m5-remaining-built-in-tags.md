@@ -1579,11 +1579,17 @@ first dict-valued node attribute, and a live dict of `FilterExpression`s has no
 
 **Files:**
 - Modify: `crates/template-core/src/parser/tags/{regroup,url}.rs`
-- Modify: `crates/template-core/src/parser/kwargs.rs` (only if `kwarg_re` needs a Rust-visible accessor)
+- Modify: `crates/template-core/src/parser/kwargs.rs` (this task did need a
+  Rust-visible accessor: `match_kwarg`, see the corrections below)
+- Modify: `python/django_rust_templates/_impl/parser.py` (`RegroupNode` and
+  `URLNode` into `NODE_CLASSES` and its import list — the draft's file list
+  omitted it)
 - Modify: `tests/parser_corpus.py`, `tests/parser_error_corpus.py`
 
 **Interfaces:**
 - Consumes: `kwarg_re` (`kwargs.rs:41`, already `pub`), `AttrValue::{Str, FilterExpr, List, Map, None}`.
+- Produces: `kwargs::match_kwarg(bit) -> Option<(Option<&str>, &str)>`, a new
+  public helper in `kwargs.rs`.
 
 **`regroup`** — `RegroupNode(target, expression, var_name)`
 (`:1353-1419`). Strict six-bit grammar (`len(bits) != 6`, `:1400-1401`).
@@ -1642,7 +1648,9 @@ Corpus:
 ```
 
 Errors: `("{% url %}", "'url' takes at least one argument, a URL pattern name.")`
-and `("{% url 'view' k=v nope= %}", "Malformed arguments to url tag")`.
+and ~~`("{% url 'view' k=v nope= %}", "Malformed arguments to url tag")`~~ —
+corrected below, both the expectation and the belief that the Malformed branch is
+reachable.
 
 - [ ] Run the seven steps for both. The two share a task because both compile a
   string that is *not* a substring of the token — the property Step 1 exists to
@@ -1654,6 +1662,37 @@ git add crates/template-core/src/parser/tags/regroup.rs \
         tests/parser_corpus.py tests/parser_error_corpus.py
 git commit -m "tags: regroup and url — both compile a derived string, not a token substring"
 ```
+
+**Two corrections to the draft, both found by measuring before writing code.**
+
+*1. `{% url %}`'s "Malformed arguments to url tag" branch is unreachable, and the
+draft's error row is wrong.* `kwarg_re`'s value group is `(.+)`, and Python's `.`
+does not cross `\n` without `DOTALL`, so `kwarg_re.match(bit)` returns `None` only
+for a bit that is empty or starts with `\n`. Every bit `token.split_contents`
+yields starts with a quote (`smart_split`'s quoted alternative) or a
+non-whitespace character (its `\S+` alternative), so **no token reaches the
+branch** — Django's own "Malformed" raise is dead code in the pinned tree. The
+draft's row `("{% url 'view' k=v nope= %}", "Malformed arguments to url tag")` is
+therefore wrong twice over: `kwarg_re.match("nope=")` keys nothing and takes
+`"nope="` as the *value*, so `compile_filter` raises
+`Could not parse the remainder: '=' from 'nope='` instead. The corrected row
+carries that message; the branch is still ported (it is in Django's source and
+its message is part of the tag's surface) and `tags/url.rs`'s unit test drives
+`classify_bits` with a `\n`-leading bit — the only way to exercise it.
+
+*2. The url pattern-name message keeps its literal quotes.* `"'%s' takes at least
+one argument, a URL pattern name." % bits[0]` (`:1562-1564`) has the quotes **in
+the format string**, so the rendered message is `'url' takes …` — my first
+implementation used bare `{}` and produced `url takes …`, which every
+message-comparison row then rejected. `%s` of the command name adds no escaping
+of its own.
+
+**One interface added by measurement.** `{% url %}` is the tree's second
+`kwarg_re` consumer and needs the per-bit classification Django gets from
+`match.groups()`, so `kwargs.rs` gained a public `match_kwarg(bit) ->
+Option<(Option<&str>, &str)>` beside the existing `token_kwargs`. It is the third
+and last consumer of `kwarg_re` (the design spec's count), so nothing further is
+expected from it.
 
 ---
 

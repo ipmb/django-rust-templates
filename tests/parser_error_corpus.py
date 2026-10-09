@@ -182,6 +182,25 @@ ERRORS = [
     # --- lorem -------------------------------------------------------------
     ("{% lorem 3 p nope %}", "Incorrect format for 'lorem' tag"),
     ("{% lorem 1 2 %}", "Incorrect format for 'lorem' tag"),
+    # --- regroup ------------------------------------------------------------
+    # Arity is checked before either keyword, so a four-bit call reports this
+    # even though `by` and `as` are also missing.
+    ("{% regroup m by k %}", "'regroup' tag takes five arguments"),
+    ("{% regroup %}", "'regroup' tag takes five arguments"),
+    # The target is compiled before the `by` check, so a six-bit call with a bad
+    # target reports the *filter* error, not the keyword one.
+    ("{% regroup m| by k as g %}", "Could not parse the remainder: '|' from 'm|'"),
+    ("{% regroup m ny k as g %}", "second argument to 'regroup' tag must be 'by'"),
+    ("{% regroup m by k is g %}", "next-to-last argument to 'regroup' tag must be 'as'"),
+    # --- url ----------------------------------------------------------------
+    ("{% url %}", "'url' takes at least one argument, a URL pattern name."),
+    # Measured: `kwarg_re.match("nope=")` keys nothing and takes `"nope="` as the
+    # value, so this is the *filter* compiler's error, not the "Malformed
+    # arguments to url tag" one the plan listed. That Malformed branch is
+    # unreachable from any token (`kwarg_re`'s `(.+)` cannot cross a newline, and
+    # no bit `split_contents` yields starts with one), so no corpus row carries
+    # its message; `tags/url.rs`'s unit test drives it directly.
+    ("{% url 'view' k=v nope= %}", "Could not parse the remainder: '=' from 'nope='"),
     # --- the innermost token, across a nested parse -------------------------
     (
         "{% autoescape on %}\n{% now a b %}\n{% endautoescape %}",
