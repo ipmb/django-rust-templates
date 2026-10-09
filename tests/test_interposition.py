@@ -29,7 +29,7 @@ from django.template import Context, Engine
 from django_rust_templates import _shim
 
 
-def render_through(tmpdir, source, name="index.html", **context):
+def render_through(tmpdir, source, *, template_name="index.html", **context):
     """Write ``source`` into ``tmpdir`` and render it through a real ``Engine``.
 
     A real ``Engine``, with the loader spelled as a dotted path, because that is
@@ -39,10 +39,18 @@ def render_through(tmpdir, source, name="index.html", **context):
     `Engine.__init__` raises `ImproperlyConfigured` when `loaders` and `app_dirs`
     are both given — and the tuple form `(path, dirs)` is how Django's own loader
     tests spell the same thing.
+
+    ``template_name`` is keyword-only, and that is load-bearing rather than
+    stylistic: the first row to use this helper renders ``"{{ name }}!"`` with
+    ``name="Ada"``, and a plain ``name`` parameter would have swallowed the
+    variable as the *file's* name. The template then resolves to ``"!"`` and the
+    row fails in a way that reads like a resolver bug — measured, before the
+    rename. ``name`` is also the commonest context key there is, so the helper is
+    the thing that has to give way.
     """
-    pathlib.Path(tmpdir, name).write_text(source)
+    pathlib.Path(tmpdir, template_name).write_text(source)
     engine = Engine(loaders=[("django.template.loaders.filesystem.Loader", [tmpdir])])
-    return engine.get_template(name).render(Context(dict(context)))
+    return engine.get_template(template_name).render(Context(dict(context)))
 
 
 class InterpositionTests(unittest.TestCase):
@@ -470,6 +478,68 @@ class ModuleInterpositionTests(unittest.TestCase):
             self.assertEqual(list(package.engines.all()), [])
 
         self.assertIn("EngineHandler.all", counts)
+
+    def test_context_resolves_to_our_file(self):
+        import django.template.context as context
+
+        self.assertIn("_impl", context.__file__, context.__file__)
+
+    def test_the_context_classes_are_not_djangos(self):
+        import inspect
+
+        import django.template.context as context
+
+        from tests.pinned_module import load_pinned
+
+        pinned = load_pinned("context.py")
+        for name in (
+            "BaseContext",
+            "Context",
+            "ContextDict",
+            "RequestContext",
+            "RenderContext",
+        ):
+            with self.subTest(name=name):
+                ours = getattr(context, name)
+                self.assertIsNot(ours, getattr(pinned, name))
+                self.assertIn("_impl", inspect.getfile(ours))
+
+    def test_a_template_renders_through_our_context(self):
+        """The end-to-end row: `Context` is on the render path, not beside it."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rendered = render_through(tmpdir, "{{ name }}!", name="Ada")
+        self.assertEqual(rendered, "Ada!")
+
+    def test_the_parse_harness_runs_our_context(self):
+        """The compared path, pinned to the three functions it measured.
+
+        Measured (`.review/m10-measurements/m10_measure_compared_path.py`): the
+        parity harness executes `BaseContext.__init__`, `BaseContext._reset_dicts`
+        and `Context.__init__` and nothing else in this file — and every source
+        that reaches them is a `{% verbatim %}` row. The harness's Python half
+        runs `Parser.parse`, and Django's `do_verbatim` renders the block *at
+        parse time* with a fresh `Context()` (`defaulttags.py:1607`), which is
+        the route. So the row runs that source, and it will move the day that
+        line stops being the route — which is why the failure message names it.
+
+        The second half is a **positive control**: the same call, with the pinned
+        copy of this file instrumented instead, must reach nothing. Without it a
+        non-zero count would only show that the instrument counted something.
+        """
+        import django.template.context as context
+
+        from tests.compared_path import instrumented
+        from tests.pinned_module import load_pinned
+        from tests.test_parser_parity import django_parse
+
+        with instrumented(context) as counts:
+            django_parse("{% verbatim %}a{% endverbatim %}")
+        self.assertIn("Context.__init__", counts)
+        self.assertIn("BaseContext.__init__", counts)
+
+        with instrumented(load_pinned("context.py")) as pinned_counts:
+            django_parse("{% verbatim %}a{% endverbatim %}")
+        self.assertEqual(sum(pinned_counts.values()), 0)
 
 
 class ShadowingTests(unittest.TestCase):

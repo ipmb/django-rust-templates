@@ -809,14 +809,14 @@ The first M10 interposition, and the one that proves the generator can express a
 
 **Interfaces:**
 - Consumes: `tests.pinned_module.load_pinned`, `tests.compared_path.instrumented`, `_shim.SHADOWING`.
-- Produces: `render_through(tmpdir, source, name="index.html", **context) -> str` at the top of `tests/test_interposition.py`, and the `ModuleInterpositionTests` class Tasks 4, 5 and 7 add to.
+- Produces: `render_through(tmpdir, source, *, template_name="index.html", **context) -> str` at the top of `tests/test_interposition.py`, and the `ModuleInterpositionTests` class Tasks 4, 5 and 7 add to.
 
 - [ ] **Step 1: Write the failing rows.**
 
 In `tests/test_interposition.py`, add after the imports (`import pathlib`, `import tempfile`, `from django.template import Context, Engine` go beside `import unittest`):
 
 ```python
-def render_through(tmpdir, source, name="index.html", **context):
+def render_through(tmpdir, source, *, template_name="index.html", **context):
     """Write ``source`` into ``tmpdir`` and render it through a real ``Engine``.
 
     A real ``Engine``, with the loader spelled as a dotted path, because that is
@@ -826,12 +826,19 @@ def render_through(tmpdir, source, name="index.html", **context):
     `ImproperlyConfigured` when `loaders` and `app_dirs` are both given, and the
     tuple form `(path, dirs)` is how Django's own loader tests spell the same
     thing.
+
+    ``template_name`` is keyword-only because it *collided*: written as a plain
+    ``name`` parameter it swallowed the first caller's context key — Task 4's row
+    renders ``"{{ name }}!"`` with ``name="Ada"``, so the file was named ``Ada``,
+    the variable resolved to empty, and the row failed as ``'!' != 'Ada!'``,
+    which reads like a resolver bug. `name` is the commonest context key there
+    is, so the helper is what gives way.
     """
-    pathlib.Path(tmpdir, name).write_text(source)
+    pathlib.Path(tmpdir, template_name).write_text(source)
     engine = Engine(
         loaders=[("django.template.loaders.filesystem.Loader", [tmpdir])]
     )
-    return engine.get_template(name).render(Context(dict(context)))
+    return engine.get_template(template_name).render(Context(dict(context)))
 
 
 class ModuleInterpositionTests(unittest.TestCase):
@@ -1156,6 +1163,11 @@ Add to `ModuleInterpositionTests`:
 
 Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_interposition.ModuleInterpositionTests -v`
 Expected: `test_context_resolves_to_our_file` fails naming Django's file; `test_the_parse_harness_runs_our_context` fails with an empty counter for `Context.__init__`.
+
+**Two corrections to that expectation, both measured while executing this step.**
+
+1. `test_the_parse_harness_runs_our_context` does **not** fail before the interposition, and the reason is worth keeping: `instrumented(context)` instruments whatever object `django.template.context` currently is, which is Django's — and `do_verbatim` does run Django's `Context.__init__`. So the row is green on both sides of the commit, and what makes it discriminating is the pin plus the resolution row, not a red-to-green transition. Only five rows go red here: resolution, and the five classes.
+2. `test_a_template_renders_through_our_context` fails for a reason that is not the interposition at all — `render_through`'s third parameter was named `name`, so the row's `name="Ada"` set the *template file's* name and `{{ name }}` rendered empty (`'!' != 'Ada!'`). The helper's signature is now `render_through(tmpdir, source, *, template_name="index.html", **context)`.
 
 - [ ] **Step 3: Generate the file and register it.**
 

@@ -108,6 +108,7 @@ _installed_finder: "_ShimFinder | None" = None
 SHADOWING = {
     "__init__.py": "transcribed",
     "base.py": "transcribed",
+    "context.py": "transcribed",
     "exceptions.py": "fresh",
     "smartif.py": "transcribed",
     "utils.py": "transcribed",

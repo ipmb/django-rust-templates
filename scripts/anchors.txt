@@ -1,5 +1,3 @@
-_shim.py:75	python/django_rust_templates/_shim.py	75	-	TARGET = "django.template"	-
-_shim.py:397	python/django_rust_templates/_shim.py	397	-	if installed():	-
 center.rs:86	crates/template-core/src/filters/center.rs	86	-	arg.unwrap_or(Value::None)	-
 center.rs:90	crates/template-core/src/filters/center.rs	90	-	text.starts_with('-')	-
 get_digit.rs:108	crates/template-core/src/filters/get_digit.rs	108	-	text.chars().rev().nth(index)	-
@@ -652,6 +650,8 @@ timesince.py:138-143	django/utils/timesince.py	138	143	timeuntil	-
 timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)
 python/django_rust_templates/_impl/base.py:1161	python/django_rust_templates/_impl/base.py	1161	-	-	-
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
+_shim.py:75	python/django_rust_templates/_shim.py	75	-	TARGET = "django.template"	-
+_shim.py:398	python/django_rust_templates/_shim.py	398	-	if installed():	-
 python/django_rust_templates/host.py:243	python/django_rust_templates/host.py	243	-	-	-
 tests/parity_target.py:41	tests/parity_target.py	41	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
 tests/parity_target.py:147	tests/parity_target.py	147	-	So this is the replacement Python side	-

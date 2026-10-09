@@ -161,12 +161,40 @@ COMPARED_PATH = {
         (206, 214, "IfParser.expression"),
     ],
     # 0 functions, measured rather than assumed: the parity harness executes
-    # nothing in this file. `EngineHandler` is entered through `engines.all()`,
-    # which no parity source calls — the harness parses, it does not render.
+    # nothing in this file. The reason is worth stating, because the tempting
+    # one is wrong: the harness *does* build a fresh `Engine` per call
+    # (`tests/test_parser_parity.py:114`), so this is not about when the Engine
+    # is constructed. It is about *which* route the harness takes. `EngineHandler`
+    # is reached only through the `django.template.engines` singleton
+    # (`engines.all()`, `engines[alias]`), and the harness resolves no template
+    # alias; `get_app_template_dirs` is reached only by the `app_directories`
+    # loader, and the harness builds no loaders. It passes `libraries=` straight
+    # to `Engine`, whose `get_template_libraries` calls `import_library` — which
+    # lives in `library.py`, not here.
+    #
     # Measured with `.review/m10-measurements/m10_measure_compared_path.py`,
     # which interposes all nine M10 files verbatim in a scratch universe and
-    # runs both corpora through `django_parse`.
+    # runs both corpora through `django_parse`; re-measured live on every unit
+    # run by `test_the_compared_path_is_the_measured_one`.
     "utils.py": [],
+    # 3 functions, spans 31-155 of 309. The parity harness is a *parsing*
+    # harness, and `Context` is a rendering object — so the reach here is not
+    # the render path but one line of `defaulttags`: `do_verbatim` renders its
+    # block at parse time with a fresh `Context()` (`defaulttags.py:1607`), and
+    # every source that reaches these three functions is a `{% verbatim %}` row.
+    # Measured with `.review/m10-measurements/m10_measure_compared_path.py`.
+    #
+    # The narrowness is the finding, and it is why `context` is worth pinning
+    # even though the module is on the render path for 984 of the 1,547 tests:
+    # the pin is about what the *parity* harness executes, and for this module
+    # that is three functions and no more. A declared region anywhere else in
+    # these 309 lines is Rust-against-Rust in the parity rows and nothing here
+    # would have said so.
+    "context.py": [
+        (31, 32, "BaseContext.__init__"),
+        (34, 40, "BaseContext._reset_dicts"),
+        (146, 155, "Context.__init__"),
+    ],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])
@@ -354,6 +382,24 @@ DECLARED = {
             # Like `smartif`, and unlike `base.py`, **that is the entire file**:
             # no delegation, nothing to read past the marker.
             ((1, 2), None, "# TRANSCRIBED: django/template/utils.py (Django 6.0.9)"),
+        ],
+    ),
+    "context.py": (
+        "django/template/context.py",
+        [
+            # The marker and its blank separator, ours only. Upstream opens with
+            # an import, so the marker is a comment on line 1 rather than a
+            # docstring's first line; no executable line, hence clause (5)'s
+            # note rather than a list of statements.
+            #
+            # **This is the entire file**, and it is the strongest form of that
+            # claim in the tree: 309 lines of ours against 307 of upstream's,
+            # with 984 of the suite's 1,547 tests rendering through `Context`.
+            # A transcription this load-bearing is the one where "the diff is
+            # the marker" has to be measured rather than asserted, so it is —
+            # `scripts/check_transcriptions.py` fails the commit if any line
+            # here is not upstream's.
+            ((1, 2), None, "# TRANSCRIBED: django/template/context.py (Django 6.0.9)"),
         ],
     ),
 }

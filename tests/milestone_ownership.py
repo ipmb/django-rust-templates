@@ -36,7 +36,6 @@ OWNERS = {
     # the row naming it is an error, corrected by this plan's close-out task.
     # `test_the_table_partitions_the_universe` makes it unrepresentable here,
     # because `origin` is not in `django_modules()`.
-    "context": "M10",
     "engine": "M10",
     "loaders": "M10",
     "loaders.base": "M10",
@@ -101,7 +100,7 @@ UNDECIDED = {
 INTERPOSED = {
     "M0": ["exceptions"],
     "M9": ["base", "smartif"],
-    "M10": ["utils"],
+    "M10": ["utils", "context"],
 }
 
 
