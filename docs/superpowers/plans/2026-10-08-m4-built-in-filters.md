@@ -284,17 +284,43 @@ think to write and wrong on the only case where the distinction exists. `__proxy
 is already on the wire from Task 6, so this is reachable, and Task 8's group
 carries the case.
 
-**D4 — M4 implements `conditional_escape` in Rust, and that is the milestone's
-one reach into M8.** §5.1 puts `escape` in `template-core` and §10.3 gives M8 the
-`SafeData`/`Promise` protocol, so this plan is taking work from a later
-milestone. It takes the smallest possible piece: `conditional_escape(value)` is
-`value if is_safe(value) else escape(value)`, it is five lines, and four of the
-57 filters cannot be written without it. What it does **not** take is the
-protocol: `Promise` resolution, `__html__`, `SafeText`/`SafeString` subclass
-handling and `mark_safe` of a non-`str` all stay M8's, and `FilterHost::is_safe`
-is a predicate the host answers rather than a rule `template-core` enforces.
-Flagged rather than assumed, because it is the milestone boundary the reviewer
-should rule on.
+**D4 — M4 does not implement `conditional_escape` at all; it calls the host's.
+This is a correction, and it removes the milestone-boundary problem rather than
+managing it.** An earlier revision had M4 writing a five-line `conditional_escape`
+in Rust — `value if is_safe(value) else escape(value)` — on the reasoning that
+§5.1 puts `escape` in `template-core` while §10.3 gives M8 the safety protocol, so
+M4 should take "the smallest possible piece". **The premise was wrong: there is no
+small pure piece.** `django/utils/html.py:115-127` branches three ways —
+
+```python
+if isinstance(text, Promise):   # not an `is_safe` question
+    text = str(text)
+if hasattr(text, "__html__"):   # also not an `is_safe` question
+    return text.__html__()
+else:
+    return escape(text)
+```
+
+— and the function's own docstring says the `__html__` convention is shared with
+`markupsafe`, which implements it **without being `SafeData`**. So a Rust version
+built from `is_safe` + `escape` is wrong for `markupsafe` objects, and wrong for
+`Promise` — which is not hypothetical, since lazy `gettext` results are `Promise`s
+and `__proxy__` is already on the wire from Task 6. Both branches are
+Python-protocol questions, and asking them across the seam is what `FilterHost` is
+for.
+
+So M4 adds **no** `escape` module and reaches into M8 for nothing: it calls
+`FilterHost::conditional_escape` and gets back a `Value`. §10.3's M8 row is
+unchanged, and the `Promise`/`__html__`/`SafeText` protocol remains M8's to
+implement on the Python side where it already lives. Eight filters depend on this
+call — `escape`, `force_escape`, `escapeseq`, `join`, `unordered_list`,
+`linenumbers`, `linebreaks`, `linebreaksbr` — which is why it is one host method
+rather than a Rust helper duplicated eight times.
+
+The one thing M4 *does* still own here is `escape` and `escapejs` themselves:
+`html.escape` is a fixed five-replacement table and `escapejs` a fixed ~30-entry
+`str.translate`, both pure, so Rust implements them and no host method is needed.
+An earlier revision had them on the trait; the derivation in §D2 says otherwise.
 
 **D5 — the corpus compares types, not only text.** A filter's result *type* is
 part of its behaviour: `escape` returns `SafeString`, `safeseq` returns a list
@@ -525,7 +551,9 @@ pub fn filter_names() -> Vec<&'static str>;
 ```
 
 - `FilterHost` is declared in full in this task and is not edited afterwards. Its
-  methods, grouped by what they are:
+  methods, grouped by what they are. **This block is the revision that followed
+  M4's first review round**, which found five filters with no expressible method;
+  the derivations are quoted in "What the first review round changed" below.
 
 ```rust
 pub trait FilterHost {
@@ -537,38 +565,175 @@ pub trait FilterHost {
     fn len(&self, value: &Value) -> Result<usize, Error>;                  // len(v)
     fn iter_values(&self, value: &Value) -> Result<Vec<Value>, Error>;     // list(v)
     fn get_index(&self, value: &Value, index: i64) -> Result<Value, Error>;
-    fn get_attr(&self, value: &Value, name: &str) -> Result<Value, Error>; // dictsort
+    /// `value[start:stop:step]` — `slice_filter` (`defaultfilters.py:651-666`).
+    /// Not expressible as `get_index` plus Rust slicing: `"abcdef"|slice:":3"`
+    /// is `"abc"`, a *string*, where the index route yields a list. Every
+    /// component is `Option` because `"::2"` and `":3"` are both legal and
+    /// Django passes `None` through to `slice(*bits)`.
+    fn get_slice(
+        &self,
+        value: &Value,
+        start: Option<i64>,
+        stop: Option<i64>,
+        step: Option<i64>,
+    ) -> Result<Value, Error>;
     fn add_values(&self, a: &Value, b: &Value) -> Result<Value, Error>;    // a + b
     fn percent_format(&self, value: &Value, spec: &str) -> Result<Value, Error>;
     fn is_safe(&self, value: &Value) -> bool;
     fn mark_safe(&self, value: Value) -> Value;
     fn repr(&self, value: &Value) -> String;
 
+    // --- the escaping protocol: one call, four branches ---------------------
+    /// `conditional_escape` (`django/utils/html.py:115-127`) — see §D4. One
+    /// method, because two of its three branches are not `is_safe` questions:
+    /// `isinstance(text, Promise)` and `hasattr(text, "__html__")`.
+    fn conditional_escape(&self, value: &Value) -> Result<Value, Error>;
+
+    // --- the one ordering operation Rust cannot express ---------------------
+    /// `dictsort`/`dictsortreversed` (`:578-600`) together with
+    /// `_property_resolver` (`:540-575`). One method, not two: the
+    /// float-vs-string branch, the private-name `AttributeError`, the
+    /// five-exception `__getitem__`→`getattr` fallback and `dictsort`'s own
+    /// `(AttributeError, TypeError)`→`""` catch are a single semantic unit, and
+    /// splitting them across the FFI would mean Rust reimplementing Python's
+    /// exception classification — the thing this seam exists to avoid. Sorting
+    /// arbitrary `Opaque` objects by an extracted key is not expressible in Rust
+    /// at all.
+    fn sort_by_property(
+        &self, value: &Value, prop: &str, reverse: bool,
+    ) -> Result<Value, Error>;
+
     // --- engines whose state is not the filter's argument -------------------
-    fn escape(&self, text: &str) -> String;                                // html.escape
-    fn escapejs(&self, text: &str) -> String;
+    /// `django.utils.html.strip_tags` — `HTMLParser`-based (`html.py:238-272`).
     fn strip_tags(&self, text: &str) -> String;
+    /// `django.utils.text.slugify` — reaches `unicodedata` NFKD. Rust owns the
+    /// two regexes and their order; the normalisation is the host's.
     fn slugify(&self, text: &str) -> String;
+    fn unicode_normalize_nfkd(&self, text: &str) -> String;
+    /// `django.utils.html.urlize` — regex over `settings.URLIZE_ASSUME_HTTPS`.
     fn urlize(&self, text: &str, limit: Option<usize>, autoescape: bool) -> String;
+    /// `Truncator.chars` / `.words` (`text.py:193-261`), **whole**. Delegated
+    /// rather than split because even the non-html path needs
+    /// `unicodedata.normalize("NFC")`, `unicodedata.combining` per character
+    /// (`:205`, `:220`) and the translatable marker `add_truncation_text` falls
+    /// back to — so a Rust `chars` would need a **third** Unicode table
+    /// diverging from CPython's, which is the M1 `\w` problem reintroduced.
+    /// `truncate_text` is Django's `truncate` argument; `None` is its default.
+    fn truncate(
+        &self,
+        text: &str,
+        length: usize,
+        words: bool,
+        html: bool,
+        truncate_text: Option<&str>,
+    ) -> String;
+    /// `django.utils.text.wrap` — `textwrap.TextWrapper`.
+    fn wrap(&self, text: &str, width: usize) -> String;
+    /// `django.utils.encoding.iri_to_uri`. `iriencode`'s entire body is this
+    /// one call (`defaultfilters.py:225-227`).
+    fn iri_to_uri(&self, text: &str) -> String;
+    /// `urllib.parse.quote` — `urlencode`'s body, with the `safe` set Rust
+    /// selects (`:365-380`).
+    fn quote(&self, text: &str, safe: &str) -> String;
+    fn json_dumps(&self, value: &Value) -> Result<String, Error>;
+    fn pformat(&self, value: &Value) -> Result<String, Error>;
+    fn random_choice(&self, value: &Value) -> Result<Value, Error>;
+
+    // --- locale, language and the clock -------------------------------------
     fn localtime(&self, value: Value, use_tz: bool) -> Result<Value, Error>;
     fn date_format(&self, value: &Value, format: &str) -> Result<String, Error>;
     fn time_format(&self, value: &Value, format: &str) -> Result<String, Error>;
     fn timesince(&self, then: &Value, now: &Value) -> String;
-    fn number_format(
-        &self, value: &Value, decimal_pos: Option<i32>,
-        force_grouping: bool, use_l10n: bool,
-    ) -> String;
+    fn number_format(&self, args: NumberFormatArgs<'_>) -> String;
     fn gettext(&self, text: &str) -> String;
     fn ngettext(&self, singular: &str, plural: &str, n: u64) -> String;
-    fn json_dumps(&self, value: &Value) -> Result<String, Error>;
-    fn pformat(&self, value: &Value) -> Result<String, Error>;
-    fn random_choice(&self, value: &Value) -> Result<Value, Error>;
     fn now(&self) -> Result<Value, Error>;
-    fn truncate_html(&self, text: &str, length: usize, words: bool, end: &str) -> String;
-    fn wrap(&self, text: &str, width: usize) -> String;
-    fn unicode_normalize_nfkd(&self, text: &str) -> String;
 }
 ```
+
+**`escape` and `escapejs` are deliberately *not* on this trait.** Both are pure —
+`django.utils.html.escape` is `SafeString(html.escape(str(text)))`, and `escapejs`
+is `mark_safe(str(value).translate(_js_escapes))` over a fixed ~30-entry table — so
+Rust owns them, which is what the derived 18 already said (§D2). An earlier
+revision of this plan listed both as host methods, contradicting its own
+derivation; the review caught the trait rather than the derivation, which is a
+useful reminder that a hand-written list and a computed one drift apart.
+
+**The trait carries a Python exception taxonomy, and that is not decoration.**
+Filters catch *specific* classes and let the rest escape, so "did it raise, and
+with what class" is part of each body's observable behaviour, and a corpus that
+flattens it to one error type cannot pin the filters that depend on it:
+
+```text
+first(5)          → TypeError escapes the filter    (:602-608 catches only IndexError)
+first([])         → IndexError → ""                 (the same three lines)
+divisibleby(x, 0) → ZeroDivisionError escapes       (:854-858 has no try at all)
+add("a", "b")     → bare `except Exception` → ""    (:745-755)
+get_digit(...)    → ValueError → the original value (:757-776)
+```
+
+So the value-protocol methods return
+`Error::Host { kind: PyErrorKind, message, operation }`, with `PyErrorKind` ∈
+`{AttributeError, IndexError, KeyError, TypeError, ValueError, ZeroDivisionError}`,
+and a body matches on `kind` rather than on a message. Task 6's `first(5)` row
+asserts the *escape*, not a value, and that is only expressible if the class
+survives the seam.
+
+**What the first review round changed, and why each is a group that would have
+stalled.** All five were reported from Django's source and all five were then
+re-checked against `.django` @ 6.0.9 before being accepted, because a
+plausible-sounding review is exactly where an unmeasured claim propagates:
+
+| # | filter(s) | the gap, verified | the fix |
+|---|---|---|---|
+| 1 | `slice` | `:651-666` is `value[slice(*bits)]`; `"abcdef"\|slice:":3"` is `"abc"`, a **string**, so `get_index` + Rust slicing returns the wrong *type* | `get_slice` |
+| 2 | `dictsort`, `dictsortreversed` | `:558-573` subscripts with a **string** key (`value = value[part]`) before falling back to `getattr`, across five exception classes; `get_index(i64)` cannot, and `sorted(value, key=…)` over `Opaque` is inexpressible | `sort_by_property` (one method, not two) |
+| 3 | `iriencode` | `:225-227` — the body is literally `return iri_to_uri(value)`, and no such method existed despite the filter being in the derived 18 | `iri_to_uri` |
+| 4 | the four `Truncator` filters | `Truncator.chars` calls `unicodedata.combining` per character (`text.py:220`) so combining marks do not count toward the length; answering that in Rust needs a third Unicode table | `truncate`, whole — better than the `unicode_combining` method the review offered, because it removes the table *and* the `gettext` marker question in one move |
+| 5 | `escape`, `force_escape`, `escapeseq`, `join`, `unordered_list`, `linenumbers`, `linebreaks`, `linebreaksbr` | `conditional_escape` (`html.py:115-127`) branches on `isinstance(text, Promise)` and `hasattr(text, "__html__")`, neither of which is `is_safe` — its own docstring says the convention is shared with `markupsafe`, which implements `__html__` **without being `SafeData`** | `conditional_escape`, whole (see §D4) |
+
+The fifth is the one that changes a milestone boundary, and it changes it in the
+direction of *removing* a reach rather than taking one: there is no small pure
+piece of `conditional_escape` to implement in Rust, because two of its three
+branches are Python-protocol questions. §D4 now says so.
+
+**Two design questions the review raised and asked to be decided rather than
+inherited:**
+
+*§D1's `PartialEq`.* Python's `SafeString("x") == "x"` is `True`, while a
+derived Rust `PartialEq` makes `Value::Safe("x") != Value::Str("x")`. **The plan
+keeps the derived, structural equality, deliberately, and disagrees with the
+direction the review implied** — the asymmetry that matters runs the other way.
+Every fan-out agent's unit tests compare a result against an expected `Value`, and
+there a folded equality would make a *dropped safety marker invisible*:
+`Value::Str("x")` would satisfy an assertion written as `Value::Safe("x")`.
+Structural equality is what makes §D1's "the marker cannot be dropped separately
+from the text" testable at all. So the guard
+`Value::Safe("x") != Value::Str("x")` is added with that reasoning in its doc.
+
+**The cost of that choice is real and lands on exactly one filter, so the rule
+that contains it is stated rather than left to the reader.** Measured with an AST
+walk: four of the 57 bodies use `==`/`!=` — `divisibleby` (`int(value) %
+int(arg) == 0`), `floatformat` (`last_char == "g"`), `pluralize` (`float(value)
+== 1`, `len(value) == 1`) and `cut` (`arg != ";"`). The first three compare
+*converted primitives* and are unaffected. **`cut` compares a `Value` against a
+literal**, and under structural equality `Value::Safe(";") != Value::Str(";")` is
+true where Python's `SafeString(";") != ";"` is false — which flips `cut`'s
+`mark_safe` branch (`:447-450`) for a safe `";"` argument. So the rule is:
+
+> A filter body compares **converted primitives** — `String`, `IntValue`, `f64`,
+> `char` — never two `Value`s. `Value`'s `PartialEq` is for tests, not for bodies.
+
+`cut` therefore tests `to_str(arg)? != ";"`, which is `str.__ne__` and therefore
+`SafeString`-faithful by construction. Task 4 carries that as a named case. This
+is the one place where the review's question ("does any body test equality?") had
+a yes hiding behind a no, and it took an AST walk rather than a reading to see it.
+
+*The group split.* Left as 8/8/9/10/12/6/4. The review's own point is that
+sizing is downstream of the surface: three of the five gaps landed in the
+escaping group, but they landed on the *trait*, and with `conditional_escape`
+whole that group is eight calls to one host method rather than a group with
+missing plumbing. Re-derive after Task 2 lands, not now.
 
 **Declared environment.** `template-core` at this point has `lexer`, `parser`
 (with `desc`, `error`, `host`, `kwargs`, `registry`, `resolve`, `smartif`,
@@ -922,15 +1087,19 @@ The group that Task 1 unblocks, and the one that proves the seam end-to-end.
 - `truncatechars` (`:305-314`) / `truncatewords` (`:330-337`) — `int(arg)` in a
   `try/except ValueError` that **returns the value unchanged** (the failure is
   silent, so the test must pin the silence), then `Truncator(value).chars(length)`
-  / `.words(length)`. `Truncator` is `django.utils.text`; `.chars` slices code
-  points and appends `"…"` when it truncates, `.words` appends `"…"` and does not
-  break long words.
+  / `.words(length)`. **Rust owns the `int(arg)` conversion and the silent
+  failure; the host owns the truncation**, via `FilterHost::truncate(…, words:
+  false, html: false, truncate_text: None)`. Delegated whole rather than split
+  because `Truncator.chars` needs `unicodedata.normalize("NFC")` and
+  `unicodedata.combining` per character (`text.py:205`, `:220`) — combining marks
+  do not count toward the length — and `add_truncation_text` falls back to
+  `gettext("%s…")`. A Rust `chars` would need a third Unicode table.
 - `truncatechars_html` (`:316-321`) / `truncatewords_html` (`:344-348`) — the same
-  with `html=True`, which runs `django.utils.html`'s `HTMLParser`-based
-  `_truncate_html`. That parser is **the host's** (§D2): `FilterHost::truncate_html`
-  is the call, and the Rust body owns the `int(arg)` failure path and the
-  dispatch. A `<` in the *text* still has to be handled, so the corpus needs
-  cases with an unbalanced tag.
+  host call with `html: true`, which is the `HTMLParser` branches. A `<` in the
+  *text* still has to be handled, so the corpus needs cases with an unbalanced
+  tag. **One method serves all four filters** (`truncate`), which is the review's
+  point taken: splitting the html and non-html paths would have put two of the
+  four behind a method that did not exist.
 - `wordwrap` (`:410-415`) — `django.utils.text.wrap`, which is
   `textwrap.TextWrapper(width=int(arg), break_long_words=False).wrap(...)`, i.e.
   Python's `textwrap`. Host call; Rust owns the `int(arg)` conversion and the
@@ -947,11 +1116,15 @@ The group that Task 1 unblocks, and the one that proves the seam end-to-end.
   exception escapes the filter — and the corpus must pin the escape, not just the
   value.
 - `length` (`:633-639`) — `len(value)` catching `(ValueError, TypeError)` → `0`.
-- `slice` (`:651-665`) — parses `str(arg)` split on `":"` into `None`/`int` bits
-  and applies Python's slice arithmetic, catching
-  `(ValueError, TypeError, KeyError)` → returns `value`. Negative indices, a
-  missing component, `"::2"` and a four-component `"a:b:c:d"` (which raises
-  `TypeError` from `slice(*bits)` and therefore returns `value`) are all rows.
+- `slice` (`:651-665`) — **Rust owns the parsing, the host owns the slicing.**
+  Rust does `str(arg).split(":")` into `None`/`int` bits inside a
+  `try/except (ValueError, TypeError, KeyError)` that returns `value`; the
+  slicing itself is `FilterHost::get_slice(value, start, stop, step)`. It cannot
+  be `get_index` plus Rust slicing: `"abcdef"|slice:":3"` is `"abc"`, a **string**,
+  where the index route yields a list — the wrong *type*, which §D5's comparison
+  is designed to catch. Rows: negative indices, a missing component, `"::2"`, and
+  a four-component `"a:b:c:d"` (which raises `TypeError` from `slice(*bits)` and
+  therefore returns `value`).
 - `join` (`:611-621`) — `needs_autoescape`, `is_safe=True`, and the group's
   trap: on `TypeError` it returns **`value`, the unjoined list**, not `""`. With
   `autoescape=True` it is `conditional_escape(arg).join([conditional_escape(v)
@@ -960,13 +1133,19 @@ The group that Task 1 unblocks, and the one that proves the seam end-to-end.
 - `random` (`:642-648`) — `random_module.choice(value)`, catching `IndexError` →
   `""`. **Review Focus 4**: the corpus row asserts membership, and the test says
   so in its name, because an equality row would be green 1 time in 57.
-- `dictsort` (`:578-588`) / `dictsortreversed` (`:590-600`) — `sorted(...,
-  key=_property_resolver(arg))`, and `_property_resolver` (`:540-575`) is the
-  second trap: it splits `arg` on `VARIABLE_ATTRIBUTE_SEPARATOR`, raises
+- `dictsort` (`:578-588`) / `dictsortreversed` (`:590-600`) — **one host call,
+  `FilterHost::sort_by_property(value, prop, reverse)`**, not a resolver plus a
+  sort. `_property_resolver` (`:540-575`) splits `arg` on
+  `VARIABLE_ATTRIBUTE_SEPARATOR`, routes a float-convertible `arg` to
+  `itemgetter` and everything else to a `__getitem__`-then-`getattr` chain whose
+  except clause names **five** classes, and raises
   `AttributeError("Access to private variables is forbidden.")` for a
-  leading-underscore bit, and falls back between `__getitem__` and `getattr`.
-  `FilterHost::get_attr` is the seam; the split and the private-name refusal are
-  Rust's.
+  leading-underscore bit. Splitting that across the FFI would mean Rust
+  reimplementing Python's exception classification, and `sorted` over `Opaque`
+  values is not expressible in Rust at all. **What Rust owns is the filter's own
+  behaviour**: the `(AttributeError, TypeError) → ""` catch, which is a match on
+  `Error::Host { kind, .. }` — the taxonomy above is what makes that a one-line
+  match rather than a string comparison.
 - `unordered_list` (`:669-743`) — `needs_autoescape`, recursive, and the largest
   body in the group. Its `escaper` is `conditional_escape` or identity depending
   on `autoescape`, and its output indents with tabs. The corpus needs a nested
@@ -1019,10 +1198,16 @@ The group that Task 1 unblocks, and the one that proves the seam end-to-end.
 `escapejs`, `linebreaks`, `linebreaksbr`, `linenumbers`, `iriencode`, `urlencode`
 
 - `escape` (`:457-461`) — `@stringfilter`, `is_safe=True`, body
-  `conditional_escape(value)`. §D4 is what makes this writable.
-- `force_escape` (`:474-483`) — `mark_safe(escape(value))` with `escape` being
-  the imported `django.utils.html.escape`, i.e. it escapes even a safe input.
-  The difference between `escape` and `force_escape` is one corpus row and it is
+  `conditional_escape(value)`. **This is a call to `FilterHost::conditional_escape`,
+  not a Rust helper** — §D4, corrected after review. One host method serves the
+  eight filters that need it.
+- `force_escape` (`:474-483`) — `mark_safe(escape(value))`, where `escape` is the
+  imported `django.utils.html.escape`, i.e. it escapes even a safe input. **That
+  `escape` is Rust's** (`SafeString(html.escape(str(text)))`, a fixed
+  five-replacement table, pure — §D2 does not put it in the 18), whereas
+  `conditional_escape` next door is the host's. The pair is the sharpest
+  illustration in M4 of the distinction: one is a table, the other is a protocol.
+  The difference between `escape` and `force_escape` is one corpus row, and it is
   the row a `SafeData` input produces.
 - `escapeseq` (`:464-472`), `safeseq` (`:518-526`) — list comprehensions, so the
   §D5 per-element type comparison is the assertion.
@@ -1030,17 +1215,25 @@ The group that Task 1 unblocks, and the one that proves the seam end-to-end.
   goes through `SafeString.__new__` and is `str()`d; measured on the pinned tree
   as `mark_safe(5)` returning the `str` subclass `SafeString`. So `safe` needs
   `FilterHost::mark_safe` to make that conversion, not a Rust cast.
-- `striptags` (`:528-538`) — `django.utils.html.strip_tags`, host.
-- `escapejs` (`:78-83`) — `is_safe` **absent**, `@stringfilter`, body is the host's
-  `escapejs`. The absent flag is why it is in this group rather than being assumed
-  safe like its neighbours.
+- `escapejs` (`:78-83`) — `is_safe` **absent**, `@stringfilter`, and **the body is
+  Rust's**: `mark_safe(str(value).translate(_js_escapes))` over a fixed ~30-entry
+  table, which is why the derivation says pure and why an earlier revision of this
+  plan wrongly had it as a host method. The absent flag is why it sits in this
+  group rather than being assumed safe like its neighbours.
+- `striptags` (`:528-538`) — `django.utils.html.strip_tags`, host — genuinely so,
+  being `HTMLParser`-based with a depth limit that raises `SuspiciousOperation`
+  (`html.py:238-272`); the corpus should carry a nested-tag case.
 - `linebreaks` (`:485-495`), `linebreaksbr` (`:497-509`) — `needs_autoescape`;
   both branch on `autoescape` and use `linebreaks` from `django.utils.html`.
 - `linenumbers` (`:230-245`) — `needs_autoescape`, `is_safe=True`, `escape=autoescape`,
-  and it emits `<span>` markup around lines. Pure Rust over `conditional_escape`
-  and `escape`, and the `autoescape=False` branch changes the output shape.
-- `iriencode` (`:223-228`) — `iri_to_uri(value, safe="/#%[]=:;$&()+,!?*@'~")` in a
-  `try/except TypeError` → `""`. Host.
+  and it emits `<span>` markup around lines. Rust, over the host's
+  `conditional_escape` and Rust's `escape`; the `autoescape=False` branch changes
+  the output shape.
+- `iriencode` (`:223-228`) — **the entire body is one call**:
+  `return iri_to_uri(value)`. Rust owns the `try/except TypeError` → `""` wrapper
+  and nothing else; the work is `FilterHost::iri_to_uri`. This filter is the
+  clearest case in M4 of why the trait had to be derived rather than written from
+  a reading — it was in the 18 from the start, and it had no method.
 - `urlencode` (`:365-380`) — `arg=None` means `safe=None` means Django's default
   safe set; then `quote(value, safe=safe)`. Host for `quote`, Rust for the
   `safe`-set selection.
@@ -1132,8 +1325,11 @@ files. §10.3's "Filter corpus parity, incl. `FilterFlags` round-tripping": Task
 
 **Gaps found and closed.** (a) `Value` had no owner in any milestone — M8's
 `SafeData` describes the *protocol*, not the representation, so M4 has to define
-it; §D1 does. (b) `conditional_escape` is M8's by §10.3 but M4's by dependency;
-§D4 records the reach. (c) `FilterHost` and `ExtensionHost` are easily confused
+it; §D1 does. (b) `conditional_escape` looked like M8's by §10.3 and M4's by
+dependency, so an earlier revision had M4 implement a pure Rust version of it.
+Review showed there is no pure piece — two of its three branches are Python
+protocols (`Promise`, `__html__`) — so §D4 is now a host call and M4 takes
+nothing from M8 at all. (c) `FilterHost` and `ExtensionHost` are easily confused
 and the spec only names the second; the self-review note above is the
 disambiguation, and Task 2's `host.rs` doc must repeat it. (d) **The spec claimed
 a reach it does not have** — §6 said Rust owns "all built-in tags and filters" and
@@ -1143,14 +1339,22 @@ for filter bodies nobody scheduled. (e) **The delegation count had no derivation
 and was given three different values across two sessions before being measured;
 Task 3 Step 1b computes it.
 
-**Two things in this plan were wrong on first writing, and both were caught by
-review rather than by me.** The M10 `utils` claim in §D2 was a factual error about
-which module a milestone interposes, and the `stringfilter`-versus-`base.py:816`
-question in §D3 was answered by the wrong measurement — "they converge" is true
-of a `SafeString` and false of a lazy proxy, and the plan now carries the probe
-that shows where. Both are recorded rather than silently fixed, because the
-failure mode in each case (a plausible-sounding milestone reference, a
-measurement taken on the easy input) is one this project will meet again.
+**Four things in this plan were wrong on first writing, and review caught three of
+them.** The M10 `utils` claim in §D2 was a factual error about which module a
+milestone interposes. The `stringfilter`-versus-`base.py:816` question in §D3 was
+answered by the wrong measurement — "they converge" is true of a `SafeString` and
+false of a lazy proxy. The `FilterHost` trait was written from a reading of the 57
+bodies rather than derived from them, and five filters had no expressible method;
+the fix is in Task 2 and the derivations are tabulated there. The fourth I found
+while checking the review's `PartialEq` question: no body compares two `Value`s,
+but `cut` compares one against the literal `";"`, which structural equality gets
+wrong for a safe argument.
+
+All four had the same shape — a plausible claim that nobody had executed — and
+each was settled by running something (an AST walk for the imports, a probe for
+the proxy, a closure walk for the trait's gaps, an AST walk for the `==` uses).
+That is the discipline the earlier milestones established and it is the reason the
+errors were cheap.
 
 **Type consistency.** `Value`, `ValueId`, `FilterFlags`, `FilterCall`, `FilterFn`,
 `FilterEntry`, `filter`, `filter_names` are spelled identically in Tasks 2, 3 and
