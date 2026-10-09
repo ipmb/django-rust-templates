@@ -346,7 +346,7 @@ defaulttags.py:1251	django/template/defaulttags.py	1251	-	-	-
 defaulttags.py:1268	django/template/defaulttags.py	1268	-	@register.tag(name="partial")	-
 defaulttags.py:1286	django/template/defaulttags.py	1286	-	simple_tag	-
 defaulttags.py:1286-1287	django/template/defaulttags.py	1286	1287	@register.simple_tag(name="querystring", takes_context=True)	def querystring(context, *args, **kwargs):
-defaulttags.py:1352-1419	django/template/defaulttags.py	1352	1419	-	-
+defaulttags.py:1352-1417	django/template/defaulttags.py	1352	1417	@register.tag	return RegroupNode(target, expression, var_name)
 defaulttags.py:1400-1401	django/template/defaulttags.py	1400	1401	if len(bits) != 6:	raise TemplateSyntaxError("'regroup' tag takes five arguments")
 defaulttags.py:1402	django/template/defaulttags.py	1402	-	target = parser.compile_filter(bits[1])	-
 defaulttags.py:1403-1404	django/template/defaulttags.py	1403	1404	if bits[2] != "by":	raise TemplateSyntaxError("second argument to 'regroup' tag must be 'by'")

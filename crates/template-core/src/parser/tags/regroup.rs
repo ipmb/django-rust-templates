@@ -1,4 +1,4 @@
-//! `{% regroup %}` — `defaulttags.regroup` (`defaulttags.py:1352-1419`).
+//! `{% regroup %}` — `defaulttags.regroup` (`defaulttags.py:1352-1417`).
 //!
 //! # The third argument is compiled *around* the fifth, not from itself
 //!
