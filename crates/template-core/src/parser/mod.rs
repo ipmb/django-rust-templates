@@ -23,6 +23,8 @@ pub use error::{Error, ErrorKind};
 pub use host::{Host, NoHost};
 pub use tags::CompileFn;
 
+use std::collections::HashMap;
+
 use crate::pyunicode;
 use crate::text::get_text_list;
 use crate::token::{Token, TokenType};
@@ -48,11 +50,15 @@ pub struct Parser<'a> {
     /// without a new dependency; guessing would put a subtly wrong string in a
     /// message the suite compares exactly.
     origin_template_repr: Option<String>,
-    // The cycle registry (`parser._last_cycle_node`, `parser._named_cycle_nodes`)
-    // arrives in Task 5 with `{% resetcycle %}`, which is its first reader. It is
-    // not declared here because a field nothing reads is a `dead_code` warning
-    // under `-D warnings`, and a milestone that adds state before its reader is
-    // how that happens.
+    /// `parser._last_cycle_node` and `parser._named_cycle_nodes`, which
+    /// `{% cycle %}` sets and `{% resetcycle %}` reads by name or by default.
+    ///
+    /// Both hold host-owned `CycleNode`s, so they are handles here. M2 only ever
+    /// reads them and always finds them empty, because `{% cycle %}` is M5; the
+    /// fields exist now so that `{% resetcycle %}`'s two error paths are the
+    /// real ones rather than a hard-coded "no cycles".
+    last_cycle_node: Option<NodeRef>,
+    named_cycle_nodes: HashMap<String, NodeRef>,
 }
 
 impl<'a> Parser<'a> {
@@ -76,6 +82,8 @@ impl<'a> Parser<'a> {
             command_stack: Vec::new(),
             host,
             origin_template_repr: None,
+            last_cycle_node: None,
+            named_cycle_nodes: HashMap::new(),
         }
     }
 
