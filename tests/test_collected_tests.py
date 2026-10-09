@@ -36,7 +36,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # as the change that moves it, and only after asking whether the *delta* is the
 # one you intended — a jump of four where you expected seven is what this row is
 # for.
-PINNED = 347
+PINNED = 354
 
 
 def collected() -> unittest.TestSuite:

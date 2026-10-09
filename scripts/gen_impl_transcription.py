@@ -49,6 +49,17 @@ MODULES = {
     "engine.py": "django/template/engine.py",
     "smartif.py": "django/template/smartif.py",
     "utils.py": "django/template/utils.py",
+    # M10's six loader files. The first keys in this table that are not a single
+    # segment, which is the point: a key is an `_impl`-relative posix path here as
+    # it is in `DECLARED`, `COMPARED_PATH` and `_shim.SHADOWING`, and the value is
+    # `django/template/` + the key for every row in the table — including these,
+    # where the key carries the subdirectory the value has to carry too.
+    "loaders/__init__.py": "django/template/loaders/__init__.py",
+    "loaders/base.py": "django/template/loaders/base.py",
+    "loaders/filesystem.py": "django/template/loaders/filesystem.py",
+    "loaders/app_directories.py": "django/template/loaders/app_directories.py",
+    "loaders/cached.py": "django/template/loaders/cached.py",
+    "loaders/locmem.py": "django/template/loaders/locmem.py",
 }
 
 # Transcriptions this generator must **not** write, because their difference from

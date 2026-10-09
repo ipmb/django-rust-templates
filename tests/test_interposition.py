@@ -28,6 +28,8 @@ import unittest
 from django.template import Context, Engine
 from django_rust_templates import _shim
 
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
 
 def render_through(tmpdir, source, *, template_name="index.html", **context):
     """Write ``source`` into ``tmpdir`` and render it through a real ``Engine``.
@@ -680,6 +682,220 @@ class ModuleInterpositionTests(unittest.TestCase):
         with instrumented(utils) as counts:
             django_parse("{{ x }}")
         self.assertEqual(sum(counts.values()), 0)
+
+    LOADER_MODULES = [
+        "loaders",
+        "loaders.base",
+        "loaders.filesystem",
+        "loaders.app_directories",
+        "loaders.cached",
+        "loaders.locmem",
+    ]
+
+    def test_every_loader_module_resolves_to_our_file(self):
+        import importlib
+
+        for name in self.LOADER_MODULES:
+            with self.subTest(name=name):
+                module = importlib.import_module(f"django.template.{name}")
+                self.assertIn("_impl", module.__file__, module.__file__)
+
+    def test_the_package_still_reaches_djangos_siblings(self):
+        """The fallback survives one level down, which is the whole hazard.
+
+        `django.template.loaders` is a package now, and a package's `__path__`
+        is built by the finder from *our* directory plus Django's. If the second
+        half were missing, every loader we have not taken would stop resolving —
+        and the failure would appear when a milestone is half-finished, which is
+        exactly when the fallback is needed.
+
+        Asserted as two memberships rather than as a length, because "our
+        directory is first" is the ordering the finder promises and "Django's is
+        also there" is the half that breaks; a `len(__path__) == 2` would be
+        true of our directory twice.
+        """
+        import django.template.loaders as loaders
+
+        paths = [pathlib.Path(p).resolve() for p in loaders.__path__]
+        self.assertIn(
+            (
+                PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "loaders"
+            ).resolve(),
+            paths,
+        )
+        self.assertTrue(
+            any(p.name == "loaders" and "_impl" not in str(p) for p in paths),
+            f"Django's own loader directory is not on {paths}",
+        )
+
+    def test_the_loader_classes_are_not_djangos(self):
+        import importlib
+        import inspect
+
+        from tests.pinned_module import load_pinned
+
+        for name, relative in [
+            ("loaders.base", "loaders/base.py"),
+            ("loaders.filesystem", "loaders/filesystem.py"),
+            ("loaders.app_directories", "loaders/app_directories.py"),
+            ("loaders.cached", "loaders/cached.py"),
+            ("loaders.locmem", "loaders/locmem.py"),
+        ]:
+            with self.subTest(name=name):
+                module = importlib.import_module(f"django.template.{name}")
+                self.assertIsNot(module.Loader, load_pinned(relative).Loader)
+                self.assertIn("_impl", inspect.getfile(module.Loader))
+
+    def test_our_app_directories_loader_subclasses_our_filesystem_loader(self):
+        """The cross-module inheritance, which is what a half-built package breaks.
+
+        `loaders/app_directories.py` does `from .filesystem import Loader`. With
+        the package interposed, that relative import resolves through our
+        `__path__` — so the base class is ours, and this row is what says so.
+        Interposing one of the two without the other would leave Django's class
+        as the base of ours, and `isinstance` against either would then be false
+        for half the objects in the tree.
+
+        The `not issubclass(…, pinned.Loader)` half is the discriminating one:
+        with only our two modules interposed the first assertion is already true
+        of a hierarchy rooted in Django's class, since our `filesystem.Loader`
+        subclasses it. What this milestone claims is the *inner* link.
+        """
+        import django.template.loaders.app_directories as app_directories
+        import django.template.loaders.filesystem as filesystem
+
+        from tests.pinned_module import load_pinned
+
+        self.assertTrue(
+            issubclass(app_directories.Loader, filesystem.Loader),
+            app_directories.Loader.__mro__,
+        )
+        self.assertFalse(
+            issubclass(app_directories.Loader, load_pinned("loaders/filesystem.py").Loader),
+            app_directories.Loader.__mro__,
+        )
+
+    def test_the_engines_loader_class_is_ours(self):
+        """Review Focus 4, as a row: a dotted path in settings resolves to us.
+
+        `Engine.find_template_loader` does `import_string("django.template.
+        loaders.filesystem.Loader")`, which is the spelling in `TEMPLATES` for
+        every Django project and in Django's own loader tests. So the assertion
+        that matters is not that the module is ours but that the *object the
+        engine instantiated* is ours — and that it is not the pinned copy's.
+        """
+        from tests.pinned_module import load_pinned
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pathlib.Path(tmpdir, "index.html").write_text("{{ name }}")
+            engine = Engine(
+                loaders=[("django.template.loaders.filesystem.Loader", [tmpdir])]
+            )
+            loader = engine.template_loaders[0]
+
+        import django.template.loaders.filesystem as filesystem
+
+        self.assertIsInstance(loader, filesystem.Loader)
+        self.assertNotIsInstance(loader, load_pinned("loaders/filesystem.py").Loader)
+
+    def test_every_loader_class_loads_and_renders(self):
+        """Each loader on its own path, constructed the way upstream spells it.
+
+        Four constructors, and the differences are what the row is for — a
+        transcription that "tidied" a signature fails here rather than in the
+        suite, where the message would be about a template that did not load.
+        Every construction below is copied from the pinned file being exercised:
+
+        * ``base.py`` — ``Loader(engine)``; its ``get_template_sources`` raises
+          ``NotImplementedError``, so it has no path of its own and the
+          assertion about it is the ``issubclass`` below.
+        * ``filesystem.py`` — ``Loader(engine, dirs=None)``.
+        * ``cached.py`` — ``Loader(engine, loaders)``, where ``loaders`` is a
+          list of **specs** that ``__init__`` resolves through
+          ``engine.get_template_loaders()``; the inner filesystem loader is
+          therefore spelled as a tuple, which is what gives it its directory.
+        * ``locmem.py`` — ``Loader(engine, templates_dict)``, keyed by
+          ``origin.name`` — the template name as written, not a path.
+        * ``app_directories.py`` — no ``__init__`` of its own; it inherits
+          ``FilesystemLoader``'s and overrides ``get_dirs()``. The override is
+          the class, so its row is the next one.
+        """
+        import django.template.loaders.base as base
+        import django.template.loaders.cached as cached
+        import django.template.loaders.locmem as locmem
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pathlib.Path(tmpdir, "index.html").write_text("{{ a }}")
+
+            filesystem_engine = Engine(
+                loaders=[("django.template.loaders.filesystem.Loader", [tmpdir])]
+            )
+            self.assertEqual(
+                filesystem_engine.get_template("index.html").render(
+                    Context({"a": "x"})
+                ),
+                "x",
+            )
+            self.assertTrue(
+                issubclass(filesystem_engine.template_loaders[0].__class__, base.Loader)
+            )
+
+            cached_engine = Engine(
+                loaders=[
+                    (
+                        "django.template.loaders.cached.Loader",
+                        [("django.template.loaders.filesystem.Loader", [tmpdir])],
+                    )
+                ]
+            )
+            loader = cached_engine.template_loaders[0]
+            self.assertIsInstance(loader, cached.Loader)
+            self.assertEqual(
+                cached_engine.get_template("index.html").render(Context({"a": "x"})),
+                "x",
+            )
+            # The cache is this loader's behaviour, and the row is that it is
+            # populated by a load rather than merely declared.
+            self.assertIsNot(loader.get_template_cache, {})
+
+            locmem_engine = Engine(
+                loaders=[
+                    ("django.template.loaders.locmem.Loader", {"index.html": "{{ a }}"})
+                ]
+            )
+            self.assertIsInstance(locmem_engine.template_loaders[0], locmem.Loader)
+            self.assertEqual(
+                locmem_engine.get_template("index.html").render(Context({"a": "x"})),
+                "x",
+            )
+
+    def test_the_app_directories_loader_keeps_its_override(self):
+        """``app_directories.Loader`` is three lines, and all three are assertions.
+
+        It declares no ``__init__`` — it inherits ``FilesystemLoader``'s — and
+        overrides ``get_dirs()`` to return ``get_app_template_dirs("templates")``,
+        which is **ours** from Task 3. That override is why passing ``dirs`` to it
+        does nothing, and this row asserts exactly that: with no app declaring a
+        ``templates/`` directory (the suite's settings have ``INSTALLED_APPS=[]``),
+        the loader finds nothing even though it was given a directory that has
+        the file. A transcription that dropped the override would find it.
+
+        That it finds templates when an app *does* declare them is
+        ``.django/tests/template_tests/test_loaders.py::AppDirectoriesLoaderTests``
+        — the milestone's ``test_loaders`` gate — which is where the app-registry
+        machinery that row needs already lives.
+        """
+        from django.template import TemplateDoesNotExist
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pathlib.Path(tmpdir, "index.html").write_text("{{ a }}")
+            engine = Engine(
+                loaders=[("django.template.loaders.app_directories.Loader", [tmpdir])]
+            )
+            loader = engine.template_loaders[0]
+            self.assertEqual(list(loader.get_dirs()), [])
+            with self.assertRaises(TemplateDoesNotExist):
+                engine.get_template("index.html")
 
 
 class ShadowingTests(unittest.TestCase):

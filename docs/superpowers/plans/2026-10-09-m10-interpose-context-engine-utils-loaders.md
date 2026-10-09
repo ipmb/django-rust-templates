@@ -1945,6 +1945,42 @@ and the same shape for the other four with `((2, 3), None, …)`. **Check each o
 
 and `tests/test_shim.py`'s meter becomes `self.assertEqual(len(remaining), 14, sorted(remaining))`, with the six `assertNotIn` lines for the loader names and the history line in the docstring extended to `…, 20 with engine, 14 with loaders — the milestone's number`.
 
+**Five things this task needs that its Files list does not name, all found by
+running it.**
+
+* `scripts/gen_impl_transcription.py` — **the step does not run without it.**
+  `render()` refuses any name not in `MODULES`, so `gen_impl_transcription.py
+  "loaders/__init__.py"` exits before reading anything. Six rows were added. They
+  are the first keys in that table that are not a single segment, which is the
+  table's own rule holding rather than bending: key is the `_impl`-relative posix
+  path, value is `django/template/` + key, for all ten rows.
+* `tests/milestone_ownership.py`'s **`OWNERS`, not just `INTERPOSED`.** The six
+  names were also in `OWNERS`, and `test_no_name_is_both_owned_and_taken` failed
+  on exactly those six — the table's own discipline working. They leave `OWNERS`
+  in this commit, so §10.3's M10 row is now empty there and the milestone is done
+  with the table.
+* `tests/test_collected_tests.py` — `PINNED` 347 → 354, the seven new rows. The
+  row fired on the first `--fast` run and named the delta, which is what it is
+  for. (Task 8 takes it further.)
+* `scripts/anchors.txt` and the prose in `tests/test_shim.py` — adding six rows to
+  `SHADOWING` moves `if installed():` from `_shim.py:399` to `:405`, and the
+  manifest row key moves with it, because the key is the citation as written.
+* `loaders/__init__.py` is **67 bytes**, not the 76 this step predicts. The
+  prediction was arithmetic done in prose and not run; the file is the marker
+  line (65 bytes including its newline) plus the blank separator. The check that
+  matters is that it is non-zero, and it is.
+
+One thing Step 2 predicts that is not true: **four of the seven rows pass before
+the interposition.** `test_the_engines_loader_class_is_ours`,
+`test_every_loader_class_loads_and_renders`,
+`test_our_app_directories_loader_subclasses_our_filesystem_loader` and
+`test_the_app_directories_loader_keeps_its_override` assert behaviour Django's own
+loaders already have, so they cannot fail first — `load_pinned` loads a *separate*
+module object, so even `assertNotIsInstance` against it holds while the imported
+class is Django's. The twelve that do fail first are the three resolution/identity
+rows; these four are regression rows, and they are the ones that would catch a
+transcription that dropped `get_dirs()` or tidied a constructor signature.
+
 - [ ] **Step 5: Run the tests to verify they pass.**
 
 Run: `scripts/run_unit_tests.sh tests.test_interposition tests.test_shim tests.test_milestone_ownership tests.test_loader_case_sensitivity -v`

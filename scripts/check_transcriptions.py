@@ -224,6 +224,19 @@ COMPARED_PATH = {
         (122, 123, "Engine.get_template_builtins"),
         (125, 129, "Engine.get_template_libraries"),
     ],
+    # 0 functions each: nothing a parity harness executes reaches the loaders.
+    # Measured with `.review/m10-measurements/m10_measure_compared_path.py`; the
+    # loaders are entered through `Engine.get_template`, which no parity source
+    # calls (the harness parses, it does not render), so the twenty-one functions
+    # these six files define between them are all outside the reach of both
+    # corpora. Present rather than absent, for the key-set-equality clause: an
+    # entry missing here is a guard failure, not a silent pass.
+    "loaders/__init__.py": [],
+    "loaders/base.py": [],
+    "loaders/filesystem.py": [],
+    "loaders/app_directories.py": [],
+    "loaders/cached.py": [],
+    "loaders/locmem.py": [],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])
@@ -444,6 +457,90 @@ DECLARED = {
             # (`functools`, `ImproperlyConfigured`, `cached_property`,
             # `import_string`) and so is every line after them.
             ((1, 2), None, "# TRANSCRIBED: django/template/engine.py (Django 6.0.9)"),
+        ],
+    ),
+    # M10's six loader files. Three shapes among them, and the shape decides
+    # which side of the file the marker lands on — so each row below is written
+    # from what the generator produced, which the guard then re-checks:
+    #
+    # * `__init__.py` (0 bytes), `base.py` (opens with an import): a comment on
+    #   line 1, region `((1, 2), None, ...)`;
+    # * `filesystem.py`, `app_directories.py`, `cached.py`, `locmem.py` (all open
+    #   with a docstring): inside it, region `((2, 3), None, ...)`.
+    #
+    # **`loaders/__init__.py` is 0 bytes upstream**, so ours is the marker and
+    # its blank line and nothing else — a two-line file whose whole content is
+    # the claim that it transcribes an empty one. It is the only transcription in
+    # the tree where upstream *is* the empty string.
+    #
+    # **The premise the +2 span arithmetic rests on, stated because it is
+    # invisible in the table.** Every `COMPARED_PATH` span for M10's files is
+    # upstream's line number plus two, and that holds only because each
+    # transcription inserts its marker and nothing else — **none of these nine
+    # rewrites its module docstring**, unlike `_impl/__init__.py`, which does. A
+    # file that both inserted a marker and edited its docstring would shift its
+    # spans by two *plus* the docstring delta, and a uniform +2 would then be
+    # wrong for every function in it while the table looked like every other row.
+    # `gen_impl_transcription.py --check` on the fast path is what keeps that
+    # true, and it is why it is worth a step in `check.sh`.
+    "loaders/__init__.py": (
+        "django/template/loaders/__init__.py",
+        [
+            (
+                (1, 2),
+                None,
+                "# TRANSCRIBED: django/template/loaders/__init__.py (Django 6.0.9)",
+            ),
+        ],
+    ),
+    "loaders/base.py": (
+        "django/template/loaders/base.py",
+        [
+            (
+                (1, 2),
+                None,
+                "# TRANSCRIBED: django/template/loaders/base.py (Django 6.0.9)",
+            ),
+        ],
+    ),
+    "loaders/filesystem.py": (
+        "django/template/loaders/filesystem.py",
+        [
+            (
+                (2, 3),
+                None,
+                "# TRANSCRIBED: django/template/loaders/filesystem.py (Django 6.0.9)",
+            ),
+        ],
+    ),
+    "loaders/app_directories.py": (
+        "django/template/loaders/app_directories.py",
+        [
+            (
+                (2, 3),
+                None,
+                "# TRANSCRIBED: django/template/loaders/app_directories.py (Django 6.0.9)",
+            ),
+        ],
+    ),
+    "loaders/cached.py": (
+        "django/template/loaders/cached.py",
+        [
+            (
+                (2, 3),
+                None,
+                "# TRANSCRIBED: django/template/loaders/cached.py (Django 6.0.9)",
+            ),
+        ],
+    ),
+    "loaders/locmem.py": (
+        "django/template/loaders/locmem.py",
+        [
+            (
+                (2, 3),
+                None,
+                "# TRANSCRIBED: django/template/loaders/locmem.py (Django 6.0.9)",
+            ),
         ],
     ),
 }

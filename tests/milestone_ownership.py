@@ -31,17 +31,15 @@ SPEC = (
 # and the meter in step, and `test_no_name_is_both_owned_and_taken` fails if a
 # name is in both.
 OWNERS = {
-    # §10.3's M10 row. `origin` is deliberately absent and cannot be added: it
-    # is not a module (§1 — `Origin` is a class in `base.py`, which M9 owns), so
-    # the row naming it is an error, corrected by this plan's close-out task.
+    # §10.3's M10 row. Its nine names lived here until the commit that
+    # interposed each moved it to `INTERPOSED` below; the six `loaders` files
+    # were the last of them, so **M10's row is now empty here and the milestone
+    # is done with this table**. `origin` is absent and cannot be added: it is
+    # not a module (§1 — `Origin` is a class in `base.py`, which M9 owns), so the
+    # row naming it is an error, corrected by this plan's close-out task.
     # `test_the_table_partitions_the_universe` makes it unrepresentable here,
     # because `origin` is not in `django_modules()`.
-    "loaders": "M10",
-    "loaders.base": "M10",
-    "loaders.filesystem": "M10",
-    "loaders.app_directories": "M10",
-    "loaders.cached": "M10",
-    "loaders.locmem": "M10",
+    #
     # §10.3's M11 row.
     "defaulttags": "M11",
     "defaultfilters": "M11",
@@ -99,7 +97,17 @@ UNDECIDED = {
 INTERPOSED = {
     "M0": ["exceptions"],
     "M9": ["base", "smartif"],
-    "M10": ["utils", "context", "engine"],
+    "M10": [
+        "utils",
+        "context",
+        "engine",
+        "loaders",
+        "loaders.base",
+        "loaders.filesystem",
+        "loaders.app_directories",
+        "loaders.cached",
+        "loaders.locmem",
+    ],
 }
 
 
