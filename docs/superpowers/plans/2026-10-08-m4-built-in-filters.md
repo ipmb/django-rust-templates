@@ -780,6 +780,14 @@ pub trait FilterHost {
 }
 ```
 
+**Three implementations of that trait, all written here**: the FFI's real one
+(Task 3), `NoFilterHost` (every method `Err(Error::host(name))`), and
+`TestFilterHost` (scripted answers, recorded calls) — the last two in this task's
+`host.rs`, per Step 2. They are deliberately three names and not two: "no host at
+all" and "a host that answers what the test says" fail a test in opposite
+directions, and collapsing them would make a body that wrongly needs the host pass
+a bare-shell unit test.
+
 **`escape` and `escapejs` are deliberately *not* on this trait.** Both are pure —
 `django.utils.html.escape` is `SafeString(html.escape(str(text)))`, and `escapejs`
 is `mark_safe(str(value).translate(_js_escapes))` over a fixed ~30-entry table — so
@@ -883,11 +891,57 @@ returning Python's name (`"NoneType"`, `"bool"`, `"int"`, `"float"`, `"str"`,
 
 - [ ] **Step 2: Write `host.rs`**
 
-The trait above, plus `NoFilterHost`. Each method's doc comment carries the
-Django call site it stands for and the reason it is on the host rather than in
-Rust — §D2's rule is the reason, and the *specific* reason is `settings`, the
-active language, or the clock. `clippy::type_complexity` has bitten this project;
+The trait above, plus `NoFilterHost` **and `TestFilterHost`**. Each method's doc
+comment carries the Django call site it stands for and the reason it is on the
+host rather than in Rust — §D2's rule is the reason, and the *specific* reason is
+`settings`, the active language, or the clock. `clippy::type_complexity` has bitten this project;
 name the `number_format` parameter list with a struct if it warns.
+
+`TestFilterHost` is **not optional and not the agents' to write**: the shared task
+shape below tells every agent to use it, §D7 forbids an agent from editing
+`host.rs`, and Task 3's corpus needs a Rust-side host whose answers a test can
+dictate. So it lands here, in the one commit that owns the file.
+
+```rust
+/// A scripted host for a filter module's own `#[cfg(test)] mod tests`.
+///
+/// Every operation answers from its own `Option` field when set, and otherwise
+/// returns `Err(Error::host("<name>"))` — the same failure `NoFilterHost` gives,
+/// so a test cannot pass by leaving a field unset. Every call is recorded, so a
+/// test can assert the body *reached* the seam rather than asserting a value the
+/// body could have produced on its own. The second half is what §11 needs: a
+/// delegating filter whose test never checks `calls()` can be reimplemented in
+/// Rust and still pass.
+#[derive(Default)]
+pub struct TestFilterHost {
+    calls: RefCell<Vec<&'static str>>,
+    pub str_lower: Option<String>,
+    pub str_title: Option<String>,
+    pub truncate: Option<String>,
+    pub strip_tags: Option<String>,
+    pub slugify: Option<String>,
+    pub urlize: Option<String>,
+    pub conditional_escape: Option<Value>,
+    pub sort_by_property: Option<Value>,
+    // …one `Option` per host operation, in the trait's own order…
+}
+
+impl TestFilterHost {
+    /// The operation names this host was asked for, in order.
+    pub fn calls(&self) -> Vec<&'static str> { … }
+    /// Panics naming `name` if it is absent, and prints the calls it did see.
+    pub fn assert_called(&self, name: &str) { … }
+}
+```
+
+Two properties, both observable in `host.rs`'s own `#[cfg(test)] mod tests` in
+this task: an unset field produces `Err(Error::host(name))` rather than a default
+value, and `calls()` is appended **before** the field is read, so recording
+cannot depend on what the scripted answer happened to be. Observe them by
+mutation, as the other two impls' tests do: give `truncate` a default answer and
+watch the "unset means error" assertion go green wrongly; move the `calls()` push
+below the field read and watch a test that asserts the call happened on an
+unset field fail. Restore both.
 
 - [ ] **Step 3: Write the 57 stubs**
 
@@ -1193,8 +1247,10 @@ concretely.
   M2 and M3 between them lost eight plan rows to predictions nobody had run.
 - [ ] **Step 2: Write the Rust unit tests** in each `filters/<name>.rs`'s
   `#[cfg(test)] mod tests`, using `NoFilterHost` for the pure cases and a
-  `TestFilterHost` (added centrally to `filters/host.rs` **before** the group is
-  dispatched) for the ones that need the seam. Each test asserts the measured
+  `TestFilterHost` (written centrally in Task 2 Step 2, in `filters/host.rs`,
+  **before** the group is dispatched) for the ones that need the seam. A test for
+  a delegating filter also asserts `host.assert_called(…)`, so the body cannot be
+  silently reimplemented in Rust and still pass. Each test asserts the measured
   rows literally.
 - [ ] **Step 3: Run them and watch them fail** —
   `cargo test -p template-core`. Expected: FAIL, `Error::unimplemented_filter`.
