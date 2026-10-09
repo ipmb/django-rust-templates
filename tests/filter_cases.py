@@ -2134,9 +2134,14 @@ CASES: list[dict] = [
     },
     {
         # A numeric *string* goes through `float`, so it is a number and not a
-        # length — and `"1"` is the row where that is invisible: `float("1")`
-        # and `len("1") == 1` select the same empty singular suffix, so a body
-        # that took the `len` arm by mistake agrees here.
+        # length — and `"1"` is the row where that is invisible: `float("1")` is
+        # `1.0` and `len("1") == 1` select the same empty singular suffix, so a
+        # body that took the `len` arm by mistake agrees here. It is the *only*
+        # one-character string that coincides (a one-character string is
+        # singular through `len`, and singular through `float` only for `"1"`),
+        # which is why it is kept even though it can never fail on its own: it is
+        # the coinciding twin of `"2"` below, and a set with `"2"` alone would not
+        # show that the other single digit had been *agreeing*.
         "name": "pluralize/numeric-string-one",
         "filter": "pluralize",
         "value": "1",
@@ -2154,6 +2159,27 @@ CASES: list[dict] = [
         "name": "pluralize/numeric-string-two",
         "filter": "pluralize",
         "value": "2",
+    },
+    {
+        # The other direction of the same disagreement, and a *signed* string:
+        # `float("+1")` is `1.0` (singular) while `len("+1") == 2` is plural, so
+        # this is a numeric string that must answer the **singular** suffix —
+        # where `"2"` must answer the plural one. Together they pin that the
+        # answer comes from a parse and not from a character count, in both
+        # directions; `"2"` alone would be satisfied by a body that treated any
+        # one-character operand as a number.
+        "name": "pluralize/signed-numeric-string-is-one",
+        "filter": "pluralize",
+        "value": "+1",
+    },
+    {
+        # And the syntax a character count has no way to see at all: an exponent.
+        # `float("1e0")` is `1.0`; `len("1e0")` is 3. This is the sharpest of the
+        # string rows, because unlike `"+1"` there is nothing in the text's
+        # *shape* that suggests a number.
+        "name": "pluralize/exponent-numeric-string-is-one",
+        "filter": "pluralize",
+        "value": "1e0",
     },
     {
         # A list *is* `len`-able, so this is the `TypeError` arm answering

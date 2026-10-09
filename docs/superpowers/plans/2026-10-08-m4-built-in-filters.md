@@ -2847,12 +2847,27 @@ the FFI's, and only a real host call over a real `str` can observe it. This is
 the case §10.4's rule exists for, and it is worth recording that the rule
 produced a finding rather than only a constraint.
 
-**And one of the three disagreeing rows was `"1"`, which agreed.** `float("1")`
-and `len("1") == 1` select the same empty singular suffix, so a body taking the
-wrong arm is right by coincidence — the third form of "parity validates
-agreement, never correctness", and the reason the row set needs `"1"` *and*
-`"2"` rather than either alone. `"1"` is the only input where the two arms
-coincide, and it is the one that would have made a two-row set look complete.
+**And the coincidence is a property of the *string*, not a quirk of `"1"`.**
+An input is blind to the defect exactly when `float(v) == 1.0` and `len(v) == 1`
+agree, since those are what the two arms select on. That happens either because
+`v` is one character long, parses to `1.0`, and is neither `"0"` nor `"2"` —
+which leaves only `"1"` — or because `v` is longer and its float is not `1.0`,
+which includes `"-1"`, `"10"`, `"1_0"`, `"nan"` and `"inf"`. Measured over the
+shapes a template can write:
+
+```text
+  coincides     "1"  "-1"  "1_0"  "10"  "nan"  "inf"
+  discriminates "2"  "0"  "+1"  "1e0"  "1."  " 1 "     ← the rows that can see it
+```
+
+The discriminating set splits both ways — `"2"` and `"0"` take the plural arm
+that `len` would not, `"+1"`, `"1e0"`, `"1."` and `" 1 "` take the singular arm
+that `len` would not — and the singular half is the interesting one, because
+those are precisely the strings `float()` accepts and a character count cannot
+see: a sign, an exponent, a trailing point, surrounding whitespace. `"1"` earns
+its place as the *coinciding* row of the same length as `"2"`, which is what
+makes the pair a pair rather than a single lucky row; the singular-arm syntax is
+carried by `"+1"` and `"1e0"`.
 
 **The corpus also needed an argument no template can spell.** `[1]`, `[","]` and
 `object()` are the three of `comma_bits`'s five rows that settle the fusion, and
