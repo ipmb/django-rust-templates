@@ -152,7 +152,7 @@ rather than only comparing the rows it is given.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
@@ -256,6 +256,41 @@ class LOUD_REPR:
 
     def __repr__(self):
         raise LOUD_REPR.BoomError("boom repr")
+
+
+class DATE_WITHOUT_DAY:
+    """The value that survives only `date`'s **second** branch.
+
+    `date`'s branch 1 is `formats.date_format(value, arg)`, whose default
+    resolves `get_format(None)` to `'N j, Y'` (`en-us`), and this object has no
+    `day`, so branch 1 raises `AttributeError` at `j`. Its branch 2 is
+    `dateformat.format(value, arg)` — the **raw** formatter, with no `get_format`
+    — so an absent argument is Python's `None` `str()`d to `'None'`, whose four
+    characters are all live format chars: `'N'` → `'Oct.'`, `'o'` → the ISO year,
+    `'n'` → the month number, `'e'` → empty for a non-`datetime`. Measured on the
+    pinned 6.0.9: `{{ x|date }}` is `'Oct.202610'`.
+
+    **This is the only row that pins branch 2 receiving the sentinel's text.**
+    A body that spelled branch 2 as `date_format(value, Some("DATE_FORMAT"))`
+    resolves the default and answers `''` here — a silent wrong answer for this
+    class of input, not untidiness, which is why the seam's `dateformat_format`
+    takes `&Value` rather than `&str`.
+
+    `isocalendar()` returns a real `IsoCalendarDate` rather than a bare tuple,
+    because `DateFormat.o` reads `.isocalendar().year`: a tuple raises
+    `AttributeError` and the row would answer `''` for the wrong reason —
+    measured while writing this row, and the reason the fixture is written this
+    way rather than the obvious way.
+    """
+
+    month = 10
+    year = 2026
+
+    def isocalendar(self):
+        return date(2026, 10, 8).isocalendar()
+
+    def tzname(self):
+        return "UTC"
 
 
 def case_value(case):
@@ -4059,6 +4094,487 @@ CASES: list[dict] = [
         "value": [1, 2],
         "arg": 0,
     },
+    # --- date: two branches, two formatters, three catch-lists --------------
+    #
+    # `date` is `if value in (None, "")` → `formats.date_format(value, arg)` →
+    # on `AttributeError` `django.utils.dateformat.format(value, arg)` → on
+    # `AttributeError` `""`. The two branches call **different functions**: the
+    # first resolves `get_format(arg or "DATE_FORMAT")`, the second uses the
+    # argument's text literally. The rows below separate them and pin the guard's
+    # two sentinels rather than truthiness.
+    {
+        "name": "date/default-format",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+    },
+    {
+        "name": "date/format-name-is-resolved",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+        "arg": "DATE_FORMAT",
+    },
+    {
+        # A `str` constant, so it arrives `mark_safe`d — and `mark_safe("")` is
+        # still falsy, so `arg or "DATE_FORMAT"` selects the default. Same answer
+        # as the row above, a different call.
+        "name": "date/empty-string-argument",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+        "arg": "",
+    },
+    {
+        # `0` is a `var_arg`, so the filter is handed the `int` 0 — also falsy,
+        # so the default key again. The pair with `date:5` below is
+        # `get_format`'s truthiness test rather than a presence test.
+        "name": "date/zero-argument",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+        "arg": 0,
+    },
+    {
+        # **`x|date:5` is not a mistake.** A bare `5` is a `var_arg`, so the
+        # filter receives the `int` 5, and `get_format` stringifies it itself
+        # (`formats.py:113`, `format_type = str(format_type)`): `'5'` is not a
+        # format setting, so it comes back as itself and formats to `'5'`.
+        "name": "date/numeric-argument",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+        "arg": 5,
+    },
+    {
+        # The same literal path with a character that is not a format char.
+        "name": "date/literal-text-argument",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+        "arg": "x",
+    },
+    {
+        "name": "date/iso-format",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+        "arg": "Y-m-d",
+    },
+    {
+        # `jS` is the day with its ordinal suffix — a body that formatted the
+        # day alone answers `'8'`.
+        "name": "date/day-suffix",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+        "arg": "jS",
+    },
+    {
+        # The backslash escapes the format char, so the answer is the literal
+        # `Y` (`re_escaped.sub(r"\1", piece)`).
+        "name": "date/escaped-format-char",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+        "arg": "\\Y",
+    },
+    {
+        "name": "date/datetime-value",
+        "filter": "date",
+        "value": datetime(2026, 10, 8, 14, 30, 45),
+        "arg": "Y",
+    },
+    {
+        # A `SafeString` has no `.year`, so **both** branches fail and the answer
+        # is `''`. The *value*'s safety is not the *result*'s: `date` is
+        # `is_safe=False` with no `@stringfilter`.
+        "name": "date/safe-string-value",
+        "filter": "date",
+        "value": mark_safe("2026-10-08"),
+        "arg": "Y-m-d",
+    },
+    # **The guard is `==` and not truthiness.** `0`, `False`, `[]`, `{}`, `()`
+    # and `0.0` are all *falsy* and all pass `value in (None, "")`, so with a
+    # non-empty argument they proceed and the literal text is the answer. A
+    # truthiness guard answers `''` for every one of them.
+    {
+        "name": "date/falsy-zero-value-proceeds",
+        "filter": "date",
+        "value": 0,
+        "arg": 5,
+    },
+    {
+        "name": "date/falsy-false-value-proceeds",
+        "filter": "date",
+        "value": False,
+        "arg": 5,
+    },
+    {
+        "name": "date/falsy-empty-list-value-proceeds",
+        "filter": "date",
+        "value": [],
+        "arg": 5,
+    },
+    {
+        "name": "date/falsy-empty-dict-value-proceeds",
+        "filter": "date",
+        "value": {},
+        "arg": 5,
+    },
+    {
+        "name": "date/falsy-empty-tuple-value-proceeds",
+        "filter": "date",
+        "value": (),
+        "arg": 5,
+    },
+    {
+        "name": "date/falsy-float-value-proceeds",
+        "filter": "date",
+        "value": 0.0,
+        "arg": 5,
+    },
+    # ... and the other half of the guard: the *two* sentinels answer `""`
+    # without reaching either branch, while every other falsy value is refused
+    # only later by the formatter — both engines agree, so the row is the guard's
+    # sentinel list rather than the divergence above.
+    {
+        "name": "date/none-value",
+        "filter": "date",
+        "value": None,
+    },
+    {
+        "name": "date/empty-string-value",
+        "filter": "date",
+        "value": "",
+    },
+    {
+        "name": "date/safe-empty-string-value",
+        "filter": "date",
+        "value": mark_safe(""),
+    },
+    # Values that are neither sentinel nor date-like: branch 1 raises, branch 2
+    # raises too (`"None"`'s `N` needs `.month`), and the answer is `''`.
+    {
+        "name": "date/string-value",
+        "filter": "date",
+        "value": "x",
+    },
+    {
+        "name": "date/int-value",
+        "filter": "date",
+        "value": 5,
+    },
+    {
+        "name": "date/list-value",
+        "filter": "date",
+        "value": [],
+    },
+    {
+        "name": "date/dict-value",
+        "filter": "date",
+        "value": {},
+    },
+    # **Branch 2's sentinel text**, the only row that pins it; see
+    # [`DATE_WITHOUT_DAY`].
+    {
+        "name": "date/branch-two-absent-argument",
+        "filter": "date",
+        "value": DATE_WITHOUT_DAY(),
+    },
+    {
+        # The fixture lacks `O`/`R`/`M`/`D`/`A`/`T`/`E`, so this time branch 2
+        # *also* raises and the answer is `''` — the negative control beside the
+        # row above.
+        "name": "date/branch-two-named-format-still-fails",
+        "filter": "date",
+        "value": DATE_WITHOUT_DAY(),
+        "arg": "DATE_FORMAT",
+    },
+    {
+        # Branch 1 *succeeds* here: `get_format("5")` is `"5"`, whose single
+        # character is literal.
+        "name": "date/branch-two-fixture-numeric-argument",
+        "filter": "date",
+        "value": DATE_WITHOUT_DAY(),
+        "arg": 5,
+    },
+    # `LANGUAGE_CODE` selects the format module, so the resolved default is the
+    # German one and neither answer is `settings.DATE_FORMAT`. Both rows carry
+    # `expected`, because a `settings` row can otherwise move both engines
+    # together on a misspelt name and stay green.
+    {
+        "name": "date/german-default-format",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+        "settings": {"LANGUAGE_CODE": "de"},
+        "expected": "8. Oktober 2026",
+    },
+    {
+        "name": "date/german-short-format-name",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+        "arg": "SHORT_DATE_FORMAT",
+        "settings": {"LANGUAGE_CODE": "de"},
+        "expected": "08.10.2026",
+    },
+    # --- time: the same skeleton, three differences --------------------------
+    #
+    # The default key is `TIME_FORMAT` (`'P'`), **both** branches catch
+    # `(AttributeError, TypeError)`, and the fallback is `dateformat.time_format`.
+    # The `date`-valued rows are the sharp pair: branch 1 raises the same
+    # `TypeError` the `date` filter propagates, `time` catches it, branch 2
+    # raises it again and the second catch answers `''`.
+    {
+        "name": "time/default-format",
+        "filter": "time",
+        "value": time(14, 30, 45),
+    },
+    {
+        "name": "time/format-H-i",
+        "filter": "time",
+        "value": time(14, 30, 45),
+        "arg": "H:i",
+    },
+    {
+        "name": "time/format-H-i-s",
+        "filter": "time",
+        "value": time(14, 30, 45),
+        "arg": "H:i:s",
+    },
+    {
+        "name": "time/format-P-is-the-default",
+        "filter": "time",
+        "value": time(14, 30, 45),
+        "arg": "P",
+    },
+    {
+        "name": "time/datetime-value",
+        "filter": "time",
+        "value": datetime(2026, 10, 8, 14, 30, 45),
+        "arg": "H:i",
+    },
+    {
+        # **The sharp row.** A real `date` has no time-related attribute, so both
+        # branches raise and both raises are caught: `''` where `x|date:"H"`
+        # propagates.
+        "name": "time/date-value-hours-only",
+        "filter": "time",
+        "value": date(2026, 10, 8),
+        "arg": "H",
+    },
+    {
+        "name": "time/date-value-H-i",
+        "filter": "time",
+        "value": date(2026, 10, 8),
+        "arg": "H:i",
+    },
+    {
+        "name": "time/date-value-default-format",
+        "filter": "time",
+        "value": date(2026, 10, 8),
+    },
+    # The same equality guard as `date`: a falsy non-sentinel proceeds and the
+    # literal `'5'` is the answer.
+    {
+        "name": "time/falsy-zero-value-proceeds",
+        "filter": "time",
+        "value": 0,
+        "arg": 5,
+    },
+    {
+        "name": "time/none-value",
+        "filter": "time",
+        "value": None,
+    },
+    {
+        "name": "time/empty-string-value",
+        "filter": "time",
+        "value": "",
+    },
+    {
+        "name": "time/string-value",
+        "filter": "time",
+        "value": "x",
+    },
+    # --- timesince: truthiness guards, one seam call, a caught pair ----------
+    #
+    # `A = datetime(2026, 10, 8, 22, 30)` and `B = datetime(2026, 10, 8, 23, 51)`,
+    # both naive, so the text is deterministic with no `now()` in it. The argument
+    # is a `datetime`, which `template_literal` cannot spell as a template
+    # constant, so every row carries it as `arg_variable`.
+    {
+        "name": "timesince/hour-and-minute",
+        "filter": "timesince",
+        "value": datetime(2026, 10, 8, 22, 30),
+        "arg_variable": datetime(2026, 10, 8, 23, 51),
+    },
+    {
+        # A value in the future is `'0\xa0minutes'` — the helper's "stop
+        # processing" arm, not a negative interval.
+        "name": "timesince/future-is-zero-minutes",
+        "filter": "timesince",
+        "value": datetime(2026, 10, 8, 23, 51),
+        "arg_variable": datetime(2026, 10, 8, 22, 30),
+    },
+    {
+        # A `date` against a `datetime` works: the helper coerces the `date` up.
+        "name": "timesince/date-value-against-a-datetime",
+        "filter": "timesince",
+        "value": date(2026, 10, 8),
+        "arg_variable": datetime(2026, 10, 8, 22, 30),
+    },
+    # **The caught `TypeError`, and it belongs in `CASES` with the empty answer.**
+    # The helper refuses a mixed-naive/aware pair and `except (ValueError,
+    # TypeError)` turns it into `''`. The `"x"` rows go the other way, into
+    # `ERROR_CASES`: `AttributeError` is not caught.
+    {
+        "name": "timesince/aware-value-naive-argument",
+        "filter": "timesince",
+        "value": datetime(2026, 10, 8, 22, 30, tzinfo=timezone.utc),
+        "arg_variable": datetime(2026, 10, 8, 22, 30),
+    },
+    {
+        "name": "timesince/naive-value-aware-argument",
+        "filter": "timesince",
+        "value": datetime(2026, 10, 8, 22, 30),
+        "arg_variable": datetime(2026, 10, 8, 22, 30, tzinfo=timezone.utc),
+    },
+    # `if not value` is truthiness, not `date`'s two sentinels: `None`, `0`, `""`
+    # and `[]` all answer `''`.
+    {
+        "name": "timesince/none-value",
+        "filter": "timesince",
+        "value": None,
+    },
+    {
+        "name": "timesince/zero-value",
+        "filter": "timesince",
+        "value": 0,
+    },
+    {
+        "name": "timesince/empty-string-value",
+        "filter": "timesince",
+        "value": "",
+    },
+    {
+        "name": "timesince/empty-list-value",
+        "filter": "timesince",
+        "value": [],
+    },
+    {
+        # The one row safe without an explicit `o`: the helper calls
+        # `datetime.now()` inside each engine's own call, so any nearer row is a
+        # race at a unit boundary. `'0\xa0minutes'` holds for the next three
+        # thousand days.
+        "name": "timesince/far-future-is-zero-minutes",
+        "filter": "timesince",
+        "value": datetime.now() + timedelta(days=3650),
+    },
+    # --- timeuntil: one flag difference and one guard difference -------------
+    #
+    # `timeuntil(value, arg)` is `timesince(value, arg, reversed=True)`, and the
+    # flag is a flag rather than an operand swap: Django normalises the
+    # timezones *after* the swap. The first two rows below are the swap read out
+    # loud — `timeuntil(A, o=B)` is `timesince(B, o=A)` — and no caller-side swap
+    # reproduces them along with `timesince`'s own rows.
+    {
+        "name": "timeuntil/past-is-zero-minutes",
+        "filter": "timeuntil",
+        "value": datetime(2026, 10, 8, 22, 30),
+        "arg_variable": datetime(2026, 10, 8, 23, 51),
+    },
+    {
+        "name": "timeuntil/future-is-an-interval",
+        "filter": "timeuntil",
+        "value": datetime(2026, 10, 8, 23, 51),
+        "arg_variable": datetime(2026, 10, 8, 22, 30),
+    },
+    {
+        "name": "timeuntil/date-value-against-a-datetime",
+        "filter": "timeuntil",
+        "value": date(2026, 10, 8),
+        "arg_variable": datetime(2026, 10, 8, 22, 30),
+    },
+    {
+        "name": "timeuntil/aware-value-naive-argument",
+        "filter": "timeuntil",
+        "value": datetime(2026, 10, 8, 22, 30, tzinfo=timezone.utc),
+        "arg_variable": datetime(2026, 10, 8, 22, 30),
+    },
+    {
+        "name": "timeuntil/none-value",
+        "filter": "timeuntil",
+        "value": None,
+    },
+    {
+        "name": "timeuntil/zero-value",
+        "filter": "timeuntil",
+        "value": 0,
+    },
+    {
+        "name": "timeuntil/empty-string-value",
+        "filter": "timeuntil",
+        "value": "",
+    },
+    {
+        "name": "timeuntil/empty-list-value",
+        "filter": "timeuntil",
+        "value": [],
+    },
+    # --- the `expects_localtime` rows -----------------------------------------
+    #
+    # `date` and `time` are the only two filters carrying the flag, and these are
+    # the corpus's only evidence of it: `run_filter` applies `localtime(value,
+    # use_tz)` before the body. Both sides read `use_tz` off the `Context` and the
+    # zone off settings, so a row needs the `context` **and** `settings` keys —
+    # and, because a `settings` row can move both engines together, an `expected`
+    # literal. Measured under `override_settings(USE_TZ=True,
+    # TIME_ZONE="Europe/Paris")` with the value `2026-10-08 22:30 UTC`. A body
+    # that called `localtime` itself, or that ignored `use_tz`, moves one of
+    # these.
+    {
+        "name": "date/localtime-use-tz-true-converts",
+        "filter": "date",
+        "value": datetime(2026, 10, 8, 22, 30, tzinfo=timezone.utc),
+        "arg": "Y-m-d H:i",
+        "context": {"use_tz": True},
+        "settings": {"USE_TZ": True, "TIME_ZONE": "Europe/Paris"},
+        "expected": "2026-10-09 00:30",
+    },
+    {
+        # The pair to the row above: `False` on the context means "do not
+        # convert", a different fact from the settings' `USE_TZ=True`.
+        "name": "date/localtime-use-tz-false-does-not-convert",
+        "filter": "date",
+        "value": datetime(2026, 10, 8, 22, 30, tzinfo=timezone.utc),
+        "arg": "Y-m-d H:i",
+        "context": {"use_tz": False},
+        "settings": {"USE_TZ": True, "TIME_ZONE": "Europe/Paris"},
+        "expected": "2026-10-08 22:30",
+    },
+    {
+        # The negative control: a naive value is not converted whatever the flag
+        # says, so a body that converted unconditionally moves this row.
+        "name": "date/localtime-naive-value-is-not-converted",
+        "filter": "date",
+        "value": datetime(2026, 10, 8, 22, 30),
+        "arg": "Y-m-d H:i",
+        "context": {"use_tz": True},
+        "settings": {"USE_TZ": True, "TIME_ZONE": "Europe/Paris"},
+        "expected": "2026-10-08 22:30",
+    },
+    {
+        "name": "time/localtime-use-tz-true-converts",
+        "filter": "time",
+        "value": datetime(2026, 10, 8, 22, 30, tzinfo=timezone.utc),
+        "arg": "H:i",
+        "context": {"use_tz": True},
+        "settings": {"USE_TZ": True, "TIME_ZONE": "Europe/Paris"},
+        "expected": "00:30",
+    },
+    {
+        # `None` on the context means "the settings' `USE_TZ`", a different fact
+        # from `True`; no `context` key, so `Context()`'s own `use_tz=None`
+        # stands and the settings' `True` is what converts.
+        "name": "time/localtime-context-none-reads-the-setting",
+        "filter": "time",
+        "value": datetime(2026, 10, 8, 22, 30, tzinfo=timezone.utc),
+        "arg": "H:i",
+        "settings": {"USE_TZ": True, "TIME_ZONE": "Europe/Paris"},
+        "expected": "00:30",
+    },
 ]
 
 
@@ -4658,5 +5174,85 @@ ERROR_CASES: list[dict] = [
         "value": {1, 2},
         "raises": "TypeError",
         "message": "Object of type set is not JSON serializable",
+    },
+    # --- date: the `TypeError` the filter does not catch -----------------------
+    #
+    # `Formatter.format` refuses a time-related specifier on a real `date`
+    # (`dateformat.py:44-48`), and `date` catches **only** `AttributeError`, so it
+    # propagates out of the filter. `time`'s identical `'H'` row answers `''` in
+    # `CASES` — the catch-lists are the whole difference and the pair is the
+    # measurement of it. The message is CPython's on both sides (the host calls
+    # Django's own `formats.date_format`), so pinning the wording here is a claim
+    # that the seam carried it, and each body's own test asserts the class alone.
+    {
+        "name": "date/time-related-specifier",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+        "arg": "H",
+        "raises": "TypeError",
+        "message": (
+            "The format for date objects may not contain time-related format "
+            "specifiers (found 'H')."
+        ),
+    },
+    {
+        # A quoted constant naming a *setting*, resolved by `get_format` to
+        # `'P'` — so the message names `P`, not the argument's text.
+        "name": "date/time-format-name",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+        "arg": "TIME_FORMAT",
+        "raises": "TypeError",
+        "message": (
+            "The format for date objects may not contain time-related format "
+            "specifiers (found 'P')."
+        ),
+    },
+    {
+        # A bare `True` is a `var_arg`, so `get_format` stringifies it to
+        # `'True'` — and `T` is a time-related specifier. One row for
+        # `get_format`'s `str(format_type)` and one for the catch-list, from the
+        # same line.
+        "name": "date/true-argument",
+        "filter": "date",
+        "value": date(2026, 10, 8),
+        "arg": True,
+        "raises": "TypeError",
+        "message": (
+            "The format for date objects may not contain time-related format "
+            "specifiers (found 'T')."
+        ),
+    },
+    # --- timesince / timeuntil: the `AttributeError` the catch misses ----------
+    #
+    # The helper cannot read `.year` off a `str`, and `except (ValueError,
+    # TypeError)` is not `AttributeError`, so the refusal escapes the filter. Its
+    # twin — the mixed-awareness `TypeError` — is caught and answers `''` in
+    # `CASES`; the two classes leave the *same* filter in opposite directions,
+    # which is the reason the seam returns a `Result` at all. The message is
+    # CPython's on both sides, and `"x"` is truthy so it passes `if not value`.
+    {
+        "name": "timesince/non-date-value",
+        "filter": "timesince",
+        "value": "x",
+        "raises": "AttributeError",
+        "message": "'str' object has no attribute 'year'",
+    },
+    {
+        # The same input with the argument present: `if arg` is satisfied, so
+        # the helper is called with `now`, and it still cannot read `.year`.
+        "name": "timesince/non-date-value-with-argument",
+        "filter": "timesince",
+        "value": "x",
+        "arg_variable": datetime(2026, 10, 8, 22, 30),
+        "raises": "AttributeError",
+        "message": "'str' object has no attribute 'year'",
+    },
+    {
+        "name": "timeuntil/non-date-value",
+        "filter": "timeuntil",
+        "value": "x",
+        "raises": "AttributeError",
+        "message": "'str' object has no attribute 'year'",
     },
 ]

@@ -407,16 +407,17 @@ class FilterParityTests(unittest.TestCase):
         )
 
     def test_every_stub_is_named(self):
-        """The stub set is what M4 has left, and the count says so out loud.
+        """The stub set is what M4 has left, and it is now empty.
 
         `filter_names()` is asserted first because everything below is silent if
         the registry itself is short: 57 stubs out of 57 names would pass a count
         check while sixteen filters had gone missing from the registry.
 
-        The **count** is the deliberate-edit signal, and the filter names are
-        printed rather than restated: a group landing moves both this number and
-        the Rust list, in a commit that says which group it was. See
-        `implemented_filters` for why there is no Python list of the stub names.
+        **The count is the deliberate-edit signal, and it has reached its floor.**
+        A group landing moves both this number and the Rust list, in a commit
+        that says which group it was — and Task 10's group is the last, so the
+        number is **0** and the set is empty. See `implemented_filters` for why
+        there is no Python list of the stub names.
         """
         all_names = set(_native.filter_names())
         implemented = implemented_filters()
@@ -425,34 +426,35 @@ class FilterParityTests(unittest.TestCase):
         self.assertEqual(
             len(all_names), 57, "the registry itself is not Django's 57 filters"
         )
-        # 4: the 57 minus `lower` and `upper`, which Task 3 lands as the corpus's
-        # seed, minus Task 4's six — `capfirst`, `title`, `cut`, `addslashes`,
-        # `make_list`, `wordcount` — minus Task 5's eight: `center`, `ljust`,
-        # `rjust`, `truncatechars`, `truncatechars_html`, `truncatewords`,
-        # `truncatewords_html`, `wordwrap` — minus Task 6's nine: `first`,
-        # `last`, `length`, `slice`, `join`, `random`, `dictsort`,
-        # `dictsortreversed`, `unordered_list` — minus Task 7's first wave of
-        # four: `add`, `divisibleby`, `get_digit`, `stringformat` — minus
-        # Task 7's second wave of four: `pluralize`, `yesno`, `default`,
-        # `default_if_none` — minus Task 7's third wave of two:
-        # `floatformat`, `filesizeformat` — minus Task 8's first wave of
+        # 0: **M4's last group has landed.** The 57 minus `lower` and `upper`,
+        # which Task 3 lands as the corpus's seed, minus Task 4's six —
+        # `capfirst`, `title`, `cut`, `addslashes`, `make_list`, `wordcount` —
+        # minus Task 5's eight: `center`, `ljust`, `rjust`, `truncatechars`,
+        # `truncatechars_html`, `truncatewords`, `truncatewords_html`, `wordwrap`
+        # — minus Task 6's nine: `first`, `last`, `length`, `slice`, `join`,
+        # `random`, `dictsort`, `dictsortreversed`, `unordered_list` — minus
+        # Task 7's first wave of four: `add`, `divisibleby`, `get_digit`,
+        # `stringformat` — minus Task 7's second wave of four: `pluralize`,
+        # `yesno`, `default`, `default_if_none` — minus Task 7's third wave of
+        # two: `floatformat`, `filesizeformat` — minus Task 8's first wave of
         # six: `escape`, `force_escape`, `escapeseq`, `safe`, `safeseq`,
-        # `escapejs` — and minus Task 8's second wave of six: `striptags`,
-        # `linebreaks`, `linebreaksbr`, `linenumbers`, `iriencode`,
-        # `urlencode` — and minus Task 9's wave A of three: `slugify`,
-        # `phone2numeric`, `pprint` — and minus Task 9's wave B of three:
-        # `json_script`, `urlize`, `urlizetrunc`. What 4 names now is the rest
-        # of Task 10: the four date and time filters. Each group's commit
-        # decreases this by its own size and adds its rows to
-        # tests/filter_cases.py — one number and one list, edited together, in
-        # the commit that does the work.
+        # `escapejs` — minus Task 8's second wave of six: `striptags`,
+        # `linebreaks`, `linebreaksbr`, `linenumbers`, `iriencode`, `urlencode`
+        # — minus Task 9's wave A of three: `slugify`, `phone2numeric`, `pprint`
+        # — minus Task 9's wave B of three: `json_script`, `urlize`,
+        # `urlizetrunc` — and minus Task 10's four: `date`, `time`, `timesince`,
+        # `timeuntil`. **The zero is the deliberate-edit signal**, and it says
+        # something a nonzero never could: `STILL_STUBBED` in
+        # `crates/template-core/src/filters/mod.rs` is the empty array, so every
+        # one of Django's 57 filters now has a body. A later group cannot move
+        # this number — there is no later group — so a nonzero here means a body
+        # has been reverted or re-stubbed, not that work is pending.
         self.assertEqual(
             len(stubs),
-            4,
-            f"the stub count moved: {len(stubs)} left, {sorted(stubs)}. If a "
-            f"group landed, this number and tests/filter_cases.py both move with "
-            f"it; if nothing landed, a body has been reverted or a registry row "
-            f"lost.",
+            0,
+            f"the stub count moved: {len(stubs)} left, {sorted(stubs)}. M4's "
+            f"last group has landed, so the stub set should be empty; a stub "
+            f"here means a body has been reverted or a registry row lost.",
         )
 
 

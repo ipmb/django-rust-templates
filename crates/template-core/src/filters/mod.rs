@@ -648,30 +648,35 @@ mod tests {
     ];
 
     /// The filters whose bodies are still stubs: the 57 minus every name a landed
-    /// group already answers.
+    /// group already answers — **empty, because M4's last group has landed**.
     ///
     /// A literal rather than an alias of [`MEASURED_NAMES`] now that groups have
     /// landed, because the two are no longer the same set and an alias would have
-    /// to be trimmed in place to say so. Trimmed so far, in the order they landed:
-    /// Task 3's corpus seed (`lower`, `upper`); Task 4's six — `capfirst`,
-    /// `title`, `cut`, `addslashes`, `make_list`, `wordcount` — Task 5's
-    /// eight: `center`, `ljust`, `rjust`, `truncatechars`, `truncatechars_html`,
-    /// `truncatewords`, `truncatewords_html`, `wordwrap` — Task 6's
-    /// nine: `first`, `last`, `length`, `slice`, `join`, `random`, `dictsort`,
-    /// `dictsortreversed`, `unordered_list` — Task 7's three waves:
+    /// to be trimmed in place to say so. Trimmed in full, in the order they
+    /// landed: Task 3's corpus seed (`lower`, `upper`); Task 4's six —
+    /// `capfirst`, `title`, `cut`, `addslashes`, `make_list`, `wordcount` —
+    /// Task 5's eight: `center`, `ljust`, `rjust`, `truncatechars`,
+    /// `truncatechars_html`, `truncatewords`, `truncatewords_html`, `wordwrap` —
+    /// Task 6's nine: `first`, `last`, `length`, `slice`, `join`, `random`,
+    /// `dictsort`, `dictsortreversed`, `unordered_list` — Task 7's three waves:
     /// `add`, `divisibleby`, `get_digit`, `stringformat`; then `pluralize`,
     /// `yesno`, `default`, `default_if_none`; then `filesizeformat` and
     /// `floatformat`; Task 8 wave A's six — `escape`, `escapejs`,
     /// `escapeseq`, `force_escape`, `safe`, `safeseq`; Task 9 wave A's
-    /// three — `phone2numeric`, `pprint`, `slugify`; and Task 9 wave B's
-    /// three — `json_script`, `urlize`, `urlizetrunc`. The wave numbering matches
+    /// three — `phone2numeric`, `pprint`, `slugify`; Task 9 wave B's
+    /// three — `json_script`, `urlize`, `urlizetrunc`; and Task 10's four —
+    /// `date`, `time`, `timesince`, `timeuntil`. The wave numbering matches
     /// `tests/test_filter_parity.py`'s, which counts the same three.
     ///
     /// **Deliberately no count in this doc**: it said 26 while the array held 22,
     /// and a number in prose that nothing checks is a defect this project has
     /// paid for more than once. The array's length is the count, and the
-    /// assertion below is what makes a stale entry fail rather than pass.
-    const STILL_STUBBED: [&str; 4] = ["date", "time", "timesince", "timeuntil"];
+    /// assertion below is what makes a stale entry fail rather than pass. An
+    /// empty array is the one shape that count cannot be wrong about — the
+    /// assertion's other direction (a declared name that is no longer a stub)
+    /// has nothing left to check, and the guard still fails if a body is
+    /// reverted to a stub, because that name would be `unbuilt` and undeclared.
+    const STILL_STUBBED: [&str; 0] = [];
 
     #[test]
     fn the_registry_is_the_measured_57() {
