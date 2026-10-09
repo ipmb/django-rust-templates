@@ -407,7 +407,7 @@ mod tests {
     #[test]
     fn a_body_error_precedes_the_next_branchs_condition() {
         // `do_if` builds a branch's condition *then* parses its body, per branch
-        // (`defaulttags.py:995-996`, then `defaulttags.py:1002-1003`), so the first body's unknown tag is
+        // (`defaulttags.py:993-996`, then `defaulttags.py:1001-1004`), so the first body's unknown tag is
         // reported before the `elif`'s empty condition is ever looked at. The
         // tempting opposite reading — "conditions are compiled first" — is true
         // *within* one condition (see the two tests below) and false across
