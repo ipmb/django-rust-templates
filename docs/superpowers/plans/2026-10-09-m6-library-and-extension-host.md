@@ -1604,10 +1604,32 @@ class AnchorManifestTests(unittest.TestCase):
             line = int(anchor.split(":")[1].split("-")[0])
             text = (DJANGO_CHECKOUT / "django/template/base.py").read_text().splitlines()
             self.assertIn(snippet, text[line - 1] + text[line])
+
+    def test_no_our_own_basename_exists_in_the_checkout(self):
+        """`OUR_OWN` shadows: it makes a bare `name.py:N` resolve to the repo root
+        instead of into `.django/`, so the day Django ships a file with one of
+        those names the guard resolves it to *ours* and goes quietly wrong in the
+        one direction it exists to prevent. Measured today: zero hits for all
+        five, `parser.py` being the plausible one. This assertion is what notices
+        the bump, and it is green until then."""
+        shadows = {}
+        for basename in anchor_manifest.OUR_OWN:
+            hits = [
+                p for p in DJANGO_CHECKOUT.rglob(basename)
+                if p.is_file() and "__pycache__" not in p.parts
+            ]
+            if hits:
+                shadows[basename] = [str(p.relative_to(DJANGO_CHECKOUT)) for p in hits]
+        self.assertEqual(
+            shadows, {},
+            "a basename in OUR_OWN now exists under .django/, so bare anchors "
+            "naming it will resolve to ours: give it an explicit path in the "
+            "manifest and drop it from OUR_OWN",
+        )
 ```
 
-- [ ] **Step 2: Run them; expect all four to FAIL** — `--update` does not exist
-yet, so the first three fail on the import and the fourth on the anchors being
+- [ ] **Step 2: Run them; expect all five to FAIL** — `--update` does not exist
+yet, so the first four fail on the import and the fifth on the anchors being
 `517-518`/`521-522` if the revert has not landed. **Land the revert first** (both
 files: the seven sed'd files and the plan) so the fourth test is a regression row
 and not a to-do.
@@ -1662,6 +1684,18 @@ at the cited line (228 of 283 candidates today) and leaves the judgement to a
 reader. Do not treat its silence as approval, and do not treat a green
 `--check` as "the citations are correct".
 
+**The loose range is a sub-case of that limit, and it is the one a reader will
+assume is covered.** A range whose *endpoints* both carry plausible snippets but
+which spans the wrong region passes both `--check` and the triage: `if.rs` cites
+`:1009-1018` for a claim about the optional `else` and the `endif` check, whose
+real span is `:1007-1018`. Both ends look right, the anchor *is* a range, the
+tool *does* check ranges — and it still passes. Measured, that class is **2 of
+`if.rs`'s 11** (the other being `:996` for a two-statement claim), against 4 that
+`--check` does catch. So roughly a fifth of the only population anyone has
+audited is invisible to a green `--frozen`, and it is invisible in the direction
+that matters: the reader sees a range-checking tool and infers ranges are
+checked.
+
 Manifest line format (tab-separated, sorted by file then line, so it reads as a
 table of what we claim each line says):
 
@@ -1700,6 +1734,13 @@ SHORTHAND_RE = re.compile(r"`:(\d+)(?:-(\d+))?`")
 # they need the opposite treatment — verified once, frozen, never rewritten — and
 # a report of their own, not this gate.
 TREE_ROOTS = ["crates", "python", "tests", ".review"]
+# Basenames that are *ours*, so a bare `name.py:N` matching one resolves to the
+# repo root rather than into `.django/`. **Measured: none of the five exists
+# anywhere under `.django/`**, and that is asserted in `test_anchor_manifest.py`
+# rather than left to hold by coincidence — this is a rule that *shadows*. The day
+# a Django bump adds `django/template/parser.py`, every bare `parser.py:N` in the
+# tree silently resolves to ours, and the guard goes quietly wrong in the one
+# direction it exists to prevent. `parser.py` is the plausible one.
 OUR_OWN = {"_shim.py", "differential.py", "parser.py", "test_materialise.py", "test_parser_parity.py"}
 ```
 
@@ -1779,10 +1820,17 @@ because its four wrong anchors are already known and re-writing it re-measures
 each one against `defaulttags.py` as it lands.
 
 A shorthand is migrated by **naming the file the surrounding comment is already
-about** — the substitution is `:1035` → `defaulttags.py:323`, never a change of
-number. Where a single comment genuinely spans two Django files, the anchor names
-its own; that is the case the per-module default would have got wrong, and it is
-the case to read rather than assume.
+about** — the substitution is `:323` → `defaulttags.py:323`. **A naming commit
+never moves a number**: if the shorthand turns out to be wrong while it is being
+named, the correction is a separate commit, so `git log` separates naming from
+re-pointing and the bulk pass stays auditable. `if.rs` is the file where this
+bites: four of its eleven are wrong, so it produces four naming commits and four
+repairs, and the repairs are reviewable one at a time instead of buried in a
+file-wide rewrite.
+
+Where a single comment genuinely spans two Django files, the anchor names its
+own; that is the case the per-module default would have got wrong, and it is the
+case to read rather than assume.
 
 For each file:
 
