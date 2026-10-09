@@ -6,6 +6,9 @@
 use pyo3::exceptions::PyStopIteration;
 use pyo3::prelude::*;
 
+// Aliased to keep the call site readable: `CoreLexer` names the crate's lexer,
+// as opposed to anything Python-side that might later be called a lexer.
+use template_core::lexer::Lexer as CoreLexer;
 use template_core::token::{Token, TokenType};
 
 /// Engine version, so the Python shell can assert it is talking to the build it
@@ -38,9 +41,47 @@ fn split_contents(contents: &str) -> PyResult<Vec<String>> {
         .map_err(|_| PyStopIteration::new_err("unterminated translation marker"))
 }
 
+/// One lexed token as it crosses into Python: token type discriminant,
+/// contents, line number, and character-index span (or `None` when lexed
+/// without `debug`).
+///
+/// Named rather than written inline because `clippy::type_complexity` rejects
+/// the anonymous tuple — the same lint that caught the debug test helper in
+/// `template-core`'s lexer module.
+type LexedToken = (u8, String, usize, Option<(usize, usize)>);
+
+/// Lex `source`, returning `(token_type, contents, lineno, position)` tuples.
+///
+/// The token type is an `int` matching `django.template.base.TokenType`'s
+/// discriminants, and `position` holds **character** indices (or `None` for the
+/// non-debug lexer).
+#[pyfunction]
+#[pyo3(signature = (source, debug = false))]
+fn lex(source: &str, debug: bool) -> Vec<LexedToken> {
+    let mut lexer = if debug {
+        CoreLexer::debug(source)
+    } else {
+        CoreLexer::new(source)
+    };
+
+    lexer
+        .tokenize()
+        .into_iter()
+        .map(|token| {
+            (
+                token.token_type as u8,
+                token.contents,
+                token.lineno,
+                token.position,
+            )
+        })
+        .collect()
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(engine_version, m)?)?;
     m.add_function(wrap_pyfunction!(split_contents, m)?)?;
+    m.add_function(wrap_pyfunction!(lex, m)?)?;
     Ok(())
 }

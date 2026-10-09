@@ -61,6 +61,16 @@ this Rust was known to *build and match*, not known to *pass*. Future plans
 should lint-check extracted code, and each task below now runs clippy in its
 verification step rather than relying on `cargo test` alone.
 
+**Second correction, added after executing Task 5: that throwaway validation
+covered `template-core` only.** No snippet belonging to `template-py` had ever
+met the clippy gate, so the same blind spot bit again — Task 5's `lex` binding
+returned an anonymous
+`Vec<(u8, String, usize, Option<(usize, usize)>)>`, which is
+`clippy::type_complexity`. The snippet below is corrected. The generalisation is
+that "known to build and match" says nothing about a crate the validation never
+compiled, so a plan's snippets are only as checked as the crate they were
+extracted from.
+
 The first run of the token comparison failed, and the failure was worth the
 exercise: an indented block in the `segments.rs` doc comment had been written as
 a Python snippet, which rustdoc compiles as a doctest and runs. `cargo test`
@@ -1137,7 +1147,18 @@ In `crates/template-py/src/lib.rs`, add:
 
 ```rust
 use template_core::lexer::Lexer as CoreLexer;
-use template_core::token::TokenType;
+
+// `TokenType` is already in scope from the `split_contents` binding's import.
+// Adding it a second time is E0252.
+
+/// One lexed token as it crosses into Python: token type discriminant,
+/// contents, line number, and character-index span (or `None` when lexed
+/// without `debug`).
+///
+/// Named rather than written inline because `clippy::type_complexity` rejects
+/// the anonymous tuple — the same lint that caught the debug test helper in
+/// `template-core`'s lexer module.
+type LexedToken = (u8, String, usize, Option<(usize, usize)>);
 
 /// Lex `source`, returning `(token_type, contents, lineno, position)` tuples.
 ///
@@ -1146,10 +1167,7 @@ use template_core::token::TokenType;
 /// non-debug lexer).
 #[pyfunction]
 #[pyo3(signature = (source, debug = false))]
-fn lex(
-    source: &str,
-    debug: bool,
-) -> Vec<(u8, String, usize, Option<(usize, usize)>)> {
+fn lex(source: &str, debug: bool) -> Vec<LexedToken> {
     let mut lexer = if debug {
         CoreLexer::debug(source)
     } else {
@@ -1171,12 +1189,14 @@ fn lex(
 }
 ```
 
-Register it in the module:
+Register it in the module — alongside `split_contents`, which Task 4 added, so
+that the module block reads:
 
 ```rust
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(engine_version, m)?)?;
+    m.add_function(wrap_pyfunction!(split_contents, m)?)?;
     m.add_function(wrap_pyfunction!(lex, m)?)?;
     Ok(())
 }
