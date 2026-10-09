@@ -79,7 +79,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # the pattern. The lesson is the one this pin exists for: a count taken from the
 # failure message *and not from the diff* is a count taken at one moment.
 #
-# `tests/test_variable_parity.py` also changed in this commit and that is not
+# `tests/test_variable_parity.py` also changed in that commit and that is not
 # part of the delta: its `Variable` moved from `from django.template.base import
 # Variable` to `load_pinned("base.py").Variable`, a swap of one binding for
 # another rather than a row. It moved because a row above left the shim
@@ -88,7 +88,17 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # class through `sys.modules[cls.__module__]`, so an interposed name answers for
 # the class defined in it. Same class of defect as the row above it, found the
 # same way: by an unrelated commit moving the ground under it.
-PINNED = 389
+#
+# 389 → 390 is the M11 review's teardown finding, **one** row:
+# `test_shim.py::test_tearDown_restores_the_state_it_found`. `git diff tests/ |
+# grep -c "^+    def test_"` is 1 and 389 + 1 = 390. What that row is *about* is
+# the reason it is here rather than a note somewhere: `test_shim`'s `tearDown`
+# uninstalled the shim unconditionally, so every module discovered after it ran
+# against stock Django — three of them today, none red, which is the state this
+# pin's own comment calls the worse one. The fix is the two-method contract in
+# that class; the row is what makes it checkable, and it fails on the old code
+# and on an unconditional install at teardown alike.
+PINNED = 390
 
 
 def collected() -> unittest.TestSuite:

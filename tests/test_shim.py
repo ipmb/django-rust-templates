@@ -26,11 +26,79 @@ from django_rust_templates import _shim  # noqa: E402
 
 
 class SubstituteDjangoTemplateTests(unittest.TestCase):
+    """The shim's own rows, and the one piece of session state they mutate.
+
+    **``tearDown`` restores the state it found rather than uninstalling.** The
+    first version uninstalled unconditionally, and the cost was measured by the
+    M11 review: ``run_unit_tests.sh`` installs the shim at interpreter start —
+    that is the whole reason the script exists (537 order-dependent failures
+    without it, 8 with a mid-run install, 0 with an install at start) — so
+    uninstalling here destroyed the invariant the runner was written to
+    establish, for the *tail* of every run. Every module discovered after this
+    one then ran against stock Django, which today is three
+    (``test_tag_inventory``, ``test_transcription_equivalence``,
+    ``test_variable_parity``) and grows with any module whose name sorts after
+    ``test_shim``.
+
+    **It was latent, and that is the part worth keeping.** All three of those
+    modules passed both ways, so nothing was red — but a row that is green for a
+    reason other than the one it names is worse than a row that fails, because
+    the green is read as evidence. ``test_variable_parity``'s guard was in
+    exactly that state for two milestones, and it is why its fix is
+    ``load_pinned("base.py").Variable``: naming the universe rather than asking
+    the session which one it is in.
+
+    The rows that assert ``installed()`` is false after an ``uninstall`` are
+    within-row and unaffected: they read the state they just made.
+    """
+
+    def setUp(self):
+        # The session's baseline, captured rather than assumed — a row run on
+        # its own (no `run_unit_tests.sh`) has it out, and must leave it out.
+        self._installed_at_setup = _shim.installed()
+
     def tearDown(self):
-        if _shim.installed():
+        if self._installed_at_setup and not _shim.installed():
+            _shim.install()
+        elif not self._installed_at_setup and _shim.installed():
             _shim.uninstall()
 
+    def test_tearDown_restores_the_state_it_found(self):
+        """The contract ``every row after this module`` depends on, tested.
+
+        Both directions, because the shape being asserted is *restore*, not
+        *always install*: this row fails on the unconditional-uninstall version
+        that ran until M11's review, and it also fails if someone "fixes" that by
+        installing at teardown unconditionally — which would hand a bare
+        ``python -m unittest tests.test_shim`` a shimmed session it did not ask
+        for, and would hide the same class of bug in the other direction.
+        """
+        baseline = self._installed_at_setup
+
+        # A row that ends with the shim out, the way `test_uninstall_restores_django`
+        # does.
+        if baseline:
+            _shim.uninstall()
+        self.tearDown()
+        self.assertEqual(
+            _shim.installed(),
+            baseline,
+            "tearDown did not put the session back where setUp found it",
+        )
+
+        # And a row that ends with it in, when it started out.
+        self._installed_at_setup = not baseline
+        if not _shim.installed():
+            _shim.install()
+        self.tearDown()
+        self.assertEqual(_shim.installed(), not baseline)
+        self._installed_at_setup = baseline
+
     def test_django_template_resolves_to_our_implementation(self):
+        # The "before" half is established here rather than inherited from the
+        # previous row's teardown, which is what it used to be: with the session
+        # baseline installed, a row that needs the shim *out* has to say so.
+        _shim.uninstall()
         real_file = importlib.import_module("django.template").__file__
         self.assertNotIn("_impl", real_file)
 
@@ -389,10 +457,9 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         found: 24 bindings reported stale across `test_shim`'s run, all of them
         correct against the cache before the second `uninstall` touched it.
 
-        `tearDown` uninstalls and the rows call `uninstall()` themselves, so the
-        redundant call is the ordinary case rather than a corner, and the
-        assertion is on what a caller can see: after the cycle, ``install``
-        still gives back *our* file.
+        The rows call `uninstall()` themselves, so the redundant call is the
+        ordinary case rather than a corner, and the assertion is on what a caller
+        can see: after the cycle, ``install`` still gives back *our* file.
         """
         _shim.install()
         _shim.uninstall()
@@ -412,6 +479,16 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         )
 
     def test_strict_mode_raises_while_falling_back(self):
+        """Strict install refuses while any module would still be Django's.
+
+        The premise — shim *out*, so the install is the one being refused — is
+        established here, like the row above. With the session baseline installed
+        this call is the idempotent re-install instead, and an install that is a
+        no-op has nothing to refuse: the row would assert nothing while staying
+        green, which is how it read before the teardown fix made the state at row
+        start explicit.
+        """
+        _shim.uninstall()
         with self.assertRaises(_shim.ShimError):
             _shim.install(strict=True)
 
