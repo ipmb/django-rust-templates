@@ -51,16 +51,17 @@ Copied verbatim from the spec; every task's requirements implicitly include them
 
 §10.3's M2 row says "Parse tree descriptor for every built-in tag; syntax-error
 parity". Read literally that is not reachable at M2, and the reason is
-structural rather than a matter of effort: **13 of the 26 built-in tags reach
+structural rather than a matter of effort: **14 of the 27 built-in tags reach
 `parser.compile_filter(...)` at compile time**, and `FilterExpression`/`Variable`
 are M3's (`smartif` too, which `{% if %}` needs). A tag's compile function cannot
 be written before the thing it compiles.
 
 Both numbers are counted, not recalled, and the counting is worth stating
-because the obvious method gets it wrong. There are **26** built-in tags: 23 in
+because the obvious method gets it wrong. There are **27** built-in tags: 24 in
 `defaulttags.py` plus 3 in `loader_tags.py` (`django.template.defaultfilters`
-registers no tags). The 13 are `cycle`, `extends`, `filter`, `firstof`, `for`,
-`if`, `ifchanged`, `include`, `lorem`, `regroup`, `url`, `widthratio`, `with`.
+registers no tags). The 14 are `cycle`, `extends`, `filter`, `firstof`, `for`,
+`if`, `ifchanged`, `include`, `lorem`, `querystring`, `regroup`, `url`,
+`widthratio`, `with`.
 Two of those contain no `compile_filter` call of their own — `{% with %}`
 reaches it through `token_kwargs`, and `{% if %}` through
 `TemplateIfParser.create_var` — so a per-function scan of the tag functions
@@ -86,7 +87,7 @@ arbitrary — each waits on something the spec schedules elsewhere:
 
 | Tags | Wait for |
 |---|---|
-| `filter`, `firstof`, `cycle`, `regroup`, `url`, `widthratio`, `with`, `lorem` | M3 (`FilterExpression`) |
+| `filter`, `firstof`, `cycle`, `regroup`, `url`, `widthratio`, `with`, `lorem`, `querystring` | M3 (`FilterExpression`) |
 | `if`, `ifchanged`, `for` | M3 (`smartif`, `FilterExpression`) |
 | `load` | M6 (`Library`, `import_library`) |
 | `block`, `extends`, `include` | M7 — and these are **Python-owned** per §6, so they are not Rust compile functions at all; the shell materialises them from Rust's compiled *structure* |
@@ -94,7 +95,7 @@ arbitrary — each waits on something the spec schedules elsewhere:
 
 The §10.3 M2 row is amended by this plan to say so. This is a *narrowing of the
 row to what it can mean*, not a reduction in the milestone's intent: the
-descriptor must be shown general enough for all 26, which is why Task 3 pins a
+descriptor must be shown general enough for all 27, which is why Task 3 pins a
 descriptor shape for a filter-bearing tag using a hand-written stand-in node,
 before M3 supplies the real `FilterExpression`.
 
@@ -2751,9 +2752,18 @@ its ancestors' private items.
 Update the `use` block:
 
 ```rust
-use crate::parser::desc::{AttrValue, NodeDesc, NodeListDesc, NodeRef, TEXT_NODE};
+use crate::parser::desc::{AttrValue, NodeDesc, NodeListDesc, TEXT_NODE};
+// `NodeRef` is used only by the `#[cfg(test)]` registry tests below (non-test
+// code holds one through `AttrValue::Ref` and the parser's fields, never as a
+// written type), so it is gated with them: an ungated import is an
+// `unused_imports` error under `-D warnings`. `pyunicode::split` replaces the
+// `str::split_whitespace` the compile functions would otherwise reach for —
+// Python's `str.split()`, which is what Django uses, is not Rust's table.
+#[cfg(test)]
+use crate::parser::desc::NodeRef;
 use crate::parser::error::Error;
 use crate::parser::Parser;
+use crate::pyunicode;
 use crate::token::Token;
 ```
 
@@ -2893,11 +2903,19 @@ Add to `crates/template-core/src/parser/tags.rs`:
 ///
 /// Django splits with `token.contents.split()`, not `split_contents()`, "because
 /// this tag doesn't accept variable as arguments". The two are observable here:
-/// for `{% autoescape a"b c %}` the raw split sees three arguments and rejects
-/// on the count, while `split_contents` would see two and reject on the value.
-/// Both fail, with different messages, and only one of them is Django's.
+/// for `{% autoescape "on off" %}` the raw split sees three arguments and
+/// rejects on the count, while `split_contents` keeps the quoted phrase whole,
+/// sees two, and rejects on the value. Both fail, with different messages, and
+/// only one of them is Django's.
+///
+/// (The original example, `{% autoescape a"b c %}`, does **not** distinguish
+/// them: the trailing quote is unmatched, so `smart_split` splits it exactly as
+/// `str.split` does — verified against Django 6.0.9 — and a `split_contents`
+/// implementation passed the test too. `pyunicode::split`, not
+/// `str::split_whitespace`, is Django's table and is what makes
+/// `{% autoescape<U+001C>on %}` two arguments.)
 fn tag_autoescape(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error> {
-    let args: Vec<&str> = token.contents.split_whitespace().collect();
+    let args = pyunicode::split(&token.contents);
     if args.len() != 2 {
         return Err(Error::syntax(
             "'autoescape' tag requires exactly one argument.",
@@ -3017,8 +3035,11 @@ fn tag_spaceless(parser: &mut Parser<'_>, _token: &Token) -> Result<NodeDesc, Er
 fn tag_templatetag(_parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error> {
     // Raw split, as in Django: the tag takes no variables, so quoting is not
     // meaningful and `{% templatetag "openblock" %}` is an invalid argument
-    // rather than a quoted one.
-    let bits: Vec<&str> = token.contents.split_whitespace().collect();
+    // rather than a quoted one. The distinguishing case is a quoted phrase with
+    // a space — `{% templatetag "open block" %}` — where the raw split sees
+    // three arguments (a count error) and `split_contents` sees two (an
+    // invalid-argument error). `pyunicode::split` is Django's `str.split()`.
+    let bits = pyunicode::split(&token.contents);
     if bits.len() != 2 {
         return Err(Error::syntax("'templatetag' statement takes one argument"));
     }
@@ -3100,9 +3121,16 @@ Add to the existing `#[cfg(test)] mod tests` in
         // half-registered tag is worse than an absent one: the error message
         // stops naming the real problem, and `{% if %}` reaching a
         // half-implementation is how a wrong tree gets committed.
+        //
+        // This is Django 6.0.9's registry minus the nine above, and the list is
+        // easy to get wrong: the pinned checkout has **27** built-ins, not 26 —
+        // `querystring` (`@register.simple_tag`, so it reaches `compile_filter`
+        // at compile time) is absent from the milestone table below. `lorem` is a
+        // plain `@register.tag` that reads `split_contents`.
         for name in [
             "if", "for", "block", "extends", "include", "load", "with", "filter", "cycle",
             "firstof", "ifchanged", "regroup", "url", "widthratio", "partialdef", "partial",
+            "lorem", "querystring",
         ] {
             assert!(builtin_tag(name).is_none(), "{name} must not be registered yet");
         }
@@ -3137,8 +3165,15 @@ Add to the existing `#[cfg(test)] mod tests` in
 
     #[test]
     fn autoescape_uses_the_raw_split_not_split_contents() {
+        // `"on off"` is one bit to `split_contents` (which keeps a quoted phrase
+        // whole) and two to the raw split, so this count error is reachable only
+        // through the raw split: a `split_contents` implementation would see two
+        // arguments and fail on the *value* instead. The original input,
+        // `{% autoescape a"b c %}`, does not distinguish them — `smart_split`
+        // splits the unmatched trailing quote exactly as `str.split` does — so
+        // it passed under either implementation.
         assert_eq!(
-            failure("{% autoescape a\"b c %}").kind,
+            failure("{% autoescape \"on off\" %}").kind,
             ErrorKind::Syntax("'autoescape' tag requires exactly one argument.".to_string()),
         );
     }
@@ -3319,14 +3354,29 @@ Add to the existing `#[cfg(test)] mod tests` in
 
     #[test]
     fn templatetag_does_not_strip_quotes() {
-        // Raw split: the quotes are part of the argument, so it is invalid. A
-        // `split_contents` implementation would accept `"openblock"`.
+        // The quotes are part of the argument, so it is invalid. This pins that
+        // *neither* splitter strips them — `smart_split` keeps the quotes too,
+        // so the original comment's "a `split_contents` implementation would
+        // accept `"openblock"`" was false and the test did not pin the raw
+        // split. The test below does.
         match failure(r#"{% templatetag "openblock" %}"#).kind {
             ErrorKind::Syntax(message) => {
                 assert!(message.contains("'\"openblock\"'"), "{message}");
             }
             other => panic!("expected a syntax error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn templatetag_uses_the_raw_split_not_split_contents() {
+        // `"open block"` is two bits to `split_contents` and three to the raw
+        // split, so this count error is reachable only through the raw split: a
+        // `split_contents` implementation would reach the invalid-argument
+        // error for `"open block"` instead.
+        assert_eq!(
+            failure(r#"{% templatetag "open block" %}"#).kind,
+            ErrorKind::Syntax("'templatetag' statement takes one argument".to_string()),
+        );
     }
 
     #[test]
