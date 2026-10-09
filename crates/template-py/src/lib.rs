@@ -2146,25 +2146,49 @@ fn log_resolution_failure(
 ///
 /// Task 5 of `docs/superpowers/plans/2026-10-09-m9-interpose-base-and-smartif.md`
 /// puts the log in Python, in the shell's `Variable._resolve_lookup`, with the
-/// `bit` carried across by [`LookupOutcome::Escaped`]'s new payload. It cannot
-/// go there, and the reason is the same one that makes the payload necessary:
-/// the only way for Python to be inside an `except` block is for Rust to
-/// *raise*, and the bit cannot ride a raised exception.
+/// `bit` carried across by [`LookupOutcome::Escaped`]'s new payload.
 ///
-/// Rust raises the user's exception object **by identity** — that is what keeps
-/// `__traceback__`, and it is why `render.django_exception` restores a host
-/// error the same way. An exception cannot be given a private attribute to
-/// carry the bit (some classes have no `__dict__`, and it is not ours to write
-/// to a caller's object), and the alternatives are all new state: a mutable
-/// out-parameter, a thread-local stash, or a second entry point. Each of them
-/// exists only to move one `&str` out of the function that already has it, one
-/// frame, into a function that has every other input — `context`, the
-/// exception, and the substitution rule.
+/// **The first version of this paragraph said it *cannot* go there, and that
+/// was false.** The reviewer falsified it, and the falsification is worth
+/// keeping because the mistake was choosing a premise and then arguing from it:
+/// a Python handler is available the moment the function stops being obliged to
+/// raise. Return the outcome instead — `(value, bit, error)` — and the shell can
+/// log `exc_info=error`, an *instance*, which `logging` accepts and which is
+/// precisely why `record.exc_info[1]` comes back as the caller's object by
+/// identity; then substitute or `raise error`. No mutated exception, no
+/// out-parameter, no thread-local, and no live `except` block anywhere. The
+/// "Rust must raise" of that paragraph is a property of
+/// `fn resolve(…) -> PyResult<Py<PyAny>>`, which has one channel — the
+/// signature was chosen, the constraint was not found.
 ///
-/// So the handler stays whole, in the place that decides its two branches
-/// already. What that costs is written down rather than hidden: the shell's
-/// `_resolve_lookup` is no longer upstream's text, and `test_base_parity`'s
-/// transcription guard is what makes that visible instead of silent.
+/// It stays here for a different reason, and the reason is what `_native.resolve`
+/// *is*: the Rust mirror of `_resolve_lookup`, built so that
+/// `tests/differential/cases.py`, `tests/test_render_parity.py`,
+/// `tests/test_resolve_invalid.py`, `tests/test_resolve_callarm.py` and
+/// `tests/test_m8_side_effects.py` can compare a lookup against Django's **at
+/// the method**, with the arm that failed named in the report. Moving the
+/// handler to Python does not take the handler out of that comparison; it moves
+/// the comparison's "ours" side. Those five harnesses exercise
+/// `silent_variable_failure` — `test_render_parity.py:529` and
+/// `test_resolve_callarm.py:86` are named for it — so an `_native.resolve` that
+/// returned the raw failure would diverge from the pinned method on exactly the
+/// rows they were built for; and routing them through the shell's
+/// `_resolve_lookup` instead puts them back inside a declared region, which is
+/// the Rust-against-Rust comparison `tests/parity_target.py` exists to refuse.
+///
+/// So the trade is **not** possible against impossible. It is a complete mirror
+/// of the method, compared at the method, against the handler verbatim in the
+/// shell with the five harnesses moved up to `Variable.resolve`. The second is
+/// not obviously worse — it restores the handler to the transcription diff —
+/// and it is carried forward rather than dismissed, because a decision is only
+/// as good as the alternative it was measured against. Task 7 owns it.
+///
+/// What this choice costs today is written down rather than hidden: the shell's
+/// `_resolve_lookup` is no longer upstream's text, and — the sharper half — the
+/// *handler* moved while the transcription diff shows only a hunk of the loop.
+/// The declared region in `scripts/check_transcriptions.py` says so in prose.
+/// Whether the guard should be able to see a moved *handler* rather than only a
+/// moved line is a question Task 7 inherits, not one this file can answer.
 fn outcome_to_py(
     py: Python<'_>,
     outcome: LookupOutcome,

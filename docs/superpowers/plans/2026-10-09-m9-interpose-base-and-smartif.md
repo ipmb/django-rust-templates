@@ -2070,3 +2070,89 @@ their teeth were proved by mutation rather than asserted: with `step_one`'s
 call deleted, the 37 resolver rows across the five harnesses produced 28F+1E and
 21F+15E respectively. The transcription guard's declared-region clause is what
 found the five; nothing in the suite would have.
+
+**(7) Correction (3)'s reason was false, and the reviewer falsified it in the
+same round it was written.** Correction (3) above says the handler "could not
+stay in Python, and the bit's transport is why". It can. Return the outcome
+instead of raising it — `(value, bit, error)` — and the shell can log
+`exc_info=error`, an *instance*, which `logging` accepts and which is exactly
+why `record.exc_info[1]` is the caller's object by identity; then substitute or
+`raise error`. No mutated exception, no out-parameter, no thread-local, and no
+live `except` anywhere. The `exc_info=<instance>` spelling is the one this very
+task adopted for its own row — the argument ruling out the Python handler was
+using a fact the fix had already established.
+
+"Rust must raise for Python to be inside an `except` block" is true, and it is a
+property of `fn resolve(…) -> PyResult<Py<PyAny>>` — a signature that has one
+channel. The signature was **chosen**; the constraint was not found. This is the
+same error the milestone keeps recording, one level up: not a wrong number or a
+wrong premise, but a *reason reached for* and then used as a proof.
+
+The decision survives on a different argument, and the argument is about what
+`_native.resolve` is: the Rust mirror of `_resolve_lookup`, built so the five
+comparison harnesses can compare a lookup against Django's **at the method**,
+with the arm that failed named in the report. Moving the handler does not take
+the handler out of that comparison; it moves the comparison's *ours* side.
+`tests/test_render_parity.py:529` (`test_a_silent_variable_failure_is_substituted`)
+and `tests/test_resolve_callarm.py:86` (`test_a_silent_type_error_is_substituted`)
+exercise `silent_variable_failure` against `_native.resolve`, so a version that
+returned the raw failure would diverge from the pinned method on precisely the
+rows they were built for; and rerouting them through the shell's
+`_resolve_lookup` puts them back inside a declared region, which is the
+Rust-against-Rust comparison `tests/parity_target.py` refuses. So the trade is
+**a complete mirror of the method, compared at the method** against **the
+handler verbatim in the shell, with five harnesses moved up to
+`Variable.resolve`** — not "possible" against "impossible". It goes to Task 7
+below as a live decision with its cost measured, because a decision is only as
+good as the alternative it was checked against.
+
+One consequence is already fixed and one is not. Fixed: `outcome_to_py`'s
+docstring and the shell's comment now state the trade rather than an
+impossibility. Not fixed, and it is the sharper half the reviewer named: **the
+declaration is smaller than what moved.** `check_transcriptions.py` records a
+hunk of the loop, while the whole of `_resolve_lookup`'s exception semantics
+left `base.py` — a body replaced by a call is one hunk however much body went
+with it, so the diff cannot show it and prose is the only place that can. The
+declared region now says so, and whether the guard should be able to see a moved
+*handler* rather than only a moved line is Task 7's.
+
+### Obligations M9 is handing to Task 7
+
+Collected here because they were written down in nine different places and a
+close-out that has to grep for its own obligations is a close-out that misses
+one. Each names the thing it needs read off the tree, since four of these
+arrived as someone else's summary.
+
+1. **The universe-capture decision.** `install()` should **fail loudly** when any
+   `django.template*` or `django.templatetags*` module is already in
+   `sys.modules`, rather than rebinding a list of names. Rebinding is an
+   enumeration, and this project's enumerations are its worst record. Three
+   capture *kinds* behave differently and none is visible at the import line:
+   a captured **function** is stale but working; a captured **enum member**
+   makes every comparison `False` (`django/templatetags/i18n.py:5` imports
+   `TokenType`); a captured **class** makes every `isinstance` `False`
+   (`django/template/defaulttags.py:30-38` captures nine names including `Node`
+   and `NodeList`). **The `i18n.py` line numbers are the reviewer's and have not
+   been re-read off the tree — read them before they go in.**
+2. **`builtin_tag_names()` / `builtin_tag_stubs()` need two names.** The
+   confusion has now happened three times; the rename is the fix, subtraction at
+   the call site is the workaround.
+3. **`COMPARED_PATH` has a blind spot on decorator-generated operator classes.**
+   `smartif`'s comparison operators are built by a decorator, so
+   `inspect.getsourcelines` reports the decorator's span and the guard sees the
+   wrong region.
+4. **Five guarded settings configurations race, and `unittest discover` decides
+   by alphabet.** Task 4's correction (6) is the third M9 instance of a row
+   being green or red because of a module's *name*. One explicit suite-wide
+   configuration is the question; five guards is the current answer.
+5. **The handler's side of the seam — this section's (7).** A complete Rust
+   mirror of `_resolve_lookup` (today) against the handler verbatim in the shell
+   with `tests/differential/cases.py`, `tests/test_render_parity.py`,
+   `tests/test_resolve_invalid.py`, `tests/test_resolve_callarm.py` and
+   `tests/test_m8_side_effects.py` retargeted to `Variable.resolve`. Its cost is
+   those five harnesses' retargeting, twice done already in this milestone.
+6. **Should the transcription guard be able to see a moved handler?** Today it
+   sees a moved *line*; a body replaced by a call is one hunk whatever moved
+   with it, and only prose can carry the difference.
+7. **The acceptance label's M9 caveat** (Task 7 Step 7) and the spec's §10.3/§10.4
+   rows, still owed.

@@ -57,16 +57,39 @@ The oracle is Django's own function, executed from the pinned file by
 ``_pinned`` below rather than retyped here: a row that compared our function
 against our function would prove nothing, and a hand-copied expectation would
 pin today's behaviour rather than Django's.
+
+**The file has a second subject, and it is not a helper.** Interposing ``base``
+also interposes ``Node.render_annotated`` and ``Template.get_exception_info``,
+so the whole debug-annotation protocol becomes ours for every node in the
+suite — including the ones Rust did not build. ``RenderAnnotationTests`` below
+pins it, and the reason is §5.5: Rust rendering interior subtrees from its own
+compiled form is exactly what would stop ``_culprit_node`` being attached at the
+right level. The plan's Task 6 predicted the ``(start, end)`` pairs would be the
+assertion that has teeth; measured, they are **invariant under both guards**,
+and what discriminates is node *identity* and the origin comparison's choice of
+frame. The docstrings below carry both measurements.
 """
 
 import ast
 import importlib
 import inspect
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PINNED_BASE = PROJECT_ROOT / ".django" / "django" / "template" / "base.py"
+
+# ``.django/tests`` as well, because ``Engine(libraries=…)`` resolves its
+# dotted paths lazily through ``import_module`` and the fixtures name
+# ``template_tests.templatetags.bad_tag``. The same guarded insertion
+# ``tests/test_parser_parity.py`` makes, and for the same reason: without it the
+# rows pass only when some earlier module happened to put the path there,
+# because ``tests/test_host_tags.py`` inserts it and sorts between us.
+DJANGO_TESTS = PROJECT_ROOT / ".django" / "tests"
+if str(DJANGO_TESTS) not in sys.path:
+    sys.path.insert(0, str(DJANGO_TESTS))
 
 import django_rust_templates  # noqa: E402
 from django_rust_templates import _shim  # noqa: E402

@@ -967,13 +967,23 @@ class Variable:
         #
         # **The handler is Rust's too, including the `logger.debug`, and that is
         # a deviation from the M9 plan** — the plan put the log here, in Python,
-        # with `LookupOutcome::Escaped` carrying the failing `bit` across. It
-        # cannot go here: for this frame to be inside an `except` block, Rust
-        # must *raise*, and the bit has no way to ride a raised exception that
-        # is the caller's own object, held by identity. `outcome_to_py` in
-        # `crates/template-py/src/lib.rs` records the whole argument. What is
-        # observable here is only that the record is the same one: same logger,
-        # same message, same `exc_info[1]`.
+        # with `LookupOutcome::Escaped` carrying the failing `bit` across.
+        #
+        # The first version of this comment said it could not go here because
+        # Rust would have to *raise* for this frame to be inside an `except`
+        # block. That is false: the handler works here as soon as
+        # `_native.resolve` *returns* its outcome — `(value, bit, error)` —
+        # because `logging` takes the exception **instance**, which is what makes
+        # `exc_info[1]` the original object by identity without any live `except`.
+        # The constraint was a property of the signature, not of the seam.
+        #
+        # It is in Rust because `_native.resolve` is defined as the Rust mirror
+        # of `_resolve_lookup`, and five comparison harnesses — which include
+        # `silent_variable_failure` rows — compare it against the pinned method.
+        # `outcome_to_py` in `crates/template-py/src/lib.rs` records the full
+        # trade and the alternative Task 7 inherits. What is observable here is
+        # that the record is the same one: same logger, same message, same
+        # `exc_info[1]`.
         #
         # `".".join(self.lookups)` is this method's whole input because
         # `_native.resolve` takes the dotted path, as `Variable.__init__` took

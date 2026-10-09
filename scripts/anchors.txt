@@ -648,6 +648,8 @@ python/django_rust_templates/_impl/base.py:1161	python/django_rust_templates/_im
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
 _shim.py:52	python/django_rust_templates/_shim.py	52	-	TARGET = "django.template"	-
 _shim.py:239	python/django_rust_templates/_shim.py	239	-	if installed():	-
+test_render_parity.py:529	tests/test_render_parity.py	529	-	def test_a_silent_variable_failure_is_substituted(self):	-
+test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
 python/django_rust_templates/host.py:243	python/django_rust_templates/host.py	243	-	-	-
 filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-
 test_unordered_list.py:143	tests/template_tests/filter_tests/test_unordered_list.py	143	-	unordered_list(item_generator()),	-

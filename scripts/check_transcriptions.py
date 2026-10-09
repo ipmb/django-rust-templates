@@ -112,13 +112,13 @@ COMPARED_PATH = {
         (744, 788, "FilterExpression.__init__"),
         (876, 927, "Variable.__init__"),
         (929, 945, "Variable.resolve"),
-        (1034, 1046, "Node.get_nodes_by_type"),
-        (1054, 1055, "NodeList.render"),
-        (1057, 1062, "NodeList.get_nodes_by_type"),
-        (1068, 1069, "TextNode.__init__"),
-        (1077, 1084, "TextNode.render_annotated"),
-        (1106, 1107, "VariableNode.__init__"),
-        (1127, 1171, "token_kwargs"),
+        (1044, 1056, "Node.get_nodes_by_type"),
+        (1064, 1065, "NodeList.render"),
+        (1067, 1072, "NodeList.get_nodes_by_type"),
+        (1078, 1079, "TextNode.__init__"),
+        (1087, 1094, "TextNode.render_annotated"),
+        (1116, 1117, "VariableNode.__init__"),
+        (1137, 1181, "token_kwargs"),
     ],
     # 6 functions, spans 138-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
@@ -268,13 +268,27 @@ DECLARED = {
             # `tests/test_base_parity.py` uses for `render_value_in_context`.
             # The guard above is what named all five rather than letting them
             # pass vacuously.
+            #
+            # **The declaration is smaller than what moved, and that is the
+            # limit this region is at.** A declared region is a claim about a
+            # *hunk*: it says which lines differ and why. What moved here is
+            # `_resolve_lookup`'s entire exception semantics — the `logger.debug`,
+            # the `silent_variable_failure` branch and the re-raise — into
+            # `crates/template-py/src/lib.rs::outcome_to_py`, which the diff
+            # cannot show, because a body replaced by a call is one hunk however
+            # much body went with it. Prose is the only place that can say so,
+            # and it is here. Whether the guard should be able to see a moved
+            # *handler* rather than only a moved line is Task 7's question; the
+            # reviewer's falsification of "a Python handler is impossible" (it is
+            # not — a non-raising signature carries the bit on an ordinary return
+            # value) is what makes the alternative live rather than closed.
             (
-                (962, 990),
+                (962, 1000),
                 (957, 1021),
                 "from django_rust_templates import _native",
             ),
             (
-                (992, 992),
+                (1002, 1002),
                 (1023, 1028),
                 'return _native.resolve(".".join(self.lookups), context)',
             ),
