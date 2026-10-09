@@ -299,7 +299,7 @@ checks the checkers propagates to everything it checks — so they come first, a
 | `tests/test_anchor_manifest.py:416` | `shadows == {}` (`OUR_OWN` basenames under `.django/`) | a positive `rglob` hit, proving the denominator is non-empty |
 | `tests/test_materialise.py:1223` | `dead == set()` over `NODE_CLASSES` | a fabricated class name in the subtraction, shown to land in `dead` |
 | `tests/test_materialise.py:1219` | `missing == set()` over `tag_emitted_class_names()` | same shape; the stripper row at `:1207` guards only `TEST_ONLY_CLASSES` |
-| `tests/test_filter_inventory.py:1238` | neither flag on any of the 57 in `REGISTERED` (Django's builtin registry) | the same `hasattr`, on the same object, for an attribute that *is* there |
+| `tests/test_filter_inventory.py:1238` | neither flag on any of the 57 in `REGISTERED` (Django's builtin registry) | the same `hasattr`, on the same object, for an attribute that *is* there — **instrument-level only**; no carrier exists in this population, so no mutation can make this row fire (§5.4) |
 | `tests/test_pyunicode_case_parity.py:91` | `not hasattr(_native, "python_lower")` | `hasattr(_native, "python_upper")` — one line, same instrument |
 | `tests/test_filter_parity.py:430` | `stubs == set()` | **already documented as vacuous by construction** (`.review/m4-summary.md:386-389`); do not "fix" — it is the deliberate-edit signal |
 
@@ -345,6 +345,24 @@ rank is indistinguishable from an oversight.
    `.so`, run the whole gate) is real work and belongs in a milestone that owns
    the Rust tree, not in the one that owns §2's enforcement.
 3. **`test_filter_parity.py:430`** — kept exactly as it is, for the reason in §4.
+4. **`test_filter_inventory.py:1238` is instrument-controlled, and its subject
+   discrimination is unproven.** M15 gives it a control (§4 above, Task 3 Step
+   6): the same `hasattr` on the same object for `__name__`, plus a check that
+   the registry carries `is_safe` somewhere, so the instrument is shown to be
+   able to see a flag and to be handed functions. Neither half can make the row
+   *fire*, because the positive this row would need does not exist: at 6.0.9
+   `do_not_call_in_templates` and `alters_data` are on **0 of the 57** builtin
+   filters, and their only carriers in the checkout are model-side
+   (`db/models/enums.py:57`, `forms/models.py:582,819`,
+   `contrib/auth/models.py:177..212`, plus the read site at
+   `template/base.py:996`). Under §1's membership test — the gate refuses on the
+   clause **and** the refusing instrument has been shown to fail when the clause
+   is false — the second half is unavailable, so the row does not leave the
+   margin set. It moves from *uncontrolled* to *instrument-controlled,
+   subject-discrimination unproven*. The tempting repair, a fabricated object
+   carrying the flag, measures `hasattr`'s truth table rather than this tree.
+   Rank: below item 3, because the claim is true and a future Django that sets
+   either flag on a builtin filter is the only thing that would expose it.
 
 ---
 
