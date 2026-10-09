@@ -187,6 +187,59 @@ class RenderParityTests(_ParityTest):
         theirs = engine.from_string("{{ nope }}").render(Context({"name": "Ada"}))
         self.assertEqual(ours, theirs)
 
+    def test_string_if_invalid_has_two_consumers_and_they_differ(self):
+        """The miss path and the silent-failure path are not the same path.
+
+        A finding from the reviewer, and it is invisible under the default
+        ``""``: an empty string substituted or filtered is still empty, so every
+        other row in this class passes however wrong these two are. Measured on
+        the pinned tree with ``string_if_invalid="<b>%s</b>"``::
+
+            {{ nope }}          -> '&lt;b&gt;nope&lt;/b&gt;'
+            {{ p.boom }}        -> '&lt;b&gt;%s&lt;/b&gt;'
+            {{ nope|upper }}    -> '&lt;b&gt;nope&lt;/b&gt;'
+            {{ p.boom|upper }}  -> '&lt;B&gt;%S&lt;/B&gt;'
+
+        Two asymmetries, and the value above carries both at once:
+
+        * ``%s`` is substituted with the variable name **only** on the
+          ``VariableDoesNotExist`` path — ``FilterExpression.resolve`` does
+          ``string_if_invalid % self.var`` — while the silent arm assigns the
+          string raw. So the silent rows render a literal ``%s``.
+        * the filter chain runs on the silent path and **not** on the miss
+          path, because ``FilterExpression.resolve`` returns early on
+          ``VariableDoesNotExist``. So ``|upper`` never runs there, and on the
+          silent row it uppercases both the surrounding tags and the leftover
+          ``%s``.
+
+        ``<b>`` is there to make the escaping observable as well: the
+        substituted value is not a ``SafeData``, so ``render_value_in_context``
+        escapes it, and a render path that emitted it raw would fail here rather
+        than pass on a string nobody compares.
+
+        Both asymmetries are Django's own code on this path today, so these rows
+        cannot fail yet — they are written for M9, when the resolver is
+        interposed and the silent arm becomes ``_native.resolve``'s. A row that
+        is cheap now and load-bearing then is the reason the corpus and this
+        class are split the way they are.
+        """
+        engine = Engine(string_if_invalid="<b>%s</b>")
+        context = {"p": _RaisesSilently()}
+        expected = {
+            "{{ nope }}": "&lt;b&gt;nope&lt;/b&gt;",
+            "{{ p.boom }}": "&lt;b&gt;%s&lt;/b&gt;",
+            "{{ nope|upper }}": "&lt;b&gt;nope&lt;/b&gt;",
+            "{{ p.boom|upper }}": "&lt;B&gt;%S&lt;/B&gt;",
+        }
+        for source, literal in expected.items():
+            ours = render_string(source, context, engine)
+            theirs = engine.from_string(source).render(Context(context))
+            self.assertEqual(ours, theirs, f"template: {source!r}")
+            # The literal as well as the comparison: comparing two runs that
+            # changed together would keep passing, and these four strings are
+            # the whole of the claim.
+            self.assertEqual(ours, literal, f"literal for {source!r}")
+
 
 class ResolverParityTests(_ParityTest):
     """Task 7's resolver, compared with ``Variable._resolve_lookup``.
@@ -271,8 +324,17 @@ class ResolverParityTests(_ParityTest):
         A port that returned ``""`` for a silent failure would pass every row
         above, because the default ``string_if_invalid`` is ``""``. This is the
         row that separates the substitution from the default.
+
+        ``"%s"`` is in the value for the reviewer's second reason: the ``%``
+        substitution with the variable name lives one frame **up**, in
+        ``FilterExpression.resolve``, so ``_resolve_lookup`` and the silent arm
+        return the string raw. A port that applied ``"%s" % self.var`` here
+        would pass with ``"<<invalid>>"`` and fail with ``"<%s>"`` — and it
+        would double-substitute once M9 puts this resolver under
+        ``FilterExpression.resolve``, which is the only reason the difference is
+        observable at all.
         """
-        engine = Engine(string_if_invalid="<<invalid>>")
+        engine = Engine(string_if_invalid="<%s>")
         ours_context = Context({"obj": _RaisesSilently()})
         theirs_context = Context({"obj": _RaisesSilently()})
         with ours_context.bind_template(engine.from_string("")):
@@ -281,7 +343,7 @@ class ResolverParityTests(_ParityTest):
                     _native.resolve("obj.boom", ours_context),
                     Variable("obj.boom")._resolve_lookup(theirs_context),
                 )
-                self.assertEqual(_native.resolve("obj.boom", ours_context), "<<invalid>>")
+                self.assertEqual(_native.resolve("obj.boom", ours_context), "<%s>")
 
 
 def _outcome(call):

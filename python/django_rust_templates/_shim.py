@@ -17,6 +17,27 @@ imports. That is what lets us reimplement one module at a time.
 A meta-path finder rather than ``sys.modules`` assignment, because Django's own
 internals import these modules by path, and dict assignment does not intercept
 submodule imports.
+
+A naming constraint on ``_impl``
+--------------------------------
+
+Because the finder serves **any** ``_impl/<name>.py`` as ``django.template.
+<name>``, a file placed there under the name of a real Django module shadows it
+— for Django's internal imports as much as for anyone else's. Measured, and it
+is not hypothetical: putting the shell's ``render.py`` at ``_impl/engine.py``
+(tempting, since it builds an ``Engine``) makes ``_impl/__init__.py``'s own
+``from .engine import Engine`` resolve to that file, and ``install()`` then
+fails with::
+
+    ImportError: cannot import name 'Engine' from 'django.template.engine'
+
+The error names Django, not the shim, which is why the rule is stated here:
+**no ``_impl`` file may take the name of a real ``django.template`` module.**
+The shell modules that only need Rust and the real Django live outside
+``_impl`` entirely (``django_rust_templates/render.py``), and the ones that
+must be inside are named for what Django does not have (``parser.py``, whose
+sibling ``django/template/parser.py`` does not exist at 6.0.9 — if it ever
+appears, that name starts shadowing too).
 """
 
 from __future__ import annotations
