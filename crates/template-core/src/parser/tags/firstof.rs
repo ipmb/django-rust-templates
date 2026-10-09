@@ -2,25 +2,27 @@
 //!
 //! # `as` is read from the end, before anything is compiled
 //!
-//! `if len(bits) >= 2 and bits[-2] == "as"` (`:801`). Two consequences that a
-//! port written from the documentation gets wrong, both measured on the pinned
-//! tree:
+//! `if len(bits) >= 2 and bits[-2] == "as"` (`defaulttags.py:801`). Two
+//! consequences that a port written from the documentation gets wrong, both
+//! measured on the pinned tree:
 //!
 //! - `{% firstof a as b c %}` has no `asvar`, because `bits[-2]` is `b`. Only a
 //!   *trailing* `as` counts, and `as` and `c` are compiled as ordinary
 //!   variables — `{% firstof a as v w %}` is four variables named `a`, `as`,
 //!   `v`, `w`.
 //! - `{% firstof as v %}` is valid and has `asvar == "v"` with *no* variables:
-//!   the argument-count check at `:798` runs on `bits` **before** the `as`
-//!   is stripped, so `['as', 'v']` is two arguments and then becomes none.
+//!   the argument-count check at `defaulttags.py:798` runs on `bits` **before**
+//!   the `as` is stripped, so `['as', 'v']` is two arguments and then becomes
+//!   none.
 //!
 //! # The attribute is `variables`, the Python attribute is `vars`
 //!
-//! `FirstOfNode.__init__(self, variables, asvar=None)` sets `self.vars =
-//! variables` (`:149-150`). The descriptor carries the **parameter** name,
-//! because the materialiser constructs `cls(**kwargs)`; a descriptor keyed
-//! `"vars"` would raise `TypeError: unexpected keyword argument` rather than
-//! build a node with a wrong attribute, which is at least loud.
+//! `FirstOfNode.__init__(self, variables, asvar=None)` sets
+//! `self.vars = variables` (`defaulttags.py:149-150`). The descriptor carries
+//! the **parameter** name, because the materialiser constructs `cls(**kwargs)`;
+//! a descriptor keyed `"vars"` would raise
+//! `TypeError: unexpected keyword argument` rather than build a node with a
+//! wrong attribute, which is at least loud.
 
 use crate::parser::desc::{AttrValue, NodeDesc};
 use crate::parser::error::Error;
@@ -40,9 +42,9 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
         ));
     }
 
-    // `asvar` is emitted even when it is absent, as `AttrValue::None`:
-    // Django always passes the second positional (`:804`), so `__init__` always
-    // sets the attribute, and `describe` compares `vars(node)`.
+    // `asvar` is emitted even when it is absent, as `AttrValue::None`: Django
+    // always passes the second positional (`defaulttags.py:804`), so `__init__`
+    // always sets the attribute, and `describe` compares `vars(node)`.
     let asvar = if bits.len() >= 2 && bits[bits.len() - 2] == "as" {
         let name = bits[bits.len() - 1].clone();
         bits.truncate(bits.len() - 2);
