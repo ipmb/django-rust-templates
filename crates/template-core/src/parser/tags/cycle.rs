@@ -114,7 +114,7 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
             }
             as_form = true;
             silent = true;
-            // `args = args[:-1]` (`:684`), so the name is read *after* this.
+            // `args = args[:-1]` (`defaulttags.py:685`), so the name is read *after* this.
             args.pop();
         } else if args[args.len() - 2] == "as" {
             as_form = true;
@@ -140,7 +140,7 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
         let values = compile_values(parser, &args[1..])?;
         NodeDesc::new("CycleNode")
             .attr("cyclevars", AttrValue::List(values))
-            // `CycleNode(values)` (`:700`) leaves both defaults, emitted rather
+            // `CycleNode(values)` (`defaulttags.py:699`) leaves both defaults, emitted rather
             // than omitted so the materialiser passes `variable_name=None` and
             // the descriptor shape does not vary by branch.
             .attr("variable_name", AttrValue::None)
