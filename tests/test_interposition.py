@@ -372,7 +372,10 @@ class InterpositionTests(unittest.TestCase):
         row then fails if the spans it was given are wrong.
 
         Both corpora, because they differ: the generator reaches ``Parser.error``
-        and ``Parser.invalid_block_tag`` and the hand-written corpus does not.
+        and ``Parser.invalid_block_tag`` and the hand-written corpus does not —
+        and they are built by ``parser_corpus.parity_sources()`` rather than
+        here, because the agreement gate in
+        ``test_compared_path_instrument`` measures over the same run.
 
         The ``_impl`` assertion is the reviewer's question — "does ``module_of``
         resolve a declared-but-not-yet-transcribed module?" — answered inside the
@@ -382,21 +385,13 @@ class InterpositionTests(unittest.TestCase):
         ``check.sh`` and a bare ``python -m unittest`` runs this row without it.
         """
         import importlib
-        import random
 
         import scripts.check_transcriptions as guard
         from tests.compared_path import measure
-        from tests.parser_corpus import (
-            RANDOM_CASES,
-            RANDOM_SEED,
-            TEMPLATES,
-            random_template,
-        )
+        from tests.parser_corpus import parity_sources
         from tests.test_parser_parity import django_parse
 
-        rng = random.Random(RANDOM_SEED)
-        sources = list(TEMPLATES)
-        sources += [random_template(rng) for _ in range(RANDOM_CASES)]
+        sources = parity_sources()
 
         for name, pinned_entries in sorted(guard.COMPARED_PATH.items()):
             module = importlib.import_module(guard.module_of(name))

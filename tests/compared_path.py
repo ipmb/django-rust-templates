@@ -816,6 +816,12 @@ def measure(module, sources, calls) -> dict:
 
     :func:`_cold` runs first, so the measurement does not depend on what the
     caller imported before calling this.
+
+    It answers "a binding this sweep could find was called", which is a proxy
+    for the question clause (4) asks — "did this code run" — and the proxy has
+    been wrong twice in the unsafe direction (see this module's docstring).
+    :func:`observed_path` asks the question directly and the two are compared
+    per module by ``tests/test_compared_path_instrument.py``.
     """
     defs = definitions(module)
     _cold()
@@ -831,3 +837,175 @@ def measure(module, sources, calls) -> dict:
         for label in sorted(reached, key=lambda label: (defs[label] or (0, 0)))
         if defs.get(label) is not None
     }
+
+
+class Observation:
+    """What one run of the corpus executed inside a module, by span.
+
+    ``reached`` maps a span ``definitions(module)`` produced to the labels that
+    share it; ``unattributed`` lists the call sites that ran in the module's own
+    file and inside no span; ``total`` is the number of frames the file
+    contributed at all, which is ``reached``'s frames plus ``unattributed``'s.
+
+    **``reached`` is keyed by span and not by label because a frame carries a
+    code object and nothing else.** Where several members share one span they
+    share one code object too — ``defaultfilters``' thirty ``@stringfilter``
+    filters are one ``_dec`` — so the observer cannot tell them apart and
+    reports the whole group; :func:`disagreement` is where that costs
+    something.
+    """
+
+    def __init__(self, reached, unattributed, total):
+        self.reached = reached
+        self.unattributed = unattributed
+        self.total = total
+
+
+@contextlib.contextmanager
+def observing(module):
+    """Record every Python call frame executed in ``module``'s own file.
+
+    The counterpart of :func:`instrumented`, and deliberately not the same
+    instrument: this one wraps nothing, touches no binding, and so cannot be
+    fooled by a member reached through a *copy* of a registry — the shape that
+    made the binding sweep read 4 functions where call frames read 7. It also
+    cannot be fooled into *crediting* one: it is indifferent to which binding
+    was invoked.
+
+    It is a profiler, so its failure mode is silence: ``setprofile`` is
+    per-thread and displaces whatever was installed, and an observer that saw
+    no frame agrees with "nothing is missing". Asserting that it saw something
+    is the caller's job — see the two conditions in
+    ``tests/test_compared_path_instrument.py``.
+
+    Yields a ``Counter`` keyed by ``(first line, function name)``. The key is a
+    *call site* and not a function: a code object is one site however many
+    closures are built from it, and which labels that site means is
+    :func:`_spans_by_line`'s question.
+    """
+    own = os.path.realpath(module.__file__)
+    files = {}
+
+    # Memoised per filename: the profiler runs on every call in the process and
+    # `realpath` on each of them is the difference between a row that takes
+    # seconds and one that takes minutes.
+    def here(path):
+        if path not in files:
+            files[path] = os.path.realpath(path) == own
+        return files[path]
+
+    seen = collections.Counter()
+
+    def profiler(frame, event, arg):
+        if event == "call" and here(frame.f_code.co_filename):
+            seen[(frame.f_code.co_firstlineno, frame.f_code.co_name)] += 1
+
+    previous = sys.getprofile()
+    sys.setprofile(profiler)
+    try:
+        yield seen
+    finally:
+        sys.setprofile(previous)
+
+
+def _spans_by_line(module):
+    """``{span: (label, ...)}`` — :func:`definitions` with the arrow reversed.
+
+    A label with no span is left out, for the reason :func:`measure` drops it:
+    a member whose lines ``inspect`` cannot read is not on a path a declared
+    region could sit over, so it is not part of the question this answers.
+    """
+    grouped = {}
+    for label, span in definitions(module).items():
+        if span is not None:
+            grouped.setdefault(span, []).append(label)
+    return {span: tuple(sorted(labels)) for span, labels in grouped.items()}
+
+
+def _innermost_span(grouped, line):
+    """The narrowest span in ``grouped`` containing ``line``, or ``None``.
+
+    Narrowest and not merely *some* span, because spans nest: a frame at
+    ``infix.<locals>.Operator.led`` is inside ``led``'s span and inside
+    ``infix``'s, and only ``led`` is the function that ran. Two distinct spans
+    containing one line cannot be equally narrow — equal width plus both
+    containing the line means equal ends, which is one span — so this needs no
+    tie-break and has no arbitrary answer to give.
+
+    ``None`` is the loud answer rather than the quiet one: a site the module's
+    file contributed and no span covers is a function :func:`definitions` did
+    not enumerate, which is exactly what the gate exists to find.
+    """
+    holding = [span for span in grouped if span[0] <= line <= span[1]]
+    if not holding:
+        return None
+    return min(holding, key=lambda span: span[1] - span[0])
+
+
+def observed_path(module, sources, calls) -> Observation:
+    """The functions ``calls`` executed in ``module`` while parsing ``sources``.
+
+    :func:`measure`'s counterpart — the same corpus, the same entry point, the
+    same cold fixtures, and the same question asked by watching execution
+    rather than by counting calls through wrapped bindings. Neither is derived
+    from the other, which is what makes their agreement evidence: a module that
+    is blind in the same way in both instruments would have to be blind by
+    different mechanisms.
+
+    A source that raises is swallowed for the same reason :func:`measure`
+    swallows it: the path was walked either way, and the frames are recorded.
+    """
+    grouped = _spans_by_line(module)
+    _cold()
+    with observing(module) as seen:
+        for source in sources:
+            try:
+                calls(source)
+            except Exception:
+                pass
+    reached = {}
+    unattributed = []
+    for first, name in sorted(seen):
+        span = _innermost_span(grouped, first)
+        if span is None:
+            unattributed.append((first, name))
+        else:
+            reached[span] = grouped[span]
+    return Observation(reached, tuple(unattributed), sum(seen.values()))
+
+
+def disagreement(measured, observation) -> tuple:
+    """``(missing, extra)`` — the labels one side saw and the other did not.
+
+    ``missing`` is :func:`measure`'s over-report: a label it credited that no
+    frame ran. **``extra`` is the direction that matters** — a frame that ran
+    with no label credited for it is a function clause (4) cannot see, so a
+    declared transcription region is accepted over code the parity comparison
+    executes, and both sides of that comparison then run Rust. Both defects
+    this instrument has had were in that direction, and neither the pin nor the
+    guard could have noticed either: the sweep was the only witness.
+
+    **The one tolerance, and it is the observer's channel being coarser than
+    the sweep's.** Several members can share one span *and one code object* —
+    ``defaultfilters``' thirty ``@stringfilter`` filters all answer to the
+    ``_dec`` at 46-52 — and a frame names the code object and nothing else.
+    :func:`measure` tells them apart because it wraps each name separately; the
+    observer cannot, and saying "thirty functions ran" when one did would be
+    the observer's blindness rather than the sweep's. So a group with a
+    credited member is agreement, and a group with no credited member is extra,
+    all of it.
+
+    Measured when this landed: no group is reached by the corpus at all, so the
+    tolerance filters nothing and the two sets are equal module by module. It
+    is here for the day the corpus reaches ``center`` — the sweep would credit
+    one name, the frames would name thirty, and a row without this rule would
+    redden on a correct tree.
+    """
+    credited = set(measured)
+    seen = set()
+    extra = []
+    for labels in observation.reached.values():
+        seen.update(labels)
+        if not credited & set(labels):
+            extra.extend(labels)
+    return sorted(credited - seen), sorted(extra)

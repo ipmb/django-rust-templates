@@ -480,3 +480,23 @@ def random_piece(rng, depth):
 
 def random_template(rng):
     return "".join(random_piece(rng, 0) for _ in range(rng.randint(0, 5)))
+
+
+def parity_sources():
+    """The corpus a parity row measures over: the written one, then the generated.
+
+    Both corpora, because they differ — the generator reaches ``Parser.error``
+    and ``Parser.invalid_block_tag`` and the hand-written one does not — under
+    the one seed, so any failure reproduces exactly.
+
+    A function rather than three constants each caller recombines, because two
+    rows that both rebuild "the corpus" are two corpora the day one of them is
+    edited. ``tests/test_interposition.py`` re-measures the pin over this and
+    ``tests/test_compared_path_instrument.py`` cross-checks the pin with a
+    second observer over it; a drift between those two runs would show up as the
+    instruments disagreeing when it was the input that moved.
+    """
+    import random
+
+    rng = random.Random(RANDOM_SEED)
+    return list(TEMPLATES) + [random_template(rng) for _ in range(RANDOM_CASES)]

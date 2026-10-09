@@ -202,7 +202,20 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # `tests/test_filter_parity.py` and `tests/test_filter_inventory.py` re-point
 # existing assertions — so none of them moves this count. Measured by discovery:
 # `git diff tests/` since `4e0cee6` adds exactly five `def test_` bodies.
-PINNED = 437
+#
+# 437 → 440 is M12 Task 8's compared-path agreement gate, **three** rows in one
+# file, `test_compared_path_instrument.py::ComparedPathAgreementTests`: the
+# per-module cross-check of the pin against a profiler that wraps nothing, and
+# the two rows that pin what the comparison's one tolerance does at each of its
+# boundaries (a group of members sharing a span, and a frame no span covers).
+# `tests/parser_corpus.py` gains `parity_sources()` (so that this gate and the
+# pin's own re-measurement row measure the *same* corpus rather than two
+# rebuildings of it), `tests/test_interposition.py`'s pin row now calls it, and
+# `tests/compared_path.py` gains the observer — none of the three is a
+# `def test_`, and none of them moves this count. Measured by discovery:
+# `git diff tests/` since `a2bd289` adds exactly three `def test_` bodies and
+# removes none.
+PINNED = 440
 
 
 def collected() -> unittest.TestSuite:

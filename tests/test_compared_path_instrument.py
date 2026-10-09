@@ -567,3 +567,214 @@ class DescriptorCountingTests(unittest.TestCase):
                 self.assertEqual(residue(module), [])
             swept += 1
         self.assertGreater(swept, 0, "no module was swept")
+
+
+class ComparedPathAgreementTests(unittest.TestCase):
+    """The compared path watched *running*, against the path the sweep counted.
+
+    ``measure`` answers "a binding this sweep could find was called"; clause (4)
+    of ``scripts/check_transcriptions.py`` asks "did this code run". The two
+    questions have different answers — ``do_block``/``do_extends``/``do_include``
+    are dispatched through a *copy* of a library's tag table
+    (``base.py:668-670``), so they reach no binding the sweep walks — and both
+    times this instrument was wrong it was wrong in the direction that hides
+    code from clause (4), which is what lets a declared region sit over code the
+    parity comparison executes. The pin cannot notice that on its own: the sweep
+    is the only witness.
+
+    So the second question is asked directly, by an observer that wraps nothing:
+    a profiler over the same corpus through the same entry point, and the two
+    answers compared per module. It is a *cross-check* and not a replacement —
+    ``measure`` stays clause (4)'s input, because the guard needs labels with
+    spans and ``definitions`` is where those come from, and ``definitions`` is
+    not the half that has been wrong.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _shim.install()
+
+    def test_the_path_that_runs_is_the_path_that_was_measured(self):
+        """Per module in ``COMPARED_PATH``: the same functions, two observers.
+
+        Both directions are failures and the message names what only one side
+        saw. ``missing`` is a label the sweep credited that no frame ran, which
+        makes clause (4) refuse a region on code the corpus never executes.
+        ``extra`` is a frame that ran with no label covering it, which makes
+        clause (4) accept a region on code it does — Rust against Rust, both
+        sides agreeing, which is the failure the whole compared-path idea exists
+        to prevent.
+
+        The corpus comes from ``parser_corpus.parity_sources()``, the same
+        function the pin's own re-measurement row calls, because two rows that
+        each rebuild "the corpus" are two corpora the day one of them is edited
+        and the disagreement would be blamed on the instruments.
+
+        The last two assertions are the conditions that keep the row from being
+        green for the wrong reason. ``frames == 0`` is what a displaced or
+        thread-local profiler looks like, and *nothing* agrees with "nothing is
+        missing". The second is the vacuity control for the empty half: twelve
+        of the twenty pins are empty, and if every module executed, the branch
+        that asserts "the frames saw nothing either" would never be exercised.
+        """
+        import importlib
+
+        import scripts.check_transcriptions as guard
+
+        from tests.compared_path import disagreement, measure, observed_path
+        from tests.parser_corpus import parity_sources
+        from tests.test_parser_parity import django_parse
+
+        sources = parity_sources()
+        frames = 0
+        live = []
+        for name in sorted(guard.COMPARED_PATH):
+            module = importlib.import_module(guard.module_of(name))
+            self.assertIn("_impl", module.__file__, f"{name} is not our file")
+            observation = observed_path(module, sources, django_parse)
+            missing, extra = disagreement(
+                measure(module, sources, django_parse), observation
+            )
+            frames += observation.total
+            if observation.total:
+                live.append(name)
+
+            with self.subTest(module=name):
+                self.assertEqual(
+                    observation.unattributed,
+                    (),
+                    f"call frame(s) ran in {name}'s file inside no span "
+                    "definitions() produces — a function the sweep cannot see, "
+                    "which is a declared region clause (4) would accept over "
+                    "code the comparison runs",
+                )
+                self.assertEqual(
+                    missing,
+                    [],
+                    f"{name}: measure() credited these and nothing executed "
+                    "them, so clause (4) refuses regions over code the corpus "
+                    "never runs",
+                )
+                self.assertEqual(
+                    extra,
+                    [],
+                    f"{name}: these executed and no credited label covers them, "
+                    "so clause (4) cannot see them and a declared region on "
+                    "their lines would be accepted",
+                )
+
+        self.assertGreater(
+            frames,
+            0,
+            "the profiler saw no frame anywhere in the pinned modules, which is "
+            "what a displaced profiler looks like — silence agrees with "
+            "'nothing is missing', and the comparison below would be vacuous",
+        )
+        self.assertTrue(live, "and with that, at least one module must have run")
+        self.assertLess(
+            len(live),
+            len(guard.COMPARED_PATH),
+            "every pinned module executed, so the empty half of this comparison "
+            "— the twelve whose pins are empty and whose frames must therefore "
+            "be empty too — was not exercised",
+        )
+
+    def test_members_sharing_one_span_are_agreement_and_a_lone_group_is_not(self):
+        """The comparison's one tolerance, and the boundary on each side of it.
+
+        Several members can share one span *and one code object*: measured,
+        ``defaultfilters``' thirty ``@stringfilter`` filters all answer to the
+        ``_dec`` written at 46-52, so a frame there names all thirty while the
+        sweep — which wraps each name separately — credits exactly one. Calling
+        that "twenty-nine functions ran" would be the observer's blindness, not
+        the sweep's, and the row above would redden on a correct tree. So a
+        group with a credited member is agreement.
+
+        The tolerance is exactly that wide and no wider, which is the part worth
+        pinning: a group *no* credited member shares is extra in full, and a
+        credited label no frame ran is still missing. Nothing here is reachable
+        from the corpus today — no such group is on it — so the rule is
+        exercised as a function rather than through a module, and the numbers in
+        the group are three names off the real thirty because the arithmetic is
+        the point and the membership is not.
+        """
+        from tests.compared_path import Observation, disagreement
+
+        span = (46, 52)
+        group = ("center", "cut", "rjust")
+        observation = Observation({span: group}, (), 3)
+
+        self.assertEqual(
+            disagreement({}, observation),
+            ([], sorted(group)),
+            "no credited member shares this span, so the whole group is extra",
+        )
+        self.assertEqual(
+            disagreement({"center": span}, observation),
+            ([], []),
+            "one credited member makes the group agreement: the observer "
+            "cannot split one code object, and measure() can",
+        )
+        self.assertEqual(
+            disagreement({"center": span, "lower": (100, 105)}, observation),
+            (["lower"], []),
+            "and the tolerance does not swallow the other direction — a "
+            "credited label no frame ran is missing whatever the groups say",
+        )
+
+    def test_a_frame_no_span_covers_is_reported_rather_than_swallowed(self):
+        """Honesty condition 2, on a frame nobody has to argue about.
+
+        A frame that runs in a pinned module's file and lands inside no span is
+        a function ``definitions()`` did not enumerate — which is precisely the
+        defect this gate exists to find, and the reason the sweep has been
+        wrong twice. An observer that dropped such a frame would make "they
+        agree" mean "both blind to the same thing", so the site is reported in
+        its own list and the row above fails on it.
+
+        The subject is a fixture module whose ``__file__`` *is* this file, with
+        one member the sweep can name and one function it cannot: the member is
+        in the module namespace, and the function it calls is a nested ``def``
+        that no namespace reaches, which is exactly the shape of a real miss
+        rather than a fabricated one. The callable is a ``functools.partial``
+        because a lambda written here would be a frame in this file too and the
+        bucket under test would then hold the row's own scaffolding.
+        """
+        import functools
+
+        from tests.compared_path import definitions, observed_path
+
+        # The corpus entry point is called once per source, so the member takes
+        # one. (A wrong-arity call raises before the frame exists, so a fixture
+        # that ignored its argument would run *no* code and measure the
+        # profiler's silence rather than its sight.)
+        def listed(*_source):
+            return unlisted()
+
+        def unlisted():
+            return "ran, and is nobody's member"
+
+        subject = types.ModuleType("agreement_probe")
+        subject.__file__ = __file__
+        subject.listed = listed
+
+        observation = observed_path(subject, ["unused"], functools.partial(listed))
+
+        self.assertEqual(
+            observation.reached,
+            {definitions(subject)["listed"]: ("listed",)},
+            "the frame the sweep can name is attributed to the span that "
+            "covers it",
+        )
+        self.assertIn(
+            (unlisted.__code__.co_firstlineno, "unlisted"),
+            observation.unattributed,
+            "a frame in the module's own file that no span covers must be "
+            "reported, not dropped",
+        )
+        self.assertEqual(
+            observation.total,
+            2,
+            "both frames ran in this file, so both are in the count the "
+            "honesty condition reads",
+        )
