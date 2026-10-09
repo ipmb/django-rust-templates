@@ -60,11 +60,12 @@ base.py:788-792	django/template/base.py	788	792	-	-
 base.py:793	django/template/base.py	793	-	-	-
 base.py:800-806	django/template/base.py	800	806	-	-
 base.py:803-819	django/template/base.py	803	819	expects_localtime	-
-base.py:804-809	django/template/base.py	804	809	-	-
+base.py:804-809	django/template/base.py	804	809	arg_vals = []	arg_vals.append(arg.resolve(context))
 base.py:804-810	django/template/base.py	804	810	-	-
 base.py:806-807	django/template/base.py	806	807	-	-
 base.py:811	django/template/base.py	811	-	obj = template_localtime(obj, context.use_tz)	-
 base.py:813	django/template/base.py	813	-	func(obj, autoescape=context.autoescape, *arg_vals)	-
+base.py:815	django/template/base.py	815	-	new_obj = func(obj, *arg_vals)	-
 base.py:816	django/template/base.py	816	-	-	-
 base.py:819	django/template/base.py	819	-	-	-
 base.py:822	django/template/base.py	822	-	def args_check(name, func, provided):	-
@@ -115,15 +116,19 @@ defaultfilters.py:71-75	django/template/defaultfilters.py	71	75	capfirst	-
 defaultfilters.py:78-83	django/template/defaultfilters.py	78	83	-	-
 defaultfilters.py:85-91	django/template/defaultfilters.py	85	91	-	-
 defaultfilters.py:94-220	django/template/defaultfilters.py	94	220	-	-
+defaultfilters.py:95	django/template/defaultfilters.py	95	-	def floatformat(text, arg=-1):	-
 defaultfilters.py:152-159	django/template/defaultfilters.py	152	159	-	-
 defaultfilters.py:153-154	django/template/defaultfilters.py	153	154	str(text)	-
 defaultfilters.py:153	django/template/defaultfilters.py	153	-	str(text)	-
 defaultfilters.py:158-159	django/template/defaultfilters.py	158	159	except (ValueError, InvalidOperation, TypeError):	-
+defaultfilters.py:161	django/template/defaultfilters.py	161	-	p = int(arg)	-
 defaultfilters.py:163	django/template/defaultfilters.py	163	-	return input_val	-
 defaultfilters.py:168-170	django/template/defaultfilters.py	168	170	except TypeError:	-
 defaultfilters.py:177	django/template/defaultfilters.py	177	-	return input_val	-
 defaultfilters.py:180	django/template/defaultfilters.py	180	-	m = int(d) - d	-
+defaultfilters.py:180-182	django/template/defaultfilters.py	180	182	m = int(d) - d	return input_val
 defaultfilters.py:182	django/template/defaultfilters.py	182	-	return input_val	-
+defaultfilters.py:184-192	django/template/defaultfilters.py	184	192	if not m and p <= 0:	-
 defaultfilters.py:186	django/template/defaultfilters.py	186	-	-	-
 defaultfilters.py:194-205	django/template/defaultfilters.py	194	205	exp = Decimal(1).scaleb(-abs(p))	-
 defaultfilters.py:197	django/template/defaultfilters.py	197	-	len(tupl[1])	-
@@ -138,7 +143,7 @@ defaultfilters.py:225-227	django/template/defaultfilters.py	225	227	return iri_t
 defaultfilters.py:230-244	django/template/defaultfilters.py	230	244	linenumbers	-
 defaultfilters.py:247-251	django/template/defaultfilters.py	247	251	-	-
 defaultfilters.py:254-263	django/template/defaultfilters.py	254	263	make_list	-
-defaultfilters.py:266-274	django/template/defaultfilters.py	266	274	-	-
+defaultfilters.py:266-274	django/template/defaultfilters.py	266	274	def slugify(value):	-
 defaultfilters.py:277-294	django/template/defaultfilters.py	277	294	stringformat	-
 defaultfilters.py:289	django/template/defaultfilters.py	289	-	isinstance(value, tuple)	-
 defaultfilters.py:292	django/template/defaultfilters.py	292	-	"%" + str(arg)	-
@@ -148,10 +153,10 @@ defaultfilters.py:316-327	django/template/defaultfilters.py	316	327	truncatechar
 defaultfilters.py:330-341	django/template/defaultfilters.py	330	341	-	-
 defaultfilters.py:344-355	django/template/defaultfilters.py	344	355	truncatewords_html	-
 defaultfilters.py:358-362	django/template/defaultfilters.py	358	362	-	-
-defaultfilters.py:365-379	django/template/defaultfilters.py	365	379	urlencode	-
-defaultfilters.py:382-386	django/template/defaultfilters.py	382	386	-	-
+defaultfilters.py:365-379	django/template/defaultfilters.py	365	379	def urlencode(value, safe=None):	return quote(value, **kwargs)
+defaultfilters.py:382-386	django/template/defaultfilters.py	382	386	def urlize(value, autoescape=True):	return mark_safe(_urlize(value, nofollow=True, autoescape=autoescape))
 defaultfilters.py:386	django/template/defaultfilters.py	386	-	return mark_safe(_urlize(value, nofollow=True, autoescape=autoescape))	-
-defaultfilters.py:389-400	django/template/defaultfilters.py	389	400	urlizetrunc	-
+defaultfilters.py:389-400	django/template/defaultfilters.py	389	400	_urlize(value, trim_url_limit=int(limit), nofollow=True, autoescape=autoescape)	-
 defaultfilters.py:399	django/template/defaultfilters.py	399	-	_urlize(value, trim_url_limit=int(limit), nofollow=True, autoescape=autoescape)	-
 defaultfilters.py:403-407	django/template/defaultfilters.py	403	407	wordcount	-
 defaultfilters.py:404	django/template/defaultfilters.py	404	-	@stringfilter	-
@@ -159,19 +164,19 @@ defaultfilters.py:410-414	django/template/defaultfilters.py	410	414	wordwrap	-
 defaultfilters.py:417-421	django/template/defaultfilters.py	417	421	-	-
 defaultfilters.py:417-438	django/template/defaultfilters.py	417	438	def ljust(value, arg):	return f"{value:^{width}}"
 defaultfilters.py:424-428	django/template/defaultfilters.py	424	428	-	-
-defaultfilters.py:431-438	django/template/defaultfilters.py	431	438	center	-
+defaultfilters.py:431-438	django/template/defaultfilters.py	431	438	def center(value, arg):	return f"{value:^{width}}"
 defaultfilters.py:441-449	django/template/defaultfilters.py	441	449	-	-
 defaultfilters.py:447-450	django/template/defaultfilters.py	447	450	-	-
 defaultfilters.py:457-461	django/template/defaultfilters.py	457	461	-	-
 defaultfilters.py:464-471	django/template/defaultfilters.py	464	471	escapeseq	-
 defaultfilters.py:474-482	django/template/defaultfilters.py	474	482	force_escape	-
-defaultfilters.py:485-494	django/template/defaultfilters.py	485	494	-	-
+defaultfilters.py:485-494	django/template/defaultfilters.py	485	494	def linebreaks_filter(value, autoescape=True):	return mark_safe(linebreaks(value, autoescape))
 defaultfilters.py:486	django/template/defaultfilters.py	486	-	-	-
 defaultfilters.py:493	django/template/defaultfilters.py	493	-	-	-
 defaultfilters.py:497-508	django/template/defaultfilters.py	497	508	linebreaksbr	-
 defaultfilters.py:511-516	django/template/defaultfilters.py	511	516	-	-
 defaultfilters.py:518-525	django/template/defaultfilters.py	518	525	safeseq	-
-defaultfilters.py:528-532	django/template/defaultfilters.py	528	532	striptags	-
+defaultfilters.py:528-532	django/template/defaultfilters.py	528	532	def striptags(value):	return strip_tags(value)
 defaultfilters.py:540-575	django/template/defaultfilters.py	540	575	def _property_resolver(arg):	-
 defaultfilters.py:558-570	django/template/defaultfilters.py	558	570	-	-
 defaultfilters.py:578-588	django/template/defaultfilters.py	578	588	-	-
@@ -206,13 +211,14 @@ defaultfilters.py:908	django/template/defaultfilters.py	908	-	value = ngettext("
 defaultfilters.py:911-912	django/template/defaultfilters.py	911	912	formats.number_format(round(value, 1), 1)	-
 defaultfilters.py:912	django/template/defaultfilters.py	912	-	formats.number_format(round(value, 1), 1)	-
 defaultfilters.py:914-925	django/template/defaultfilters.py	914	925	KB = 1 << 10	value = ngettext("%(size)d byte", "%(size)d bytes", bytes_) % {"size": bytes_}
+defaultfilters.py:922	django/template/defaultfilters.py	922	-	bytes_ = -bytes_  # Allow formatting of negative numbers.	-
 defaultfilters.py:925	django/template/defaultfilters.py	925	-	value = ngettext("%(size)d byte", "%(size)d bytes", bytes_) % {"size": bytes_}	-
 defaultfilters.py:927-935	django/template/defaultfilters.py	927	935	gettext("%s KB")	-
 defaultfilters.py:942-981	django/template/defaultfilters.py	942	981	-	-
 defaultfilters.py:942-982	django/template/defaultfilters.py	942	982	def pluralize(value, arg="s"):	-
 defaultfilters.py:965-966	django/template/defaultfilters.py	965	966	if "," not in arg:	arg = "," + arg
-defaultfilters.py:984-987	django/template/defaultfilters.py	984	987	-	-
-defaultfilters.py:990-996	django/template/defaultfilters.py	990	996	-	-
+defaultfilters.py:984-987	django/template/defaultfilters.py	984	987	def phone2numeric_filter(value):	return phone2numeric(value)
+defaultfilters.py:990-996	django/template/defaultfilters.py	990	996	def pprint(value):	return "Error in formatting: %s: %s" % (e.__class__.__name__, e)
 defaultfilters.py:996	django/template/defaultfilters.py	996	-	"Error in formatting: %s: %s" % (e.__class__.__name__, e)	-
 defaulttags.py:97	django/template/defaulttags.py	97	-	-	-
 defaulttags.py:106-112	django/template/defaulttags.py	106	112	-	-
@@ -314,7 +320,7 @@ formats.py:160-169	django/utils/formats.py	160	169	-	-
 formats.py:172	django/utils/formats.py	172	-	-	-
 formats.py:179-180	django/utils/formats.py	179	180	-	-
 html.py:44	django/utils/html.py	44	-	MAX_STRIP_TAGS_DEPTH = 50	-
-html.py:47	django/utils/html.py	47	-	-	-
+html.py:47	django/utils/html.py	47	-	long_open_tag_without_closing_re = _lazy_re_compile(r"<[a-zA-Z][^>]{1000,}")	-
 html.py:50-60	django/utils/html.py	50	60	@keep_lazy(SafeString)	return SafeString(html.escape(str(text)))
 html.py:51-60	django/utils/html.py	51	60	SafeString(html.escape(str(text)))	-
 html.py:63-85	django/utils/html.py	63	85	-	-
@@ -333,7 +339,7 @@ html.py:181-197	django/utils/html.py	181	197	convert_charrefs=False	-
 html.py:210-229	django/utils/html.py	210	229	-	-
 html.py:210-232	django/utils/html.py	210	232	-	-
 html.py:211-229	django/utils/html.py	211	229	-	-
-html.py:214	django/utils/html.py	214	-	-	-
+html.py:214	django/utils/html.py	214	-	for long_open_tag in long_open_tag_without_closing_re.finditer(value):	-
 html.py:222	django/utils/html.py	222	-	raise SuspiciousOperation	-
 html.py:246	django/utils/html.py	246	-	-	-
 html.py:319	django/utils/html.py	319	-	safe_input = isinstance(text, SafeData)	-

@@ -17,8 +17,9 @@ criterion.** Two reasons, and neither is redundancy:
 
 **An absent `arg` is the call `func(obj)` and `"arg": None` is the call
 `func(obj, None)`** — two different calls, not two spellings of one, because
-Django builds `arg_vals` (`base.py:804-809`) and spreads it (`:813`/`:815`), and
-the list's *length* is the distinction. So the key's presence is the whole
+Django builds `arg_vals` (`base.py:804-809`) and spreads it
+(`base.py:813`/`base.py:815`), and the list's *length* is the distinction.
+So the key's presence is the whole
 signal, which is why the harness reads it through `tests/test_filter_parity.py`'s
 `case_arg` — `case["arg"]` when the key is there, `NO_ARG` when it is not —
 rather than `.get("arg")`, which collapsed the two and scored a raise as an
@@ -241,7 +242,8 @@ class LOUD_STR:
 class LOUD_REPR:
     """An object whose `repr()` raises — the input `pprint`'s `except` arm renders.
 
-    `pprint` (`:990-996`) is `pformat(value)` inside a `try`, and the arm answers
+    `pprint` (`defaultfilters.py:990-996`) is `pformat(value)` inside a
+    `try`, and the arm answers
     `"Error in formatting: %s: %s" % (e.__class__.__name__, e)`. Reaching it needs
     a `__repr__` that raises, which is why [`LOUD_STR`] cannot stand in: its
     `__repr__` returns a string, so `pformat` *succeeds* on it and a row built on
@@ -728,7 +730,7 @@ CASES: list[dict] = [
     # than eight, because the flag reaches the loop by the same line for every
     # `is_safe=True` filter and the remaining four share a shape with one of
     # these. That is the one place in this file where a row stands for another.
-    # --- center (`:431-438`): the format spec `^`, NOT `str.center` ----------
+    # --- center (`defaultfilters.py:431-438`): the format spec `^`, NOT `str.center`
     {
         # **The row the plan mandates, and the only one that separates the two
         # rules.** CPython's format spec puts the extra space on the **right**
@@ -2381,8 +2383,9 @@ CASES: list[dict] = [
     # collapsed the others into it would pass a corpus that held one row per
     # *text*, so the rows are one per route.
     {
-        # `arg=-1` (`:95`) on a value with nothing after the point: `m` is falsy
-        # and `p <= 0`, so this is the integral arm (`:184-192`) and the text is
+        # `arg=-1` (`defaultfilters.py:95`) on a value with nothing after the
+        # point: `m` is falsy and `p <= 0`, so this is the integral arm
+        # (`defaultfilters.py:184-192`) and the text is
         # `"%d" % int(d)`. The `mark_safe` is the first of two, and this row is a
         # `SafeString` while the refusal rows below are not.
         "name": "floatformat/no-argument-integers-are-whole",
@@ -2542,7 +2545,8 @@ CASES: list[dict] = [
     },
     {
         # `Decimal("1e300")` parses — so this is *not* the unparseable arm — but
-        # one digit and an exponent of 300 sum past 200, so `:177` returns the
+        # one digit and an exponent of 300 sum past 200, so
+        # `defaultfilters.py:177` returns the
         # value. A body that parsed the value as a float would agree on the text
         # and lose the flag.
         "name": "floatformat/scientific-string-returns-the-value",
@@ -2562,7 +2566,8 @@ CASES: list[dict] = [
         "value": "1" + "0" * 199,
     },
     {
-        # One digit over, so `:177` returns the input **unmarked**: the same
+        # One digit over, so `defaultfilters.py:177` returns the input
+        # **unmarked**: the same
         # digits, the same length story, and the opposite flag.
         "name": "floatformat/one-digit-over-the-limit-returns-the-value",
         "filter": "floatformat",
@@ -2583,10 +2588,11 @@ CASES: list[dict] = [
     },
     {
         # **`'F'` is two source arms at once.** `abs(exponent)` on a letter tuple
-        # is the `TypeError` the sum catches at `:168-170`, *and* `int(d)` on an
-        # infinity is the `OverflowError` caught at `:180-182` — both mean
-        # `return input_val`, and a body that tested only one of them would agree
-        # on `inf` and diverge on `nan` (`'n'`), so the pair is the measurement.
+        # is the `TypeError` the sum catches at `defaultfilters.py:168-170`, *and*
+        # `int(d)` on an infinity is the `OverflowError` caught at
+        # `defaultfilters.py:180-182` — both mean `return input_val`, and a body
+        # that tested only one of them would agree on `inf` and diverge on
+        # `nan` (`'n'`), so the pair is the measurement.
         "name": "floatformat/infinity-returns-the-value",
         "filter": "floatformat",
         "value": float("inf"),
@@ -2623,9 +2629,9 @@ CASES: list[dict] = [
         # **`m` is the *unrounded* value's polarity and `rounded_d` is the
         # rounded one's**, and here they disagree: the value is not whole (so the
         # integral arm is skipped) and the rounded value is zero (so `if sign and
-        # rounded_d` at `:210` drops the minus). A body that tested the sign of
-        # the value it was rounding, or that read `integral` where the seam
-        # exposes `truthy`, emits `'-0.00'`.
+        # rounded_d` at `defaultfilters.py:210` drops the minus). A body that
+        # tested the sign of the value it was rounding, or that read `integral`
+        # where the seam exposes `truthy`, emits `'-0.00'`.
         "name": "floatformat/negative-rounding-to-zero-drops-the-sign",
         "filter": "floatformat",
         "value": -0.0001,
@@ -2643,9 +2649,10 @@ CASES: list[dict] = [
     # --- wave 3: `filesizeformat` ------------------------------------------
     #
     # One `int()` inside a `try` for three classes, one negation, and a six-arm
-    # branch compared on the **absolute** value — the negation at `:922` is three
-    # lines above the branch and reads like part of the output formatting. Every
-    # answer here is a plain `str` whatever the settings: the filter's
+    # branch compared on the **absolute** value — the negation at
+    # `defaultfilters.py:922` is three lines above the branch and reads like part
+    # of the output formatting. Every answer here is a plain `str` whatever the
+    # settings: the filter's
     # `is_safe=True` is the registry's flag and not the body's, which is why the
     # safety half of the comparison is a constant on this filter.
     #
@@ -3202,7 +3209,7 @@ CASES: list[dict] = [
         "filter": "escapejs",
         "value": None,
     },
-    # --- striptags (`:528-532`, is_safe=True, `@stringfilter`) ---------------
+    # --- striptags (`defaultfilters.py:528-532`, is_safe=True, `@stringfilter`)
     #
     # The whole body is the host's `strip_tags`, so what these rows pin is the
     # Python tag grammar rather than Rust: the stripper is an `HTMLParser` fed
@@ -3260,7 +3267,7 @@ CASES: list[dict] = [
         "filter": "striptags",
         "value": mark_safe("<b>hi</b>"),
     },
-    # --- linebreaks (`:485-494`, is_safe=True, needs_autoescape) ------------
+    # --- linebreaks (`defaultfilters.py:485-494`, is_safe=True, needs_autoescape)
     {
         # Escaping, the `\n{2,}` paragraph split and the escape-**before**-`<br>`
         # order, all in one row: `'more'.` is `&#x27;more&#x27;` and the single
@@ -3450,7 +3457,7 @@ CASES: list[dict] = [
         "filter": "iriencode",
         "value": mark_safe("abc"),
     },
-    # --- urlencode (`:365-379`, is_safe=False, `@stringfilter`) -------------
+    # --- urlencode (`defaultfilters.py:365-379`, is_safe=False, `@stringfilter`)
     #
     # Django's body is two lines — `kwargs["safe"] = safe` unless it is `None`,
     # then `quote(value, **kwargs)` — and the rows below are the whole of what
@@ -3543,10 +3550,11 @@ CASES: list[dict] = [
     #
     # All three bodies are thin on purpose, and that is why these three groups
     # are long. Each delegates its real work to a host operation and owns only
-    # the part no host performs: `slugify` (`:266-274`) and `phone2numeric`
-    # (`:984-987`) wrap `django.utils.text` helpers, and `pprint` (`:990-996`)
-    # owns its `except` arm and nothing else. So no row here asserts "the
-    # algorithm is right" — the host's own suite does that — only *which*
+    # the part no host performs: `slugify` (`defaultfilters.py:266-274`) and
+    # `phone2numeric` (`defaultfilters.py:984-987`) wrap `django.utils.text`
+    # helpers, and `pprint` (`defaultfilters.py:990-996`) owns its `except` arm
+    # and nothing else. So no row here asserts "the algorithm is right" — the
+    # host's own suite does that — only *which*
     # operation the body chose and *what it handed it*, one measured input per
     # branch, which is the only thing a thin body can get wrong.
     #
@@ -3789,8 +3797,9 @@ CASES: list[dict] = [
         "filter": "pprint",
         "value": LOUD_REPR(),
     },
-    # **`urlize` (`defaultfilters.py:382-386`) and `urlizetrunc` (`:389-400`).**
-    # The helper is `django.utils.html.urlize` — the host's — so the body is the
+    # **`urlize` (`defaultfilters.py:382-386`) and `urlizetrunc`
+    # (`defaultfilters.py:389-400`).** The helper is `django.utils.html.urlize` —
+    # the host's — so the body is the
     # seam call plus `mark_safe`, and the rows below are about what the body
     # hands it. Two of them carry `settings` (`URLIZE_ASSUME_HTTPS`) and are
     # therefore pinned with `expected`; see the module doc on why a settings row
@@ -4800,8 +4809,9 @@ ERROR_CASES: list[dict] = [
         "message": "string index out of range",
     },
     {
-        # `{{ x|floatformat:None }}` — `int(arg)` at `:161`, where the bare
-        # `{{ x|floatformat }}` never gets: its default is `arg=-1`, so the token
+        # `{{ x|floatformat:None }}` — `int(arg)` at `defaultfilters.py:161`,
+        # where the bare `{{ x|floatformat }}` never gets: its default is
+        # `arg=-1`, so the token
         # without an argument is not this call. **This row is the one that forced
         # the FFI's argument list to be a list.** Until it was, `_native.filter`
         # took an `Option` and a Python `None` argument became "no argument", so
@@ -4974,7 +4984,7 @@ ERROR_CASES: list[dict] = [
         # two, they are not the same check, and each is reachable only from its
         # own shape. This one is caught before the loop starts, by
         # `long_open_tag_without_closing_re = r"<[a-zA-Z][^>]{1000,}"`
-        # (`html.py:47`, `:214`): one `<` followed by a letter and then 1000+
+        # (`html.py:47`, `html.py:214`): one `<` followed by a letter and then 1000+
         # characters with no `>` in them — here `<a` × 501, which is 1002
         # characters and 501 `<`. A body that ported only the iteration counter
         # answers `''` on this row.
@@ -5054,8 +5064,9 @@ ERROR_CASES: list[dict] = [
     },
     # --- phone2numeric: `str.lower`'s refusal, on a filter with no `@stringfilter`
     #
-    # `phone2numeric` (`:984-987`) is one of the four filters the 29 exclude from
-    # `@stringfilter` (`tests/test_filter_inventory.py`'s `STRINGFILTER`), so its
+    # `phone2numeric` (`defaultfilters.py:984-987`) is one of the four filters the
+    # 29 exclude from `@stringfilter` (`tests/test_filter_inventory.py`'s
+    # `STRINGFILTER`), so its
     # argument is **not** coerced: `"".join(char2number.get(c, c) for c in
     # phone.lower())` (`text.py:344`) calls a `str` method on whatever it was
     # handed, and the refusal is CPython's `AttributeError`. The class name is
