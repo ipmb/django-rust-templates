@@ -16,6 +16,7 @@
 - `crates/template-core` has **no PyO3 dependency**. All Python interaction lives in `crates/template-py`.
 - Python 3.14; Rust stable.
 - `scripts/check.sh` must pass before every commit (cargo test, fmt, clippy `-D warnings`, Python unit tests, differential, Django suite).
+- **`cargo test` does not run clippy.** A task whose code is only `cargo test`ed can still fail `check.sh` under `-D warnings`. Every task's verification step runs clippy explicitly. (Found the hard way: this plan's own Task 3 code failed on `module_inception` and `type_complexity`.)
 - `PIP_CONFIG_FILE=/dev/null` is required for pip — the machine's global pip config is malformed. `scripts/env.sh` handles this.
 - Reference source of truth for behaviour: `.django/django/template/base.py` and `.django/tests/template_tests/test_base.py`.
 - **Indented code in a Rust doc comment is a doctest**, and `cargo test` compiles and runs it. Never put non-Rust code in an indented rustdoc block — it fails the build. Use an inline code span instead. (A ``` fence inside a rustdoc comment avoids the doctest but breaks the Markdown of any document that quotes the file, this plan included.)
@@ -49,6 +50,16 @@ run before handoff, so the executor starts from code known to build:
 - `smart_split` + `split_contents` comparison against `django.utils.text.smart_split`
   and `Token.split_contents` over **13 corpus entries plus 4000 seeded random
   cases → byte-identical output** (20,497 result lines).
+
+**Correction, added after first execution: that validation ran `cargo test`, not
+`clippy`, so it never checked the code against the gate that governs commits
+here.** Executing Task 3 found two lints in this plan's own Rust —
+`clippy::module_inception` (the Lexer at `lexer/lexer.rs`) and
+`clippy::type_complexity` (the debug test helper's return type) — both of which
+`scripts/check.sh` rejects under `-D warnings`. So the accurate claim is that
+this Rust was known to *build and match*, not known to *pass*. Future plans
+should lint-check extracted code, and each task below now runs clippy in its
+verification step rather than relying on `cargo test` alone.
 
 The first run of the token comparison failed, and the failure was worth the
 exercise: an indented block in the `segments.rs` doc comment had been written as
@@ -453,8 +464,9 @@ git commit -m "M1: segment scanner matching Django's tag_re"
 ### Task 3: Lexer
 
 **Files:**
-- Create: `crates/template-core/src/lexer/lexer.rs`
-- Modify: `crates/template-core/src/lexer/mod.rs`
+- Rewrite: `crates/template-core/src/lexer/mod.rs` — currently only declares and
+  re-exports `segments`; the `Lexer` belongs here beside it, not in a nested
+  `lexer/lexer.rs`, which is `clippy::module_inception` and fails `check.sh`.
 
 **Interfaces:**
 - Consumes: `segments::segments`, `Segment`, `token::{Token, TokenType}`.
@@ -466,7 +478,39 @@ git commit -m "M1: segment scanner matching Django's tag_re"
 
 - [ ] **Step 1: Write the failing test**
 
-Create `crates/template-core/src/lexer/lexer.rs`:
+Create `crates/template-core/src/lexer/mod.rs` — the module declarations, the
+re-exports, and then the `Lexer` itself:
+
+```rust
+//! The lexer, following `django.template.base.Lexer` and `DebugLexer`.
+//!
+//! `Lexer` and `DebugLexer` differ only in whether token positions are
+//! recorded, so one implementation with a `debug` flag serves both. Django
+//! keeps them as separate classes for speed; that distinction is **not worth
+//! reproducing in Rust**, but it is **mandatory in the Python shell at M9**,
+//! which must expose both as distinct classes. See "M9 obligations" in the
+//! plan for the three things the shell must reconstruct.
+
+pub mod segments;
+
+// Also a `use`, so `segments` and `Segment` are in scope below.
+pub use segments::{segments, Segment};
+
+use crate::token::{Token, TokenType};
+```
+
+…followed by the `Lexer` implementation. The test helper's return types are
+named rather than spelled out inline — `Vec<(TokenType, String, usize, Option<(usize, usize)>)>`
+is `clippy::type_complexity`:
+
+```rust
+    /// One token's observable fields, for compact assertions.
+    type Lexed = (TokenType, String, usize);
+    type LexedDebug = (TokenType, String, usize, Option<(usize, usize)>);
+```
+
+`crates/template-core/src/lib.rs` already has `pub mod lexer;`, which now
+resolves to this directory. No entry for `Lexer` is needed there.
 
 ```rust
 //! The lexer, following `django.template.base.Lexer` and `DebugLexer`.
@@ -773,18 +817,15 @@ mod tests {
 }
 ```
 
-Add to `crates/template-core/src/lexer/mod.rs`:
-
-```rust
-pub mod lexer;
-
-pub use lexer::Lexer;
-```
-
-- [ ] **Step 2: Run tests to verify they pass**
+- [ ] **Step 2: Run tests and the lint gate**
 
 Run: `cargo test -p template-core lexer::`
-Expected: PASS (14 tests).
+Expected: PASS (14 lexer tests).
+
+Run: `cargo clippy -p template-core --all-targets -- -D warnings`
+Expected: clean. `cargo test` does **not** run clippy, so a task can pass Step 2
+and still fail `check.sh` — which is what happened when this plan was first
+executed. Both lints it caught were in the plan's own code.
 
 - [ ] **Step 3: Commit**
 
