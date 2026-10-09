@@ -82,30 +82,33 @@ first.
    factory has its own seen-to-fail step in Task 5 and why A4 checks keys
    against the Rust source rather than trusting the list. **Owned by Task 1
    (A4) and Task 5 (the factory).**
-3. **`{% if %}` and `{% cycle %}` are the first real producers of
-   `AttrValue::Ref`, and the render path cannot resolve one.** Today `Ref` is
-   exercised only by hand-built descriptors in `tests/test_materialise.py:178-206`;
-   no parse produces one, because no implemented tag needs a host-owned value.
+3. **`{% if %}` and `{% cycle %}` are the first real producers of a wire handle,
+   and the render path cannot resolve one.** Today `Ref` is exercised only by
+   hand-built descriptors in `tests/test_materialise.py:178-206`; no parse
+   produces one, because no implemented tag needs a host-owned value.
    `_native.render` materialises with `resolve_ref=None`
-   (`crates/template-py/src/lib.rs:1529-1531`), so a `Ref` reaching it raises
+   (`crates/template-py/src/lib.rs:1529-1531`), so a handle reaching it raises
    `LookupError` (`parser.py:343-348`). M5 introduces the producers *and* the
    table; getting the table's lifetime wrong (per-parse vs persistent) makes
    handles ambiguous in exactly the way `PyTarget`'s doc warns about
    (`lib.rs:996-1000`). **Owned by Task 2; pinned by the `{% cycle … as %}` +
-   `{% resetcycle %}` round-trip, which is *seen to fail* first.**
-4. **`{% cycle %}`'s named-node identity is parser state, not descriptor
-   state, and it must survive a *reused* name.** Django stores the *node object*
-   in `parser._named_cycle_nodes[name]` (`defaulttags.py:693-696`) and
-   `{% resetcycle %}` reads it back (`:1437`); two `{% cycle a b as c %}`
-   occurrences must yield *one* node, the second returning the first's
-   (`:669-671`). `template-core`'s `Parser` already carries
-   `named_cycle_nodes: HashMap<String, NodeRef>` and `last_cycle_node`
-   (`parser/mod.rs:71-72`), and `resetcycle.rs` already reads them — so M5's
-   `cycle.rs` must *write* them, and the handle it stores must be the same one
-   the descriptor emits. A second `CycleNode` built for a repeated name is a
-   silent divergence with no error and no tree-shape difference the parity test
-   would see unless the corpus has the repeated-name template. **Owned by
-   Task 6; pinned by a repeated-name corpus row and a descriptor test.**
+   `{% cycle c %}` identity assertion, which is *seen to fail* first.**
+4. **`{% cycle %}`'s named-node identity is parser state, it must survive a
+   *reused* name, and it is a render-time invariant rather than a tree-shape
+   one.** Django stores the *node object* in `parser._named_cycle_nodes[name]`
+   (`defaulttags.py:693-696`) and `{% resetcycle %}` reads it back (`:1437`);
+   two `{% cycle a b as c %}` occurrences must yield *one* node, the second
+   returning the first's (`:669-671`). The consequence is measured, not
+   assumed: `CycleNode.render` keys `context.render_context` **by the node
+   object** (`:106-112`), so two distinct objects get separate
+   `itertools.cycle` iterators and the second mention **restarts** the sequence
+   — a divergence no tree comparison can see. `template-core`'s `Parser`
+   already carries `named_cycle_nodes` and `last_cycle_node`
+   (`parser/mod.rs:71-72`) and `resetcycle.rs` already reads them, so M5's
+   `cycle.rs` must *write* them and the wire must carry the reference as
+   `AttrValue::NodeSlot` (§B), not as two equal descriptors. **Owned by Task 6;
+   pinned by a repeated-name corpus row and the identity assertion Task 2 adds,
+   which the descriptor-level check cannot substitute for.**
 5. **`{% url %}` compiles *and* reverses nothing at parse time; a body that
    reverses early is wrong only under a settings state the corpus must set.**
    `url`'s compile builds FilterExpressions and returns `URLNode`; `reverse` is
@@ -273,24 +276,67 @@ inside a descriptor" (`crates/template-py/src/lib.rs:358-366`);
   handle must resolve to the *same Python `CycleNode` object*, so that
   `resetcycle` resets the very node `cycle` renders from.
 
+**Why the sharing is load-bearing, measured.** `CycleNode.render` keys its
+iterator on **the node object**:
+
+```python
+if self not in context.render_context:
+    context.render_context[self] = itertools_cycle(self.cyclevars)
+cycle_iter = context.render_context[self]
+value = next(cycle_iter).resolve(context)
+```
+
+(`defaulttags.py:106-112`; `reset` does the same at `:123-127`.) Two
+equal-but-distinct objects do not merely duplicate structure: they get
+**separate `itertools.cycle` iterators**, so a `{% cycle c %}` that should
+*continue* the sequence **restarts it**, and `{% resetcycle c %}` resets an
+iterator the visible `{% cycle %}` never advances. The sharing is a render-time
+invariant, not a tree-shape one — which is why a mechanism that only produces
+equal descriptors is not enough, and why the plan must say this sentence where a
+reader deciding on the mechanism will see it.
+
 **The design: one table, owned by the shell, threaded through the parse call.**
 
-* The `Host` trait's parse-side impl in `template-py` gains a method that takes
-  a filter *token string*, has Python build the real object (Django's
-  `Parser.compile_filter` for `if`; the already-built `CycleNode` for `cycle`),
-  pushes it onto a `Vec<Py<PyAny>>`, and returns `NodeRef(index)`. This is the
-  same shape as the existing `check_filter` callback
-  (`crates/template-py/src/lib.rs:930-938`), which already calls back into
-  Python during parse — so the mechanism is proven, only its return widens.
+* The table is a single `Vec` per parse, indexed by `usize`. **Two `AttrValue`
+  variants index it, and they differ in who fills an entry and when** — which is
+  the meaning that must not be conflated:
+
+  * `AttrValue::Ref(NodeRef)` (`desc.rs`, existing) — filled **at parse time by
+    the host**. `{% if %}`'s condition.
+  * **`AttrValue::NodeSlot(usize)` — new, and M5's one wire addition** — filled
+    **at materialisation time by the materialiser**. `{% resetcycle %}`'s target
+    and a reused `{% cycle name %}` descriptor.
+
+  `NodeSlot` follows `AttrValue::NodeListRef(usize)` (`desc.rs:131-148`), which
+  M3 added for `IfNode.conditions_nodelists` for exactly this reason: the wire is
+  a tree and the thing it must express is not, so the tree carries an index into
+  a side collection resolved at materialisation. The node slot is that idiom one
+  level up — into a per-parse table rather than a node's own children.
+* **`AttrValue::Int` was the first draft and is wrong.** An `Int` carries its
+  meaning out of band: the materialiser would have to know that *for `CycleNode`*
+  this attribute is a cache key. This project has already made that call the
+  other way twice — `SafeStr` and `NodeRef` each got their own wire class
+  precisely so the decoder needs no per-class knowledge — and M2's wire-form
+  review named "an `Int` that sometimes means one thing and sometimes another"
+  as the hazard to design out. One variant, and the decoder stays generic.
+* The `Host` trait gains **`alloc_slot(&self) -> usize`** (push a placeholder,
+  return its index) and **`compile_filter(&self, token: &str) -> Result<NodeRef,
+  Error>`** (allocate, then have Python build the real object and store it). The
+  latter is the same shape as the existing `check_filter` callback
+  (`crates/template-py/src/lib.rs:930-938`), which already calls back into Python
+  during parse — the mechanism is proven, only its return widens.
+* **`cycle` itself needs no host call.** Its slot is filled by the materialiser,
+  so `template-core` only needs an index; `resetcycle.rs`'s existing
+  `AttrValue::Ref` (`:34`, `:42`) becomes `AttrValue::NodeSlot`.
 * `_native.parse` returns the table alongside the tree. Its current return is
   `(nodes, contains_nontext)`; it becomes `(nodes, contains_nontext, refs)`, and
-  the Python harnesses pass `resolve_ref=refs.__getitem__` into `materialise`.
-  This closes the `resolve_ref=None` hole in the render path (§Review Focus 3):
-  `_native.render` becomes able to resolve a `Ref` it built.
+  the Python harnesses pass `resolve_ref=refs.__getitem__`,
+  `register_ref=refs.__setitem__`. This closes the `resolve_ref=None` hole in the
+  render path (§Review Focus 3): `_native.render` becomes able to resolve a
+  handle it built.
 * **The table is per-parse and meaningless outside it** — the same lifetime rule
   `PyTarget.arena` states for the other kind of handle (`lib.rs:996-1000`).
-  `NodeRef.index` is only ever valid against the table the producing parse
-  returned.
+  An index is only ever valid against the table the producing parse returned.
 
 **Why not a second structural variant instead of a handle.** `{% if %}`'s
 condition *could* cross as `AttrValue::FilterExpr` (structural, like every other
@@ -322,11 +368,12 @@ declared with their reason rather than left implicit.
 Every descriptor is built from the variants `desc.rs` already has
 (`crates/template-core/src/parser/desc.rs:61-149`): `Str`, `SafeStr`, `Bool`,
 `Int`, `Float`, `BigInt`, `None`, `Ref`, `Variable`, `FilterExpr`, `List`,
-`Map`, `NodeListRef`. **No new `AttrValue` variant is needed for M5** — the
-`if` condition is a `Ref` (§B) and a node's sub-nodelists are named or
-`NodeListRef` (§D-general). The per-tag shapes below are the pinned source read
-against those variants; each is a claim, and each task's first step re-measures
-it against `.django/` @ 6.0.9 before writing code.
+`Map`, `NodeListRef` — **plus exactly one new one, `NodeSlot(usize)`** (§B),
+which is the only wire addition M5 makes. The `if` condition is a `Ref` and a
+node's sub-nodelists are named or `NodeListRef` (§D-general); `NodeSlot` exists
+only for the two cycle back-references. The per-tag shapes below are the pinned
+source read against those variants; each is a claim, and each task's first step
+re-measures it against `.django/` @ 6.0.9 before writing code.
 
 **D-general — sub-nodelists and repeated names.** A named nodelist becomes a
 `__init__` kwarg; an *empty-named* nodelist is positional-only and reachable
@@ -334,9 +381,7 @@ only through `AttrValue::NodeListRef(i)` into the node's own `nodelists`
 (`parser.py:109-113`, `:130`; `desc.rs:131-148`). `token_kwargs` results are a
 `Vec<(String, AttrValue)>` (`AttrValue::Map`), **not** a map: a repeated key
 keeps the first position and the last value, and only `dict(pairs)` reproduces
-it (`base.py:1196`; `desc.rs` doc).
-
-**D1 — `querystring` moves to M6 (evidence, not preference).** It is
+it (`base.py:1196`; `desc.rs` doc).**D1 — `querystring` moves to M6 (evidence, not preference).** It is
 `@register.simple_tag(name="querystring", takes_context=True)`
 (`defaulttags.py:1286`) — the **only** `simple_tag` in `defaulttags.py` (the
 other 25 registrations are `@register.tag`). It has no `do_querystring`;
@@ -441,9 +486,13 @@ unpacking `ValueError` (`:237-241`) is Django's, unported.
 (`:99-102`): `cyclevars` an `AttrValue::List` of `FilterExpr`; `variable_name` a
 `Str` or absent; `silent` a `Bool`. Four messages (`:660`, `:666-668`,
 `:670`, `:679-682`). **Writes parser state** (§Review Focus 4): a new name
-pushes the fresh node into `named_cycle_nodes` and sets `last_cycle_node`
-(`:693-700`); a repeated name returns the *existing* node's handle (`:669-671`)
-and must **not** build a second descriptor.
+pushes the fresh node's **slot** into `named_cycle_nodes` and sets
+`last_cycle_node` (`:693-700`); a repeated name returns the *existing* slot
+(`:669-671`) and must **not** build a second descriptor — the descriptor it
+emits carries `AttrValue::NodeSlot(slot)` and no other attribute, so the
+materialiser returns the object built for the first occurrence (§B). Two
+identical descriptors would pass every tree comparison and still restart the
+sequence at render (§B's measured reason).
 
 **D12 — `if`.** `IfNode(conditions_nodelists)`: an `AttrValue::List` whose
 elements are `AttrValue::List([condition, NodeListRef(i)])`, where `condition` is
@@ -742,42 +791,61 @@ declares, because a gate nobody has seen fail is a comment.
 ## Task 2: The host-owned reference table
 
 **Files:**
-- Modify: `crates/template-core/src/parser/host.rs` (the `Host` trait gains two methods)
+- Modify: `crates/template-core/src/parser/desc.rs` (add `AttrValue::NodeSlot(usize)` — §B)
+- Modify: `crates/template-core/src/parser/host.rs` (the `Host` trait gains `alloc_slot` and `compile_filter`)
 - Modify: `crates/template-py/src/lib.rs` (`FilterCheckHost` gains the table; `parse` returns it; `render` threads it)
-- Modify: `python/django_rust_templates/_impl/parser.py` (`materialise`/`materialise_node` accept and fill the table)
-- Modify: `tests/test_parser_parity.py` (pass `resolve_ref` from the returned table)
-- Modify: `tests/test_materialise.py`
-- Test: `tests/test_ref_table.py` (new)
+- Modify: `python/django_rust_templates/_impl/parser.py` (`materialise`/`materialise_node` gain `register_ref` and the `NodeSlot` arm)
+- Modify: `tests/test_parser_parity.py` (pass `resolve_ref`/`register_ref` from the returned table)
+- Test: `tests/test_ref_table.py` (new — the table's wire test, and the identity assertion that closes §Review Focus 3)
 
 **Interfaces:**
-- Produces: `Host::alloc_ref(&self) -> NodeRef` and
+- Produces: `AttrValue::NodeSlot(usize)`; `Host::alloc_slot(&self) -> usize` and
   `Host::compile_filter(&self, token: &str) -> Result<NodeRef, Error>`;
-  `_native.parse` → `(nodes, contains_nontext, refs)`, where `refs` is a
-  list-like of host objects the shell can read and fill;
-  `materialise(desc, origin=None, refs=None, parser=None)`.
-- Consumes: `AttrValue::Ref(NodeRef)` (exists), `smartif::CompileFilter` (exists).
+  `_native.parse` → `(nodes, contains_nontext, refs)`;
+  `materialise(nodelist_desc, origin=None, resolve_ref=None, register_ref=None, parser=None)`.
+- Consumes: `AttrValue::Ref(NodeRef)` (exists), `AttrValue::NodeListRef` (exists, the precedent), `smartif::CompileFilter` (exists).
 
-**Design, and the one part most likely to need review.** Two tags need a
-host-owned value at two different *times*, and the table serves both:
+**Design, and the one part most likely to need review.** Two tags need a value
+that is built outside `template-core`, at two different *times*, and one table
+serves both. The variants differ in who fills an entry and when — §B is the full
+argument, this is the summary:
 
-* `{% if %}` — Django builds the `FilterExpression` at **parse** time and raises
-  on a bad one (`TemplateIfParser.__init__` → `create_var` → `compile_filter`).
-  So `compile_filter` fills its slot during the parse, and the slot is read-only
-  afterwards.
-* `{% cycle %}` — the identity that must survive is a *materialised Python
-  object*: `{% cycle a b as c %}` returns the node **and** stores that same
-  object in `parser._named_cycle_nodes` (`defaulttags.py:693-696`), so a later
+* `{% if %}` — `AttrValue::Ref(NodeRef)`, filled **at parse time by the host**.
+  Django builds the `FilterExpression` at parse time and raises on a bad one
+  (`TemplateIfParser.__init__` → `create_var` → `compile_filter`), so
+  `compile_filter` fills its entry during the parse.
+* `{% cycle %}` — `AttrValue::NodeSlot(usize)`, filled **at materialisation time
+  by the materialiser**. The identity that must survive is a materialised Python
+  object: `{% cycle a b as c %}` returns the node **and** stores that same object
+  in `parser._named_cycle_nodes` (`defaulttags.py:693-696`), so a later
   `{% cycle c %}` returns the same object (`:669-671`) and `{% resetcycle c %}`
-  resets it (`:1437`). Two `CycleNode`s with equal fields are *not* faithful:
-  they render identically until a `resetcycle` separates them, which is a
-  divergence the parse-time parity test **cannot see** (it compares
-  descriptions, not identity). So the descriptor carries the slot index and the
-  materialiser fills the slot on first construction:
+  resets it (`:1437`). So the descriptor carries the slot index and the
+  materialiser fills the entry on first construction:
 
-  - a `CycleNode` descriptor carries an extra `AttrValue::Int` attr `"__slot"`;
-  - `materialise_node`, on seeing `__slot=k`, returns `refs[k]` if it is
-    already filled, else builds the node normally, stores it at `refs[k]`, and
-    returns it;
+  - a `CycleNode` descriptor carries `AttrValue::NodeSlot(k)`;
+  - `materialise_node`, on decoding `NodeSlot(k)`, returns `refs[k]` if it is
+    already filled, else builds the node, stores it at `refs[k]`, and returns it;
+
+**What is and is not testable, measured — the first draft of this plan got this
+wrong and overstated it.** Two links, and both are testable:
+
+* **The descriptor carries the slot, visibly.** `_native.parse` returns each
+  node as `(class_name, attrs, nodelists, token)` (`test_parser_parity.py:504-529`
+  reads exactly that), so a test can assert that two `{% cycle %}` occurrences
+  carry the **same** slot value. Note it is the *wire* descriptor that shows it,
+  not `describe()`: `describe` walks `vars()` of a **materialised** node
+  (`:131-147`), and the slot cannot survive into one — `CycleNode.__init__` takes
+  no such parameter, so `cls(**kwargs)` would raise. Popping it before
+  construction is required, not incidental.
+* **The materialiser honoured the slot.** `tests/test_materialise.py` can assert
+  `nodes[0] is nodes[1]` **today** — it is the direct statement of the property,
+  Python-side, and it does not wait for Task 6 or for a corpus row.
+
+So the untestable part is narrower than "the mechanism": it is only *whether the
+two objects a render would iterate are the same object*, and that is exactly what
+the identity assertion covers. This is why Task 2 adds it rather than deferring
+it — a claim that something is untestable is the kind that gets quoted later, and
+it should be as small as the evidence makes it.
   - `{% resetcycle %}`'s existing `node: AttrValue::Ref(slot)` then resolves,
     through the same table, to that object.
 
@@ -835,15 +903,33 @@ def test_resetcycle_targets_the_cycles_node():
 Run: `./scripts/check.sh` (or `pytest tests/test_ref_table.py -v`)
 Expected: **FAIL** — `LookupError: ... needs a resolve_ref callback; none was
 passed to materialise` (`parser.py:344-348`), because nothing produces or
-threads a ref yet. This is the "seen to fail" for §Review Focus 3.
+threads a table yet. This is the "seen to fail" for §Review Focus 3.
 
-- [ ] **Step 3: Add the two `Host` methods and the shell table.**
+- [ ] **Step 3: Add the `NodeSlot` variant, the two `Host` methods, and the shell
+  table.**
+
+`crates/template-core/src/parser/desc.rs` — beside `NodeListRef` (`:131-148`),
+with a doc that says which table and who fills it:
+
+```rust
+    /// An index into the **per-parse node-slot table**, filled at
+    /// materialisation time rather than at parse time.
+    ///
+    /// `NodeListRef` is the same idiom one level down: the wire is a tree and
+    /// the thing being expressed is not, so the tree carries an index that is
+    /// resolved once the side collection exists. A `Ref` indexes the same table
+    /// but the *host* fills it during the parse; this one the materialiser fills
+    /// as it builds. `{% cycle %}` is the only producer, twice over.
+    NodeSlot(usize),
+```
 
 `crates/template-core/src/parser/host.rs`:
 
 ```rust
-    /// Allocate an empty slot in the shell's per-parse reference table.
-    fn alloc_ref(&self) -> NodeRef;
+    /// Allocate an empty entry in the shell's per-parse reference table and
+    /// return its index. The table is filled at parse time for `Ref` and at
+    /// materialisation time for `NodeSlot`; this only reserves the index.
+    fn alloc_slot(&self) -> usize;
     /// `Parser.compile_filter(token)` — build the host's `FilterExpression` and
     /// return its handle. Called at *parse* time, so a bad filter raises here,
     /// which is where Django raises it.
@@ -851,9 +937,10 @@ threads a ref yet. This is the "seen to fail" for §Review Focus 3.
 ```
 
 `crates/template-py/src/lib.rs`: `FilterCheckHost` (and the `render` host) gains
-`refs: RefCell<Vec<Py<PyAny>>>` with `alloc_ref` pushing `None`-placeholder
-entries and `compile_filter` calling Python's `parser.compile_filter(token)`
-(the existing `check_filter` callback's sibling) and storing the result.
+`refs: RefCell<Vec<Py<PyAny>>>` with `alloc_slot` pushing a `None`-placeholder
+entry, `alloc_ref` being `alloc_slot` for the `Ref` case, and `compile_filter`
+calling Python's `parser.compile_filter(token)` (the existing `check_filter`
+callback's sibling) and storing the result into the reserved slot.
 `parse_source` returns `(nodes, contains_nontext, refs)`.
 
 - [ ] **Step 4: Thread it through `materialise` — the smallest diff that works.**
@@ -876,22 +963,59 @@ Task 2 is not the place to churn them. Three edits:
 2. `materialise` and `materialise_node` gain `register_ref=None` after
    `resolve_ref`, threaded through both recursive calls (`:87`, `:125`) and into
    `_decode_value`.
-3. `materialise_node` handles `__slot` beside the existing `token` attachment
-   (`:133`-ish): read `attrs` for `"__slot"`, and if `register_ref` is not
-   `None`
+3. `materialise_node` gains a `NodeSlot` arm in the attribute loop (`:131-133`),
+   beside where `token` is attached. It is **not** a kwarg — `CycleNode.__init__`
+   takes no such parameter — so it is handled where the attribute value is
+   decoded, not passed on:
 
 ```python
-    slot = kwargs.pop("__slot", None)
-    if slot is not None:
-        existing = resolve_ref(slot) if resolve_ref else None
-        if existing is not None:
-            return existing          # {% cycle name %} — the same object
-        node = cls(**kwargs)
-        register_ref(slot, node)
-        return node                  # first construction fills the slot
+    node = None
+    for name, value in attrs:
+        if isinstance(value, _native.NodeSlot):
+            existing = resolve_ref(value.index) if resolve_ref else None
+            if existing is not None:
+                return existing          # {% cycle name %} — the same object
+            node = None                  # first construction: build below, fill after
+            _pending_slot = value.index
+            continue
+        kwargs[name] = _decode_value(value, resolve_ref, parser, child_lists)
+
+    node = cls(**kwargs)
+    if _pending_slot is not None:
+        register_ref(_pending_slot, node)
+    return node
 ```
 
-   with the rest of `materialise_node` unchanged for every other node.
+   with the rest of `materialise_node` unchanged for every other node. Written
+   this way the slot is filled *after* the node exists, which is what makes the
+   second occurrence return the first's object rather than a second one; and the
+   slot never reaches `cls(**kwargs)`, which would raise.
+
+- [ ] **Step 4b: Add the identity assertion in `tests/test_ref_table.py`, beside
+  `ours_parse`, so it runs the moment the table exists.** This is the property
+  stated directly, and it is why "a divergence with no test" is too strong a
+  claim:
+
+```python
+def test_a_reused_named_cycle_materialises_one_object():
+    """`{% cycle a b as c %}{% cycle c %}` — one object, two nodelist entries.
+
+    Identity is a render-time invariant, not a tree-shape one: `CycleNode.render`
+    keys `context.render_context` by the node object (`defaulttags.py:106-112`),
+    so two equal-but-distinct nodes get separate `itertools.cycle` iterators and
+    the second `{% cycle c %}` restarts the sequence instead of continuing.
+    """
+    nodes, refs = ours_parse("{% cycle 'a' 'b' as c %}{% cycle c %}")
+    assert nodes[0] is nodes[1]
+    assert refs[0] is nodes[0], "the slot holds the object it built"
+```
+
+  It lives here rather than in `tests/test_materialise.py` only because
+  `test_materialise.py` has no `ours_parse`; the file is not what makes it
+  runnable. What makes it runnable is that it needs no tag code — Task 6's
+  `cycle.rs` writes the descriptor, but the *table* and this assertion are
+  Task 2's, so the link is closed now instead of declared untestable until
+  Task 6.
 
 `tests/test_parser_parity.py`'s `ours_parse` (`:107-108`) passes the third
 return value and the two callables:
@@ -916,10 +1040,11 @@ Expected: `test_ref_table.py` PASS; the whole suite green **except** Task 1's
 - [ ] **Step 6: Commit.**
 
 ```bash
-git add crates/template-core/src/parser/host.rs crates/template-py/src/lib.rs \
+git add crates/template-core/src/parser/desc.rs \
+        crates/template-core/src/parser/host.rs crates/template-py/src/lib.rs \
         python/django_rust_templates/_impl/parser.py tests/test_ref_table.py \
-        tests/test_parser_parity.py tests/test_materialise.py
-git commit -m "tags: the per-parse reference table, so a Ref resolves instead of raising"
+        tests/test_parser_parity.py
+git commit -m "tags: the per-parse table and NodeSlot, so a cycle's second mention is the same node"
 ```
 
 ---
@@ -1316,13 +1441,14 @@ git commit -m "tags: ifchanged and for, and the factory NODE_CLASSES needed for 
 
 **Files:**
 - Modify: `crates/template-core/src/parser/tags/cycle.rs`
-- Modify: `crates/template-core/src/parser/tags/resetcycle.rs` (messages only; it already emits `AttrValue::Ref`, `:34`, `:42`)
+- Modify: `crates/template-core/src/parser/tags/resetcycle.rs` — its three messages **and** its wire form: `AttrValue::Ref` (`:34`, `:42`) becomes `AttrValue::NodeSlot`, because the thing it points at is a node built at materialisation, not a host object. Its own `#[cfg(test)]` fixtures assert `AttrValue::Ref` (`:90`, `:99`) and go with it, as does the comment at `:83` that says the `Ref` "is what M5 will need"
+- Modify: `crates/template-core/src/parser/mod.rs` — `last_cycle_node: Option<NodeRef>` and `named_cycle_nodes: HashMap<String, NodeRef>` (`:71-72`) become slot indices, and their doc comment changes with them: it currently says "Both hold host-owned `CycleNode`s, so they are handles here. M2 only ever reads them and always finds them empty" — the first clause is the sentence this task falsifies
 - Modify: `tests/parser_corpus.py`, `tests/parser_error_corpus.py`, `tests/test_ref_table.py`
 
 **Interfaces:**
 - Consumes: `parser.named_cycle_nodes` / `parser.last_cycle_node`
-  (`resetcycle.rs:34`, `:42` already read them), `AttrValue::{Str, Bool, FilterExpr, List, Ref, Int}`, and the `__slot` mechanism from Task 2.
-- Produces: the `__slot` attr convention every `CycleNode` descriptor carries.
+  (`resetcycle.rs:34`, `:42` already read them), `AttrValue::{Str, Bool, FilterExpr, List, NodeSlot}`, and `Host::alloc_slot` from Task 2.
+- Produces: the `AttrValue::NodeSlot` wire form every named-`CycleNode` descriptor carries.
 
 **`cycle`** — `CycleNode(cyclevars, variable_name=None, silent=False)`
 (`:612-702`). Five parse shapes, and the shapes are the design:
@@ -1330,10 +1456,12 @@ git commit -m "tags: ifchanged and for, and the factory NODE_CLASSES needed for 
 1. `len(args) < 2` → refuse (`:657-658`).
 2. `len(args) == 2` → **a name reference**: return the *existing* node
    (`:660-671`), or refuse. The descriptor for this form is the *reuse*
-   descriptor — it carries the `__slot` of the node the name was bound to and
-   Task 2's materialiser returns the already-built object. It must **not** build
-   a second descriptor with the same values; two equal `CycleNode`s pass a tree
-   comparison and diverge at the first `{% resetcycle %}` (§Review Focus 4).
+   descriptor — it carries the `AttrValue::NodeSlot` of the node the name was
+   bound to and Task 2's materialiser returns the already-built object. It must
+   **not** build a second descriptor with the same values; two equal `CycleNode`s
+   pass a tree comparison and get separate `itertools.cycle` iterators at render
+   (`defaulttags.py:106-112`), so the second mention restarts the sequence
+   (§Review Focus 4).
 3. `len(args) > 4` with `args[-3] == "as"` → `... as name silent` (`:675-686`).
 4. `len(args) > 4` with `args[-2] == "as"` → `... as name` (`:687-688`).
 5. otherwise → the anonymous form (`:698-700`).
