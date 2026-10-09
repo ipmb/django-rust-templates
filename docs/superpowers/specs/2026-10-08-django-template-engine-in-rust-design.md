@@ -152,7 +152,7 @@ propagates like a copied citation.
 
 | trait | where | what it is |
 |---|---|---|
-| `LookupTarget` | `parser/resolve.rs:107` | one resolved value, and the per-bit cascade Django's `_resolve_lookup` runs against it |
+| `LookupTarget` | `parser/resolve.rs:139` | one resolved value, and the per-bit cascade Django's `_resolve_lookup` runs against it |
 | `Host` | `parser/host.rs:22` | the parser's callbacks — `has_tag`, `call_tag`, and a **defaulted** `check_filter` |
 | `FilterHost` | `filters/host.rs:195` | the Python value protocol a filter body needs: `to_str`, `to_int`, `to_float`, `len`, `iter_values`, `get_index`, `get_slice`, `add_values`, … |
 | `FilterFlags` | `filters/mod.rs:118` | the three per-filter attributes Django reads when calling a filter (`base.py:805-820`); `library.py:85` propagates all three, so they cross the seam |
@@ -165,10 +165,10 @@ propagates like a copied citation.
 | `ValueResolver::resolve_bit` | — | **retired** |
 | `ValueResolver::force_promise` | — | **retired** |
 | `ValueResolver::is_safe`, `is_callable`, `call` | `LookupTarget::call_arm`, plus the host's value protocol | **replaced**; `call_arm` folds Django's `callable`, `do_not_call_in_templates` and `alters_data` into one round trip, because only the host can read the flags |
-| `LookupError` | `Step` (`resolve.rs:28`) + `LookupOutcome` (`resolve.rs:170`) | **split**; a per-bit verdict and a whole-path verdict are different lifetimes |
+| `LookupError` | `Step` (`resolve.rs:28`) + `LookupOutcome` (`resolve.rs:236`) | **split**; a per-bit verdict and a whole-path verdict are different lifetimes |
 | `ExtensionHost` | `Host` + `FilterHost` | **split**; the tag half and the value half have no method in common |
 | `ExtensionHost::call_tag` | `Host::call_tag` | **real**, in service |
-| `ExtensionHost::filter_flags` | `_native.filter_flags` (`template-py/src/lib.rs:117`) | **real**, but a free function: `template-core` never reads a flag, the binding does |
+| `ExtensionHost::filter_flags` | `_native.filter_flags` (`template-py/src/lib.rs:119`) | **real**, but a free function: `template-core` never reads a flag, the binding does |
 | `ExtensionHost::call_filter` | — | **retired** |
 | `ExtensionHost::render_foreign_node` | — | **retired** |
 | `ExtensionHost::annotate_exception` | — | **open obligation** |

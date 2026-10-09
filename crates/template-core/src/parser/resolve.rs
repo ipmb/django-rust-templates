@@ -94,6 +94,38 @@ pub enum CallArm {
     AltersData,
 }
 
+/// Why a callable could not be called.
+///
+/// Three outcomes, because Django's arm has three (`base.py:1000-1013`) and
+/// they are not two: `signature()` raising `ValueError` and `bind()` raising
+/// `TypeError` both substitute `string_if_invalid`, while everything else is the
+/// bare `raise` at `base.py:1013`, which leaves this arm entirely and reaches the
+/// outer handler at `base.py:1014`. Measured: a zero-arg callable whose body raises
+/// `TypeError` **propagates** — both of the first two checks succeed for it — so
+/// folding `Raised` into `ArgsRequired` would swallow a real error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallFailure {
+    /// `inspect.signature` raised `ValueError` — Django's "No signature found".
+    NoSignature,
+    /// `signature(...).bind()` raised `TypeError` — arguments were required.
+    ArgsRequired,
+    /// Anything else. The host holds the exception by identity; it is Django's
+    /// `raise` at `base.py:1013`, and the host decides between the outer
+    /// handler's two branches, exactly as it does for [`LookupOutcome::Escaped`].
+    Raised,
+}
+
+/// The host's read of `context.template.engine.string_if_invalid` raised, and
+/// the host has stashed the exception.
+///
+/// A one-variant type rather than `()` — `Err(())` at a call site reads as
+/// "nothing to do", while this means "something escaped and the host is holding
+/// it", which is [`LookupOutcome::Escaped`]'s contract. Not folded into
+/// [`CallFailure`] because it is not a call failure; not a `bool` because "no
+/// invalid value is configured" is not a state Django has (its default is `""`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingFailure;
+
 /// What the resolver needs from a context, supplied by the host.
 ///
 /// Nine methods, one per predicate Django actually evaluates. That count is the
@@ -158,6 +190,40 @@ pub trait LookupTarget {
     /// because only it can read the flags and reading them here would need a
     /// second round trip.
     fn call_arm(&self) -> Option<CallArm>;
+
+    /// Call the resolved callable and hand back the result as a new target.
+    ///
+    /// Django calls `current()` assuming no arguments (`base.py:1000`) and falls
+    /// back to `signature()`/`bind()` to decide whether the `TypeError` meant
+    /// "arguments were required" or "the body raised". The host owns all three
+    /// because all three are Python (`inspect.signature` is Python's, and the
+    /// exception must survive **by identity**).
+    fn call(&self) -> Result<Box<dyn LookupTarget>, CallFailure>;
+
+    /// `context.template.engine.string_if_invalid`, read **at the moment a
+    /// substitution happens** — Django's three assignment sites
+    /// (`base.py:997`, `base.py:1005`, `base.py:1011`) each re-read it, all
+    /// inside `for bit in self.lookups:` (`base.py:959`) and all inside the
+    /// outer `try` at `base.py:958`.
+    ///
+    /// Both halves of that are load-bearing, and both are measured
+    /// (`m8_measure_invalid.py` §2):
+    ///
+    /// * **Lazy.** With no template bound the read raises
+    ///   `AttributeError: 'NoneType' object has no attribute 'engine'`, while
+    ///   `{{ x }}` with a plain value returns the value — the read is never
+    ///   reached. A port that fetched the invalid value up front would raise on
+    ///   the most ordinary template there is.
+    /// * **Fallible, and the failure propagates.** The read is inside the outer
+    ///   `try`, so its `AttributeError` reaches the handler at `base.py:1014`, which
+    ///   finds no `silent_variable_failure` and re-raises. Measured: an
+    ///   `alters_data` callable on an unbound context raises `AttributeError`;
+    ///   it does not substitute.
+    ///
+    /// So `Err` means *the host has stashed that exception*: the caller returns
+    /// [`LookupOutcome::Escaped`] and the host's outer-handler rule decides,
+    /// exactly as for an arm that raised.
+    fn string_if_invalid(&self) -> Result<Box<dyn LookupTarget>, PendingFailure>;
 
     /// The handle this container *is*. `Found` names the value the loop ended
     /// on; `Missing` names the container it failed **in**, which is the object
@@ -241,9 +307,23 @@ pub fn resolve_lookup(lookups: &[String], mut current: Box<dyn LookupTarget>) ->
             // M8 owns the call. The alternative — returning the callable —
             // renders `<function …>`, which is wrong and quiet (D3).
             Some(CallArm::Call) => {
-                return LookupOutcome::Unimplemented(
-                    "calling a resolved callable is M8's".to_string(),
-                )
+                current = match current.call() {
+                    Ok(called) => called,
+                    // Django assigns `string_if_invalid` and the loop goes on to
+                    // the next bit with it (`base.py:997`, inside `for bit in …`).
+                    Err(CallFailure::NoSignature | CallFailure::ArgsRequired) => {
+                        match current.string_if_invalid() {
+                            Ok(invalid) => invalid,
+                            Err(PendingFailure) => return LookupOutcome::Escaped,
+                        }
+                    }
+                    // Not a substitution: `base.py:1013` re-raises into the outer
+                    // `except Exception` (`base.py:1014`), whose two branches need
+                    // the
+                    // exception object. The host owns that decision, as for
+                    // `Escaped`.
+                    Err(CallFailure::Raised) => return LookupOutcome::Escaped,
+                }
             }
             // Also M8's, and it is not a call: Django substitutes
             // `context.template.engine.string_if_invalid`, which needs the
@@ -404,6 +484,14 @@ mod tests {
         falsy_class_attrs: Vec<&'static str>,
         is_context: bool,
         call_arm: Option<CallArm>,
+        /// What `call()` answers, when the fixture drives the callable arm. The
+        /// `Fake` inside stands for the value the call produced, and it is
+        /// **boxed** because `Option<Result<Fake, _>>` would make this type
+        /// contain itself by value.
+        call: Option<Result<Box<Fake>, CallFailure>>,
+        /// What `string_if_invalid()` answers, when the fixture drives a
+        /// substitution. `Err` is the host's stashed-exception case.
+        invalid: Option<Result<Box<Fake>, PendingFailure>>,
     }
 
     impl Fake {
@@ -422,6 +510,8 @@ mod tests {
                 falsy_class_attrs: Vec::new(),
                 is_context: false,
                 call_arm: None,
+                call: None,
+                invalid: None,
             }
         }
 
@@ -503,6 +593,24 @@ mod tests {
 
         fn call_arm(&self) -> Option<CallArm> {
             self.call_arm
+        }
+
+        fn call(&self) -> Result<Box<dyn LookupTarget>, CallFailure> {
+            match self.call.as_ref() {
+                // `Box<Fake>` unsizes to `Box<dyn LookupTarget>` in return
+                // position, so the clone is the whole conversion.
+                Some(Ok(called)) => Ok(called.clone()),
+                Some(Err(failure)) => Err(*failure),
+                None => panic!("this fixture does not drive the callable arm"),
+            }
+        }
+
+        fn string_if_invalid(&self) -> Result<Box<dyn LookupTarget>, PendingFailure> {
+            match self.invalid.as_ref() {
+                Some(Ok(invalid)) => Ok(invalid.clone()),
+                Some(Err(failure)) => Err(*failure),
+                None => panic!("this fixture does not drive the substitution"),
+            }
         }
 
         fn node(&self) -> NodeRef {
@@ -681,23 +789,100 @@ mod tests {
         // Measured: `{{ f.b }}` with `f = lambda: {"b": "B"}` renders `'B'`.
         // The callable is bit 1's *result*, so a resolver that checked
         // callability only after the loop would look up `b` on the function.
+        //
+        // This replaced an assertion that the `Call` arm returned
+        // `Unimplemented("… M8's")`. That assertion pinned the stub, and M8
+        // removed the stub — the row it was written for is what the fixed arm
+        // now does, so the replacement asserts the *called* value's handle and
+        // then the second bit resolved on it. If the call ran after the loop
+        // instead of inside it, bit `b` would be looked up on `f` and miss.
+        let called = Fake {
+            map: Some(vec![("b", Fake::scalar(2, "'B'"))]),
+            ..Fake::scalar(1, "{'b': 'B'}")
+        };
         let mid_path = Fake {
             map: Some(vec![(
                 "f",
                 Fake {
                     call_arm: Some(CallArm::Call),
+                    call: Some(Ok(Box::new(called))),
                     ..Fake::scalar(1, "f")
                 },
             )]),
             ..Fake::scalar(99, "{'f': f}")
         };
-        let outcome = resolve_lookup(&lookups(&["f", "b"]), Box::new(mid_path));
-        let LookupOutcome::Unimplemented(message) = outcome else {
-            panic!("{outcome:?}")
+        assert_eq!(
+            resolve_lookup(&lookups(&["f", "b"]), Box::new(mid_path)),
+            LookupOutcome::Found(NodeRef(2)),
+        );
+    }
+
+    #[test]
+    fn a_substitution_that_cannot_read_the_context_escapes() {
+        // The `Call` arm's args-required branch: Django assigns
+        // `string_if_invalid` and **stays in the loop** (`base.py:997`), so the
+        // next bit resolves against the invalid value. Here the read itself
+        // fails — the host's stashed-exception case — and the arm's contract is
+        // `Escaped`, not a silent `""` (measured; `m8_measure_invalid.py` §2).
+        let needs_an_arg = Fake {
+            call_arm: Some(CallArm::Call),
+            call: Some(Err(CallFailure::ArgsRequired)),
+            invalid: Some(Err(PendingFailure)),
+            ..Fake::scalar(3, "f")
         };
-        assert!(
-            message.contains("M8"),
-            "the message must name the milestone: {message}"
+        let holder = Fake {
+            attrs: vec![("f", needs_an_arg)],
+            ..Fake::scalar(99, "{'f': f}")
+        };
+        assert_eq!(
+            resolve_lookup(&lookups(&["f"]), Box::new(holder)),
+            LookupOutcome::Escaped,
+        );
+    }
+
+    #[test]
+    fn a_substitution_continues_the_loop_with_the_invalid_value() {
+        // Review Focus 1, in-crate: `string_if_invalid('<<invalid>>')` is
+        // assigned and the loop goes on, so `{{ x.upper }}` resolves `.upper`
+        // *on the invalid string*. The second row is the discriminator — a port
+        // that substituted and stopped would end on the invalid value's own
+        // handle and never reach `upper`.
+        let needs_an_arg = Fake {
+            call_arm: Some(CallArm::Call),
+            call: Some(Err(CallFailure::ArgsRequired)),
+            invalid: Some(Ok(Box::new(Fake::scalar(4, "<<invalid>>")))),
+            ..Fake::scalar(3, "f")
+        };
+        let holder = Fake {
+            attrs: vec![("f", needs_an_arg)],
+            ..Fake::scalar(99, "{'f': f}")
+        };
+        assert_eq!(
+            resolve_lookup(&lookups(&["f"]), Box::new(holder)),
+            LookupOutcome::Found(NodeRef(4)),
+        );
+
+        // And with a `dir`-answered second bit on the invalid value, the loop
+        // really did continue: `.upper` is read off the substituted target.
+        let invalid_with_upper = Fake {
+            attrs: vec![("upper", Fake::scalar(5, "<<INVALID>>"))],
+            ..Fake::scalar(4, "<<invalid>>")
+        };
+        let holder = Fake {
+            attrs: vec![(
+                "f",
+                Fake {
+                    call_arm: Some(CallArm::Call),
+                    call: Some(Err(CallFailure::ArgsRequired)),
+                    invalid: Some(Ok(Box::new(invalid_with_upper))),
+                    ..Fake::scalar(3, "f")
+                },
+            )],
+            ..Fake::scalar(99, "{'f': f}")
+        };
+        assert_eq!(
+            resolve_lookup(&lookups(&["f", "upper"]), Box::new(holder)),
+            LookupOutcome::Found(NodeRef(5)),
         );
     }
 

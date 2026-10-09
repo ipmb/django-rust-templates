@@ -31,7 +31,9 @@ use template_core::parser::desc::{
 // handle a *descriptor* carries. The resolver's handles are `template-core`'s
 // and are never the same type.
 use template_core::parser::desc::NodeRef as CoreNodeRef;
-use template_core::parser::resolve::{resolve_lookup, CallArm, LookupOutcome, LookupTarget, Step};
+use template_core::parser::resolve::{
+    resolve_lookup, CallArm, CallFailure, LookupOutcome, LookupTarget, PendingFailure, Step,
+};
 use template_core::parser::{Error, ErrorKind, Host, Parser as CoreParser};
 use template_core::pynum::IntValue;
 use template_core::token::{Token, TokenType};
@@ -1652,6 +1654,15 @@ struct PyTarget {
     /// port never returns `Reraise` twice or later — so the most recent write is
     /// always the right one.
     pending: Rc<Cell<Option<PyErr>>>,
+    /// The context this lookup runs against, shared with every target the loop
+    /// produces. `string_if_invalid` is read from a target the loop has already
+    /// walked into, so the root's copy is not enough.
+    ///
+    /// `Rc<Py<PyAny>>` rather than a cache filled on first use: Django re-reads
+    /// the attribute at **every** substitution, and a cache would be an
+    /// optimisation this port has to justify rather than a faithful default.
+    /// Nothing measured needs one, and YAGNI is the rule that says so.
+    context: Rc<Py<PyAny>>,
 }
 
 /// Hand-written rather than derived, because `Py<PyAny>` is not `Clone`: an
@@ -1665,6 +1676,8 @@ impl Clone for PyTarget {
             value: self.value.clone_ref(py),
             arena: Rc::clone(&self.arena),
             pending: Rc::clone(&self.pending),
+            // No token needed: this is an `Rc` bump, not a `Py` clone.
+            context: Rc::clone(&self.context),
         })
     }
 }
@@ -1674,12 +1687,23 @@ impl PyTarget {
         value: Py<PyAny>,
         arena: &Rc<RefCell<Vec<Py<PyAny>>>>,
         pending: &Rc<Cell<Option<PyErr>>>,
+        context: &Rc<Py<PyAny>>,
     ) -> Self {
         Self {
             value,
             arena: Rc::clone(arena),
             pending: Rc::clone(pending),
+            context: Rc::clone(context),
         }
+    }
+
+    /// A target over `value`, sharing this call's arena, `pending` and context.
+    ///
+    /// A method rather than an inline `Self::new` because `call` and
+    /// `string_if_invalid` both produce a fresh value mid-loop, and sharing the
+    /// four `Rc`s is the whole contract.
+    fn target_for(&self, value: Py<PyAny>) -> Box<dyn LookupTarget> {
+        Box::new(Self::new(value, &self.arena, &self.pending, &self.context))
     }
 
     /// Classify one arm's result: a swallowed exception is a miss the next arm
@@ -1690,7 +1714,7 @@ impl PyTarget {
     /// returned out of `Python::attach`, so the classification happens inside.
     fn step(&self, result: PyResult<Py<PyAny>>, arm: Arm) -> Step {
         match result {
-            Ok(found) => Step::Found(Box::new(Self::new(found, &self.arena, &self.pending))),
+            Ok(found) => Step::Found(self.target_for(found)),
             Err(error) => {
                 let is_swallowed = Python::attach(|py| swallowed(py, &error, arm));
                 self.pending.set(Some(error));
@@ -1843,6 +1867,83 @@ impl LookupTarget for PyTarget {
                 Some(CallArm::AltersData)
             } else {
                 Some(CallArm::Call)
+            }
+        })
+    }
+
+    /// `current()` with Django's `signature()`/`bind()` fallback
+    /// (`base.py:1000-1013`).
+    ///
+    /// The three `CallFailure` outcomes are Django's three, and the distinction
+    /// between the last two is the one worth keeping: a `TypeError` from
+    /// `signature`/`bind` means arguments were required, while a `TypeError`
+    /// from the call itself — with both checks succeeding — is the bare `raise`
+    /// at `base.py:1013`, which leaves this arm and reaches the outer handler at
+    /// `base.py:1014`. Measured: a zero-arg callable whose body raises `TypeError`
+    /// propagates rather than substituting, and the original error must be the
+    /// one stashed, not the `bind` error, or the message is Django's-never.
+    fn call(&self) -> Result<Box<dyn LookupTarget>, CallFailure> {
+        Python::attach(|py| {
+            let value = self.value.bind(py);
+            match value.call0() {
+                Ok(called) => Ok(self.target_for(called.unbind())),
+                Err(err) if err.is_instance_of::<PyTypeError>(py) => {
+                    // Django's fallback: signature() then bind() (`base.py:1002-1013`).
+                    let inspect = match py.import("inspect") {
+                        Ok(inspect) => inspect,
+                        Err(error) => {
+                            self.pending.set(Some(error));
+                            return Err(CallFailure::Raised);
+                        }
+                    };
+                    match inspect.getattr("signature").and_then(|f| f.call1((value,))) {
+                        Err(e) if e.is_instance_of::<PyValueError>(py) => {
+                            Err(CallFailure::NoSignature)
+                        }
+                        Err(error) => {
+                            self.pending.set(Some(error));
+                            Err(CallFailure::Raised)
+                        }
+                        Ok(sig) => match sig.call_method0("bind") {
+                            Err(e) if e.is_instance_of::<PyTypeError>(py) => {
+                                Err(CallFailure::ArgsRequired)
+                            }
+                            Err(error) => {
+                                self.pending.set(Some(error));
+                                Err(CallFailure::Raised)
+                            }
+                            // Neither check failed, so the `TypeError` came from
+                            // the body: Django re-raises the **original** error,
+                            // so the host must stash `err`, not the bind error.
+                            Ok(_) => {
+                                self.pending.set(Some(err));
+                                Err(CallFailure::Raised)
+                            }
+                        },
+                    }
+                }
+                Err(err) => {
+                    self.pending.set(Some(err));
+                    Err(CallFailure::Raised)
+                }
+            }
+        })
+    }
+
+    fn string_if_invalid(&self) -> Result<Box<dyn LookupTarget>, PendingFailure> {
+        Python::attach(|py| {
+            // The read happens here, at the substitution site, and not in
+            // `PyTarget::new` — Django re-reads the attribute at each of its
+            // three assignments, and a plain value on an unbound context must
+            // never reach it (measured; `m8_measure_invalid.py` §2).
+            match string_if_invalid(self.context.bind(py)) {
+                Ok(value) => Ok(self.target_for(value)),
+                // `PendingFailure` means "the host holds the exception", so it
+                // must actually be holding it; `outcome_to_py` reads `pending`.
+                Err(error) => {
+                    self.pending.set(Some(error));
+                    Err(PendingFailure)
+                }
             }
         })
     }
@@ -2088,7 +2189,8 @@ fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>
     // outer handler reads `context.template.engine` from. `Bound::clone` is a
     // refcount bump, not a conversion.
     let context = context.bind(py);
-    let root = PyTarget::new(context.clone().unbind(), &arena, &pending);
+    let context_rc = Rc::new(context.clone().unbind());
+    let root = PyTarget::new(context.clone().unbind(), &arena, &pending, &context_rc);
     outcome_to_py(
         py,
         resolve_lookup(lookups, Box::new(root)),
