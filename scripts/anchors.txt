@@ -653,6 +653,7 @@ timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not 
 python/django_rust_templates/_impl/base.py:1161	python/django_rust_templates/_impl/base.py	1161	-	-	-
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
 _impl/parser.py:501	python/django_rust_templates/_impl/parser.py	501	-	func = parser.find_filter(name)	-
+_impl/parser.py:602	python/django_rust_templates/_impl/parser.py	602	-	func = resolve_ref(handle.index)	-
 _shim.py:75	python/django_rust_templates/_shim.py	75	-	TARGET = "django.template"	-
 _shim.py:408	python/django_rust_templates/_shim.py	408	-	if installed():	-
 python/django_rust_templates/host.py:243	python/django_rust_templates/host.py	243	-	-	-
