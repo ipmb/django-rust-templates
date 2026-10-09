@@ -155,7 +155,14 @@ impl Error {
     /// A Python exception, raised by `operation` on the filter seam.
     ///
     /// The class is a separate argument from the message because a body matches
-    /// on it, and `operation` is the `FilterHost` method's name.
+    /// on it, and `operation` is the `FilterHost` method's name — with one
+    /// measured exception, where a body raises an error the seam has no method
+    /// for and names instead the CPython operation it stands in for
+    /// ([`cut`](crate::filters::cut) raising `str.replace`'s `TypeError`, since
+    /// no `FilterHost` method performs a replacement). The field is diagnostics
+    /// only — it is never part of the message a template author sees — so a
+    /// wrong value here misleads a reader of a `Debug` dump rather than a user,
+    /// which is exactly why it is worth keeping honest.
     pub fn filter_host(
         kind: PyErrorKind,
         operation: &'static str,

@@ -635,23 +635,21 @@ mod tests {
         "yesno",
     ];
 
-    /// The filters whose bodies are still stubs: the 55 of the 57 that M4 has
+    /// The filters whose bodies are still stubs: the 49 of the 57 that M4 has
     /// not landed yet.
     ///
-    /// A literal rather than an alias of [`MEASURED_NAMES`] now that the first
-    /// group has landed, because the two are no longer the same set and an alias
-    /// would have to be trimmed in place to say so. The 55 are the 57 minus
-    /// `lower` and `upper`, which Task 3 implements as the corpus's seed.
+    /// A literal rather than an alias of [`MEASURED_NAMES`] now that groups have
+    /// landed, because the two are no longer the same set and an alias would have
+    /// to be trimmed in place to say so. The 49 are the 57 minus `lower` and
+    /// `upper` (Task 3's corpus seed) and minus Task 4's six — `capfirst`,
+    /// `title`, `cut`, `addslashes`, `make_list`, `wordcount`.
     ///
     /// **The central commit that lands a group moves that group's names out of
     /// this list**, in the same commit — and the assertion below is what makes
     /// forgetting fail rather than pass.
-    const STILL_STUBBED: [&str; 55] = [
+    const STILL_STUBBED: [&str; 49] = [
         "add",
-        "addslashes",
-        "capfirst",
         "center",
-        "cut",
         "date",
         "default",
         "default_if_none",
@@ -675,7 +673,6 @@ mod tests {
         "linebreaksbr",
         "linenumbers",
         "ljust",
-        "make_list",
         "phone2numeric",
         "pluralize",
         "pprint",
@@ -690,7 +687,6 @@ mod tests {
         "time",
         "timesince",
         "timeuntil",
-        "title",
         "truncatechars",
         "truncatechars_html",
         "truncatewords",
@@ -699,7 +695,6 @@ mod tests {
         "urlencode",
         "urlize",
         "urlizetrunc",
-        "wordcount",
         "wordwrap",
         "yesno",
     ];

@@ -2,7 +2,7 @@
 
 Both sides run on the pinned tree. Django's side is its real `FilterExpression`
 over a real `Context`, driven by its real filter registry; ours is
-`_native.filter`, which is the seam the fan-out's 55 bodies are written against.
+`_native.filter`, which is the seam the fan-out's bodies are written against.
 
 **The comparison is `(type name, value)` and a separate safety flag**, per §D5,
 and the type half is compared *here* rather than in Rust on purpose: a Rust
@@ -111,8 +111,19 @@ class FilterParityTests(unittest.TestCase):
         )
 
     def render_django(self, case):
-        """Django's answer, through `resolve`'s loop, with the token it used."""
-        return probe.django_answer(case["filter"], case["value"], case.get("arg"))
+        """Django's answer, through `resolve`'s loop, with the token it used.
+
+        The argument goes through `probe.template_literal` because `django_answer`
+        takes **template text**, not a Python object: a `str` argument has to be
+        rendered as the constant `"b"` to become a `constant_arg` and be
+        `mark_safe`d by `resolve` (`base.py:788-792`), where the bare `b` would be
+        a variable lookup. Task 4's `cut` rows are the corpus's first with an
+        argument, so this path had never run; it was passing `case["arg"]` raw,
+        which made every argument a lookup while `test_every_case` asserted the
+        token was the constant. Both sides now agree on what `x|cut:"b"` means.
+        """
+        given = probe.template_literal(case["arg"]) if "arg" in case else None
+        return probe.django_answer(case["filter"], case["value"], given)
 
     def render_rust(self, case, context):
         return probe.rust_answer(
@@ -193,13 +204,13 @@ class FilterParityTests(unittest.TestCase):
         """The stub set is what M4 has left, and the count says so out loud.
 
         `filter_names()` is asserted first because everything below is silent if
-        the registry itself is short: 55 stubs out of 55 names would pass a count
-        check while three filters had gone missing from the registry.
+        the registry itself is short: 49 stubs out of 49 names would pass a count
+        check while eight filters had gone missing from the registry.
 
         The **count** is the deliberate-edit signal, and the filter names are
         printed rather than restated: a group landing moves both this number and
         the Rust list, in a commit that says which group it was. See
-        `implemented_filters` for why there is no Python list of 55 names.
+        `implemented_filters` for why there is no Python list of 49 names.
         """
         all_names = set(_native.filter_names())
         implemented = implemented_filters()
@@ -208,13 +219,14 @@ class FilterParityTests(unittest.TestCase):
         self.assertEqual(
             len(all_names), 57, "the registry itself is not Django's 57 filters"
         )
-        # 55: the 57 minus `lower` and `upper`, which Task 3 lands as the corpus's
-        # seed. Each group's commit decreases this by its own size and adds its
-        # rows to tests/filter_cases.py — one number and one list, edited
-        # together, in the commit that does the work.
+        # 49: the 57 minus `lower` and `upper`, which Task 3 lands as the corpus's
+        # seed, minus Task 4's six — `capfirst`, `title`, `cut`, `addslashes`,
+        # `make_list`, `wordcount`. Each group's commit decreases this by its own
+        # size and adds its rows to tests/filter_cases.py — one number and one
+        # list, edited together, in the commit that does the work.
         self.assertEqual(
             len(stubs),
-            55,
+            49,
             f"the stub count moved: {len(stubs)} left, {sorted(stubs)}. If a "
             f"group landed, this number and tests/filter_cases.py both move with "
             f"it; if nothing landed, a body has been reverted or a registry row "

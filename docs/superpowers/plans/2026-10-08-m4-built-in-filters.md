@@ -1704,6 +1704,28 @@ later reasons that the work is parallel so the dispatch should be:
   every other agent's `cargo test -p template-core`, since Rust compiles a crate
   as a unit; parallel agents cannot all run their own Step 3.
 
+### What the pilot found in the central harness
+
+Recorded here because it is the one class of defect no group can see from inside
+the module it owns — and it is why the pilot's Step 7 report is worth asking for
+in full rather than as a summary.
+
+`render_django` in `tests/test_filter_parity.py` passed `case["arg"]` to the probe
+**raw**, but `django_answer` takes *template text*: a `str` argument has to be
+handed over rendered as the constant `"b"`, so that `resolve` sees a
+`constant_arg` and `mark_safe`s it (`base.py:788-792`). A bare `b` is a variable
+*lookup*. Every corpus row before Task 4 had no argument at all, so the path had
+never executed — and in the ordinary case that is not a crash but a **silently
+different question**: `x|cut:b` scored against the corpus's declared `x|cut:"b"`.
+Task 4 contributes the corpus's first argument, which is why the first group with
+one is where a harness defect older than the group surfaced. The fix is one line,
+`probe.template_literal(case["arg"])`, and its guard was observed failing for its
+intended reason before it was kept (§11): the raw-argument version dies with
+`VariableDoesNotExist: Failed lookup for key [b]` while `test_every_case` asserts
+in the same breath that the token is the constant — the two halves of the harness
+disagreeing about what was compared is exactly what a row with an argument exists
+to detect, and neither half alone would have caught it.
+
 ### The shared task shape
 
 - [ ] **Step 1: Measure.** For each filter in the group, run
@@ -1756,10 +1778,20 @@ entirely the host's.
 - `capfirst` (`:71-76`) — `value and value[0].upper() + value[1:]`. The empty
   string returns itself, not `""`-built-from-nothing; `value[0]` is a **code
   point**, so `capfirst("ßx")` is `"SSx"` and the string grows by one character.
-  Measured, not derived. It is the second and last caller of
-  `pyunicode::case::upper_str` (the first being Task 3's `upper`), and it shares
-  that table's suppression of the 28 code points — so `capfirst("ꟓ")` is
-  itself, not `"꟒"`.
+  Measured, not derived. It is the second consumer of Task 1's case table — but
+  it calls the **per-code-point iterator** `pyunicode::case::upper(ch)`, not
+  `upper_str`: Python's `value[0].upper()` is *one code point* whose mapping may
+  yield several characters, and `collect()` on the iterator is that shape, where
+  `upper_str` is a whole-string function that would have to be handed a
+  one-character slice. Task 3's `upper` is therefore the only caller of
+  `upper_str`. The suppression of the 28 code points is in the shared table and
+  applies either way — so `capfirst("ꟓ")` is itself, not `"꟒"`, and the
+  corpus row `capfirst/suppressed-code-point` pins it (a *second* code point from
+  `upper/beria-erfe-assignment`'s list, which is what makes the suppression
+  reachable from two filters rather than one body's test). This wording was
+  corrected at Task 4's integration: the bullet originally said capfirst was the
+  second and last caller of `upper_str`, which is what the body *would* have been
+  written against had the code point and the string been the same thing.
 - `title` (`:297-303`) — `@stringfilter`, `is_safe=True`, body is **the host's
   `str_title`**, followed by two Rust regexes:
   `re.sub("([a-z])'([A-Z])", lambda m: m[0].lower(), …)` then
@@ -1799,11 +1831,30 @@ entirely the host's.
   and it is left visible here because a body written to satisfy it would carry a
   branch no input can reach.
 
-  The `TypeError` is **not** a corpus row: `test_filter_parity.py`'s `assert_same`
-  compares `(type, value)` and safety, with no exception path, so the harness
-  cannot express an answer that is a `raise`. It is recorded here as a body
-  requirement instead — do not coerce `arg` — and whether the corpus should grow
-  an expected-exception key is a question this pilot raised, not one it settled.
+  The `TypeError` is **not** a corpus row, and at integration it stopped being an
+  open question: `test_filter_parity.py`'s `assert_same` compares `(type, value)`
+  and safety with no exception path, so the harness cannot express an answer that
+  is a `raise`. `cut.rs` carries it instead —
+  `a_non_string_argument_raises_type_error` and
+  `a_none_argument_is_the_replace_type_error` assert the class and the exact
+  message (`not int`, and `not None` where the obvious
+  `Value::None.type_name()` spelling would say `not NoneType`). **So the corpus
+  should not grow an expected-exception key**, which is the question an earlier
+  revision of this bullet left open: one filter raising one exception is pinned
+  more sharply in that filter's own module, next to the body, than a corpus row
+  could pin it — and the corpus's job is the comparison a rendered template
+  cannot make, which a body test already covers here. If a second filter later
+  raises, the question reopens; today the key would have exactly one user.
+
+  The same three answers were then confirmed **end to end**, through the FFI and
+  through the shim, and each is byte-identical to stock Django's: `{{ x|cut }}` is
+  the parser's `TemplateSyntaxError: cut requires 2 arguments, 1 provided` (so the
+  arity error is raised before any body, which is what makes the `None` branch
+  above the reachable one), `{{ x|cut:None }}` is
+  `TypeError: replace() argument 1 must be str, not None`, and
+  `_native.filter("cut", "abc", 5)` is `... not int`. The last of those is the one
+  no template can express — it needs the seam directly — and it is the proof that
+  the class and the message survive `filter_py_error` on the way out.
 
   **This is the filter that reads the coerced value's safety**, so it is the one
   whose corpus rows close the wrapper's coercion half (§D3): `cut`'s rows must
@@ -1825,6 +1876,28 @@ entirely the host's.
   other two exist to prove the ordinary paths still answer correctly, and deleting
   them would cost correctness coverage; deleting the proxy row would cost the
   guard.
+
+  **The mutation was then run, and it is the measurement of §D3's claim rather
+  than a restatement of it.** `run_filter` was changed to hand every body
+  `current` while the marking half still asked the coerced value — one token, and
+  the marking half deliberately left alone so the two halves could be told apart —
+  then rebuilt and swept over the corpus. **Exactly one row of the 49 went red**,
+  the guard: `cut/lazy-proxy-whose-str-is-safe`, `AssertionError: 'SafeString' !=
+  'str'` from the type comparison, the text identical either way (which is the
+  whole point — a corpus comparing `==` would have stayed green). **The other 48
+  rows are blind to the mutation**, and that number is §D3's "unobservable until a
+  body reads its own input's safety" measured: the wrapper's replacement half is
+  invisible to every filter in Django's 57 except `cut`.
+
+  One of those 48 was a comment of this plan's that the mutation falsified:
+  `capfirst/lazy-proxy-whose-str-is-safe` **stayed green**, because `capfirst`
+  never reads its input's safety, so nothing about which value its body received
+  can reach its answer. The row observes the loop's **marking** half
+  (`was_safe || coerced_is_safe` — only the second disjunct is true on a
+  `__proxy__`), the same line `lower/lazy-proxy…` observes. Its comment claimed a
+  second observer of the replacement half and has been rewritten from the
+  measurement. The replacement half has **exactly one** observer in M4, and it is
+  `cut`'s proxy row.
 - `addslashes` (`:60-69`) — three `replace`s in the order backslash, `"`, `'`.
 - `make_list` (`:254-263`) — `list(str(value))`, so **code points**: a combining
   sequence is two elements. An integer becomes a list of its digit characters.

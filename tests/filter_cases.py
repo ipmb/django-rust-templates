@@ -187,4 +187,264 @@ CASES: list[dict] = [
         "filter": "lower",
         "value": LAZY_SAFE_PROXY,
     },
+    # --- capfirst: `value[0].upper() + value[1:]`, is_safe=True --------------
+    {
+        # `value and …`: the empty string is falsy, so it is returned as-is
+        # rather than rebuilt. A body that unconditionally did
+        # `first.upper() + rest` would raise on the empty string, so this row is
+        # a crash guard as much as a value one.
+        "name": "capfirst/empty",
+        "filter": "capfirst",
+        "value": "",
+    },
+    {
+        "name": "capfirst/ascii",
+        "filter": "capfirst",
+        "value": "hello",
+    },
+    {
+        # `value[0].upper()` is a **code point** mapping, so the answer can be
+        # longer than the input. A body that mapped code point to code point
+        # would be right for every ASCII input and wrong here.
+        "name": "capfirst/growing-mapping",
+        "filter": "capfirst",
+        "value": "ßx",
+    },
+    {
+        # U+A7D3 is one of `pyunicode::case::UNCASED`'s 28 entries: Python 3.14.4
+        # maps it to itself (measured) where Rust's tables map it to U+A7D2, so the
+        # shared table suppresses Rust's answer and the input comes back
+        # unchanged. It is a *second* code point from `upper/beria-erfe-assignment`'s
+        # list rather than the same one — that row is U+16EBB, a Unicode 17.0
+        # assignment — which is what makes the suppression reachable from two
+        # filters and not just one body's test.
+        "name": "capfirst/suppressed-code-point",
+        "filter": "capfirst",
+        "value": "ꟓ",
+    },
+    {
+        "name": "capfirst/int-coerces",
+        "filter": "capfirst",
+        "value": 5,
+    },
+    {
+        # `capfirst` is `is_safe=True`, so the *loop* marks the result: the body
+        # returns a plain `Value::Str` and never calls `mark_safe` itself.
+        "name": "capfirst/safe-input-stays-safe",
+        "filter": "capfirst",
+        "value": mark_safe("abc"),
+    },
+    {
+        # The lazy proxy through a second `is_safe=True` body. This comment
+        # originally claimed the row observed the wrapper's *replacement* half;
+        # the §11 mutation measured that it does not. Handing the body the raw
+        # value while the marking still asks the coerced one left **this row
+        # green** and took `cut/lazy-proxy…` red — `capfirst` never reads its
+        # input's safety, so nothing about which value the body received can
+        # reach its answer. What the row observes is the marking half: the loop's
+        # condition is `was_safe || coerced_is_safe`, and on a `__proxy__` only
+        # the second disjunct is true. `lower/lazy-proxy…` observes the same line
+        # through another body; both are kept because a row is cheap and this
+        # pair is what makes the disjunct's reach filter-independent rather than
+        # a property of one name. The replacement half has exactly one observer
+        # in M4 — `cut`, the only body in Django that reads `isinstance(value,
+        # SafeData)` — and that row is `cut/lazy-proxy-whose-str-is-safe`.
+        "name": "capfirst/lazy-proxy-whose-str-is-safe",
+        "filter": "capfirst",
+        "value": LAZY_SAFE_PROXY,
+    },
+    # --- title: the host's `str.title()`, then two Rust regexes, is_safe=True -
+    {
+        "name": "title/ascii",
+        "filter": "title",
+        "value": "hello world",
+    },
+    {
+        # The Final_Sigma answer, and the reason `title` is a host call: a Rust
+        # per-code-point rule cannot produce `ς` — it needs the context, and it
+        # needs Unicode's `Cased` property and titlecase table besides. A body
+        # that reimplemented `str.title` passes every ASCII row and fails this.
+        "name": "title/final-sigma",
+        "filter": "title",
+        "value": "ΟΣ",
+    },
+    {
+        "name": "title/final-sigma-mid-word",
+        "filter": "title",
+        "value": "ΟΣΑ",
+    },
+    {
+        "name": "title/apostrophe",
+        "filter": "title",
+        "value": "o'connor",
+    },
+    {
+        # The first regex's actual work: `str.title()` answers `"They'Re"`, and
+        # `([a-z])'([A-Z])` lowercases the whole three-character match. Dropping
+        # that pass leaves this row red while every non-apostrophe row stays green.
+        "name": "title/apostrophe-uppercase-after",
+        "filter": "title",
+        "value": "they're",
+    },
+    {
+        # The second regex: `"abc1Def".title()` is `"Abc1Def"` and `\d([A-Z])`
+        # lowercases the `"1D"`. `\d` is Unicode `\p{Nd}` in Rust's regex as in
+        # Python's, which is why the two select the same 760 code points.
+        "name": "title/digit-then-uppercase",
+        "filter": "title",
+        "value": "abc1Def",
+    },
+    {
+        "name": "title/int-coerces",
+        "filter": "title",
+        "value": 5,
+    },
+    # --- cut: the only body that reads its input's safety, is_safe absent ----
+    {
+        # A plain `str` is not `SafeData`, so the result is a plain `str` even
+        # though the argument is not `";"`. A body that marked safe whenever it
+        # had replaced something fails here.
+        "name": "cut/plain-string",
+        "filter": "cut",
+        "value": "AbC",
+        "arg": "b",
+    },
+    {
+        # Safe in, safe out, for the ordinary argument. This row is a *control*
+        # for the proxy row below rather than a guard: `was_safe` is already true
+        # here, so handing the body the uncoerced value changes nothing. Keep it —
+        # it covers the body's marking path — but the guard is the proxy.
+        "name": "cut/safe-string-is-marked-safe",
+        "filter": "cut",
+        "value": mark_safe("AbC"),
+        "arg": "b",
+    },
+    {
+        # The `arg != ";"` half of the condition, which is the half a body is
+        # most likely to drop: the value *is* safe, and the answer is still a
+        # plain `str`. Note it also pins the comparison against a converted
+        # primitive: `SafeString(";") != ";"` is `False` in Python, so a body
+        # comparing the raw values would flip this branch.
+        "name": "cut/safe-string-semicolon-argument",
+        "filter": "cut",
+        "value": mark_safe("a;b"),
+        "arg": ";",
+    },
+    {
+        # **The guard for the wrapper's other half**, and the reason this row set
+        # cannot be trimmed for speed. Django answers `SafeString("AC")`: the
+        # loop's `isinstance(obj, SafeData)` is `False` on a `__proxy__`, and the
+        # wrapper's `isinstance(str(first), SafeData)` is `True`, so `cut`'s
+        # `safe` is true only because the body was handed the *coerced* value.
+        # Hand the body the raw proxy and it answers plain `"AC"` — same text,
+        # same `==`, different type — which is the entire observable difference
+        # the coercion makes anywhere in M4 until a body reads its own input's
+        # safety, and `cut` is the only body in Django that does.
+        "name": "cut/lazy-proxy-whose-str-is-safe",
+        "filter": "cut",
+        "value": LAZY_SAFE_PROXY,
+        "arg": "b",
+    },
+    {
+        # The `@stringfilter` coercion of the *value*: `cut(5, "5")` is `""`,
+        # because the body's input is `"5"` before it replaces anything. A body
+        # that read `arg` out of the value would fail this and pass the row above.
+        "name": "cut/int-value-coerces",
+        "filter": "cut",
+        "value": 5,
+        "arg": "5",
+    },
+    # --- addslashes: three `replace`s, is_safe=True --------------------------
+    {
+        "name": "addslashes/nothing-to-escape",
+        "filter": "addslashes",
+        "value": "abc",
+    },
+    {
+        "name": "addslashes/apostrophe",
+        "filter": "addslashes",
+        "value": "I'm",
+    },
+    {
+        "name": "addslashes/quotes",
+        "filter": "addslashes",
+        "value": 'say "hi"',
+    },
+    {
+        # The ordering guard: a backslash *before* a quote. Escaping the quote
+        # first and the backslash second would escape the backslash this step
+        # introduced, giving one more `\` than Django. The pairs are what make the
+        # order observable at all — a single-character input cannot see it.
+        "name": "addslashes/backslash-then-quote",
+        "filter": "addslashes",
+        "value": 'a\\"b',
+    },
+    # --- make_list: `list(str(value))`, is_safe=False ------------------------
+    {
+        "name": "make_list/empty",
+        "filter": "make_list",
+        "value": "",
+    },
+    {
+        "name": "make_list/ascii",
+        "filter": "make_list",
+        "value": "abc",
+    },
+    {
+        # Code points, not graphemes and not bytes: `e` + U+0301 is two
+        # elements. A body that split on `bytes` or on grapheme clusters is right
+        # for every ASCII row and wrong here.
+        "name": "make_list/combining-mark-is-two-elements",
+        "filter": "make_list",
+        "value": "é",
+    },
+    {
+        "name": "make_list/int-coerces",
+        "filter": "make_list",
+        "value": 5,
+    },
+    # --- wordcount: `len(value.split())`, is_safe=False ----------------------
+    {
+        "name": "wordcount/empty",
+        "filter": "wordcount",
+        "value": "",
+    },
+    {
+        "name": "wordcount/collapses-runs",
+        "filter": "wordcount",
+        "value": "  a  b  ",
+    },
+    {
+        # The four information separators U+001C..U+001F are separate characters
+        # for Python's `str.split()` (measured: `"a\x1cb".split()` is `["a","b"]`)
+        # and **not** whitespace for Rust's `char::is_whitespace`, which follows
+        # Unicode's `White_Space` property (measured: `"a\u{1c}b"
+        # .split_whitespace()` is one item). So these rows are the pair that
+        # separates the host's splitter from `split_whitespace` — a body using the
+        # latter answers `1` where Django answers `2`.
+        "name": "wordcount/information-separator-u001c",
+        "filter": "wordcount",
+        "value": "a\u001cb",
+    },
+    {
+        "name": "wordcount/information-separator-u001f",
+        "filter": "wordcount",
+        "value": "a\u001fb",
+    },
+    {
+        # U+00A0 **is** a separator for Python's `str.split()` — measured,
+        # `"a\xa0b".split()` is `["a","b"]` — which is what a splitter built on
+        # `is_ascii_whitespace`, or a plain `split(' ')`, gets wrong. Rust's
+        # `split_whitespace` happens to agree here (NBSP is `White_Space`), so this
+        # row guards the *ASCII-only* mistake rather than the `split_whitespace`
+        # one the two rows above guard.
+        "name": "wordcount/nbsp-separates",
+        "filter": "wordcount",
+        "value": "a b",
+    },
+    {
+        "name": "wordcount/int-coerces",
+        "filter": "wordcount",
+        "value": 5,
+    },
 ]
