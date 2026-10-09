@@ -293,23 +293,27 @@ wrong and green. That is not residue — it is the only instrument that fires on
 anchored-but-wrong rows cited exclusively from files that have finished.
 
 It fires when a *file* finishes, which is why its size says nothing. The whole
-history so far, as entries rather than as a count that returned to 76 four times:
+history so far, as entries rather than as a size that has sat in the high 70s
+since the first file finished:
 
 | entered at | file that went shorthand-free | rows that entered | read? |
 | --- | --- | --- | --- |
 | `0876b22` | `template-py/src/filters.rs`, `template-core/src/filters/mod.rs` | `html.py:246`, `html.py:412-415`, `defaultfilters.py:38-52`, `:48`, `:558-570` | 5 read; **2 wrong** (`:246` is a blank line; `:412-415` is `wrapping_punctuation_openings`, not `trim_url`) — fixed in `0876b22`, the three correct ones requoted in `a73dccb` |
 | `a3798f3` | `template-core/src/parser/resolve.rs` | `base.py:1014`, `:959-1029`, `:963-995`, `:972`, `:999`, `:999-1029` | 6 read; **5 wrong** (`959-1029` ends on a blank line; `963-995` runs past the arms it claims; `999` is not the callable arm's guard; `999-1029` misses two of its three branches and ends past the handler; `972` is right for the predicate but was cited for a `raise` at 980) — fixed in `c24d657` |
 | the `lib.rs` `InvalidOperation` commit | `template-py/src/lib.rs` | `base.py:109-110`, `base.py:972-976`, `smartif.py:54-56` | 3 read; **0 wrong** — and the reason is worth keeping: `lib.rs`'s citations had already been read in context by its own naming pass, so by the time they were stranded they had been looked at once. This batch is the counter-example that shows the detector's ratio is about *which pass read the row first*, not about the bucket |
+| `363140f` | `python/django_rust_templates/_impl/parser.py` | `base.py:514`, `base.py:697-701`, `base.py:771-774`, `base.py:804-810`, `defaulttags.py:323`, `defaulttags.py:909-911`, `engine.py:194`, `smartif.py:115-116` | 8 read; **3 wrong** (`697-701` is inside `filter_raw_string`, a regex — `compile_filter`'s quoted `return` is 676; `771-774` and `804-810` each end one line past the construct they name) — fixed in `1546c36`. The other five are right, and `697-701` was cited from **two** files |
 
-Fifteen rows have passed through; seven were wrong or cited for the wrong line.
-Four were wrong in a *span's* end (`base.py:959-1029` ends on a blank line,
+Twenty-three rows have passed through; ten were wrong or cited for the wrong
+line. Six were wrong in a *span's* end (`base.py:959-1029` ends on a blank line,
 `:963-995` runs past the arms it claims, `:999-1029` misses two of its three
-branches, `html.py:412-415` is a neighbouring `@cached_property`) and three were
-wrong in the line itself (`html.py:246` is blank, `base.py:999` is not the guard
-it is cited as, `base.py:972` is right for one of its two sites and wrong for
-the other). All seven came from a file whose citations had never been read in
-context, and the span ones are invisible to a check that only asks whether some
-line inside the span exists.
+branches, `html.py:412-415` is a neighbouring `@cached_property`, and
+`base.py:771-774` / `base.py:804-810` each end one statement past the construct
+they enumerate) and four were wrong in the line itself (`html.py:246` is blank,
+`base.py:999` is not the guard it is cited as, `base.py:972` is right for one of
+its two sites and wrong for the other, and `base.py:697-701` is a regex rather
+than the `compile_filter` its sentence is about). All ten came from a file whose
+citations had never been read in context, and the span ones are invisible to a
+check that only asks whether some line inside the span exists.
 
 The order of the sweep decides when each row becomes visible: a row cited only
 from files swept last surfaces last. So the list still has to be read once, at
