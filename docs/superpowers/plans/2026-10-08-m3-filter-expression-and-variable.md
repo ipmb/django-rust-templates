@@ -2295,6 +2295,47 @@ git commit -m "M3 task 3: Python's int/float grammar and Variable's parsing"
 
 **Declared environment.** `desc.rs` unit tests run in a bare shell; the materialiser tests need `maturin develop`. `NodeListRef` is the one arm whose *resolution* cannot be tested from Rust at all — it is an index into a `NodeDesc`'s own `nodelists`, and only the Python materialiser resolves it — so Step 4's proof is a Python test, and that is stated rather than left implicit.
 
+**Corrections applied during execution — four, and the first two are the ones
+that would have shipped a silent wrong answer:**
+
+- **`NodeListRef` crosses the wire as its own pyclass, not as a bare `int`.**
+  Step 4's sketch reads `if isinstance(value, int): return nodelists[index]`,
+  and that cannot work: `AttrValue::Int` is *also* a Python `int`, so a node
+  carrying both an integer attribute and a nodelist reference is unmaterialisable
+  and the failure is a node handed a *wrong* nodelist. `NodeListRef` is now a
+  `#[pyclass(frozen)]` with `index: usize`, in the same style as `NodeRef` and
+  `SafeStr`, and `test_an_integer_attribute_is_not_a_nodelist_reference` pins the
+  negative case with a nodelist sitting beside the int. (The sketch's `nodelists`
+  is also undefined in its own signature, which is what made the ambiguity easy
+  to miss.)
+- **`AttrValue::Variable` is boxed.** `VariableDesc.literal` is an
+  `Option<AttrValue>`, so the two are mutually recursive and the unboxed variant
+  is an infinite type (`E0072`). Boxed on the variant rather than on `literal`
+  because the variant is the rarer shape.
+- **A nodelist whose name is the empty string is positional only.** `IfNode`'s
+  `__init__` takes exactly one parameter, `conditions_nodelists`, and holds its
+  branch nodelists inside that list — `nodelist` is a computed property returning
+  `NodeList(self)`, so there is no parameter name to give them. `materialise_node`
+  builds kwargs only from named entries while `NodeListRef` indexes the full
+  ordered list, and both directions are pinned
+  (`test_a_positional_only_nodelist_is_reachable_but_not_a_kwarg`,
+  `test_a_reference_resolves_to_the_nodelist_at_its_index`).
+- **`pair_to_py` is not dead.** The plan said to delete it in the same commit
+  because the new `Map` arm was supposedly its only caller; it is called twice by
+  `node_desc_to_py`, for attrs and nodelists. `clippy -D warnings` is the gate
+  and it reports dead code itself, so delete on clippy's word rather than the
+  plan's.
+
+**One test is deferred, deliberately.** The plan's Step 3a wants the
+repeated-key behaviour pinned through the wire
+(`_native_attr_map([("a", 1), ("b", 2), ("a", 3)])` — a function that does not
+exist and should not be added for one test). **No tag produces a `Map` at
+Task 4**, so the FFI's `PyDict::set_item` collapsing cannot be observed from
+Python yet. Rust's half is pinned now
+(`a_map_keeps_a_repeated_key_as_two_entries`); the wire half belongs to **Task 5**,
+whose `FilterExpression.args`/`kwargs` are the first real `token_kwargs` result
+and so the first descriptor a Python test can drive through `parse`.
+
 - [ ] **Step 1: Write the failing `desc.rs` unit tests**
 
 ```rust
