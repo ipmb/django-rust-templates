@@ -153,6 +153,7 @@ base.py:983-988	django/template/base.py	983	988	IndexError,  # list index out of
 base.py:993-996	django/template/base.py	993	996	if callable(current):	elif getattr(current, "alters_data", False):
 base.py:993	django/template/base.py	993	-	if callable(current):	-
 base.py:993-1013	django/template/base.py	993	1013	if callable(current):	raise
+base.py:994-995	django/template/base.py	994	995	if getattr(current, "do_not_call_in_templates", False):	pass
 base.py:997	django/template/base.py	997	-	current = context.template.engine.string_if_invalid	-
 base.py:1000-1013	django/template/base.py	1000	1013	bind()	-
 base.py:1000	django/template/base.py	1000	-	current()	-
