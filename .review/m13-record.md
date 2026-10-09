@@ -61,18 +61,29 @@ methods, each returning a `NodeRef`:
 **The seam is not a new species of thing, and that is what makes it allowed.**
 `Host::compile_filter` (`crates/template-core/src/parser/host.rs:256`) is a
 **required** `Host` method returning `NodeRef` — the wire cannot carry a compiled
-node in a `NodeDesc`, and `NodeRef` is what the tree already does about that — and
-it has been called at compile time since M5 (both the method and its caller
-landed in `e34a301`, M5's last tag). Its tag-level caller is
+node in a `NodeDesc`, and `NodeRef` is what the tree already does about that. It
+landed in `e34a301` (M5's last tag), and it has **exactly one tag-level caller**:
 `Parser::compile_condition_filter` (`crates/template-core/src/parser/mod.rs:226`),
 "a thin forward to `[`Host::compile_filter`]`", reached from
-`crates/template-core/src/parser/tags/if.rs:145`. So the two M13 methods are that
-same move applied to two more values, not a new escape hatch: the wire cannot
-carry a live `DeferredSubDict`, and `NodeRef` is what the tree already does about
-that. (The `cache.rs`/`cycle.rs` compile-time host calls are a round trip of the
-same *shape* but not this precedent: they go through `Parser::compile_filter`
-(`crates/template-core/src/parser/mod.rs:212`) and return an `AttrValue`, not a
-`NodeRef`.)
+`crates/template-core/src/parser/tags/if.rs:145`. So the precedent for *a registry
+tag obtaining a host-built `NodeRef` at compile time* is **one tag, through one
+call site** — and the count is the argument, not a caveat: `{% if %}` and
+`{% partial %}` are the only two tags in the engine whose compiled product a
+`NodeDesc` cannot represent, and both take the same remedy. `partial` is not an
+exception to the rule; it is the rule's second application. A two-of-two claim
+does not invite "how many is enough" the way "many tags have done this" would —
+and a reader who later finds only `if.rs:145` must be able to see that the
+singularity is stated rather than discovered.
+
+**A trap in the tree's own vocabulary, worth naming because it nearly cost this
+paragraph its point.** `Parser::compile_filter`
+(`crates/template-core/src/parser/mod.rs:212`) and `Host::compile_filter`
+(`host.rs:256`) share a name and differ in return type: the first returns an
+`AttrValue`, a value the wire **can** carry; the second a `NodeRef` it cannot.
+`cache` (`cache.rs:98,109,120`) and `cycle` (`cycle.rs:180`) call the first, so
+their compile-time host round trip is the same *shape* but was never an instance
+of the rule. A grep for the shared name returns both spellings, and reading every
+hit as the `Host` one gives the rule precedents it does not have.
 
 The seam is committed at `e592fc3`; the two tags' Rust compile functions at
 `13f9b08` and `24bed0f`.
