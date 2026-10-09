@@ -56,7 +56,8 @@
 //!
 //! # The values are filters
 //!
-//! `[parser.compile_filter(arg) for arg in …]` in both branches (`:691`, `:699`)
+//! `[parser.compile_filter(arg) for arg in …]` in both branches
+//! (`defaulttags.py:692`, `defaulttags.py:698`)
 //! — so `{% cycle a b %}` holds two `FilterExpression`s and nothing resolves
 //! them at parse time.
 

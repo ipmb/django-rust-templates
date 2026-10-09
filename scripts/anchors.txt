@@ -282,8 +282,10 @@ defaulttags.py:669-671	django/template/defaulttags.py	669	671	if name not in par
 defaulttags.py:671	django/template/defaulttags.py	671	-	return parser._named_cycle_nodes[name]	-
 defaulttags.py:675-685	django/template/defaulttags.py	675	685	if len(args) > 4:	args = args[:-1]
 defaulttags.py:686-688	django/template/defaulttags.py	686	688	elif args[-2] == "as":	silent = False
+defaulttags.py:692	django/template/defaulttags.py	692	-	values = [parser.compile_filter(arg) for arg in args[1:-2]]	-
 defaulttags.py:693-696	django/template/defaulttags.py	693	696	node = CycleNode(values, name, silent=silent)	parser._named_cycle_nodes[name] = node
 defaulttags.py:697-699	django/template/defaulttags.py	697	699	else:	node = CycleNode(values)
+defaulttags.py:698	django/template/defaulttags.py	698	-	values = [parser.compile_filter(arg) for arg in args[1:]]	-
 defaulttags.py:700	django/template/defaulttags.py	700	-	parser._last_cycle_node = node	-
 defaulttags.py:724-757	django/template/defaulttags.py	724	757	-	-
 defaulttags.py:744	django/template/defaulttags.py	744	-	_, rest = token.contents.split(None, 1)	-
