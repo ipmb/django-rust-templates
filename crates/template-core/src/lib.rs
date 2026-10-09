@@ -7,6 +7,7 @@
 
 pub mod lexer;
 pub mod parser;
+pub mod text;
 pub mod token;
 
 /// Version of the engine, surfaced through the Python binding.
