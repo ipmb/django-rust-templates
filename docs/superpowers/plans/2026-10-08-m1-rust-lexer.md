@@ -29,6 +29,12 @@ Each line names a failure mode the design implies but that no task's happy-path 
 3. **Character indices, not bytes.** Python positions and slices are character indices. Rust `regex` reports byte offsets. `"héllo{{x}}"` has different byte and character positions; using byte offsets silently misreports every position after the first non-ASCII character. (Task 2)
 4. **Verbatim state.** Inside `{% verbatim %}`, `{% endverbatim %}` is a BLOCK token, `{% other %}` is TEXT, and `{{ x }}` is TEXT *including its delimiters*. Ending requires exact content equality, not prefix matching. (Task 3)
 5. **`lineno` accumulates over segments including empty ones.** The `in_tag` toggle flips on **every** split segment, including empty strings from adjacent tags, while `lineno` only advances on non-empty ones. Getting the toggle wrong desynchronises every subsequent token. (Task 3)
+6. **The corpus and the implementation share an author.** 47 hand-picked cases test only the divergences I thought of. A divergence neither author imagined passes silently. This is the class that cannot be closed by adding cases, only by generating them. (Task 5's seeded randomised pass)
+7. **Verbatim crossed with line numbers.** Items 4 and 5 are each covered alone; no case has a newline *inside* verbatim, so a bug in `lineno` accounting while `verbatim` is set is invisible. (Task 3, Task 5)
+8. **`TokenType`'s name must survive the FFI.** `_native.lex` returns an int, but `Token.__repr__` renders `token_type.name.capitalize()` → `"Block"`, and that repr is asserted in `test_parser.py:36` and `i18n/test_blocktranslate.py:881`. The int is the right wire format; the name mapping is part of M1's contract and belongs in a test. (Task 5)
+9. **`debug_assert_eq!` is not Django's `assert`.** Django's assert is live unless run under `python -O`; `debug_assert!` silently compiles out under `--release`, which is how the extension is built. If the branch is worth asserting, assert it in release. (Task 3)
+10. **Lone surrogates.** A Python `str` may legally hold `"\ud800"`; a Rust `&str` cannot, so PyO3 rejects the argument where Django's lexer handles it. Not expected in the suite, but a known FFI-boundary difference worth recording so it is recognised rather than rediscovered. (Task 5)
+11. **`segments()`' alternation is an unchecked invariant.** The entire `in_tag` toggle assumes the returned vec has odd length and strictly alternates text/tag. Nothing asserts it. (Task 2)
 
 ---
 
@@ -37,18 +43,54 @@ Each line names a failure mode the design implies but that no task's happy-path 
 The Rust in this plan was extracted into a throwaway crate outside the repo and
 run before handoff, so the executor starts from code known to build:
 
-- `cargo test` → **26 passed, 0 failed**, doctests clean, no warnings.
+- `cargo test` → **30 passed, 0 failed**, doctests clean, no warnings.
 - Token-stream comparison against Django's real `Lexer`/`DebugLexer` over all
   **47 corpus entries in both modes → byte-identical output**.
+- `smart_split` + `split_contents` comparison against `django.utils.text.smart_split`
+  and `Token.split_contents` over **13 corpus entries plus 4000 seeded random
+  cases → byte-identical output** (20,497 result lines).
 
-The first run of that comparison failed, and the failure was worth the exercise:
-an indented block in the `segments.rs` doc comment had been written as a Python
-snippet, which rustdoc compiles as a doctest and runs. `cargo test` therefore
-failed on a file whose unit tests all passed. That is why Global Constraints
-forbids indented non-Rust code in doc comments, and why the regex is now quoted
-inline rather than shown in a block.
+The first run of the token comparison failed, and the failure was worth the
+exercise: an indented block in the `segments.rs` doc comment had been written as
+a Python snippet, which rustdoc compiles as a doctest and runs. `cargo test`
+therefore failed on a file whose unit tests all passed. That is why Global
+Constraints forbids indented non-Rust code in doc comments, and why the regex is
+now quoted inline rather than shown in a block.
 
-The throwaway crate is at `/tmp/m1plan/` and is not part of the repository.
+Note what this validation does **not** establish: it was written by the same
+author as the implementation, so it shares the blind spot that Task 6's
+randomised pass exists to cover. It proves the code builds and matches on the
+cases I thought of; it cannot prove the corpus is complete.
+
+The throwaway crate is at `/tmp/m1plan/` and `/tmp/m1plan2/` and is not part of
+the repository.
+
+---
+
+## M9 obligations recorded while they are cheap
+
+The Rust layer deliberately does not reproduce some Python-visible details. Each
+of these is fine in Rust and mandatory in the shell, and each is pinned by a test
+that will fail confusingly if rediscovered at M9 rather than here.
+
+1. **Two distinct classes, literally named.** `Lexer.__repr__` interpolates
+   `self.__class__.__qualname__`, and `test_parser.py:46-50` asserts
+   `'<Lexer template_string="{% for i in 1 %}{{ a...", verbatim=False>'`. The
+   shell needs classes named exactly `Lexer` and `DebugLexer`, both constructible
+   with one argument, with different position behaviour (`test_base.py:34-45`).
+2. **`verbatim` surfaces as `False`, not `None`.** Rust models it as
+   `Option<String>`; passing that through gives `verbatim=None` and fails that
+   assertion on one character. The shell must map `None` to `False`.
+3. **Verbatim state persists on the instance after `tokenize()`.** `_native.lex`
+   is a flat, stateless function returning a list, so the shell's `Lexer` must
+   hold the post-tokenize state itself, not read it back from the call.
+4. **`Token.lineno` and `Token.position` default to `None`.** Django's signature
+   is `Token(token_type, contents, position=None, lineno=None)`, and
+   `test_parser.py:25-27,36` constructs `Token(TokenType.BLOCK, "some text")`.
+   Rust's `usize` cannot carry that; the shell's `Token` needs `Optional`.
+
+These are recorded rather than implemented because none of them is reachable
+before the shell exists, and writing them down now costs a paragraph.
 
 ---
 
@@ -257,6 +299,12 @@ pub fn segments(source: &str) -> Vec<Segment<'_>> {
         span: (index.chars_before(byte_cursor), total_chars),
     });
 
+    // Load-bearing: the lexer's in_tag toggle assumes the vec starts and ends
+    // with a text segment and alternates strictly, so tags are the odd indices.
+    // Every push above is paired, so this holds by construction — the assert is
+    // here so that a future edit to the loop cannot break it silently.
+    assert_eq!(out.len() % 2, 1, "segments must alternate text/tag/text");
+
     out
 }
 
@@ -330,6 +378,34 @@ mod tests {
     }
 
     #[test]
+    fn segments_always_alternate_text_and_tag() {
+        // The lexer's in_tag toggle depends on this shape: odd length, text at
+        // even indices, tags at odd indices. Assert it directly rather than
+        // leaving it as an assumption the toggle happens to rely on.
+        const SOURCES: &[&str] = &[
+            "", "a", "{{ a }}", "{{% a %}", "{{ a }}{{ b }}", "{% a %}{# b #}",
+            "a{% b %}c", "{%\nif x %}", "héllo{{ x }}", "{#}{#}", "{{ {% }}",
+            "{% verbatim %}{{ x }}{% endverbatim %}",
+        ];
+        for source in SOURCES {
+            let segs = segments(source);
+            assert_eq!(segs.len() % 2, 1, "odd length for {source:?}");
+            for (i, seg) in segs.iter().enumerate() {
+                let is_tag = seg.text.starts_with("{%")
+                    || seg.text.starts_with("{{")
+                    || seg.text.starts_with("{#");
+                // Even indices are text, odd indices are tags. An even-index
+                // segment may still *look* like a tag if it is plain text that
+                // merely begins with those characters, so only assert the odd
+                // direction, which is the one the toggle relies on.
+                if i % 2 == 1 {
+                    assert!(is_tag, "odd index {i} is not a tag in {source:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn segments_reconstruct_the_source() {
         let source = "a{{ b }}c{% d %}{# e #}f";
         let rebuilt: String = segments(source).into_iter().map(|s| s.text).collect();
@@ -359,7 +435,7 @@ pub mod lexer;
 - [ ] **Step 3: Run tests to verify they pass**
 
 Run: `cargo test -p template-core segments`
-Expected: PASS (10 tests).
+Expected: PASS (11 tests).
 
 If `unmatched_opener_is_retried_one_character_later` fails, the `regex` crate's
 alternation is behaving differently than assumed — stop and investigate before
@@ -397,8 +473,10 @@ Create `crates/template-core/src/lexer/lexer.rs`:
 //!
 //! `Lexer` and `DebugLexer` differ only in whether token positions are
 //! recorded, so one implementation with a `debug` flag serves both. Django
-//! keeps them as separate classes for speed; that distinction is not worth
-//! reproducing here.
+//! keeps them as separate classes for speed; that distinction is **not worth
+//! reproducing in Rust**, but it is **mandatory in the Python shell at M9**,
+//! which must expose both as distinct classes. See "M9 obligations" in the
+//! plan for the three things the shell must reconstruct.
 
 use crate::lexer::segments::{segments, Segment};
 use crate::token::{Token, TokenType};
@@ -496,7 +574,11 @@ impl<'a> Lexer<'a> {
                 let token_type = if token_start == VARIABLE_TAG_START {
                     TokenType::Var
                 } else {
-                    debug_assert_eq!(token_start, COMMENT_TAG_START);
+                    // Django writes this as a bare `assert`, which is live unless
+                    // the interpreter runs under `-O`. `debug_assert!` would
+                    // compile out under `--release`, which is how this extension
+                    // is actually built, so a real assert is the faithful port.
+                    assert_eq!(token_start, COMMENT_TAG_START);
                     TokenType::Comment
                 };
                 return Token {
@@ -713,7 +795,292 @@ git commit -m "M1: Rust lexer with verbatim handling and debug positions"
 
 ---
 
-### Task 4: `_native.lex` binding
+### Task 4: `Token::split_contents` and `smart_split`
+
+M1's §10.3 row names `Token`, and `split_contents` is a `Token` method that Django's
+`test_parser.py:24-33` tests directly. It is in scope, so it is planned rather than
+silently dropped.
+
+`smart_split` itself lives in `django/utils/text.py`, **outside** the namespace our
+finder owns. It is therefore still live in Django for other callers, and the Rust
+implementation must match it exactly rather than inherit it.
+
+**Files:**
+- Create: `crates/template-core/src/text.rs`
+- Modify: `crates/template-core/src/lib.rs` (add `pub mod text;`)
+- Modify: `crates/template-core/src/token.rs` (add `split_contents`)
+- Modify: `crates/template-py/src/lib.rs` (expose `_native.split_contents`)
+
+**Interfaces:**
+- Consumes: `token::Token`.
+- Produces: `text::smart_split(&str) -> Vec<&str>`; `text::SplitError`;
+  `Token::split_contents(&self) -> Result<Vec<String>, SplitError>`; and
+  `_native.split_contents(contents: str) -> list[str]`, raising `StopIteration` on
+  `SplitError`.
+
+- [ ] **Step 1: Read the specification**
+
+`smart_split`'s regex is the specification and is reproduced from
+`django/utils/text.py:409`:
+
+```python
+smart_split_re = _lazy_re_compile(
+    r"""
+    ((?:
+        [^\s'"]*
+        (?:
+            (?:"(?:[^"\\]|\\.)*" | '(?:[^'\\]|\\.)*')
+            [^\s'"]*
+        )+
+    ) | \S+)
+""",
+    re.VERBOSE,
+)
+```
+
+Compacted out of `VERBOSE` form it is one line, and it is used with
+`finditer(...)` — the result is the non-overlapping matches in order, not a
+capture-group split.
+
+- [ ] **Step 2: Write the failing test**
+
+Create `crates/template-core/src/text.rs`:
+
+```rust
+//! Text utilities ported from `django/utils/text.py`.
+//!
+//! These live outside `django.template`, so shadowing the template namespace
+//! does not replace them — Django's originals stay live for other callers. The
+//! Rust versions must therefore match them exactly rather than inherit them.
+
+use std::sync::OnceLock;
+
+use regex::Regex;
+
+/// Splits a string on whitespace, keeping quoted phrases together, where the
+/// quotes are kept in the output.
+///
+/// Mirrors `smart_split` (`django/utils/text.py:423`), which is
+/// `smart_split_re.finditer(str(text))`.
+pub fn smart_split(text: &str) -> Vec<&str> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(
+            r#"((?:[^\s'"]*(?:(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')[^\s'"]*)+)|\S+)"#,
+        )
+        .expect("smart_split_re is a valid pattern")
+    });
+    re.find_iter(text).map(|m| m.as_str()).collect()
+}
+
+/// Raised where Django's `Token.split_contents` lets `next(bits)` raise
+/// `StopIteration` — an unterminated `_("...` marker at the end of the token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SplitError;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn splits_on_whitespace() {
+        assert_eq!(smart_split("a b c"), vec!["a", "b", "c"]);
+        assert_eq!(smart_split("  leading"), vec!["leading"]);
+        assert_eq!(smart_split("trailing  "), vec!["trailing"]);
+    }
+
+    #[test]
+    fn keeps_quoted_phrases_together_and_keeps_the_quotes() {
+        assert_eq!(smart_split(r#"a "b c" d"#), vec!["a", "\"b c\"", "d"]);
+        assert_eq!(smart_split("a 'b c' d"), vec!["a", "'b c'", "d"]);
+    }
+
+    #[test]
+    fn escaped_quotes_do_not_close_the_phrase() {
+        // The `\\.` alternative means a backslash-escaped quote is consumed
+        // rather than ending the quoted run.
+        assert_eq!(smart_split(r#"a "b\"c" d"#), vec!["a", r#""b\"c""#, "d"]);
+    }
+
+    #[test]
+    fn empty_and_whitespace_only_inputs_yield_nothing() {
+        assert!(smart_split("").is_empty());
+        assert!(smart_split("   ").is_empty());
+    }
+
+    #[test]
+    fn unquoted_quotes_are_kept_in_the_word() {
+        // `a"b` has no closing quote, so the quoted alternative cannot match and
+        // `\S+` takes the whole run.
+        assert_eq!(smart_split(r#"a"b"#), vec![r#"a"b"#]);
+        assert_eq!(smart_split("a'b"), vec!["a'b"]);
+    }
+}
+```
+
+Add to `crates/template-core/src/lib.rs`:
+
+```rust
+pub mod text;
+```
+
+- [ ] **Step 3: Run tests to verify they pass**
+
+Run: `cargo test -p template-core text::`
+Expected: PASS (5 tests).
+
+- [ ] **Step 4: Write the failing test for `split_contents`**
+
+Add to `crates/template-core/src/token.rs`, inside the existing `tests` module:
+
+```rust
+    use crate::text::SplitError;
+
+    #[test]
+    fn split_contents_keeps_translation_markers_whole() {
+        // From tests/template_tests/test_parser.py:24-33.
+        let token = Token {
+            token_type: TokenType::Block,
+            contents: r#"sometag _("Page not found") value|yesno:_("yes,no")"#.to_string(),
+            lineno: 1,
+            position: None,
+        };
+        assert_eq!(
+            token.split_contents().unwrap(),
+            vec![
+                "sometag".to_string(),
+                r#"_("Page not found")"#.to_string(),
+                r#"value|yesno:_("yes,no")"#.to_string(),
+            ],
+        );
+    }
+
+    #[test]
+    fn split_contents_plain_token() {
+        let token = Token {
+            token_type: TokenType::Block,
+            contents: "if x > 1".to_string(),
+            lineno: 1,
+            position: None,
+        };
+        assert_eq!(
+            token.split_contents().unwrap(),
+            vec!["if".to_string(), "x".to_string(), ">".to_string(), "1".to_string()],
+        );
+    }
+
+    #[test]
+    fn split_contents_reports_an_unterminated_translation_marker() {
+        // Django reaches `next(bits)` on an exhausted iterator here, which
+        // raises StopIteration out of `split_contents`. Rust cannot, so the
+        // condition is explicit and the shell raises StopIteration for parity.
+        let token = Token {
+            token_type: TokenType::Block,
+            contents: r#"tag _("unterminated"#.to_string(),
+            lineno: 1,
+            position: None,
+        };
+        assert_eq!(token.split_contents(), Err(SplitError));
+    }
+```
+
+- [ ] **Step 5: Implement `split_contents`**
+
+Add to `crates/template-core/src/token.rs`:
+
+```rust
+use crate::text::{smart_split, SplitError};
+
+impl Token {
+    /// Split the token's contents into arguments, keeping quoted phrases and
+    /// translation-marked `_("...")` runs together.
+    ///
+    /// Ports `Token.split_contents` (`django/template/base.py:388-400`). The
+    /// inner `while` loop is where Django calls `next(bits)` on an exhausted
+    /// generator; that surfaces here as `Err(SplitError)` rather than a panic.
+    pub fn split_contents(&self) -> Result<Vec<String>, SplitError> {
+        let bits = smart_split(&self.contents);
+        let mut split = Vec::with_capacity(bits.len());
+        let mut i = 0;
+
+        while i < bits.len() {
+            let mut bit = bits[i].to_string();
+
+            if bit.starts_with("_(\"") || bit.starts_with("_('") {
+                // `bit[2]` is the quote character, so byte 2 is a char boundary.
+                let sentinel = format!("{})", &bit[2..3]);
+                let mut trans_bit = vec![bit.clone()];
+
+                while !bit.ends_with(&sentinel) {
+                    i += 1;
+                    if i >= bits.len() {
+                        return Err(SplitError);
+                    }
+                    bit = bits[i].to_string();
+                    trans_bit.push(bit.clone());
+                }
+
+                bit = trans_bit.join(" ");
+            }
+
+            split.push(bit);
+            i += 1;
+        }
+
+        Ok(split)
+    }
+}
+```
+
+- [ ] **Step 6: Run tests to verify they pass**
+
+Run: `cargo test -p template-core`
+Expected: PASS (all tests, including the three new ones).
+
+- [ ] **Step 7: Expose `_native.split_contents`**
+
+In `crates/template-py/src/lib.rs`:
+
+```rust
+use template_core::token::{Token, TokenType};
+use pyo3::exceptions::PyStopIteration;
+
+/// Split template-tag contents into arguments.
+///
+/// Raises `StopIteration` where Django's implementation would, so the shell's
+/// `Token.split_contents` has identical error behaviour.
+#[pyfunction]
+fn split_contents(py: Python<'_>, contents: &str) -> PyResult<Vec<String>> {
+    let token = Token {
+        token_type: TokenType::Block,
+        contents: contents.to_string(),
+        lineno: 1,
+        position: None,
+    };
+
+    token
+        .split_contents()
+        .map_err(|_| PyStopIteration::new_err("unterminated translation marker"))
+}
+```
+
+Register it in the module alongside `lex`:
+
+```rust
+    m.add_function(wrap_pyfunction!(split_contents, m)?)?;
+```
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add crates/template-core/src/text.rs crates/template-core/src/token.rs \
+        crates/template-core/src/lib.rs crates/template-py/src/lib.rs
+git commit -m "M1: Token::split_contents and smart_split"
+```
+
+---
+
+### Task 5: `_native.lex` binding
 
 **Files:**
 - Modify: `crates/template-py/Cargo.toml` (add `template-core` features if needed — none expected)
@@ -802,7 +1169,7 @@ git commit -m "M1: expose _native.lex"
 
 ---
 
-### Task 5: Parity test against Django's real lexer
+### Task 6: Parity test against Django's real lexer
 
 This is the task that actually establishes the milestone's claim. Everything before it is scaffolding for this comparison.
 
@@ -877,6 +1244,13 @@ CORPUS = [
     "{% verbatimx %}",
     "{% verbatim %}{% endverbatim %}{{ after }}",
     "{% verbatim %}{% verbatim %}{% endverbatim %}",
+    # --- verbatim crossed with line numbers ---
+    # Items 4 and 5 of Review Focus are each covered alone above; these cross
+    # them, so a lineno bug that only appears while verbatim state is set shows.
+    "{% verbatim %}a\nb{% endverbatim %}",
+    "{% verbatim %}\n{% if x %}\n{% endverbatim %}",
+    "{% verbatim %}\n\n\n{% endverbatim %}",
+    "x\n{% verbatim %}\ny\n{% endverbatim %}\nz",
     # --- non-ASCII, where byte and character offsets diverge ---
     "héllo{{ x }}",
     "{{ café }}",
@@ -906,19 +1280,45 @@ where a byte-offset implementation diverges silently.
 """
 
 import inspect
+import random
 import sys
 import unittest
 from pathlib import Path
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 
 if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
-from django.template.base import DebugLexer, Lexer  # noqa: E402
+from django.template.base import DebugLexer, Lexer, Token, TokenType  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 from tests.lexer_corpus import CORPUS  # noqa: E402
+
+# Token contents for `split_contents`, kept separate from CORPUS because these
+# are tag *contents*, not whole templates.
+SPLIT_CORPUS = [
+    'sometag _("Page not found") value|yesno:_("yes,no")',
+    "if x > 1",
+    "for i in items",
+    "",
+    "   ",
+    'a "b c" d',
+    "a 'b c' d",
+    r'a "b\"c" d',
+    r'a"b',
+    'value|default:"a b"',
+    "_(\"outer _('inner') outer\")",
+    'x _("a") _("b") y',
+    "{% if x %}",
+]
+
+# Pinned so a randomised failure reproduces exactly.
+RANDOM_SEED = 20261008
+RANDOM_CASES = 3000
+RANDOM_ALPHABET = "{}%# \naé🎉"
+RANDOM_MAX_LEN = 40
 
 
 def django_tokens(source, debug):
@@ -970,6 +1370,75 @@ class LexerParityTests(unittest.TestCase):
     def test_corpus_is_not_trivially_small(self):
         self.assertGreaterEqual(len(CORPUS), 40)
 
+    def test_randomised_sources_match(self):
+        """Generated sources, because the corpus shares an author with the lexer.
+
+        CORPUS only probes divergences its author thought of; a divergence
+        neither author imagined passes it silently. Generating sources from a
+        small alphabet of the characters that matter — tag delimiters, percent,
+        hash, newline, space, and characters that are multi-byte in UTF-8 — is
+        the only mechanism here that can reach that class.
+
+        The seed is pinned so a failure reproduces exactly, and mismatch reports
+        come from ``assert_matches``, which prints the source.
+        """
+        rng = random.Random(RANDOM_SEED)
+        for _ in range(RANDOM_CASES):
+            length = rng.randrange(RANDOM_MAX_LEN + 1)
+            source = "".join(rng.choice(RANDOM_ALPHABET) for _ in range(length))
+            for debug in (False, True):
+                with self.subTest(source=source, debug=debug):
+                    self.assert_matches(source, debug)
+
+    def test_token_type_names_round_trip(self):
+        """The FFI carries an int; the name is part of the contract.
+
+        ``Token.__repr__`` renders ``token_type.name.capitalize()``, and that repr
+        is asserted by ``test_parser.py:36`` and
+        ``i18n/test_blocktranslate.py:881``. The int is the right wire format —
+        this pins that it maps back to the right name.
+        """
+        names = [
+            TokenType(token[0]).name.capitalize()
+            for token in _native.lex("a{% b %}{{ c }}{# d #}")
+        ]
+        self.assertEqual(names, ["Text", "Block", "Var", "Comment"])
+
+    def test_lone_surrogate_raises_at_the_ffi_boundary(self):
+        """A documented difference between the two implementations.
+
+        A Python ``str`` may legally contain a lone surrogate; a Rust ``&str``
+        cannot, so PyO3 rejects the argument where Django's lexer processes it.
+        Not expected anywhere in the suite — recorded so that it is recognised
+        rather than rediscovered, and so the difference is a decision rather
+        than a surprise. ``ValueError`` covers PyO3's decode/encode errors,
+        which are both subclasses.
+        """
+        with self.assertRaises(ValueError):
+            _native.lex("a\ud800b")
+
+    def test_split_contents_matches(self):
+        """`split_contents` is a `Token` method, so it is M1's to get right."""
+        for contents in SPLIT_CORPUS:
+            with self.subTest(contents=contents):
+                self.assertEqual(
+                    list(_native.split_contents(contents)),
+                    Token(TokenType.BLOCK, contents).split_contents(),
+                )
+
+    def test_split_contents_unterminated_marker_raises_the_same_way(self):
+        """Django lets `next(bits)` raise `StopIteration` here; so must we.
+
+        An obscure path, but it is the one place `split_contents` can fail, and
+        matching the exception type is cheaper than discovering the difference
+        in a traceback later.
+        """
+        contents = 'tag _("unterminated'
+        with self.assertRaises(StopIteration):
+            Token(TokenType.BLOCK, contents).split_contents()
+        with self.assertRaises(StopIteration):
+            _native.split_contents(contents)
+
     def test_comparison_target_is_genuinely_djangos_lexer(self):
         """Guard against this test silently becoming a self-comparison.
 
@@ -1008,7 +1477,8 @@ Expected: PASS.
 Then run the parity test alone with verbose output to confirm every corpus entry ran:
 
 Run: `.venv/bin/python -m unittest tests.test_lexer_parity -v`
-Expected: 6 tests, PASS.
+Expected: 11 tests, PASS. `test_randomised_sources_match` runs 3000 sources × 2
+modes under one test, so its subtests are the bulk of the work.
 
 If `test_corpus_matches_debug` fails on a non-ASCII source, the byte/character
 conversion in `segments.rs` is wrong — that is Review Focus item 3 and it is the
@@ -1023,7 +1493,7 @@ git commit -m "M1: lexer parity test against Django's lexer"
 
 ---
 
-### Task 6: Milestone close-out
+### Task 7: Milestone close-out
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-10-08-django-template-engine-in-rust-design.md` (§10.3, M1 row → done)
