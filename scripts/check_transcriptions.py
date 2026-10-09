@@ -79,7 +79,8 @@ MARKER_WINDOW = 4
 # re-runs the instrument and fails if the two disagree. A pinned table with a
 # live re-measurement behind it is the same shape as the module meter.
 #
-# 28 functions, spans 116-1165 — nearly the whole file, which is the finding.
+# 28 functions, spanning 116-1181 in a file of 1181 lines — nearly the whole
+# file, which is the finding.
 # A guard that checked only the named target's own lines would miss a region
 # declared in any of the other 27.
 COMPARED_PATH = {

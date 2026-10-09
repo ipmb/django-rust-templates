@@ -177,6 +177,7 @@ base.py:1011	django/template/base.py	1011	-	current = context.template.engine.st
 base.py:1013	django/template/base.py	1013	-	raise	-
 base.py:1014	django/template/base.py	1014	-	except Exception as e:	-
 base.py:1014-1026	django/template/base.py	1014	1026	silent_variable_failure	-
+base.py:1014-1020	django/template/base.py	1014	1020	"Exception while resolving variable '%s' in template '%s'."	exc_info=True
 base.py:1015-1020	django/template/base.py	1015	1020	template_name = getattr(context, "template_name", None) or "unknown"	exc_info=True,
 base.py:1015	django/template/base.py	1015	-	getattr(context, "template_name", None) or "unknown"	-
 base.py:1016-1021	django/template/base.py	1016	1021	logger.debug	-
@@ -372,8 +373,8 @@ defaultfilters.py:965-966	django/template/defaultfilters.py	965	966	if "," not i
 defaultfilters.py:984-987	django/template/defaultfilters.py	984	987	def phone2numeric_filter(value):	return phone2numeric(value)
 defaultfilters.py:990-996	django/template/defaultfilters.py	990	996	def pprint(value):	return "Error in formatting: %s: %s" % (e.__class__.__name__, e)
 defaultfilters.py:996	django/template/defaultfilters.py	996	-	"Error in formatting: %s: %s" % (e.__class__.__name__, e)	-
-django/template/defaulttags.py:37	django/template/defaulttags.py	37	-	-	-
 django/template/defaulttags.py:30-38	django/template/defaulttags.py	30	38	-	-
+django/template/defaulttags.py:37	django/template/defaulttags.py	37	-	-	-
 defaulttags.py:99	django/template/defaulttags.py	99	-	def __init__(self, cyclevars, variable_name=None, silent=False):	-
 defaulttags.py:104-114	django/template/defaulttags.py	104	114	def render(self, context):	return render_value_in_context(value, context)
 django/template/defaulttags.py:114	django/template/defaulttags.py	114	-	-	-
@@ -485,6 +486,7 @@ defaulttags.py:1575	django/template/defaulttags.py	1575	-	kwarg_re.match	-
 defaulttags.py:1575-1577	django/template/defaulttags.py	1575	1577	"Malformed arguments to url tag"	-
 defaulttags.py:1579	django/template/defaulttags.py	1579	-	if name:	-
 defaulttags.py:1584	django/template/defaulttags.py	1584	-	return URLNode(viewname, args, kwargs, asvar)	-
+defaulttags.py:1607	django/template/defaulttags.py	1607	-	return VerbatimNode(nodelist.render(Context()))	-
 defaulttags.py:1610-1650	django/template/defaulttags.py	1610	1650	parser.compile_filter(max_width)	-
 defaulttags.py:1634-1637	django/template/defaulttags.py	1634	1637	tag, this_value_expr, max_value_expr, max_width = bits	tag, this_value_expr, max_value_expr, max_width, as_, asvar = bits
 defaulttags.py:1643	django/template/defaulttags.py	1643	-	raise TemplateSyntaxError("widthratio takes at least three arguments")	-

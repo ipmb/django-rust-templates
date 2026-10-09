@@ -16,10 +16,14 @@ So it is measured. Every function the module defines is wrapped with a counter,
 the corpus is parsed through the harness's own entry point, and the functions
 that ran, with the lines they occupy, *are* the compared path:
 
-    28 function(s) executed, ours spans 116-1209
+    28 of 66 function(s) the module defines were executed, spanning 116-1181
 
-which is why the answer matters — the reach covers nearly the whole module, not
-one function in it.
+which is why the answer matters — the reach covers nearly the whole file, not
+one function in it. (The span is the first start to the last end of the
+executed functions. It was 116-1209 when `base.py` was a verbatim copy and
+shrank as Tasks 2 and 5 replaced bodies with calls; the number is quoted from
+the instrument rather than from this docstring, and the pin below is what the
+row re-measures.)
 
 ``scripts/check_transcriptions.py`` pins that result in ``COMPARED_PATH``, and
 ``tests/test_interposition.py::test_the_compared_path_is_the_measured_one``

@@ -19,7 +19,7 @@ sites (`_impl/__init__.py`, `_impl/parser.py`, the shell modules).
 
 ---
 
-## 1. The blast radius, measured — 964 of the 1547
+## 1. The blast radius, measured — 964 of the 1547 (961 on the closed tree; §1b)
 
 `.review/m9-measurements/m9_measure_render_blast_radius.py`, one suite run:
 
@@ -34,9 +34,11 @@ constructs directly — the reviewer's point, and it errs the safe way for a
 milestone number whose only job is "how much does this put at risk". A test that
 reached our render path without calling `NodeList.render` would make the true
 figure higher, never lower. Labelled because the next reader will subtract from
-it.
+it — and the next reader did: §1b has the closed-tree figure and the reason it is
+lower rather than higher.
 
-62.3% of the suite. That is `setup_test_environment`
+62.3% of the suite as measured here, 62.1% once M9 lands. That is
+`setup_test_environment`
 (`django/test/utils.py:108-114`) setting `Template._render =
 instrumented_test_render`, whose body is a signal send and then
 
@@ -45,9 +47,34 @@ return self.nodelist.render(context)
 ```
 
 so every `template.render()` in the run — including the ones inside Django's own
-view, form, model and admin tests — enters the Python nodelist. The count is a
-count of *tests that render*, so it does not depend on which class is bound to
-`NodeList`; it is the same 964 before and after M9.
+view, form, model and admin tests — enters the Python nodelist.
+
+**Corrected at M9's close (2026-10-09), and the sentence that was here has been
+deleted rather than reworded.** It read: *"The count is a count of tests that
+render, so it does not depend on which class is bound to `NodeList`; it is the
+same 964 before and after M9."* That is false, and the instrument was the only
+thing that could have said so. Re-run on the closed tree (`6ff127d`), the same
+script reports **9600 calls across 961 tests**. The whole difference — 30 calls,
+8 tests, listed in §1b — is Django's `verbatim` compile function,
+`defaulttags.py:1607`:
+
+```python
+nodelist = parser.parse(("endverbatim",))
+parser.delete_first_token()
+return VerbatimNode(nodelist.render(Context()))
+```
+
+It **renders the block at parse time**, to produce the verbatim text. So
+`NodeList.render` is not only the suite's render path; it is also where Django
+compiles a verbatim block, and Rust `verbatim` does that work without a Python
+nodelist. A metric is defined by what it counts, and the class of dependency
+this one cannot see is precisely that: a Rust path that renders nothing through
+Python is invisible to it, while a Django path that renders at *parse* time is
+counted. The recon's error was not the measurement — 9630/964 is what the
+pre-interposition tree does — but the invariance claim attached to it.
+
+The count above is therefore the *pre-interposition* figure, and it is 62.1% of
+the suite (961/1547) once M9 lands, not 62.3%.
 
 The same run measures the other half of the interposition, the annotation
 protocol, and reports it **by calling frame**:
@@ -108,7 +135,8 @@ annotations** (four of which delegate inward). What changed is the total, 430 �
 `Ran 1547 tests … OK (skipped=6)` from `scripts/run_django_suite.sh`, with the
 meter at 23. Finding 3 below is that this evidence is *vacuous on its own*: a
 verbatim copy of `base.py` also passes.
-The 964/84 figures are what a reader needs to size the risk, and the M9 close-out
+The 964/84 figures — 961/84 on the closed tree — are what a reader needs to size
+the risk, and the M9 close-out
 needs delegation-specific evidence to go with them.
 
 ## 1a. The parse seam is wider than the render seam — 1170 of the 1547
@@ -121,7 +149,12 @@ distinct tests that parsed at least once: 1170
 distinct tests that both parsed and rendered: 958
 ```
 
-**1170 tests parse, 964 render, 958 do both.** The parse seam is the wider one,
+Re-run on the closed tree (`6ff127d`), the same three lines are `4360`, `1170`
+and `955` — the parse numbers do not move at all.
+
+**1170 tests parse, 964 render, 958 do both** — and on the closed tree, 961
+render and **955** do both (§1b): the parse figures are unchanged, and the three
+tests that move are the verbatim ones §1b lists. The parse seam is the wider one,
 and it is the one `base.Template` alone controls: every `Engine.from_string`
 builds a `Template`, whose `__init__` ends in
 `self.nodelist = self.compile_nodelist()` (`base.py:155`), so an interposed
@@ -141,6 +174,60 @@ Two consequences for the plan:
   figure. A Rust-backed rewrite of this method has to keep all three, which is
   why it wants to be a *delegating* transcription rather than a new
   implementation.
+
+## 1b. What the render seam loses when `verbatim` becomes Rust's — 30 calls, 8 tests
+
+Attribution for the 9630/964 → 9600/961 move, measured by running the suite in
+both universes and diffing the per-test maps, then by dumping the Python call
+chain under every `NodeList.render` call (`traceback.extract_stack()` from the
+counting wrapper, which is what turns "fewer calls" into a cause).
+
+The rows that change, all of them in `test_verbatim` and `test_partials`:
+
+```
+9  -> 6   test_verbatim_tag01, 02, 03, 06      (six render-time + three compile-time)
+12 -> 6   test_verbatim_tag05                  (six + six: two verbatim blocks)
+6  -> 0   test_verbatim_tag04                  (compile-time only)
+3  -> 0   test_partials ..._embedded_in_verbatim
+3  -> 0   test_partials ..._embedded_in_named_verbatim
+```
+
+Every vanished call has the same caller chain, and it ends at Django's `verbatim`
+compile function rather than at a render:
+
+```
+defaulttags.py:1607:verbatim <- base.py:583:parse <- base.py:199:compile_nodelist
+  <- base.py:157:__init__ <- loaders/base.py:28:get_template <- engine.py:186:get_template
+```
+
+`test_verbatim_tag04` is the row that proves the reading rather than merely
+agreeing with it: its body asserts `get_template` raises and renders nothing at
+all, so **all six** of its pre-M9 calls were the compile-time render of the
+blocks it parses on the way to that error. A test that cannot render cannot have
+a render-path cost.
+
+**Where the cost survives.** It is paid wherever the parse of a verbatim block is
+still Python's, and one place is left: a verbatim block inside a `{% partialdef %}`
+body, because the host drives that parse. The current-tree dump shows it plainly —
+
+```
+defaulttags.py:1607:verbatim <- _impl/base.py:588:parse <- defaulttags.py:1242:partialdef_func
+  <- host.py:201:call_tag <- render.py:347:parse_template <- _impl/base.py:204:compile_nodelist
+  <- … <- test_partials.py:599
+```
+
+so `test_partial_template_contains_fake_end_inside_verbatim` still reaches
+`defaulttags.py:1607` twice on the closed tree. That is M13's territory
+(`partialdef` is still Django's), and it is recorded there rather than treated as
+a defect: the behaviour is Django's, on both sides.
+
+**What this costs the metric, stated once.** "The render seam" is 961 tests /
+9600 calls, and it is a count of calls that reach the Python `NodeList.render` —
+ours for the whole suite now, as the instrument's own pre-flight checks
+(`base` resolved to `_impl/base.py`). It is not a count of render-path work, and
+the two diverge exactly where Django renders at parse time or Rust renders
+without a Python nodelist. This is the second question §10.3's vacuity rule
+cannot answer, and this section is what it looks like answered.
 
 ## 2. `run_django_suite.sh` is the only meaningful invocation
 
@@ -184,7 +271,7 @@ prints the progress meter and therefore the only one whose count means anything)
 - `template_tests.test_logging.VariableResolveLoggingTests.test_log_on_variable_does_not_exist_not_silent`
 - `template_tests.test_logging.VariableResolveLoggingTests.test_log_on_variable_does_not_exist_silent`
 
-Both are the same defect: Django's outer handler (`base.py:1014-1018`) emits
+Both are the same defect: Django's outer handler (`base.py:1014-1020`) emits
 
 ```python
 logger.debug(
@@ -295,7 +382,7 @@ tag, nested inside a Rust-owned `{% for %}` — the `render_foreign_node` path.
 
 Still owed, unchanged, and structural: it is a module-level function in `base.py`
 (`base.py:1123-1136`), nothing under `crates/` or `python/` implements it or its
-conversion test, and Django's own runs on all 9630 renders above. It becomes ours
+conversion test, and Django's own runs on all 9600 renders above. It becomes ours
 the moment `base` is interposed. The conversion test is
 `issubclass(type(value), str)`, **not** `isinstance`.
 

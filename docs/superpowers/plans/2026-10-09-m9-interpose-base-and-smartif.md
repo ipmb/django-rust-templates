@@ -163,7 +163,7 @@ The disjointness row fails **loudly and names what moved**; a stale stash fails 
 
 ### Task 1: The walking skeleton — `_impl/base.py` transcribed, interposition proven
 
-This is the highest-risk edit in the project: from here, every one of the 1547 tests renders through *our* `NodeList` (**964**, a lower bound — recon finding 1) and parses through *our* `Template` (1170). Do it verbatim first, delegate in Task 2. A verbatim transcription was measured to keep the whole suite green (recon finding 3), so any red after this step is an addressing/import error, not a behavioural one — which is exactly the property that makes this the right walking skeleton.
+This is the highest-risk edit in the project: from here, every one of the 1547 tests renders through *our* `NodeList` (**964**, a lower bound — recon finding 1; the closed-tree figure is **961**, and the 30-call difference is Django's compile-time `verbatim` render — `.review/m9-recon.md` §1b and Task 7's close-out) and parses through *our* `Template` (1170). Do it verbatim first, delegate in Task 2. A verbatim transcription was measured to keep the whole suite green (recon finding 3), so any red after this step is an addressing/import error, not a behavioural one — which is exactly the property that makes this the right walking skeleton.
 
 **Files:**
 - Create: `python/django_rust_templates/_impl/base.py`
@@ -951,7 +951,7 @@ EOF
 
 ### Task 5: The resolver seam — `Variable._resolve_lookup`, with the failing `bit` on the wire
 
-Recon finding 4: wiring `Variable._resolve_lookup` to `_native.resolve` leaves **exactly two** failures, both the same defect. `LookupOutcome::Escaped` carries no `bit`, so the host's outer handler (`base.py:1014-1018`) cannot log the variable that failed:
+Recon finding 4: wiring `Variable._resolve_lookup` to `_native.resolve` leaves **exactly two** failures, both the same defect. `LookupOutcome::Escaped` carries no `bit`, so the host's outer handler (`base.py:1014-1020`) cannot log the variable that failed:
 
 ```python
 logger.debug(
@@ -1034,7 +1034,7 @@ Add to `tests/test_interposition.py`:
         """The two rows this pins were the only failures in the recon wiring.
 
         `Variable._resolve_lookup`'s outer handler logs the variable that failed
-        (`base.py:1014-1018`). `LookupOutcome::Escaped` did not carry it, so the
+        (`base.py:1014-1020`). `LookupOutcome::Escaped` did not carry it, so the
         log line had no `bit` and `test_logging` reported two failures. The bit
         now travels with the outcome.
         """
@@ -1074,7 +1074,7 @@ In `crates/template-core/src/parser/resolve.rs`, change the variant and its prod
     /// ... (existing doc comment unchanged) ...
     ///
     /// **The failing `bit` travels with it.** Django's outer handler logs the
-    /// variable that failed (`base.py:1014-1018`):
+    /// variable that failed (`base.py:1014-1020`):
     ///
     /// ```text
     /// logger.debug(
@@ -1194,7 +1194,7 @@ M9: Variable._resolve_lookup delegates, with the failing bit on the wire
 The third seam, and the one recon found a real defect in: wiring the resolver
 left exactly two failures, both template_tests.test_logging rows, because
 LookupOutcome::Escaped carried the exception and the frame but not the variable
-bit Django's outer handler logs (base.py:1014-1018).
+bit Django's outer handler logs (base.py:1014-1020).
 
 The bit now travels with the outcome, so the log line is emitted from Python
 where the logger lives rather than imitated on the Rust side.
@@ -1523,7 +1523,8 @@ transcription now declares its differences and check_transcriptions.py asserts
 the differing hunks equal the declaration: an undeclared edit fails, and so does
 a stale declaration.
 
-M9 closes at 23 modules, with the parse (1170 tests), render (964) and resolve
+M9 closes at 23 modules, with the parse (1170 tests), render (961, re-measured —
+the recon's 964 counted Django's compile-time `verbatim` render) and resolve
 seams delegated to Rust and each pinned by a direct-entry row, since
 interposition alone is invisible to every count this project accepts.
 
@@ -2115,7 +2116,7 @@ which is at **`base.py:94`**; `base.py:994` was cited for the
 `base.py:1015-1021` was a loose range whose end line is the closing paren of the
 `logger.debug` call, so its endpoint quoted `)`. All three were written from the
 plan's own prose rather than read off the tree — the plan's Step 4 doc-comment
-itself says "(`base.py:1014-1018`)", which is the handler's `except` line
+itself says "(`base.py:1014-1020`)", which is the handler's `except` line
 followed by the log call's first three lines and omits both `template_name` and
 `exc_info`. The repaired citations are `base.py:94`, `base.py:989`, and
 `base.py:1015-1020`, each with a snippet authored from the sentence's own claim
@@ -2226,17 +2227,68 @@ arrived as someone else's summary.
    though the reviewer has since confirmed measuring them: from the message alone
    you cannot tell which kind of number it is, the carrier looks identical either
    way, and the flag costs one file-open at close-out.
+
+   **Discharged in `6ff127d`, and the first implementation of it was wrong.**
+   `install()` now calls `_stale_captures()` *after* the substitution and raises
+   a `ShimError` naming each stale binding, and `uninstall()` returns early when
+   the finder is already out. Both halves are the obligation, not one: the second
+   was found by measurement when the first shipped — `uninstall()` ran its cache
+   swap with the finder already removed, filing Django's modules under the *ours*
+   cache, after which the next `install()` placed Django's `base` under our name
+   and the new check truthfully reported **24 correct bindings as stale** inside
+   `test_shim`'s own run. `test_shim`'s `tearDown` uninstalls and its rows call
+   `uninstall()` themselves, so the redundant call is the ordinary path, not a
+   corner. The check is a **binding-identity** comparison rather than the
+   "refuse if any `django.template*` module is in `sys.modules`" precondition
+   this item first asked for, and the difference is measured too: the
+   precondition refuses the ordinary `uninstall()`/`install()` cycle, where the
+   modules come back from the cache and their captures are still valid. Two new
+   rows in `tests/test_shim.py`, each with its red state measured (7 errors with
+   the guard disabled, the new row among them). The two line numbers this item
+   asked to be re-read off the tree before use: `django/templatetags/i18n.py:5`
+   is `from django.template.base import TokenType, render_value_in_context`, and
+   `django/template/defaulttags.py:30-38` is nine names including `Node`,
+   `NodeList` and `PartialTemplate` — both verified.
 2. **`builtin_tag_names()` / `builtin_tag_stubs()` need two names.** The
    confusion has now happened three times; the rename is the fix, subtraction at
    the call site is the workaround.
+
+   **Discharged in `10e75eb`.** `builtin_tag_names_including_stubs()` and
+   `builtin_tag_stub_names()` — each named for what it *answers*, with the
+   subtraction written where it is used. The rename's real cost was not the two
+   functions: it moved every anchor and transcription span that quoted the old
+   docstrings, and six added docstring lines shifted three anchors
+   (`template-py/src/lib.rs:119→125`, `:667→673`, `test_render_parity.py:529→533`),
+   all re-keyed in `scripts/anchors.txt` in the same commit. A rename in this
+   project is a documentation change with a code side, which is why it is one
+   commit rather than two.
 3. **`COMPARED_PATH` has a blind spot on decorator-generated operator classes.**
    `smartif`'s comparison operators are built by a decorator, so
    `inspect.getsourcelines` reports the decorator's span and the guard sees the
    wrong region.
+
+   **Discharged in `20cce28`.** `tests/compared_path.py` now sweeps the module
+   *and* the classes a factory generated — `smartif`'s operators carry the
+   qualname `infix.<locals>.Operator`, so every class one factory built is
+   attributed to the factory ("a region declared over a method this factory
+   generated") — and it walks the `OPERATORS` dict, because that is the only
+   place the generated wrapper is bound. The guard does not need to know which
+   method ran, only that a region over generated methods is a region over the
+   factory that made them.
 4. **Five guarded settings configurations race, and `unittest discover` decides
    by alphabet.** Task 4's correction (6) is the third M9 instance of a row
    being green or red because of a module's *name*. One explicit suite-wide
    configuration is the question; five guards is the current answer.
+
+   **Discharged in `b928614`.** `tests/__init__.py` configures once, at package
+   import, and `tests/test_settings_configuration.py` fails if a local
+   `settings.configure` comes back — three rows: only the probe configures, the
+   package configures them, and the probe still makes the one permitted call.
+   The obligation's own text was corrected by measurement on the way through:
+   "Six test classes need settings" became **ten**, five of which reached
+   `ensure_settings()` already and five of which configured settings themselves
+   — a count that came from an `ast` walk of the suite, not from the prose that
+   had asserted it.
 5. **The handler's side of the seam — this section's (7).** One comparison point
    (today) against two: move the handler verbatim into the shell and split the
    five harnesses — `tests/differential/cases.py`, `tests/test_render_parity.py`,
@@ -2247,6 +2299,14 @@ arrived as someone else's summary.
    which stays `pinned_resolve_lookup()`. The cost is the retargeting, and the
    reason it is not paid now is sequencing — new teeth would be asserted rather
    than measured, inside a commit whose job is a correction.
+
+   **Discharged as a *record*, not as a change.** The trade is now written into
+   the design spec's §10.4, under "What M9 leaves behind, and to whom", with the
+   cost named as this section names it — one comparison point instead of two, and
+   `tests/parity_target.py` guards the *target* (`pinned_resolve_lookup()`), so
+   nothing forbids splitting the five harnesses later. That is the right home for
+   it: the plan is consumed by the milestone that wrote it, and a reader at M10
+   reads the spec.
 6. **The transcription guard cannot see a moved handler, and should not try.**
    It sees a moved *line*; a body replaced by a call is one hunk whatever moved
    with it. Seeing the handler would take comparing semantics, which is not
@@ -2256,5 +2316,82 @@ arrived as someone else's summary.
    declared note above a threshold, is mechanical and would have flagged this
    hunk. It does not say *what* moved; it says something did, which is currently
    prose's only witness.
+
+   **Discharged in `20cce28` — the achievable half, and only that.** The clause
+   compares the two spans the guard already holds and requires a declared note
+   when a region changes shape (`check_transcriptions.py`'s shape clause). The
+   unachievable half — seeing a moved *handler* — is recorded in the spec's
+   §10.4 as what the guard cannot do, so the next reader does not have to
+   rediscover the limit by trusting a false claim of coverage.
 7. **The acceptance label's M9 caveat** (Task 7 Step 7) and the spec's §10.3/§10.4
    rows, still owed.
+
+   **Discharged.** The label was re-measured in `cbf8bf6` rather than reworded:
+   `m9_measure_native_calls.py` wraps every public `_native` callable and runs
+   the suite, and reports 23,263 calls from 1,176 of the 1,547 tests — `resolve`
+   10,180, and `compile_template`, `builtin_tag_names_including_stubs`,
+   `builtin_tag_stub_names` 4,361 each. The label stays, for a narrower and now
+   measured reason: `lex` is reached zero times (`base.Lexer` is Python at M9)
+   and `engine.py` is still Django's, so "(rust engine)" would assert more than
+   the run does. The spec's rows are the close-out commit itself.
+
+### Task 7's Steps 5–8, executed — and the render seam is 961, not 964
+
+Every obligation above is discharged or recorded; this section is what the two
+remaining Steps produced, and the one place where **this plan's own number is
+wrong**.
+
+**Step 5–6.** The declarations are in and the guard is green: `check.sh` ends
+`all checks passed`, with the suite at `Ran 1547 tests … OK (skipped=6)`, the
+unit suite at 315, and `cargo test -p template-core` at 682.
+
+**Step 7** is the discharge of obligation 7 above (`cbf8bf6`).
+
+**Step 8 is where the plan was wrong.** Step 8 says to record "the three seams
+with their measured sizes (parse 1170, render 964, resolve)". Re-measured on the
+closed tree (`6ff127d`) with the same instrument the recon used, the three are:
+
+```
+parse  4360 compile_nodelist calls / 1170 tests
+render 9600 NodeList.render calls  / 961 tests
+       (84 render-time annotations across 41 of them)
+resolve 10180 _native.resolve calls, of 23263 _native calls from 1176 tests
+```
+
+**The render figure moved down by 30 calls and 3 tests, and the reason is a
+metric lesson rather than a regression.** `.review/m9-recon.md` §1 claimed "the
+count is a count of tests that render, so it does not depend on which class is
+bound to `NodeList`; it is the same 964 before and after M9" — and this plan
+repeated it ("**964**, a lower bound" at line 166, and the same figure in Task
+4 and Task 5's arguments and in the Step 9 commit draft). It is false. Every
+missing call is Django's `verbatim` tag rendering its block **at parse time**
+(`defaulttags.py:1607`, `return VerbatimNode(nodelist.render(Context()))`),
+which Rust's `verbatim` does no longer do; the per-test diff and the call chains
+are in `.review/m9-recon.md` §1b, and `test_verbatim_tag04` is the row that
+proves the reading, because it renders nothing at all and only asserts an error,
+so all six of its pre-M9 calls were parse-time work.
+
+**So the figures elsewhere in this plan that say 9630 or 964 are the
+pre-interposition measurement, left in place deliberately** — they are how the
+argument was made before there was anything to measure, and §1b is where a
+reader is sent to correct them. The one exception is Step 9's commit draft,
+which is an instruction rather than an argument and has been corrected to 961.
+
+**A second number in this plan was wrong, and the anchor guard is what found
+it.** Task 5 cites the resolver's outer handler five times as
+`base.py:1014-1018`, and the manifest had no entry for it — so the close-out's
+new prose was the first citation of it the guard ever checked, and it failed.
+The handler's `except` is on 1014 and its `logger.debug(...)` call runs to
+`exc_info=True` on **1020**; 1018 is `bit,`, which means the citation stopped two
+lines short of the half Task 5 is *about*. Corrected to `base.py:1014-1020` in
+the five plan sites, in `.review/m9-recon.md` and in the spec, and given a
+manifest entry whose snippet is the log message and whose end snippet is
+`exc_info=True` — so the number now carries its own claim instead of relying on
+the reader to re-read the file.
+
+**What the milestone hands forward.** The reviewer's dispatch is the last step
+after the docs commit; §10.4 of the design spec now carries the six things M9
+leaves behind (interior-subtree rendering deferred; `render_value_in_context`
+equivalent but not ours; the resolver seam's one comparison point; the moved
+handler the guard cannot see; the verbatim-at-parse-time cost M13 inherits; and
+`install()`'s capture refusal, which M10–M14 all live under).

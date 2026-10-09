@@ -24,8 +24,9 @@ right if the culprit is the innermost node *and* the origin comparison picked th
 right frame.
 
 It also counts how often the debug branch is entered anywhere in the suite, which
-bounds how much of the 964-test render blast radius this protocol actually
-covers.
+bounds how much of the 961-test render blast radius this protocol actually
+covers (964 was the recon's pre-interposition figure; `.review/m9-recon.md` §1b
+has the difference and the cause).
 
     . scripts/env.sh
     PYTHONPATH="$PWD/scripts/shimpath:$PWD/.django" \
