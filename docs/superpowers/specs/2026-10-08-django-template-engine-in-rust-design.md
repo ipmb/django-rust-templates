@@ -697,6 +697,22 @@ that the suite's verdict at M9 is about integration alone.
 
 Recorded here while they are cheap, so they are not rediscovered at M9:
 
+- **Fan-out structure for M3/M4 — one file per tag and per filter.** The human
+  asked for the tag and filter work to be parallelised once the general
+  foundation is in place. The foundation is M2 **plus M3**: 14 of the 27 tags and
+  every filter sit behind `FilterExpression`, so there is nothing to fan out
+  over until M3 lands. Before it does, the layout must change, because today all
+  nine M2 tags live in the single file `parser/tags.rs` and parallel agents
+  editing one file clobber each other. M3 therefore delivers
+  `parser/tags/<name>.rs` and `filters/<name>.rs`, each module owning exactly
+  one tag or filter, behind a registry written **once, up front, in full** so
+  that no fan-out agent ever edits a shared file.
+  The fan-out contract, because build state is shared too: an agent owns one
+  module and writes no other file, and does not run `maturin develop` or commit.
+  There is one `.so`, one `target/`, and one git index, and concurrent writers
+  race on all three — so the extension is rebuilt and the commit made centrally,
+  after the agents' files land.
+
 - **§5.5's render path** — `NodeList.render`/`Node.render_annotated` kept
   verbatim, shadow nodes renderable; M9 gate.
 - **§5.2's `annotate_exception`** — needed for Rust-owned culprits; verified by
