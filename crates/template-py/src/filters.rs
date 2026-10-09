@@ -574,7 +574,7 @@ impl<'py> PyFilterHost<'py> {
     /// **Not the same question as [`PyFilterHost::is_safe_value`], and that is the
     /// whole reason this exists.** Django's wrapper rebinds `first = str(first)`
     /// *before* calling the body, so the value a body sees is the coerced one —
-    /// and `cut` reads `isinstance(value, SafeData)` off it (`:410`). The two
+    /// and `cut` reads `isinstance(value, SafeData)` off it (`defaultfilters.py:445`). The two
     /// questions differ on exactly one operand: an object that is not a `str`
     /// subclass but whose `str()` is `SafeData`, which is Django's own lazy
     /// `__proxy__`. Measured on the pinned tree: `Variable.resolve` hands the
@@ -1562,11 +1562,10 @@ impl PyFilterHost<'_> {
 /// union would mark safe a result Django leaves bare.
 ///
 /// The coercion is applied **here, once**, rather than by each of the 29 bodies.
-/// Django rebinds `first = str(first)` before calling the body, so the body
-/// genuinely receives the coerced value — `cut` reads its safety (`:410`) — and a
-/// wrapper that handed bodies the raw value would make that filter unimplementable
-/// without a second, subtler rule that 29 separately-written bodies would each have
-/// to remember.
+/// Django rebinds `first = str(first)` before calling the body, so the body genuinely receives the
+/// coerced value — `cut` reads its safety (`defaultfilters.py:445`) — and a wrapper that handed
+/// bodies the raw value would make that filter unimplementable without a second, subtler rule that
+/// 29 separately-written bodies would each have to remember.
 pub fn run_filter(
     py: Python<'_>,
     name: &str,

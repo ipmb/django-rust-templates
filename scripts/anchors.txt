@@ -201,6 +201,7 @@ defaultfilters.py:424-428	django/template/defaultfilters.py	424	428	-	-
 defaultfilters.py:431-438	django/template/defaultfilters.py	431	438	def center(value, arg):	return f"{value:^{width}}"
 defaultfilters.py:435-437	django/template/defaultfilters.py	435	437	if width <= 0:	return value
 defaultfilters.py:441-449	django/template/defaultfilters.py	441	449	-	-
+defaultfilters.py:445	django/template/defaultfilters.py	445	-	safe = isinstance(value, SafeData)	-
 defaultfilters.py:447-450	django/template/defaultfilters.py	447	450	-	-
 defaultfilters.py:457-461	django/template/defaultfilters.py	457	461	-	-
 defaultfilters.py:464-471	django/template/defaultfilters.py	464	471	escapeseq	-

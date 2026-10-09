@@ -180,7 +180,7 @@ pub struct FilterEntry {
     /// Measured in §D3 of the plan; the corpus carries the case.
     ///
     /// A body that reads the value's *safety* therefore reads the coerced one,
-    /// which is Django's own semantics and what makes `cut` (`:410`) writable at
+    /// which is Django's own semantics and what makes `cut` (`defaultfilters.py:445`) writable at
     /// all — its `safe = isinstance(value, SafeData)` is a question about the
     /// value the wrapper produced. `stringfilter: true` is the statement that a
     /// body may branch on that, and that the FFI owes it a coerced `Value` rather
