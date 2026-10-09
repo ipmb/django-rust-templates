@@ -351,6 +351,8 @@ module and no parity test imported it. M9 is what makes the existing leak visibl
 **Fix, measured.** Install the shim once at unit-test session start:
 
 ```
+$ DJANGO_RUST_TEMPLATES=1 PYTHONPATH=…/shimpath:…/.django \
+      python -m unittest discover -s tests -t . -p 'test_*.py'
 Ran 285 tests, FAILED (failures=7)
 ```
 
