@@ -114,6 +114,33 @@ pub enum ErrorKind {
     /// raises `StopIteration`, matching what M1's `_native.split_contents`
     /// already does at the same boundary.
     UnterminatedMarker,
+    /// A **`ValueError`** Django lets out of a compile function, message and all.
+    ///
+    /// Not a `Syntax`, for [`ErrorKind::UnterminatedMarker`]'s reason: it is not
+    /// a verdict on the template but a CPython exception from a tag body, and
+    /// Django's `parse` re-raises the *same object* after attaching `.token`
+    /// (`base.py:566-567` catches `Exception`, not `TemplateSyntaxError`). A
+    /// drop-in replacement raises the same class, so the shell needs to be told
+    /// which one — see the FFI arm.
+    ///
+    /// **There is exactly one producer and it is an accident of the source.**
+    /// `do_filter` writes `_, rest = token.contents.split(None, 1)`
+    /// (`defaulttags.py:744`) with no length guard, so `{% filter %}` — where
+    /// `contents` has no separating run — unpacks a one-element list and CPython
+    /// raises. Measured on the pinned tree:
+    ///
+    /// ```text
+    /// Engine().from_string("{% filter %}x{% endfilter %}")
+    /// → ValueError: not enough values to unpack (expected 2, got 1)
+    ///   with .token set to the `filter` block token
+    /// ```
+    ///
+    /// Reproduced rather than converted to a `TemplateSyntaxError` because a
+    /// `Syntax` with the same text passes every corpus test in
+    /// `tests/test_parser_errors.py` — the message and the token would match —
+    /// so the divergent class would be invisible. The parity test that pins it is
+    /// the FFI twin of `test_an_unterminated_marker_is_a_stop_iteration_for_both`.
+    ValueError(String),
     /// Something M2 deliberately does not do yet. Removed by the milestone that
     /// supplies it, so the list of these is the milestone's remaining work.
     Unimplemented(String),
@@ -199,6 +226,17 @@ impl Error {
         }
     }
 
+    /// The error a tag returns when Django would let a `ValueError` out.
+    ///
+    /// See [`ErrorKind::ValueError`] for the one producer and why the class is
+    /// carried rather than flattened into a `Syntax`.
+    pub fn value_error(message: impl Into<String>) -> Self {
+        Self {
+            kind: ErrorKind::ValueError(message.into()),
+            token: None,
+        }
+    }
+
     pub fn unimplemented(message: impl Into<String>) -> Self {
         Self {
             kind: ErrorKind::Unimplemented(message.into()),
@@ -222,6 +260,7 @@ impl Error {
         match &self.kind {
             ErrorKind::Syntax(message)
             | ErrorKind::Host(message)
+            | ErrorKind::ValueError(message)
             | ErrorKind::Unimplemented(message)
             | ErrorKind::Internal(message) => message.clone(),
             // Verbatim, **not** prefixed with the operation: this is the text
@@ -256,6 +295,7 @@ mod tests {
         // rule silently never apply.
         assert_eq!(Error::syntax("a").token, None);
         assert_eq!(Error::host("a").token, None);
+        assert_eq!(Error::value_error("a").token, None);
         assert_eq!(Error::unterminated_marker().token, None);
         assert_eq!(Error::unimplemented("a").token, None);
         assert_eq!(Error::internal("a").token, None);

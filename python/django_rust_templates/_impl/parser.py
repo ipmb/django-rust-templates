@@ -34,11 +34,16 @@ from django.template.defaulttags import (
     CommentNode,
     CsrfTokenNode,
     DebugNode,
+    FilterNode,
+    FirstOfNode,
+    LoremNode,
     NowNode,
     ResetCycleNode,
     SpacelessNode,
     TemplateTagNode,
     VerbatimNode,
+    WidthRatioNode,
+    WithNode,
 )
 from django.utils.safestring import mark_safe
 
@@ -63,12 +68,17 @@ NODE_CLASSES = {
     "CommentNode": CommentNode,
     "CsrfTokenNode": CsrfTokenNode,
     "DebugNode": DebugNode,
+    "FilterNode": FilterNode,
+    "FirstOfNode": FirstOfNode,
+    "LoremNode": LoremNode,
     "NowNode": NowNode,
     "ResetCycleNode": ResetCycleNode,
     "SpacelessNode": SpacelessNode,
     "TemplateTagNode": TemplateTagNode,
     "VerbatimNode": VerbatimNode,
     "VariableNode": VariableNode,
+    "WidthRatioNode": WidthRatioNode,
+    "WithNode": WithNode,
 }
 
 

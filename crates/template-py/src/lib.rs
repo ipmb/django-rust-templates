@@ -10,7 +10,7 @@ use pyo3::exceptions::{
 };
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::types::{PyDict, PyList, PyString, PyTuple};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -812,6 +812,14 @@ fn parse_error(py: Python<'_>, error: &Error) -> PyResult<PyErr> {
         // it a message would be a gratuitous difference from Django at the one
         // place `assertRaises` is used instead of `assertRaisesMessage`.
         ErrorKind::UnterminatedMarker => PyStopIteration::new_err(()),
+        // Django's `parse` catches `Exception`, not `TemplateSyntaxError`, so a
+        // `ValueError` raised inside a tag body leaves `parse` as the *same
+        // object* with `.token` attached below — `do_filter`'s unguarded
+        // `_, rest = token.contents.split(None, 1)` is the one producer
+        // (`defaulttags.py:744`). A `TemplateSyntaxError` with the same text
+        // would satisfy every comparison in `tests/test_parser_errors.py`, so
+        // without this arm the divergent class would be invisible.
+        ErrorKind::ValueError(_) => PyValueError::new_err(error.message()),
         // Its own class, so the "this engine has not built it yet" bucket is
         // visible at the FFI. See the exception's docstring for why the message
         // cannot carry that.
@@ -942,6 +950,34 @@ impl Host for FilterCheckHost<'_> {
             // at M2/M3.
             Err(error) => Err(Error::host(python_error_message(check.py(), &error))),
         }
+    }
+
+    /// Python's own `repr()`, which is why this override exists at all.
+    ///
+    /// [`Host::repr`]'s default (`py_repr_str`) is exact on ASCII only, and the
+    /// M5 tag that reads it interpolates the **offending token** — arbitrary
+    /// template text — through `%r`. Measured on the pinned tree:
+    /// `{% with a=1 foo<U+00AD>bar %}` reports
+    /// `'with' received an invalid token: 'foo\xadbar'`, which the Rust default
+    /// would emit with the soft hyphen raw.
+    ///
+    /// The `expect` is a `repr()` of a `str` — a C slot with no failure mode but
+    /// memory exhaustion, where the process is already lost. Falling back to the
+    /// Rust approximation instead would put a *silently wrong* string in a
+    /// message the parity suite compares exactly, which this project treats as
+    /// strictly worse than a loud failure.
+    fn repr(&self, s: &str) -> String {
+        // `Python::attach` is the pinned PyO3's spelling — it has no
+        // `Python::with_gil` (`pyo3-0.29.3/src/marker.rs`) — and it is cheap
+        // here because the caller is already attached.
+        Python::attach(|py| {
+            PyString::new(py, s)
+                .as_any()
+                .repr()
+                .expect("repr() of a str cannot raise")
+                .to_string_lossy()
+                .into_owned()
+        })
     }
 
     fn alloc_slot(&self) -> usize {

@@ -173,6 +173,28 @@ class ErrorParityTests(unittest.TestCase):
         self.assertEqual(str(theirs), str(ours))
         self.assertEqual(token_shape(theirs.token), token_shape(ours.token))
 
+    def test_a_filter_tag_with_no_argument_is_a_value_error_for_both(self):
+        # The second exception whose *class* is Django's rather than ours, and
+        # for the same reason as the `StopIteration` above: `do_filter` unpacks
+        # `token.contents.split(None, 1)` with no length check
+        # (`defaulttags.py:744`), and Django's `parse` catches `Exception`, not
+        # `TemplateSyntaxError`, so the class survives the trip out of the
+        # parser.
+        #
+        # The assertion is needed *in addition* to the `ERRORS` row, and this is
+        # the point of it: the corpus compares `str()` and the token, so a
+        # `TemplateSyntaxError` carrying the same text — which is what a port
+        # that converted the failure would raise — passes every comparison
+        # there. Only the class names the divergence.
+        source = "{% filter %}x{% endfilter %}"
+        theirs = django_failure(source)
+        ours = ours_failure(source)
+        self.assertIsInstance(theirs, ValueError)
+        self.assertIsInstance(ours, ValueError)
+        self.assertNotIsInstance(ours, _native.ParseError, "not a parse error here")
+        self.assertEqual(str(theirs), str(ours))
+        self.assertEqual(token_shape(theirs.token), token_shape(ours.token))
+
     def test_the_error_corpus_covers_every_m5_tag_that_can_fail_to_compile(self):
         """The error-side mirror of the success-corpus coverage test.
 

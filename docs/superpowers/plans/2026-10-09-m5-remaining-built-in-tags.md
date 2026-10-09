@@ -1351,8 +1351,14 @@ of the whole token) — `tags/mod.rs`'s `py_repr_str` is exact on ASCII only.
 **Step 5 — run and watch the switch go green for this group.**
 
 Run: `./scripts/check.sh`
-Expected: PASS — `Ran <N> tests … OK (skipped=6)`, with `N` grown by the rows
-added in Step 2 and the tests added in Step 6.
+
+Expected: **not a full PASS.** A3's coverage gate
+(`test_the_error_corpus_covers_every_m5_tag_that_can_fail_to_compile`) is keyed
+to `M5_TAGS` and is red from Task 1 until Task 7 (§A), so no task in 3-6 can
+reach `OK (skipped=6)`. The deliverable this step checks is narrower and exact:
+the *only* reds are the two declared Task-1 reds — `test_no_m5_tag_is_still_a_stub`
+and the A3 coverage gate — and this group's tags appear in **neither** list. A
+full PASS is Task 7's, and only Task 7's.
 
 **Step 6 — add the error rows, and see each message fail once.** Add the task's
 `(source, expected message)` rows to `tests/parser_error_corpus.py::ERRORS`.
@@ -1372,11 +1378,20 @@ shared part is only that the message states which messages were seen to fail.
 **Files:**
 - Modify: `crates/template-core/src/parser/tags/{filter,firstof,with,widthratio,lorem}.rs`
 - Modify: `tests/parser_corpus.py`, `tests/parser_error_corpus.py`
+- Modify (added by measurement, see this task's corrections): the shared seams
+  the five tags needed — `crates/template-core/src/pyunicode.rs` (`split_once`),
+  `crates/template-core/src/parser/{error.rs,host.rs,mod.rs,registry.rs}`,
+  `crates/template-py/src/lib.rs`,
+  `python/django_rust_templates/_impl/parser.py` (the five node classes),
+  `tests/test_parser_errors.py`, `tests/test_parser_parity.py`.
+  (`tags/mod.rs`'s `py_repr_str` is the ASCII default this task reads but does
+  not change; it landed with Task 1's gate.)
 
 **Interfaces:**
 - Consumes: `NodeDesc::new`/`.with_nodelist`/`.attr`/`.nodelist`
   (`desc.rs`), `AttrValue::{Str, Bool, FilterExpr, List, Map, None}`,
-  `Error::TemplateSyntax`.
+  `Error::TemplateSyntax`; and, as this task adds them, `Parser::compile_filter`,
+  `Parser::py_repr`, `Host::repr`, `ErrorKind::ValueError`, `pyunicode::split_once`.
 - Produces: nothing later tasks call. These five have no shared state.
 
 **`filter`** — `FilterNode(filter_expr, nodelist)` (`defaulttags.py:725-757`).
@@ -1515,6 +1530,48 @@ git add crates/template-core/src/parser/tags/filter.rs \
         tests/parser_corpus.py tests/parser_error_corpus.py
 git commit -m "tags: filter, firstof, with, widthratio and lorem, with every message seen to fail once"
 ```
+
+**Three corrections to the draft, every one of them found by running it.**
+
+*1. `{% filter %}` with no argument is a bare `ValueError`, a shape the draft
+never anticipated.* `_, rest = token.contents.split(None, 1)` (`:744`) has no
+length check, so `{% filter %}` — whose contents hold no separating whitespace
+run — raises `ValueError: not enough values to unpack (expected 2, got 1)` out of
+Django's parser, with the token still attached. The draft listed only the
+`escape`/`safe` refusal. This is reproduced as a new
+`ErrorKind::ValueError(String)` rather than converted to `Syntax` on
+`UnterminatedMarker`'s precedent: a `Syntax` carrying the same text passes every
+*message* comparison and so would hide the divergent *class*, which the shell
+turns into `PyValueError` vs `PySyntaxError`. Measured, `{% filter %}` and
+`{% filter  %}` are the two reachable spellings.
+
+*2. The widthratio five-bit and six-bit cases were the wrong way round.* The
+draft's Step-3 note says `{% widthratio a b c d e %}` is the "at least three
+arguments" case. Measured on the pinned tree it is the opposite: **five** bits
+(`{% widthratio a b c d %}`) falls to the `else` and reports "takes at least
+three arguments", while **six** bits (`{% widthratio a b c d e %}`) enters the
+`as` branch, finds `bits[4] == "d"`, and reports `Invalid syntax … Expecting 'as'
+keyword` (`:1639-1643`). Counting the tag name is the whole difference, and the
+unit test `the_arity_branches_are_measured_not_derived` pins both.
+
+*3. `{% with %}x{% endwith %}` is an error, not a corpus row.* The draft's
+success list included it. Measured, `token_kwargs` removes nothing, so the
+emptiness check fires first and it reports `'with' expected at least one variable
+assignment`. It moved to `ERRORS`; `{% with %}{% endwith %}` and `{% with a
+%}{% endwith %}` are its two reachable spellings.
+
+**Shared seams this task had to add, none of them named in the draft's Files
+list.** The five tags needed four pieces of infrastructure that did not exist:
+`Parser::compile_filter` (a `&str` → `AttrValue::FilterExpr`, borrowed immutably
+so the tags can compile operands without holding `&mut Parser`), `Parser::py_repr`
+plus `Host::repr` (Django interpolates `%r` of user text in `{% with %}` and
+`{% lorem %}`; the default is the ASCII-only Rust repr, the shell overrides it
+with Python's `str.__repr__`), `ErrorKind::ValueError` (above), and
+`pyunicode::split_once` (Python's `str.split(None, 1)`, which preserves the
+remainder's interior whitespace). `{% with %}`'s `extra_context` also forced
+`describe()` in `tests/test_parser_parity.py` to grow a `dict` arm: it is the
+first dict-valued node attribute, and a live dict of `FilterExpression`s has no
+`__eq__`, so two structurally identical parses compared unequal.
 
 ---
 

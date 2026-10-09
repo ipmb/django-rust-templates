@@ -65,6 +65,62 @@ pub fn split(s: &str) -> Vec<&str> {
     s.split(is_space).filter(|part| !part.is_empty()).collect()
 }
 
+/// Python's `str.split(None, 1)` — split on the *first* whitespace run only.
+///
+/// Not `split(s).into_iter().take(2)`, and the difference is observable in the
+/// one place this is used. The remainder keeps its **interior and trailing**
+/// whitespace and loses only the run that separated it, because stopping after
+/// one split is what stops the stripping: measured on the pinned interpreter,
+/// `"filter   lower  |upper".split(None, 1)` is
+/// `['filter', 'lower  |upper']`, while re-joining a full split gives
+/// `'lower |upper'` — a different filter-expression string, and so a different
+/// `FilterExpression`.
+///
+/// A tail that is *all* whitespace yields **one** element, not two with an empty
+/// second: `"a  "` is `['a']`. That is the case a `splitn`-shaped port gets
+/// wrong, and the reason [`crate::parser::tags::filter`] can treat a
+/// one-element result as "no argument at all" — which is exactly Django's
+/// unguarded `_, rest = token.contents.split(None, 1)`.
+///
+/// Returns `str` slices for [`split`]'s reason: nothing here allocates.
+pub fn split_once(s: &str) -> Vec<&str> {
+    let mut chars = s.char_indices();
+    // `start` is Python's "skip the leading run"; nothing but whitespace is no
+    // fields at all rather than one empty field.
+    let start = loop {
+        match chars.next() {
+            Some((_, c)) if is_space(c) => continue,
+            Some((i, _)) => break i,
+            None => return Vec::new(),
+        }
+    };
+
+    let mut first_end = s.len();
+    for (i, c) in chars {
+        if is_space(c) {
+            first_end = i;
+            break;
+        }
+    }
+    if first_end == s.len() {
+        return vec![&s[start..]];
+    }
+
+    // The tail begins after the whole separating run. Reaching the end of the
+    // string here is `"a  "`, whose tail is empty and so is not a field.
+    let mut tail = None;
+    for (i, c) in s[first_end..].char_indices() {
+        if !is_space(c) {
+            tail = Some(first_end + i);
+            break;
+        }
+    }
+    match tail {
+        Some(tail) => vec![&s[start..first_end], &s[tail..]],
+        None => vec![&s[start..first_end]],
+    }
+}
+
 /// The whitespace class as `regex` syntax, for patterns replacing `\s`/`\S`.
 ///
 /// Written with `\x{..}` rather than `\u{..}` because the latter is not
@@ -117,6 +173,40 @@ mod tests {
         assert_eq!(split("  a  "), vec!["a"]);
         assert_eq!(split("\u{1c}"), Vec::<&str>::new());
         assert_eq!(split(""), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn split_once_matches_python() {
+        // Every pair is `s.split(None, 1)` measured on the pinned interpreter
+        // (CPython 3.x via `.venv`), not derived from `split` — the whole
+        // reason this function exists is the three rows where the two differ.
+        let table: &[(&str, &[&str])] = &[
+            ("", &[]),
+            (" ", &[]),
+            ("  \t\n ", &[]),
+            ("a", &["a"]),
+            ("a ", &["a"]),
+            // The tail is empty, so it is not a second field.
+            ("a  ", &["a"]),
+            (" a", &["a"]),
+            ("  a  ", &["a"]),
+            ("a b", &["a", "b"]),
+            ("a  b", &["a", "b"]),
+            // The run is consumed, the *trailing* whitespace is not.
+            ("a b ", &["a", "b "]),
+            ("a  b  c", &["a", "b  c"]),
+            ("a\tb\tc", &["a", "b\tc"]),
+            ("filter", &["filter"]),
+            ("filter   lower  |upper", &["filter", "lower  |upper"]),
+            // U+001C is Python whitespace and not Rust's, which is the
+            // separator table this module exists for.
+            ("\u{1c}", &[]),
+            ("a\u{1c}b", &["a", "b"]),
+            ("\u{1c}a\u{1c}b\u{1c}", &["a", "b\u{1c}"]),
+        ];
+        for (input, expected) in table {
+            assert_eq!(split_once(input), *expected, "split_once({input:?})");
+        }
     }
 
     #[test]

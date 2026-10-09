@@ -126,6 +126,35 @@ impl<'a> Parser<'a> {
         self.host.alloc_slot()
     }
 
+    /// `Parser.compile_filter(token)` — `FilterExpression(token, self)`
+    /// (`base.py:682`).
+    ///
+    /// One argument, exactly as in the pinned source: there is no
+    /// `ignore_invalid` flag in 6.0.9, so every call site passes a bare string.
+    /// The descriptor is the one the `{{ … }}` arm builds, so a tag's
+    /// `filter_expr` attribute and a `VariableNode`'s attribute are the same
+    /// shape on the wire.
+    ///
+    /// **The error comes back bare, carrying no token.** Django wraps the whole
+    /// `compile_func(self, token)` call in `except Exception as e: raise
+    /// self.error(token, e)` (`base.py:566-567`), so the token attached to a
+    /// tag's filter failure is the *tag's* — attaching one here would pre-empt
+    /// that and make `error()`'s innermost rule unreachable. The `{{ … }}` arm
+    /// has to call `self.error` itself only because it is not inside that `try`.
+    pub fn compile_filter(&self, source: &str) -> Result<AttrValue, Error> {
+        parse_filter_expression(source, self.host)
+            .map(|expression| AttrValue::FilterExpr(Box::new(expression)))
+    }
+
+    /// Python's `repr()` of `s`, through the host — see [`Host::repr`].
+    ///
+    /// A forward rather than a call to `py_repr_str`, because the shell's
+    /// implementation is Python's own `repr` and `py_repr_str` is only exact on
+    /// ASCII. `{% with %}` is the caller whose argument makes that matter.
+    pub fn py_repr(&self, s: &str) -> String {
+        self.host.repr(s)
+    }
+
     /// `Parser.next_token` — `self.tokens.pop()`.
     pub fn next_token(&mut self) -> Option<Token> {
         self.tokens.pop()

@@ -85,6 +85,52 @@ TEMPLATES = [
     "{% endspaceless %}{% endautoescape %}",
     "{% comment %}{% spaceless %}{% endcomment %}{% spaceless %}x{% endspaceless %}",
     "text{% csrf_token %}more{% debug %}end",
+    # --- filter: the synthetic `var|…` source, and its body -----------------
+    # `do_filter` does not compile the token it was given; it rebuilds a
+    # variable around the argument (`defaulttags.py:745`), so the descriptor's
+    # `FilterExpr.token` is `"var|lower"` and `var` names nothing in the
+    # template.
+    "{% filter lower %}X{% endfilter %}",
+    "{% filter lower|capfirst %}X{% endfilter %}",
+    "{% filter lower %}{% endfilter %}",
+    "{% filter lower %}{{ x }}{% endfilter %}",
+    # --- firstof: the `as` form, the fallback literal, and the bare list ----
+    "{% firstof a %}",
+    "{% firstof a b c %}",
+    "{% firstof a b as v %}",
+    '{% firstof a "fallback" %}',
+    "{% firstof a|lower b|upper %}",
+    "{% firstof a b as v %}x",
+    # `as` is read from the *end*, and the argument count is checked before it
+    # is stripped, so this is a legal tag with no variables at all — measured.
+    "{% firstof as v %}",
+    # --- with: the kwargs form, the legacy `as` form, and both together -----
+    "{% with a=1 %}{{ a }}{% endwith %}",
+    "{% with a=1 b=2 %}{{ a }}{% endwith %}",
+    "{% with a=1 %}{% endwith %}",
+    "{% with a=1 b=2 %}{{ a }}{{ b }}{% endwith %}",
+    # `token_kwargs` compiles the value side, so the filter chain is part of
+    # the tree.
+    "{% with a=1|add:2 %}{{ a }}{% endwith %}",
+    # The legacy form: `support_legacy=True` is what makes it reachable, and
+    # the name is the third bit while the value is the first (`base.py:1200`).
+    "{% with a as b %}{{ b }}{% endwith %}",
+    "{% with a as b and c as d %}{{ b }}{% endwith %}",
+    # --- widthratio: all three operands are filter expressions -------------
+    "{% widthratio a b 100 %}",
+    "{% widthratio a b 100 as w %}",
+    "{% widthratio a|add:1 b 100 %}",
+    # The width is `compile_filter`ed too, not `int()`ed — this row is what
+    # separates the two.
+    "{% widthratio a b c|add:1 %}",
+    # --- lorem: each optional bit, and the defaults ------------------------
+    "{% lorem %}",
+    "{% lorem 3 %}",
+    "{% lorem 2 p %}",
+    "{% lorem 2 w random %}",
+    # A lone `w` is the *method*: the method pop runs before the count pop.
+    "{% lorem w %}",
+    "{% lorem random %}",
     # --- variables, and the `contains_nontext` they set ---------------------
     # M3's half of §10.4's ordering gate. `{{ … }}` is what sets
     # `contains_nontext` — measured: `text{% extends %}` is legal and

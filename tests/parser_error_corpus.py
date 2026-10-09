@@ -126,6 +126,62 @@ ERRORS = [
     ("{% resetcycle %}", "No cycles in template."),
     ("{% resetcycle x %}", "Named cycle 'x' does not exist."),
     ("{% resetcycle a b %}", "'resetcycle' tag accepts at most one argument."),
+    # --- filter ------------------------------------------------------------
+    (
+        "{% filter escape %}x{% endfilter %}",
+        '"filter escape" is not permitted. Use the "autoescape" tag instead.',
+    ),
+    (
+        "{% filter safe %}x{% endfilter %}",
+        '"filter safe" is not permitted. Use the "autoescape" tag instead.',
+    ),
+    # The chain is walked in order, so the offending filter is named by its own
+    # position and not by the first one.
+    (
+        "{% filter upper|safe %}x{% endfilter %}",
+        '"filter safe" is not permitted. Use the "autoescape" tag instead.',
+    ),
+    # Not a `TemplateSyntaxError` at all: `do_filter` unpacks
+    # `token.contents.split(None, 1)` with no length check
+    # (`defaulttags.py:744`), so `{% filter %}` — whose contents hold no
+    # separating run — raises a bare `ValueError`. Django's `parse` catches
+    # `Exception`, not `TemplateSyntaxError`, and re-raises the same object with
+    # `.token` attached, which is why the token comparison below still bites.
+    #
+    # The *class* is pinned separately, by
+    # `test_a_filter_tag_with_no_argument_is_a_value_error_for_both` — this list
+    # only compares `str()` and the token, so a `TemplateSyntaxError` carrying
+    # the same text would satisfy it.
+    ("{% filter %}x{% endfilter %}", "not enough values to unpack (expected 2, got 1)"),
+    # --- firstof -----------------------------------------------------------
+    ("{% firstof %}", "'firstof' statement requires at least one argument"),
+    # --- with --------------------------------------------------------------
+    ("{% with %}{% endwith %}", "'with' expected at least one variable assignment"),
+    ("{% with x %}{% endwith %}", "'with' expected at least one variable assignment"),
+    # The leftover bit after `token_kwargs` has taken what it recognised, and
+    # it goes through Python's `repr` — the tag name too.
+    ("{% with a=1 b %}{% endwith %}", "'with' received an invalid token: 'b'"),
+    # A stray `and` in *kwarg* form is not a separator: only the legacy branch
+    # consumes it (`base.py:1203-1206`).
+    ("{% with a=1 and %}{% endwith %}", "'with' received an invalid token: 'and'"),
+    # --- widthratio --------------------------------------------------------
+    ("{% widthratio a b %}", "widthratio takes at least three arguments"),
+    # Five bits — tag plus four — is the `else`, so the count message is about a
+    # tag that does have three arguments.
+    ("{% widthratio a b c d %}", "widthratio takes at least three arguments"),
+    # Six bits takes the *`as` branch*, whose keyword is at index 4; the plan
+    # for this task had this row down as the three-argument case.
+    (
+        "{% widthratio a b c d e %}",
+        "Invalid syntax in widthratio tag. Expecting 'as' keyword",
+    ),
+    (
+        "{% widthratio a b c nope w %}",
+        "Invalid syntax in widthratio tag. Expecting 'as' keyword",
+    ),
+    # --- lorem -------------------------------------------------------------
+    ("{% lorem 3 p nope %}", "Incorrect format for 'lorem' tag"),
+    ("{% lorem 1 2 %}", "Incorrect format for 'lorem' tag"),
     # --- the innermost token, across a nested parse -------------------------
     (
         "{% autoescape on %}\n{% now a b %}\n{% endautoescape %}",

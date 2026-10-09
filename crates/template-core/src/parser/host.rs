@@ -108,6 +108,31 @@ pub trait Host {
         Ok(())
     }
 
+    /// Python's `repr()` of a `str`, for the messages Django builds with `%r`.
+    ///
+    /// Two M5 tags interpolate **user text** through `%r`: `{% with %}`'s
+    /// `"%r received an invalid token: %r"` (`defaulttags.py:1682-1684`, both
+    /// `bits[0]` and `remaining_bits[0]`) and `{% resetcycle %}`'s tag name.
+    /// `remaining_bits[0]` is an arbitrary token, so the escape rules matter:
+    /// measured on the pinned tree,
+    ///
+    /// ```text
+    /// {% with a=1 foo<U+00AD>bar %}
+    /// → 'with' received an invalid token: 'foo\xadbar'
+    /// ```
+    ///
+    /// `U+00AD` is category `Cf`, and Python escapes every non-`Py_UNICODE_ISPRINTABLE`
+    /// code point — all of Cf, Cs, Co, Cn, Zl, Zp and Zs — while Rust's
+    /// `char::is_control()` is Cc alone. So `py_repr_str`, which is exact on
+    /// ASCII and asserts it, is the **default** here rather than the
+    /// implementation: it keeps `cargo test -p template-core` free of Python
+    /// (§10.4), and the shell overrides this with the real `repr()`. A Rust-only
+    /// test that needs a non-ASCII token here must supply a host; widening
+    /// `py_repr_str` instead is the one thing its doc comment forbids.
+    fn repr(&self, s: &str) -> String {
+        crate::parser::tags::py_repr_str(s)
+    }
+
     /// Reserve an entry in the per-parse reference table and return its index.
     ///
     /// The table is the one side collection two tags share, and this is the only

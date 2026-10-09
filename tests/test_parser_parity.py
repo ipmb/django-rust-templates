@@ -161,6 +161,19 @@ def describe(value):
         return {"safe_str": str(value)}
     if isinstance(value, list):
         return [describe(item) for item in value]
+    if isinstance(value, dict):
+        # `AttrValue::Map`'s product — `WithNode.extra_context` is the first
+        # dict-valued attribute any node carries, and `{% include %}`'s `with`
+        # option is the second at M7. Without this arm the dict is returned as
+        # it stands, and its values are live `FilterExpression`s, which define
+        # no `__eq__`: two identical `{% with %}` trees compared unequal by
+        # identity. That is the same failure the `FilterExpression` and
+        # `Variable` arms above were added for, one container further out.
+        #
+        # No `"type"` marker, for the `list` arm's reason: nothing else
+        # describes to a string-keyed dict, and a marker would show up in every
+        # diff as noise around the keys that actually differ.
+        return {key: describe(item) for key, item in value.items()}
     return value
 
 
