@@ -41,6 +41,7 @@ humanize.py:3	django/contrib/humanize/templatetags/humanize.py	3	-	from decimal 
 humanize.py:80	django/contrib/humanize/templatetags/humanize.py	80	-	except (TypeError, ValueError, InvalidOperation):	-
 db/models/fields/__init__.py:1818	django/db/models/fields/__init__.py	1818	-	except (decimal.InvalidOperation, TypeError, ValueError):	-
 base.py:60	django/template/base.py	60	-	-	-
+base.py:63	django/template/base.py	63	-	from django.utils.inspect import lazy_annotations, signature	-
 base.py:75	django/template/base.py	75	-	-	-
 django/template/base.py:97-101	django/template/base.py	97	101	-	-
 base.py:109-110	django/template/base.py	109	110	def __str__(self):	return self.msg % self.params
@@ -597,6 +598,7 @@ html.py:492	django/utils/html.py	492	-	-	-
 html.py:496-499	django/utils/html.py	496	499	def urlize(text, trim_url_limit=None, nofollow=False, autoescape=False):	-
 django/utils/html.py:502-507	django/utils/html.py	502	507	avoid_wrapping	-
 html.py:502-507	django/utils/html.py	502	507	avoid_wrapping	-
+django/utils/inspect.py:126-134	django/utils/inspect.py	126	134	def signature(obj):	return inspect.signature(obj)
 safestring.py:64-78	django/utils/safestring.py	64	78	@keep_lazy(SafeString)	return SafeString(s)
 text.py:36	django/utils/text.py	36	-	\r\n	-
 text.py:193-261	django/utils/text.py	193	261	-	-
@@ -645,8 +647,10 @@ tests/template_tests/test_nodelist.py:44-86	tests/template_tests/test_nodelist.p
 test_parser.py:36	tests/template_tests/test_parser.py	36	-	-	-
 test_parser.py:49	tests/template_tests/test_parser.py	49	-	<Lexer template_string="{% for i in 1 %}{{ a...", verbatim=False>	-
 test_partials.py:171	tests/template_tests/test_partials.py	171	-	def test_template_without_extra_data_attribute(self):	-
+tests/template_tests/tests.py:12-13	tests/template_tests/tests.py	12	13	if TYPE_CHECKING:	type AnnotatedKwarg = str
 .django/tests/template_tests/tests.py:114-123	tests/template_tests/tests.py	114	123	assertRaises(RuntimeError)	-
 tests.py:148-155	tests/template_tests/tests.py	148	155	def test_compile_tag_extra_data(self):	self.assertEqual(t.extra_data["extra_data"], "CUSTOM_DATA")
 .django/tests/template_tests/tests.py:148-155	tests/template_tests/tests.py	148	155	-	-
+tests/template_tests/tests.py:231-243	tests/template_tests/tests.py	231	243	def test_callable_uses_deferred_annotations(self):	self.assertEqual(template.render(Context({"obj": MyObject()})), "")
 tests/test_host_tags.py:32-37	tests/test_host_tags.py	32	37	PROJECT_ROOT = Path(__file__).resolve().parent.parent	sys.path.insert(0, str(_path))
 .django/tests/utils_tests/test_html.py:204-217	tests/utils_tests/test_html.py	204	217	-	-

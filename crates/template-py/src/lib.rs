@@ -1889,7 +1889,19 @@ impl LookupTarget for PyTarget {
                 Ok(called) => Ok(self.target_for(called.unbind())),
                 Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                     // Django's fallback: signature() then bind() (`base.py:1002-1013`).
-                    let inspect = match py.import("inspect") {
+                    //
+                    // **`django.utils.inspect.signature`, not `inspect.signature`**
+                    // — and the difference is measured, not stylistic. Django
+                    // imports its own wrapper (`base.py:63`), which on Python
+                    // 3.14+ passes `annotation_format=Format.FORWARDREF` so a
+                    // *deferred* annotation is never evaluated. The bare
+                    // `inspect.signature` evaluates them and raises whatever the
+                    // annotation evaluates to: measured, `{{ obj.method }}` on a
+                    // callable annotated `value: Undefined` raises `NameError`
+                    // through this path and renders `''` through Django's.
+                    // `django/utils/inspect.py:126-134` is the wrapper;
+                    // `tests/template_tests/tests.py:231-243` is the row.
+                    let inspect = match py.import("django.utils.inspect") {
                         Ok(inspect) => inspect,
                         Err(error) => {
                             self.pending.set(Some(error));

@@ -29,6 +29,7 @@ would pass against a port that raised a Rust-defined exception with the same tex
 import sys
 import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
@@ -38,6 +39,7 @@ if str(DJANGO_CHECKOUT) not in sys.path:
 
 from django.template import Context, Engine  # noqa: E402
 from django.template.base import BaseContext, Variable  # noqa: E402
+from django.utils.version import PY314  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 from django_rust_templates.render import render_string  # noqa: E402
@@ -97,6 +99,40 @@ class _PlainWithAFalsyClassAttribute:
 
     def __init__(self):
         self.zero = 7
+
+
+if TYPE_CHECKING:
+    # Never defined at runtime — that is the whole point. ``AnnotatedKwarg`` is
+    # the name Django's own row uses, and it lives under ``TYPE_CHECKING`` there
+    # too (``tests/template_tests/tests.py:12-13``), so the two rows have the
+    # same shape rather than merely the same conclusion.
+    type AnnotatedKwarg = str
+
+
+class _DeferredAnnotation:
+    """A callable whose annotation names a symbol that exists only for a
+    type-checker.
+
+    Python 3.14 evaluates annotations lazily (PEP 649), so this class body is
+    fine on its own; the name is resolved only by something that *asks for the
+    annotation's value*. ``Variable._resolve_lookup`` reaches this callable
+    through the ``TypeError``-then-``signature()`` arm (``base.py:1002-1013``),
+    and which ``signature`` is called decides whether the annotation is ever
+    evaluated: ``django.utils.inspect.signature`` passes
+    ``Format.FORWARDREF`` (``django/utils/inspect.py:126-134``) and leaves it
+    alone, while the bare ``inspect.signature`` evaluates it and raises
+    ``NameError`` out of the resolver.
+
+    **The annotation is written as a bare name, not as a string**, and that is
+    the difference between a row that measures this and one that measures
+    nothing: ``value: "AnnotatedKwarg"`` is already a string, so *every*
+    ``signature`` leaves it alone and the two implementations agree. The first
+    draft of this class quoted it and passed against the pre-fix Rust.
+    """
+
+    @staticmethod
+    def uses_deferred_annotations(value: AnnotatedKwarg):  # noqa: F821
+        return value
 
 
 class _FalsyClassAttributeContext(BaseContext):
@@ -344,6 +380,28 @@ class ResolverParityTests(_ParityTest):
                     Variable("obj.boom")._resolve_lookup(theirs_context),
                 )
                 self.assertEqual(_native.resolve("obj.boom", ours_context), "<%s>")
+
+    @unittest.skipUnless(PY314, "Deferred annotations are Python 3.14+ only")
+    def test_the_callable_arm_asks_for_the_annotation_eagerly(self):
+        """The row that pins **which** ``signature`` the callable arm calls.
+
+        Every other row in this class goes through the callable arm's *first*
+        half — ``call0()`` raising ``TypeError`` — and then the ``signature()``
+        fallback, which succeeds on any ordinary callable whichever
+        ``signature`` it is. So the arm's two implementations are
+        indistinguishable until an annotation is expensive to evaluate, and a
+        deferred one is the cheapest way to make that observable: the port
+        called the bare ``inspect.signature``, which evaluates the annotation,
+        and ``AnnotatedKwarg`` does not exist.
+
+        The failure this pins was shipped in M8 and the M8 gate could not see
+        it: the only row that reaches it is
+        ``tests/template_tests/tests.py:231-243``, which runs inside a suite
+        whose result was reported as a count. Caught by M9 recon.
+        """
+        self.assert_resolves_like_django(
+            "obj.uses_deferred_annotations", {"obj": _DeferredAnnotation()}
+        )
 
 
 def _outcome(call):
