@@ -69,7 +69,7 @@ def parser():
     `find_filter` raises `Invalid filter` for every name. This is the same trap
     `tests/test_parser_errors.py` records: the libraries have to come from an
     `Engine` instance, because `template_builtins` is set in `Engine.__init__`
-    (`engine.py:62-63`) rather than on the class. This is the path
+    (`engine.py:63`) rather than on the class. This is the path
     `Engine.compile_template` itself takes.
     """
     engine = Engine()

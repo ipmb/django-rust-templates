@@ -381,7 +381,6 @@ defaulttags.py:1676	django/template/defaulttags.py	1676	-	support_legacy=True	-
 defaulttags.py:1682-1684	django/template/defaulttags.py	1682	1684	"%r received an invalid token: %r"	-
 defaulttags.py:1683	django/template/defaulttags.py	1683	-	remaining_bits[0]	-
 engine.py:15-16	django/template/engine.py	15	16	filters	-
-engine.py:62-63	django/template/engine.py	62	63	-	-
 engine.py:63	django/template/engine.py	63	-	self.template_builtins = self.get_template_builtins(self.builtins)	-
 engine.py:194	django/template/engine.py	194	-	-	-
 library.py:211-212	django/template/library.py	211	212	delete_first_token	-
