@@ -263,9 +263,21 @@ decorator away.
 **Why this decides deliverable 1's shape.** §3.2's checkout check catches an
 `xfail` introduced by editing `.django/` — the realistic path — and nothing else:
 not a `conftest`, not a runner change, not a Django that ships one. Reading the
-summary line catches all of them. So the assertion is the line, not the count —
-the two strings `scripts/run_django_suite.sh` ends on, as the acceptance run
-prints them:
+summary line catches all of them.
+
+And the "line rather than status" choice is not a preference; it is forced. The
+review measured the missing third case, both kinds in one run:
+`FAILED (expected failures=1, unexpected successes=1)`, exit 1. So
+`expected failures=N` rides on `OK` alone and on a `FAILED` decided by another
+qualifier beside one — it **never sets the verdict, in any combination** — and
+the pinned interpreter's source says why: `TestResult.wasSuccessful` is
+`failures == errors == 0 and not unexpectedSuccesses`, with no `expectedFailures`
+term at all (`inspect.getsource`, CPython 3.14.4). No guard that reads an exit
+status could ever catch this clause. The string comparison is the only available
+mechanism, not the cheapest.
+
+So the assertion is the line, not the count — the two strings
+`scripts/run_django_suite.sh` ends on, as the acceptance run prints them:
 
 ```
 Ran 1547 tests in 3.5s      <- the prefix is pinned; the elapsed time varies

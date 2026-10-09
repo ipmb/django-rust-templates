@@ -47,8 +47,22 @@ from pathlib import Path
 # needs the string because the status agrees with it. Put both rows in one module
 # and the unexpected success dominates the verdict —
 # `FAILED (expected failures=1, unexpected successes=1)` — the same asymmetry
-# stated a third way. A reader who sees only the qualifier-parsing branch here
-# might take the silence for an oversight.
+# stated a third way.
+#
+# That third line is the whole argument for comparing a string, so it is worth
+# reading twice: **`expected failures=N` never sets the verdict, in any
+# combination.** Alone it rides on `OK`; beside an unexpected success it rides on
+# a `FAILED` the other qualifier decided. It is not that the current gate misses
+# it — no gate reading the exit status ever could, and the pinned interpreter's
+# own source says so: `unittest.result.TestResult.wasSuccessful` is
+# `failures == errors == 0 and not unexpectedSuccesses`, and `expectedFailures`
+# does not appear in it (`inspect.getsource`, CPython 3.14.4). So the whole-line
+# pin is the *only* available mechanism for §2:33's "zero `xfail`ed", not the
+# cheapest one — which is the answer to a later reader asking why this parses a
+# string when there is an exit code in hand.
+#
+# A reader who sees only the qualifier-parsing branch here might take the silence
+# for an oversight.
 #
 # It is a literal because this is an *instrument* condition — Django's output
 # format, which §2 describes in prose ("1547 tests run; 1541 pass; exactly 6
