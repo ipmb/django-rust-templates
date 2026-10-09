@@ -190,7 +190,7 @@ def django_exception(error, host=None):
       (`python/django_rust_templates/host.py:555`), on the way out — so it
       always names a `call_tag` failure too;
     * a host error is **terminal**: the parse loop's arm is
-      `Err(error) => Err(error)` (`crates/template-core/src/parser/mod.rs:420-429`) and its caller is
+      `Err(error) => Err(error)` (`crates/template-core/src/parser/mod.rs:434-443`) and its caller is
       `?`, so no `call_tag` failure is caught and survived, and the failing call
       is necessarily the last one to have touched either field.
 

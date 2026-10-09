@@ -292,7 +292,7 @@
       <span class="cap">filters answered by Rust — the 57 built-ins, plus the 9 Django's five tag libraries register</span>
     </div>
     <div class="stat is-open">
-      <span class="num">24 / 27</span>
+      <span class="num">25 / 27</span>
       <span class="cap">built-in tags implemented in Rust</span>
     </div>
     <div class="stat is-done">
@@ -409,16 +409,16 @@
   </section>
 
   <section>
-    <h2>Built-in tags <span class="count">24 of 27 done</span></h2>
+    <h2>Built-in tags <span class="count">25 of 27 done</span></h2>
     <p class="sub">
-      The twenty-four below are compiled by Rust. The three that follow are parsed by
+      The twenty-five below are compiled by Rust. The two that follow are parsed by
       Rust but still compiled and executed by Django's Python tag functions.
     </p>
     <ul class="chips">
       <li>{% autoescape %}</li><li>{% block %}</li><li>{% comment %}</li><li>{% csrf_token %}</li>
       <li>{% cycle %}</li><li>{% debug %}</li><li>{% extends %}</li><li>{% filter %}</li>
       <li>{% firstof %}</li><li>{% for %}</li><li>{% if %}</li><li>{% ifchanged %}</li>
-      <li>{% include %}</li><li>{% lorem %}</li><li>{% now %}</li><li>{% partial %}</li>
+      <li>{% include %}</li><li>{% lorem %}</li><li>{% now %}</li><li>{% partial %}</li><li>{% partialdef %}</li>
       <li>{% regroup %}</li><li>{% resetcycle %}</li><li>{% spaceless %}</li><li>{% templatetag %}</li>
       <li>{% url %}</li><li>{% verbatim %}</li><li>{% widthratio %}</li><li>{% with %}</li>
     </ul>
@@ -430,10 +430,6 @@
       <li class="todo">
         <span class="name">{% querystring %}<span>query-string rewriting</span></span>
         <span class="why">Still Django's tag. Small, and it belongs with the rest of the request-facing helpers.</span>
-      </li>
-      <li class="wip">
-        <span class="name">{% partialdef %}<span>named partials</span></span>
-        <span class="why">Rust's registry reserves the name but has no compile function for it yet, so a template using it stops at compile. Unlike <code>{% partial %}</code>, whose node is built from a name alone, this one's body has to carry its nodelist across the seam. <em>The pair is the newest part of Django's template language.</em></span>
       </li>
     </ul>
   </section>

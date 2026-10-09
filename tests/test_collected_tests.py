@@ -288,7 +288,51 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # read from the failure text: that text says "2 rows" whether the two arrived as
 # two additions or as three additions minus one rename, and only the second is
 # what happened.
-PINNED = 449
+# 449 → 457 is M13 Task 4, **eight** net rows, and the diff's two numbers are both
+# worth writing down: `git diff tests/` since `cea06d9` is `+12/-4`, so the net
+# and "eight new rows and no rename" are the same +8 while the shape is not.
+# `tests/test_partials_rust.py` gains **two classes, eight rows between them** —
+# and this count was wrong on its first pass in exactly the way this comment
+# exists to catch: it named `PartialDefSeamTests` and stopped, as though the file
+# had gained one class, and discovery then disagreed by four. Both classes are
+# Task 4's, because Task 4 is what needs them.
+#
+# `PartialDefSeamTests`, four rows and all of them the ones Tasks 2 and 3 could
+# not write because neither tag existed end-to-end until this task: a use
+# *before* its definition renders (the live mapping observed through the shell
+# rather than through a Rust row), an `inline` definition renders at the point of
+# use, a duplicate definition names the origin template
+# (`defaulttags.py:1252-1256`, the check and the message quoting
+# `parser.origin.name`), and the stored `PartialTemplate` and the returned
+# `PartialDefNode` hold one nodelist **by identity** — the last one needs a spy on
+# the seam, because two equal-but-not-identical trees render identically.
+#
+# `ReferenceTableTests`, four more, are Task 5's rows landing in Task 4's commit:
+# Task 5 was written **conditional** on its identity row failing, and the
+# condition was answered by the acceptance suite instead of by the row (27 red on
+# a filter expression reaching a body with no reference table), so the rows and
+# the change they pin are Task 4's by construction. A body containing a filter
+# expression materialises at all; a partial body and the outer template share one
+# `CycleNode` **by identity**, which output cannot witness; the same shape
+# end-to-end renders the pinned tree's `'aaa'`; and a stateful library tag in a
+# body is built once (`'012'`), which guards a *different* defect — a body
+# re-parsed or re-materialised per render — and is named in the file as not the
+# table's proof.
+#
+# The other four rows are three renames and one re-pairing: `tests/test_tag_inventory.py`'s
+# `test_the_last_unimplemented_entry_is_the_m13_pair_tail` became
+# `test_no_builtin_tag_is_still_a_stub`,
+# `tests/test_parser_parity.py`'s
+# `test_an_unimplemented_tag_is_its_own_kind_at_the_ffi` became
+# `test_the_unimplemented_kind_has_no_producer_and_still_maps`, and
+# `tests/test_host_tags.py`'s two rows became
+# `test_the_nested_region_never_reaches_the_partial_seam` and
+# `test_the_bare_template_reaches_the_seam_once`. Both of the last two are the
+# same move — the discriminator stopped being "Rust compiles this tag" (there is
+# no tag only one side compiles now) and became "the Rust *route* is not taken" —
+# which is why it is the one change here that had to replace two rows with two
+# rows rather than rename one. So 449 + 12 - 4 = 457.
+PINNED = 457
 
 
 def collected() -> unittest.TestSuite:

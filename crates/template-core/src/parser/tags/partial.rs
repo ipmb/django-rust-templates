@@ -9,10 +9,12 @@
 //! `PartialNode`, so the compiled node closes over parse state a `NodeDesc`
 //! cannot represent at all. The argument check stays here because it raises
 //! *before* that call; everything after it crosses the seam
-//! (`Host::partial_node`), and the registry's own note (`crates/template-core/src/parser/registry.rs:117-132`)
-//! is where that rule and its reason are written down — still as "flagged, not
-//! resolved", because the note predates this task and describes the choice, not
-//! its outcome. What this file is: the first half of that choice, made.
+//! (`Host::partial_node`), and the registry's own note (`crates/template-core/src/parser/registry.rs:117-134`)
+//! is where that rule and its reason are written down. That note read "flagged,
+//! not resolved" when this file landed, because it predates the task that
+//! placed the pair and described the choice rather than its outcome; the task
+//! that emptied the stub list is where it was rewritten, and it now records the
+//! choice as taken. What this file is: the first half of that choice, made.
 
 use crate::parser::desc::NodeDesc;
 use crate::parser::error::Error;

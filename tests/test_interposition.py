@@ -2110,7 +2110,28 @@ class FabricatedNameTests(unittest.TestCase):
         green forever.
         """
         registries = self.registries()
+        # The one registry that is legitimately empty, and the file that owns
+        # that fact: `tests/test_tag_inventory.py::test_no_builtin_tag_is_still_a_stub`
+        # asserts `builtin_tag_stub_names()` is `set()` *with* a control of its
+        # own. Asserting it non-empty here would be two rows claiming one fact in
+        # opposite directions, which is a disagreement a later milestone would
+        # have to find and adjudicate. It stays in `registries()`, so the row
+        # above still covers it — a "no name carries this prefix" claim is
+        # satisfied vacuously by an empty registry, and the emptiness itself is
+        # the other file's claim to make.
+        #
+        # The exclusion is asserted to name something, so a future edit that
+        # removed the registry from `registries()` cannot leave this skip behind
+        # as a silent no-op.
+        empty_by_design = {"builtin_tag_stub_names"}
+        self.assertTrue(
+            empty_by_design <= set(registries),
+            f"`empty_by_design` names {sorted(empty_by_design - set(registries))}, "
+            f"which is no longer in `registries()` — the exclusion is now dead",
+        )
         for registry, names in sorted(registries.items()):
+            if registry in empty_by_design:
+                continue
             with self.subTest(registry=registry):
                 self.assertTrue(names, f"{registry} is empty, so the row is vacuous")
 

@@ -15,14 +15,18 @@ and nothing at all about our engine.
 
 Error *text* cannot close the hole — our messages are ported verbatim from
 Django's, so `{% for %}` with a missing argument raises identical text whichever
-side compiled it. The discriminator has to be something only one side does, and
-that is `{% partialdef %}`: its Rust entry is still a stub
-(`builtin_tag_stub_names()` contains it), so a Rust-parsed body would raise
-`UnimplementedTag` (`measured`), while a Django-parsed one runs `do_partialdef`
-and stores into `parser.extra_data["partials"]` (`defaulttags.py:1250-1251`).
-The contrast is asserted below rather than argued in this docstring, because a
-discriminator nobody has seen fail on both sides is the same kind of comment
-this file exists to replace.
+side compiled it. **Until M13 the discriminator was a tag only one side
+implemented**: `{% partialdef %}` was a Rust stub, so a Rust-parsed body raised
+`UnimplementedTag`, while a Django-parsed one ran `do_partialdef`, which stores
+into `parser.extra_data["partials"]` (`defaulttags.py:1250-1251`). M13's Task 4
+gave both tags Rust bodies (`builtin_tag_stub_names()` is empty now), so the
+discriminator is the **route** rather than the tag: the claim is that
+`ShellHost.register_partial_def` — the seam every Rust-compiled
+`{% partialdef %}` crosses — is *not* reached from a body Django parses. The two
+rows below are that claim and the control it cannot be read without: same host
+class, same tag, one difference in the source. The contrast is asserted rather
+than argued in this docstring, because a discriminator nobody has seen fail on
+both sides is the same kind of comment this file exists to replace.
 """
 
 import sys
@@ -42,12 +46,12 @@ from django.template.exceptions import TemplateSyntaxError  # noqa: E402
 from django_rust_templates import _native, render  # noqa: E402
 from django_rust_templates import host as host_module  # noqa: E402
 
-# `{% partialdef %}` is the discriminator; see the module docstring. It sits
-# between the block tag's opening and closing tokens, so it is inside the region
-# Django's own `parse` walks.
+# `{% partialdef %}` is the discriminator's tag; see the module docstring. It
+# sits between the block tag's opening and closing tokens, so it is inside the
+# region Django's own `parse` walks.
 BODY_SOURCE = "{% wrap %}{% partialdef p %}x{% endpartialdef %}{% endwrap %}"
-# The same tag with no host block around it: Rust compiles this one, and its
-# stub is what makes the difference measurable.
+# The same tag with no host block around it: this one is Rust's parse, and the
+# seam it crosses is what makes the difference measurable.
 BARE_SOURCE = "{% partialdef p %}x{% endpartialdef %}"
 
 # `.django`'s own templatetags package, which is what `Engine(libraries=…)`
@@ -105,38 +109,57 @@ class HostBlockTagRegionTests(unittest.TestCase):
 
         ensure_settings()
 
-    def test_a_host_block_tags_body_is_parsed_by_django_and_that_is_asserted(self):
-        """The nested region is Django-parsed, and this makes that visible.
+    def test_the_nested_region_never_reaches_the_partial_seam(self):
+        """The host route's half, asserted on the seam rather than on a tag.
 
-        When a host tag's compile function calls `parser.parse(...)` — which is
-        `Library.simple_block_tag` verbatim (`library.py:211-212`) — the body is
-        parsed by *Django's* `Parser.parse`, so every tag inside it is compiled
-        by Django and `assert_trees_match` cannot tell that from Rust having
-        done it. **A tree comparison over such a body is therefore not evidence
-        about our engine**, which is the vacuous-gate failure this project has
-        hit twice.
+        `do_partialdef` ran — that is the row above — and it ran inside Django's
+        `Parser.parse`, so it reached `_impl/defaulttags.py`'s compile function
+        and **not** `ShellHost.register_partial_def`. That is the hole this
+        module documents, and it is now *per-route* rather than per-tag: M13 gave
+        both tags Rust bodies, and this body is still Django's because
+        `Library.simple_block_tag`'s compile function parses it host-side.
 
-        The assertion is that `do_partialdef` ran, which is only reachable
-        through Django's parse: Rust's entry for the name returns
-        `UnimplementedTag` (the row below pins that).
+        A spy rather than an `UnimplementedTag` assertion, because the class
+        assertion M13 removed was a claim about a *stub*, and the claim that
+        survives is about a *route*.
         """
         engine = _hosting_engine()
         host = host_module.ShellHost(render.parser_for("", engine))
+        calls = []
+        original = host.register_partial_def
 
+        def spy(*args, **kwargs):
+            calls.append(args)
+            return original(*args, **kwargs)
+
+        host.register_partial_def = spy
         _native.parse(BODY_SOURCE, host=host)
 
+        self.assertEqual(calls, [], "the host route reached the Rust partial seam")
         self.assertIn("p", host.parser.extra_data["partials"])
 
-    def test_the_discriminator_is_Rust_compiling_the_same_tag(self):
-        """The other side of the contrast the row above rests on.
+    def test_the_bare_template_reaches_the_seam_once(self):
+        """The Rust route's half, over the same host class and the same tag.
 
-        Without this, "the body reached Django" is a claim about a parse that
-        might equally have been Rust's — and since our messages are Django's,
-        only a tag *one* side implements can tell them apart. `partialdef` is
-        that tag, and this is what Rust does with it.
+        The control the row above needs: the spy *does* fire when Rust drives the
+        parse, so `[]` there is a fact about the route and not about a spy that
+        never fires. Same host, same tag, one argument's difference in the
+        source.
         """
-        with self.assertRaises(_native.UnimplementedTag):
-            _native.parse(BARE_SOURCE)
+        engine = _hosting_engine()
+        host = host_module.ShellHost(render.parser_for("", engine))
+        calls = []
+        original = host.register_partial_def
+
+        def spy(*args, **kwargs):
+            calls.append(args)
+            return original(*args, **kwargs)
+
+        host.register_partial_def = spy
+        _native.parse(BARE_SOURCE, host=host)
+
+        self.assertEqual(len(calls), 1)
+        self.assertIn("p", host.parser.extra_data["partials"])
 
 
 class HostParserStateTests(unittest.TestCase):

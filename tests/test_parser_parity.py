@@ -57,6 +57,7 @@ from django.template.base import (  # noqa: E402
     NodeList,
     Origin,
     Parser,
+    PartialTemplate,
     Token,
     TokenType,
 )
@@ -233,6 +234,11 @@ def describe(value):
     # equal — which is what adding variables to the corpus reported.
     if isinstance(value, DeferredSubDict):
         return describe_deferred_sub_dict(value)
+    if isinstance(value, PartialTemplate):
+        # The value the view above reads through. Same milestone, same reason,
+        # and it is the arm the `sub` dict needs as soon as a definition is
+        # stored in it — see `describe_partial_template`.
+        return describe_partial_template(value)
     if isinstance(value, FilterExpression):
         return describe_filter_expression(value)
     if isinstance(value, Variable):
@@ -340,6 +346,38 @@ def describe_deferred_sub_dict(mapping):
     return {
         "deferred_key": mapping.deferred_key,
         "sub": describe(mapping.parent_dict.get(mapping.deferred_key)),
+    }
+
+
+def describe_partial_template(partial):
+    """The stored `PartialTemplate`, by value — the object the view above points at.
+
+    `describe_deferred_sub_dict` compares the *view*; this compares what is
+    behind it, and it arrives with the same corpus row, one level down. The
+    reason is the same failure mode: `base.py:294-346` defines no `__eq__` on
+    `PartialTemplate`, so the row that *uses* a definition
+    (`{% partialdef p %}body{% endpartialdef %}{% partial p %}`) put two live
+    objects in the diff and compared unequal by identity no matter what either
+    parser built.
+
+    All five fields are carried, and the two source offsets are read off the
+    private `_source_start`/`_source_end` the class stores them in: they are
+    `None` under the non-debug lexer and character offsets under the debug one,
+    so comparing them is what makes "the offsets come from the two *tokens*" a
+    diff rather than a coincidence. `origin` is described by its own fields
+    rather than carried as an object — `Origin.__eq__` would work here (both
+    sides are `base.Origin` with `loader=None`), but a diff showing two equal
+    `Origin` objects says nothing about *which* field a divergence was in.
+    """
+    return {
+        "type": "PartialTemplate",
+        "name": partial.name,
+        "origin_name": partial.origin.name,
+        "origin_template_name": partial.origin.template_name,
+        "origin_loader": partial.origin.loader_name,
+        "source_start": partial._source_start,
+        "source_end": partial._source_end,
+        "nodelist": describe(partial.nodelist),
     }
 
 
@@ -534,7 +572,7 @@ class CorpusParityTests(unittest.TestCase):
         """Review Focus 4: the host node must be token-bearing *by the same route*
         as every other node, which is the thing Task 2's arm can quietly break.
 
-        Rust ports `extend_nodelist` (`crates/template-core/src/parser/mod.rs:532`)
+        Rust ports `extend_nodelist` (`crates/template-core/src/parser/mod.rs:546`)
         and calls it at `crates/template-core/src/parser/mod.rs:418` for a host
         descriptor exactly as for a Rust-built block node, so the token reaches
         the descriptor either way. The failure
@@ -886,34 +924,34 @@ class ShapeTests(unittest.TestCase):
         )
         self.assertEqual(caught.exception.token[1], "a+b")
 
-    def test_an_unimplemented_tag_is_its_own_kind_at_the_ffi(self):
-        """`Unimplemented` is not just a `ParseError` with a different message.
+    def test_the_unimplemented_kind_has_no_producer_and_still_maps(self):
+        """`UnimplementedTag` survives M13 with nothing left to produce it.
 
-        Django compiles `{% load %}`, so our refusing it is a fact about *this
-        engine*. A harness that compared messages would match our text against
-        Django's "Did you forget to register or load this tag?" and score the
-        one case where we are wrong as a pass. The class carries it instead —
-        and as a subclass, so the shell's single `except ParseError` still
-        converts it to `TemplateSyntaxError` exactly as before.
+        Every milestone before this one had a tag to point at, and each moved
+        this row's example forward — `{% if %}` until M5's Task 7, `{% load x %}`
+        until M6 handed `load` to the host, `{% partialdef x %}` until M13's Task
+        4. There is no fourth example: `builtin_tag_stub_names()` is `[]`, which
+        `test_tag_inventory.py` asserts with a control drawn from the same
+        population, so this row's subject is the *class* and no longer a tag.
 
-        The example is a tag that is **still** a stub, enumerated rather than
-        guessed: `_native.builtin_tag_stub_names()` is `['partial', 'partialdef']` on
-        this tree, and `partialdef` is the one of the two Django's base parser
-        will not reject first. `{% if %}` was the example until M5's Task 7
-        landed it, and `{% load x %}` until M6 handed `load` to the host — which
-        is exactly the rot this test was written to survive: it names a stub, so
-        every milestone that implements the last stub, or hands one over, has to
-        move it. M13 implements the pair that is left.
+        The relationship is what a caller depends on — the shell's single
+        `except ParseError` still converts it, and `describe()` still dispatches
+        on it — so it is asserted directly rather than through an input that no
+        longer exists. What is **not** asserted is that some template produces it,
+        because none does. The two producers left in the crate are both pinned
+        where they *are* reachable: `crates/template-core/src/parser/tags/verbatim.rs`'s
+        `render_text_only` refuses a verbatim body that is not text with an
+        `Unimplemented` (its own row, and the lexer cannot put a non-text node
+        there yet), and `registry::unimplemented` — whose only caller is its own
+        row in `registry.rs` since the last stub body left.
         """
-        with self.assertRaises(_native.UnimplementedTag) as caught:
-            _native.parse("{% partialdef x %}")
-        self.assertIsInstance(caught.exception, _native.ParseError)
-        self.assertEqual(caught.exception.token[1], "partialdef x")
-
-        # The classes are genuinely different, and a syntax error is not
-        # silently swept into the "not built yet" bucket.
         self.assertNotEqual(_native.UnimplementedTag, _native.ParseError)
         self.assertTrue(issubclass(_native.UnimplementedTag, _native.ParseError))
+
+        # The control the old row got from a real stub, kept because it is still
+        # true and still load-bearing: a syntax error is not swept into the "not
+        # built yet" bucket. `{% endif %}` is the example this row has always
+        # used for that half.
         with self.assertRaises(_native.ParseError) as syntax:
             _native.parse("{% endif %}")
         self.assertNotIsInstance(syntax.exception, _native.UnimplementedTag)

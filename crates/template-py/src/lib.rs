@@ -1224,7 +1224,24 @@ struct FilterCheckHost<'py> {
     /// tuple. Its lifetime is the parse and the materialisation that follows it,
     /// exactly as `PyTarget.arena`'s is the `resolve` call — a handle is
     /// meaningless outside the pair.
-    refs: RefCell<Vec<Option<Py<PyAny>>>>,
+    ///
+    /// **It is the Python `list` itself, not a Rust `Vec` copied out on read,
+    /// and M13's Task 4 is why.** A handle is an *index*, so the index is
+    /// meaningful only against one table; a copy made per read therefore makes
+    /// the same index mean two things. `{% partialdef %}` materialises its body
+    /// *during* the parse (`FilterCheckHost::register_partial_def`), so with a
+    /// per-read copy the body's materialisation writes into a list that is then
+    /// discarded and the outer materialisation reads a second one — a
+    /// `{% cycle %}` slot reserved outside the body and filled inside it would
+    /// come back empty and build a second node for one slot. The failure that
+    /// forced the change is blunter than that and was measured on the pinned
+    /// tree: a body containing *any* filter expression arrives as a handle, so
+    /// the body could not be materialised at all without a resolver
+    /// (`LookupError: the filter 'default' arrived as <NodeRef 0> but no
+    /// resolve_ref was passed to materialise …`), and 27 of the 1,547 went red.
+    /// The list is created **before** the parse and lives here, on the host —
+    /// the object the parser borrows for the parse's whole life.
+    refs: Py<PyAny>,
     /// The shell's tag seam, one object per parse — `ShellHost` in
     /// `python/django_rust_templates/host.py`.
     ///
@@ -1254,17 +1271,37 @@ impl FilterCheckHost<'_> {
     /// `list.__setitem__`, and reserving an index without filling it is a
     /// normal state rather than an error — a `None` placeholder is what the
     /// materialiser reads as "nothing is here yet, so build the node".
+    ///
+    /// **The same object every time, and that is the contract.** This used to
+    /// build a fresh `PyList` from the `Vec` on each call, which is the snapshot
+    /// the field's own comment rules out: two readers of one index must
+    /// subscript one table. It is a handle *out* of the host, so it is a
+    /// `clone_ref` and not a copy — `FilterCheckHost::register_partial_def`
+    /// hands this list to the shell mid-parse and `compile_template` hands it to
+    /// `materialise` afterwards, and both must see the same entries.
     fn ref_list(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let refs: Vec<Py<PyAny>> = self
-            .refs
-            .borrow()
-            .iter()
-            .map(|entry| match entry {
-                Some(value) => value.clone_ref(py),
-                None => py.None(),
-            })
-            .collect();
-        Ok(PyList::new(py, refs)?.into_any().unbind())
+        Ok(self.refs.clone_ref(py))
+    }
+
+    /// Reserve the next slot and fill it in one step, returning its handle.
+    ///
+    /// Every producer that *has* the object at the moment it reserves goes
+    /// through this — a host-built node (`call_tag`, `partial_node`), a
+    /// host-bound filter function (`check_filter`), and the `PartialDefNode`
+    /// the shell returns from `register_partial_def`. Only
+    /// [`Host::alloc_slot`] reserves without filling, and it is the only caller
+    /// that leaves a `None` placeholder behind.
+    ///
+    /// It appends to the same list `alloc_slot` does, which is the contract the
+    /// field's comment states: one table per parse, so an index reserved here
+    /// is readable by a materialisation that starts later — and by one that
+    /// started earlier and is still running, which is `{% partialdef %}`'s case.
+    fn fill_slot(&self, value: Bound<'_, PyAny>) -> CoreNodeRef {
+        let refs = self.refs.bind(value.py());
+        let index: usize = refs.len().expect("the reference table is a list");
+        refs.call_method1("append", (value,))
+            .expect("the reference table is a list");
+        CoreNodeRef(index as u64)
     }
 }
 
@@ -1400,13 +1437,11 @@ impl Host for FilterCheckHost<'_> {
         // `FilterExpression` and `{% cycle %}`'s slot live in: it is a Python
         // object this side must not read, and a `NodeRef` is how a descriptor
         // names one (§5.2). The materialiser's `HOST_NODE` arm returns it.
-        let handle = {
-            let mut refs = self.refs.borrow_mut();
-            refs.push(Some(node.unbind()));
-            CoreNodeRef((refs.len() - 1) as u64)
-        };
-        // Read before `node.unbind()` above; set here, so the descriptor carries
-        // the host's own answer rather than this side's default.
+        //
+        // `fill_slot` takes ownership of `node`, which is why `must_be_first`
+        // was read off it above; it was set here rather than there so the
+        // descriptor carries the host's own answer and not this side's default.
+        let handle = self.fill_slot(node);
         let mut desc = NodeDesc::host(handle);
         desc.must_be_first = must_be_first;
         Ok((desc, left))
@@ -1426,9 +1461,7 @@ impl Host for FilterCheckHost<'_> {
                 // reason: a handle is an index into the parse's table, and this
                 // is the parse. Reserved-and-filled in one step, so no `None`
                 // placeholder is ever visible for this producer.
-                let mut refs = self.refs.borrow_mut();
-                refs.push(Some(func.unbind()));
-                Ok(Some(CoreNodeRef((refs.len() - 1) as u64)))
+                Ok(Some(self.fill_slot(func)))
             }
             // The callable raises Django's own exception, so its message is
             // already Django's; flattening it is what `ErrorKind::Host` asks for
@@ -1465,9 +1498,85 @@ impl Host for FilterCheckHost<'_> {
         let node = host
             .call_method1("partial_node", (name,))
             .map_err(|error| python_host_error(host.py(), &error))?;
-        let mut refs = self.refs.borrow_mut();
-        refs.push(Some(node.unbind()));
-        Ok(CoreNodeRef((refs.len() - 1) as u64))
+        Ok(self.fill_slot(node))
+    }
+
+    fn register_partial_def(
+        &self,
+        token: &Token,
+        name: &str,
+        inline: bool,
+        body: &NodeListDesc,
+        source_start: Option<usize>,
+        source_end: Option<usize>,
+    ) -> Result<CoreNodeRef, Error> {
+        let Some(host) = &self.host else {
+            // Reachable for `partial_node`'s reason, and reached the same way:
+            // `ShellHost.has_tag` answers `False` for `partialdef` — the
+            // registered callable is still `defaulttags`' — so the tag routes
+            // *to* Rust's registry with no host in play.
+            return Err(Error::internal(
+                "this parse reached {% partialdef %} with no host; pass a \
+                 `ShellHost` to `_native.parse`",
+            ));
+        };
+        let py = host.py();
+        // The dispatched token travels as its wire tuple, not as a Python
+        // `Token`, for `call_tag`'s reason: this crate does not name a Django
+        // class, and the shell rebuilds `Token(TokenType(t), contents,
+        // position, lineno)` — the signature its own `register_partial_def`
+        // takes. It needs a real token because `Template.get_exception_info`
+        // reads the one attached to the duplicate-definition
+        // `TemplateSyntaxError`.
+        let wire = (
+            token.token_type as u8,
+            token.contents.clone(),
+            token.lineno,
+            token.position,
+        );
+        // The body crosses as the **descriptor** tuple `parse_source` hands out
+        // (`(nodes, contains_nontext)`) — plus the parse's **reference table**
+        // as its third element, which is what makes the body materialisable at
+        // all. A handle in the body is an index into the parse's one table, and
+        // `materialise` derives `resolve_ref`/`register_ref` from the third
+        // element when the caller passes none (which `ShellHost` does): without
+        // it, a body containing any filter expression arrives as a `NodeRef`
+        // with no resolver and dies with
+        // `LookupError: the filter 'default' arrived as <NodeRef 0> but no
+        // resolve_ref was passed to materialise …`. Measured on the pinned tree
+        // — 27 of the 1,547 went red before this line existed. The two callbacks
+        // are bound methods of the *same* list `compile_template` later hands to
+        // the outer `materialise`, so a slot the body fills is filled for the
+        // whole tree (`{% cycle %}`'s slot reserved outside a body and named
+        // inside it is the case that notices).
+        //
+        // The shell is still what materialises it: `materialise` builds one
+        // `NodeList` that the stored `PartialTemplate` and the returned
+        // `PartialDefNode` share *by identity* (`defaulttags.py:1258`,
+        // `defaulttags.py:1265`). Materialising here would need the shell's
+        // materialiser, and building it twice would give the inline and deferred
+        // render paths different trees.
+        let body = nodelist_desc_to_py(py, body).map_err(|error| {
+            Error::internal(format!(
+                "could not hand {{% partialdef {name} %}}'s body to the host: {error}"
+            ))
+        })?;
+        let body = with_ref_table(py, body, self).map_err(|error| {
+            Error::internal(format!(
+                "could not attach the parse's reference table to {{% partialdef \
+                 {name} %}}'s body: {error}"
+            ))
+        })?;
+        let node = host
+            .call_method1(
+                "register_partial_def",
+                (wire, name, inline, body, source_start, source_end),
+            )
+            .map_err(|error| python_host_error(host.py(), &error))?;
+        // The same table `partial_node`'s node and `{% cycle %}`'s slots live
+        // in, reserved-and-filled in one step so no `None` placeholder is ever
+        // visible for this producer.
+        Ok(self.fill_slot(node))
     }
 
     /// Python's own `repr()`, which is why this override exists at all.
@@ -1499,13 +1608,24 @@ impl Host for FilterCheckHost<'_> {
     }
 
     fn alloc_slot(&self) -> usize {
-        // The placeholder is a Rust `None` rather than `py.None()`, because this
-        // is called from `template-core` with no `Python<'_>` to hand — and it is
-        // the right shape anyway: `ref_list` is the only reader, and "reserved
-        // but not filled" is a state this table has rather than an error.
-        let mut refs = self.refs.borrow_mut();
-        refs.push(None);
-        refs.len() - 1
+        // `list.append(None)` on the parse's **own** list, which is what lets a
+        // slot reserved here be filled by a materialisation that has not started
+        // yet and read by one that started mid-parse: the index and the table
+        // travel together because there is only one table.
+        //
+        // The placeholder is `py.None()` rather than a Rust `None` now that a
+        // `Python<'_>` is what this holds: "reserved but not filled" is the
+        // state the materialiser reads as "nothing is here yet, so build the
+        // node", and a Rust `None` in the `Vec` used to be translated to exactly
+        // this on the way out. `Python::attach` is available because storing the
+        // list is what removed the need for a `Python<'_>` at the call site.
+        Python::attach(|py| {
+            let refs = self.refs.bind(py);
+            let index: usize = refs.len().expect("the reference table is a list");
+            refs.call_method1("append", (py.None(),))
+                .expect("the reference table is a list");
+            index
+        })
     }
 
     fn compile_filter(&self, token: &str) -> Result<CoreNodeRef, Error> {
@@ -1536,9 +1656,7 @@ impl Host for FilterCheckHost<'_> {
                 // resolves that through the same two callbacks `{% resetcycle %}`
                 // uses. Reserved-and-filled in one step here, which is why no
                 // `None` placeholder is ever visible for this producer.
-                let mut refs = self.refs.borrow_mut();
-                refs.push(Some(expression.unbind()));
-                Ok(CoreNodeRef((refs.len() - 1) as u64))
+                Ok(self.fill_slot(expression))
             }
             // The callable raises Django's own `TemplateSyntaxError`, from
             // `find_filter` or from `FilterExpression.__init__`'s variable
@@ -1569,7 +1687,11 @@ fn parse_filter_expression(
         // reach `Host::compile_filter`; `None` is the honest spelling of "this
         // entry point has no such seam".
         compile_filter: None,
-        refs: RefCell::new(Vec::new()),
+        // This entry point's own table, created here and handed out with the
+        // descriptor below. It is one object and not a copy of one, for the
+        // field's reason — `filter_expr_desc_to_py` carries it as
+        // `FilterExpr::refs` and `_materialise_filter_expression` subscript it.
+        refs: PyList::empty(py).into_any().unbind(),
         // A `{{ … }}` body has no block tags in it, so `has_tag` is never
         // consulted and there is nothing for a tag seam to do.
         host: None,
@@ -1578,7 +1700,7 @@ fn parse_filter_expression(
         // The table goes out **with** the descriptor, because this entry point's
         // handles index into it and nothing else will ever see it: returning the
         // descriptor alone would leave every handle pointing into a dropped
-        // `Vec`. See `FilterExpr::refs`.
+        // list. See `FilterExpr::refs`.
         Ok(desc) => filter_expr_desc_to_py(py, &desc, Some(host.ref_list(py)?)),
         Err(error) => Err(parse_error(py, &error)?),
     }
@@ -1693,7 +1815,7 @@ fn parse(
     let host = FilterCheckHost {
         check_filter,
         compile_filter,
-        refs: RefCell::new(Vec::new()),
+        refs: PyList::empty(py).into_any().unbind(),
         host,
     };
     let nodelist = parse_source(py, source, debug, origin_template_name, &host)?;
@@ -2596,7 +2718,7 @@ fn compile_template(
     let host = FilterCheckHost {
         check_filter: Some(check),
         compile_filter: Some(compile),
-        refs: RefCell::new(Vec::new()),
+        refs: PyList::empty(py).into_any().unbind(),
         host,
     };
 

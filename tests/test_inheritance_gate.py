@@ -39,7 +39,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 # `template_tests.templatetags.custom` is reached by name rather than
 # re-implemented, so the rows below exercise Django's own fixture and not a copy
-# of it that could drift — `tests/test_host_tags.py:32-37` is the precedent, and
+# of it that could drift — `tests/test_host_tags.py:36-41` is the precedent, and
 # it needs the same second path entry.
 for _path in (DJANGO_CHECKOUT, DJANGO_CHECKOUT / "tests"):
     if str(_path) not in sys.path:

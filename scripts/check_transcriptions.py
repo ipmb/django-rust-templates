@@ -124,6 +124,7 @@ COMPARED_PATH = {
     "__init__.py": [],
     "base.py": [
         (116, 119, "Origin.__init__"),
+        (306, 313, "PartialTemplate.__init__"),
         (364, 386, "Token.__init__"),
         (395, 408, "Token.split_contents"),
         (412, 414, "Lexer.__init__"),
@@ -309,22 +310,27 @@ COMPARED_PATH = {
         (40, 54, "stringfilter"),
     ],
     "defaulttags.py": [
-        # Measured, 46 of the file's 82 functions. **The plan's Step 2 predicted
+        # Measured, 48 of the file's 82 functions. **The plan's Step 2 predicted
         # a small set — `load` and `querystring` "because the host does not own
         # them", plus the two stub tags — and the measurement disagrees with it
         # in both directions**, so recording which is which matters more than the
         # list itself:
         #
-        # * **`load` is in it; `querystring` and `partialdef` are not.** Those
-        #   two are absent because the parity corpus (`tests/parser_corpus.py`)
-        #   holds no template that uses them, not because the shell handles them
-        #   host-side. The prediction reasoned about the *render* path; this pin
-        #   is about the *harness*'s path, and the two reach different code.
-        #   `partial` left this bullet in M13's Task 3: the corpus gained a
-        #   `{% partial p %}` row, so `partial_func` and `PartialNode.__init__`
-        #   are now on the compared path and the count moved 44 → 46. That is the
-        #   bullet's mechanism demonstrated rather than asserted — the corpus, not
-        #   the shell, decides.
+        # * **`load` is in it; `querystring` is not.** That one is absent because
+        #   the parity corpus (`tests/parser_corpus.py`) holds no template that
+        #   uses it, not because the shell handles it host-side. The prediction
+        #   reasoned about the *render* path; this pin is about the *harness*'s
+        #   path, and the two reach different code. `partial` left this bullet in
+        #   M13's Task 3 and `partialdef` in Task 4: the corpus gained a
+        #   `{% partial p %}` row and then a
+        #   `{% partialdef p %}body{% endpartialdef %}{% partial p %}` one, so
+        #   `partial_func`/`PartialNode.__init__` and then
+        #   `partialdef_func`/`PartialDefNode.__init__` are on the compared path
+        #   and the count moved 44 → 46 → 48. That is the bullet's mechanism
+        #   demonstrated rather than asserted — the corpus, not the shell,
+        #   decides. The second row is also why `base.py`'s list gained
+        #   `PartialTemplate.__init__`: the stored object is only *reachable* from
+        #   a `PartialNode`'s mapping once a definition exists to be stored.
         # * **Everything else in it is the tags the shell does own** — `cycle`,
         #   `do_if`, `do_for`, `url`, `widthratio` — for the same reason: the
         #   harness's Django side is a bare `Parser` over this transcription, so
@@ -348,6 +354,7 @@ COMPARED_PATH = {
         (341, 344, "LoremNode.__init__"),
         (364, 367, "RegroupNode.__init__"),
         (400, 402, "NowNode.__init__"),
+        (416, 419, "PartialDefNode.__init__"),
         (426, 429, "PartialNode.__init__"),
         (441, 442, "ResetCycleNode.__init__"),
         (450, 451, "SpacelessNode.__init__"),
@@ -373,6 +380,7 @@ COMPARED_PATH = {
         (1104, 1133, "load"),
         (1136, 1180, "lorem"),
         (1183, 1203, "now"),
+        (1206, 1267, "partialdef_func"),
         (1270, 1285, "partial_func"),
         (1354, 1419, "regroup"),
         (1422, 1445, "resetcycle"),

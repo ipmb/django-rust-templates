@@ -183,20 +183,24 @@ def django_own_tags():
     **Rust's registry is a subset of this table, never equal to it, and this
     paragraph said "exactly the union" until M12 measured it.** Measured against
     `.django` @ 6.0.9: the union of `defaulttags`' and `loader_tags`' tables is
-    **27** names, Rust's registry is **23**, and `rust - django` is `[]`. The
-    five libraries' 18 names are the *other* direction of the same inequality —
-    in this table and not in Rust's registry at all, until Tasks 3-6 port them.
-    Containment is the only direction that has to hold, because the clause below
-    compares against this table — and a Rust-owned name missing from it would put
-    `None` on the right of an `is not`, so the escape resolves the wrong way and
-    the host compiles a tag Rust owns, silently, with the suite green.
+    **27** names, Rust's registry is **25** — it was 23 when M12 measured it, and
+    M13's two tasks moved `partial` and `partialdef` into it — and `rust - django`
+    is `[]`. The five libraries' 18 names are the *other* direction of the same
+    inequality — in this table and not in Rust's registry at all, until Tasks 3-6
+    port them. Containment is the only direction that has to hold, because the
+    clause below compares against this table — and a Rust-owned name missing from
+    it would put `None` on the right of an `is not`, so the escape resolves the
+    wrong way and the host compiles a tag Rust owns, silently, with the suite
+    green.
 
-    The four names here that Rust does not own — `load`, `querystring`,
-    `partial`, `partialdef` — never reach that comparison: `load` and
-    `querystring` because Rust's registry has no `do_load`/`do_querystring`, and
-    the two stubs because `_rust_owned` subtracts `builtin_tag_stub_names()`.
-    All four are answered by `has_tag`'s early return, before this table is
-    consulted at all.
+    The two names here that Rust does not own — `load` and `querystring` — never
+    reach that comparison: Rust's registry has no `do_load`/`do_querystring`, so
+    there is no Rust body to prefer and `has_tag`'s early return answers before
+    this table is consulted at all. **Until M13's Task 4 the sentence here named
+    four**, adding `partial` and `partialdef`, which were then keys with stub
+    bodies and were subtracted by `_rust_owned` rather than by the registry. Both
+    are Rust's now, so the exception list the subtraction built has shrunk to the
+    pair whose absence is structural.
 
     The old sentence was wrong in both halves and had been for five milestones,
     and it was wrong in the direction that **hides** this: read as an equality,
@@ -438,8 +442,8 @@ class ShellHost:
         # `builtin_tag_stub_names()` — the built-ins — unioned with
         # `library_tag_names()`, the `django.templatetags` tags Rust compiles. The first alone is the built-in registry's *keys*,
         # and a stub is a key with a body that raises `Unimplemented`, so taking
-        # it whole claims `partial` and `partialdef` for Rust and the identity
-        # clause below then declines them on the host's behalf — measured, that
+        # it whole claimed `partial` and `partialdef` for Rust and the identity
+        # clause below then declined them on the host's behalf — measured, that
         # is 245 failures in the 1547, every one of them
         # `'partial' is a built-in tag this engine does not implement yet (M13)`
         # where `template_tests.syntax_tests.test_partials` expected either a
@@ -448,9 +452,24 @@ class ShellHost:
         # The subtraction is not a new rule, it is the one the rest of the tree
         # already uses: `tests/test_parser_parity.py` derives "implemented" as
         # `set(builtin_tag_names_including_stubs()) -
-        # set(builtin_tag_stub_names())`, and
-        # `tests/test_tag_inventory.py` pins the stub set to those two names. The
-        # host was the one place that read the keys as the registry.
+        # set(builtin_tag_stub_names())`, and `tests/test_tag_inventory.py`
+        # pins the stub set. The host was the one place that read the keys as the
+        # registry.
+        #
+        # **The subtraction is a no-op as of M13's Task 4**, because the stub set
+        # is empty: every built-in in the table has a real body now. It stays
+        # written this way rather than collapsing to the keys, because the
+        # derivation is what makes the two agree by construction — a future
+        # milestone that adds a half-built entry to the table gets the correct
+        # answer from this line without anyone remembering to come back to it.
+        # The subtrahend's derivation is pinned in Rust, one layer down:
+        # `crates/template-core/src/parser/registry.rs`'s
+        # `the_stub_derivation_is_not_a_copy_of_the_table` derives the stubs by
+        # *asking each compile function* rather than reading a list, and hands
+        # that derivation a fabricated table containing one stub so the row still
+        # distinguishes it from a copy — with the live table's stub set empty, the
+        # derivation and a hardcoded empty list give the same answer, which is the
+        # one thing that row is for.
         # M12 widens this with the `django.templatetags` names Rust has a real
         # body for — `cache`, `static` and the two prefix tags, plus `tz`'s three
         # tag names as of Task 4, `l10n`'s one (`localize`) as of Task 5,
@@ -484,11 +503,14 @@ class ShellHost:
         if func is None:
             return False
         if command not in self._rust_owned:
-            # `load`, `querystring`, the two stub tags, and everything a
-            # `{% load %}` brought in. `load` and `querystring` are answered by
-            # the registry not containing them; `partial` and `partialdef` by
-            # their bodies being stubs — see `__init__` for why the registry's
-            # keys are not the same question as its implementations.
+            # `load`, `querystring`, and everything a `{% load %}` brought in.
+            # The first two are answered by the registry not containing them —
+            # there is no Rust body to prefer. **This arm carried two more names
+            # until M13's Task 4**, `partial` and `partialdef`, which were keys
+            # with stub bodies and were subtracted by `_rust_owned`; both are
+            # Rust's now, so the only names left here are the ones whose absence
+            # from the table is structural. See `__init__` for why the
+            # registry's keys are not the same question as its implementations.
             return True
         # Rust's, unless something replaced `defaulttags`' callable for the
         # name — `add_library` is `self.tags.update(lib.tags)`

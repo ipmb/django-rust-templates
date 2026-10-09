@@ -16,13 +16,15 @@ crates/template-core/src/parser/desc.rs:436	crates/template-core/src/parser/desc
 crates/template-core/src/parser/desc.rs:474	crates/template-core/src/parser/desc.rs	474	-	must_be_first: false,	-
 crates/template-core/src/parser/error.rs:292-293	crates/template-core/src/parser/error.rs	292	293	str.replace	-
 crates/template-core/src/parser/host.rs:22	crates/template-core/src/parser/host.rs	22	-	-	-
-crates/template-core/src/parser/mod.rs:347	crates/template-core/src/parser/mod.rs	347	-	NodeDesc::new("VariableNode")	-
+crates/template-core/src/parser/mod.rs:361	crates/template-core/src/parser/mod.rs	361	-	NodeDesc::new("VariableNode")	-
+parser/mod.rs:394-400	crates/template-core/src/parser/mod.rs	394	400	prepend_token	-
 crates/template-core/src/parser/mod.rs:418	crates/template-core/src/parser/mod.rs	418	-	-	-
-crates/template-core/src/parser/mod.rs:420-429	crates/template-core/src/parser/mod.rs	420	429	Err(error) => Err(error)	-
-crates/template-core/src/parser/mod.rs:473-478	crates/template-core/src/parser/mod.rs	473	478	token.or_else	-
-crates/template-core/src/parser/mod.rs:532	crates/template-core/src/parser/mod.rs	532	-	pub fn extend_nodelist(	-
-crates/template-core/src/parser/mod.rs:538	crates/template-core/src/parser/mod.rs	538	-	if node.must_be_first && nodelist.contains_nontext {	-
-crates/template-core/src/parser/registry.rs:117-132	crates/template-core/src/parser/registry.rs	117	132	-	-
+crates/template-core/src/parser/mod.rs:434-443	crates/template-core/src/parser/mod.rs	434	443	Err(error) => Err(error)	-
+parser/mod.rs:465-469	crates/template-core/src/parser/mod.rs	465	469	-	-
+crates/template-core/src/parser/mod.rs:487-492	crates/template-core/src/parser/mod.rs	487	492	token.or_else	-
+crates/template-core/src/parser/mod.rs:546	crates/template-core/src/parser/mod.rs	546	-	pub fn extend_nodelist(	-
+crates/template-core/src/parser/mod.rs:552	crates/template-core/src/parser/mod.rs	552	-	if node.must_be_first && nodelist.contains_nontext {	-
+crates/template-core/src/parser/registry.rs:117-134	crates/template-core/src/parser/registry.rs	117	134	-	-
 crates/template-core/src/parser/resolve.rs:28	crates/template-core/src/parser/resolve.rs	28	-	pub enum Step {	-
 crates/template-core/src/parser/resolve.rs:156	crates/template-core/src/parser/resolve.rs	156	-	pub trait LookupTarget {	-
 crates/template-core/src/parser/resolve.rs:253	crates/template-core/src/parser/resolve.rs	253	-	pub enum LookupOutcome {	-
@@ -60,7 +62,9 @@ base.py:183-186	django/template/base.py	183	186	lexer = DebugLexer(self.source)	
 django/template/base.py:198	django/template/base.py	198	-	-	-
 base.py:198-200	django/template/base.py	198	200	parser.parse()	-
 base.py:204-212	django/template/base.py	204	212	e.raw_error_message = raw_message	-
+base.py:294-346	django/template/base.py	294	346	-	-
 base.py:314-322	django/template/base.py	314	322	-	-
+base.py:341-346	django/template/base.py	341	346	-	-
 base.py:358-403	django/template/base.py	358	403	class Token:	-
 django/template/base.py:390-403	django/template/base.py	390	403	-	-
 base.py:472	django/template/base.py	472	-	-	-
@@ -74,7 +78,9 @@ base.py:529-591	django/template/base.py	529	591	token.contents.split()[0]	-
 base.py:549-551	django/template/base.py	549	551	-	-
 base.py:560-563	django/template/base.py	560	563	command = token.contents.split()[0]	raise self.error(token, "Empty block tag on line %d" % token.lineno)
 base.py:561-564	django/template/base.py	561	564	command = token.contents.split()[0]	if command in parse_until:
+base.py:561	django/template/base.py	561	-	-	-
 base.py:564-569	django/template/base.py	564	569	-	-
+base.py:564	django/template/base.py	564	-	-	-
 base.py:568	django/template/base.py	568	-	self.prepend_token(token)	-
 base.py:573	django/template/base.py	573	-	(command, token)	-
 base.py:583-585	django/template/base.py	583	585	except Exception as e:	raise self.error(token, e)
@@ -475,9 +481,15 @@ defaulttags.py:1162	django/template/defaulttags.py	1162	-	common = bits[-1] != "
 defaulttags.py:1171-1175	django/template/defaulttags.py	1171	1175	if len(bits) > 1:	count = parser.compile_filter(count)
 defaulttags.py:1176-1177	django/template/defaulttags.py	1176	1177	if len(bits) != 1:	raise TemplateSyntaxError("Incorrect format for %r tag" % tagname)
 defaulttags.py:1204	django/template/defaulttags.py	1204	-	@register.tag(name="partialdef")	-
+defaulttags.py:1221-1234	django/template/defaulttags.py	1221	1234	-	-
+defaulttags.py:1237	django/template/defaulttags.py	1237	-	valid_endpartials = ("endpartialdef", f"endpartialdef {partial_name}")	-
+defaulttags.py:1244	django/template/defaulttags.py	1244	-	-	-
 defaulttags.py:1250-1251	django/template/defaulttags.py	1250	1251	-	-
 defaulttags.py:1250-1265	django/template/defaulttags.py	1250	1265	partials[partial_name] = PartialTemplate(	-
+defaulttags.py:1250	django/template/defaulttags.py	1250	-	-	-
 defaulttags.py:1251	django/template/defaulttags.py	1251	-	-	-
+defaulttags.py:1252-1256	django/template/defaulttags.py	1252	1256	parser.origin.name	-
+defaulttags.py:1257-1265	django/template/defaulttags.py	1257	1265	-	-
 defaulttags.py:1258	django/template/defaulttags.py	1258	-	-	-
 defaulttags.py:1265	django/template/defaulttags.py	1265	-	-	-
 defaulttags.py:1268	django/template/defaulttags.py	1268	-	@register.tag(name="partial")	-
@@ -824,6 +836,7 @@ i18n/test_translate.py:7	tests/template_tests/syntax_tests/i18n/test_translate.p
 tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py:16	tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py	16	-	-	-
 syntax_tests/test_for.py:334	tests/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 syntax_tests/test_include.py:371-397	tests/template_tests/syntax_tests/test_include.py	371	397	def test_include_cache(self):	-
+test_include.py:372-397	tests/template_tests/syntax_tests/test_include.py	372	397	CounterNode	-
 syntax_tests/test_static.py:5	tests/template_tests/syntax_tests/test_static.py	5	-	from django.templatetags.static import StaticNode	-
 bad_tag.py:6-8	tests/template_tests/templatetags/bad_tag.py	6	8	badtag	-
 custom.py:386-393	tests/template_tests/templatetags/custom.py	386	393	self.count = count + 1	-
@@ -845,7 +858,7 @@ tests/template_tests/tests.py:12-13	tests/template_tests/tests.py	12	13	if TYPE_
 tests.py:148-155	tests/template_tests/tests.py	148	155	def test_compile_tag_extra_data(self):	self.assertEqual(t.extra_data["extra_data"], "CUSTOM_DATA")
 .django/tests/template_tests/tests.py:148-155	tests/template_tests/tests.py	148	155	-	-
 tests/template_tests/tests.py:231-243	tests/template_tests/tests.py	231	243	def test_callable_uses_deferred_annotations(self):	self.assertEqual(template.render(Context({"obj": MyObject()})), "")
-tests/test_host_tags.py:32-37	tests/test_host_tags.py	32	37	PROJECT_ROOT = Path(__file__).resolve().parent.parent	sys.path.insert(0, str(_path))
+tests/test_host_tags.py:36-41	tests/test_host_tags.py	36	41	PROJECT_ROOT = Path(__file__).resolve().parent.parent	sys.path.insert(0, str(_path))
 test_render_parity.py:533	tests/test_render_parity.py	533	-	def test_a_silent_variable_failure_is_substituted(self):	-
 test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
 .django/tests/timezones/tests.py:1051-1071	tests/timezones/tests.py	1051	1071	test_localtime_filters_do_not_raise_exceptions	-

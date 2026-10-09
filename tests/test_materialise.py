@@ -1133,7 +1133,7 @@ _CLASS = re.compile(r'NodeDesc::(?:new|with_nodelist)\s*\(\s*"([A-Za-z_][A-Za-z0
 _TEXT = re.compile(r"NodeDesc::text\s*\(")
 
 # Emitted by the parse core rather than by a tag module: `TextNode` by
-# `desc.rs::NodeDesc::text` and `VariableNode` by `crates/template-core/src/parser/mod.rs:347`.
+# `desc.rs::NodeDesc::text` and `VariableNode` by `crates/template-core/src/parser/mod.rs:361`.
 CORE_EMITTED_CLASSES = {"TextNode", "VariableNode"}
 
 # Names that exist **only** under `#[cfg(test)]`. The stripper below is asserted

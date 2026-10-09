@@ -342,26 +342,36 @@ class RustRegistryTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertNotIn(name, _native.builtin_tag_names_including_stubs())
 
-    def test_the_last_unimplemented_entry_is_the_m13_pair_tail(self):
-        """A stub is a real M13 tag, not a stand-in for a name Rust handed over.
+    def test_no_builtin_tag_is_still_a_stub(self):
+        """The stub set is empty, and an empty set is not on its own evidence.
 
-        `builtin_tag_stub_names()` asks the registry itself which names have a compile
-        function that returns `Unimplemented`, so pinning the set here is what
-        separates "not done yet" from "not ours": `load` and `querystring` are
-        absent from the table entirely, and after M13's Task 3 only `partialdef`
-        remains. Task 4 empties it, and that row says so with a control; this one
-        is the pin that moves with each tag.
+        `builtin_tag_stub_names()` derives the set by *asking each compile
+        function* whether it returns `Unimplemented`, so `set()` is also what a
+        table that lost its rows would produce — this row's predecessor pinned a
+        literal instead (`{"partial"}`, then `{"partialdef"}`) and would have gone
+        red on the way here, which is the difference the empty set makes: nothing
+        about emptiness can redden. The control is therefore drawn from the same
+        population and asserts the population is still there: the
+        including-stubs list still has names in it, it still has the ones this
+        row's predecessors named, and every one of them resolves to a body that
+        is *not* a stub.
 
-        **The row's name moves with the literal**, which is why it is no longer
-        `..._the_m13_pair`: two names became one in Task 3, and a name asserting
-        a set of two while the assertion holds one is the same shape of rot as a
-        stale arithmetic in a comment (`registry.rs`'s twin of this pin carried
-        one until this task). A reader trusts the name far more often than the
-        literal.
+        **This is the row that owns "the stub set is empty"**, which is why
+        `tests/test_interposition.py`'s control excludes this registry from its
+        own non-empty assertion: two rows claiming one fact disagree the moment
+        either is edited. That file points here.
         """
         from django_rust_templates import _native
 
-        self.assertEqual(set(_native.builtin_tag_stub_names()), {"partialdef"})
+        names = _native.builtin_tag_names_including_stubs()
+        self.assertGreater(len(names), 0, "the registry is empty, so this row measures nothing")
+        with self.subTest(name="for"):
+            self.assertIn("for", names)
+        with self.subTest(name="partial"):
+            self.assertIn("partial", names)
+        with self.subTest(name="partialdef"):
+            self.assertIn("partialdef", names)
+        self.assertEqual(set(_native.builtin_tag_stub_names()), set())
 
     def test_no_m5_tag_is_still_a_stub(self):
         """M5's switch: the milestone is done iff this intersection is empty.
@@ -377,6 +387,16 @@ class RustRegistryTests(unittest.TestCase):
         That is the one red commit the plan declares, and the reason for it is
         that a gate nobody has seen fail is a comment — the vacuous shape this
         whole file exists to replace.
+
+        **The gate has since been eaten by a wider one, and the row is kept as
+        what it now is.** M13's Task 4 emptied the stub set, so this intersection
+        is empty because its *right* side is, not because `M5_TAGS`' bodies were
+        checked one by one; the row that owns "the stub set is empty" is the one
+        above. What survives here is a regression check with a name nobody will
+        have to guess at: an M5 name going back to a stub — a body reverted, or a
+        new entry added under one of those eleven names — reddens this row and
+        not the one above, because that row asserts nothing about *which* names
+        are stubs.
         """
         from django_rust_templates import _native
 

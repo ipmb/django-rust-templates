@@ -77,11 +77,25 @@ pub struct Parser<'a> {
     /// fill — the same slot a second `{% cycle c %}` names so that it resolves
     /// to the first one's node ([`NodeDesc::slot`]).
     ///
+    /// `_named_cycle_nodes` holds the definition's **descriptor** rather than
+    /// the bare slot, and M13 is why: Django's map holds the node itself, and a
+    /// descriptor is the closest thing to "the node" that exists before the
+    /// materialiser runs. A reference that carries only a slot can be resolved
+    /// only if the definition was materialised **first**, and `{% partialdef %}`
+    /// breaks exactly that — a body is materialised mid-parse, so a body whose
+    /// `{% cycle c %}` names a definition *outside* it reached an empty slot and
+    /// had no constructor arguments to build from
+    /// (`TypeError: CycleNode.__init__() missing 1 required positional argument:
+    /// 'cyclevars'` on a template Django renders). Echoing the definition's
+    /// arguments makes the slot's *filler* an arbitrary one of its namers: the
+    /// first to materialise builds the node, the rest find it, and `CycleNode`'s
+    /// render-context key is one object either way.
+    ///
     /// M5 only ever reads them and finds them empty until `{% cycle %}` lands;
     /// the fields exist now so that `{% resetcycle %}`'s two error paths are the
     /// real ones rather than a hard-coded "no cycles".
     last_cycle_node: Option<usize>,
-    named_cycle_nodes: HashMap<String, usize>,
+    named_cycle_nodes: HashMap<String, NodeDesc>,
     /// `parser.__loaded_blocks` — the names of every `{% block %}` compiled in
     /// this template, in order.
     ///
@@ -824,33 +838,6 @@ mod tests {
                     .to_string(),
             ),
         );
-    }
-
-    #[test]
-    fn an_unimplemented_builtin_says_so_rather_than_denying_the_tag_exists() {
-        // The behaviour change M3 introduces. Before it, an unimplemented
-        // built-in fell through to `invalid_block_tag` and reported Django's
-        // "Did you forget to register or load this tag?" — a message that is
-        // *false* for a built-in tag, since the template is not missing
-        // anything. Now it is an `Unimplemented` naming the milestone that
-        // supplies it.
-        //
-        // The example is `{% partialdef %}`, one of the two stubs M13 will
-        // replace, and it moved *to* `partialdef` in M6: this test is one of the
-        // few that names a *specific* unimplemented tag, so each milestone's
-        // tasks move it as they land. It named `{% if %}` until M5 implemented
-        // that tag, then `{% load %}` — which M6 stopped being a stub at all,
-        // because it left the table for the host. `partialdef` is the first
-        // still-stubbed entry now and is M13's, so this line outlives M6.
-        let error = failure("{% partialdef x %}");
-        assert_eq!(
-            error.kind,
-            ErrorKind::Unimplemented(
-                "'partialdef' is a built-in tag this engine does not implement yet (M13)"
-                    .to_string(),
-            ),
-        );
-        assert_eq!(error.token.unwrap().contents, "partialdef x");
     }
 
     #[test]

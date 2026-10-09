@@ -389,8 +389,9 @@ TEMPLATES = [
     # template Django *parses* and only fails to *render* ("Partial 'p' is not
     # defined in the current template."), so it is a success row for the parse
     # corpus — the mirror of `{% badtag %}` above, whose failure is also at
-    # render. Adding a `{% partialdef %}` here would make it Task 4's row
-    # instead, since that tag is still a stub and raises `UnimplementedTag`.
+    # render. A `{% partialdef %}` row could not be added here until Task 4,
+    # since that tag was still a stub and raised `UnimplementedTag` before the
+    # comparison could run; it is the row below.
     #
     # It is also the first row whose node carries a value that is neither a
     # node nor a plain value: `PartialNode.partial_mapping` is a
@@ -398,6 +399,21 @@ TEMPLATES = [
     # has an arm for it (see its comment). Without that arm both sides compare
     # two live objects by identity and this row fails looking like a Rust bug.
     "{% partial p %}",
+    # --- M13 Task 4: `{% partialdef %}` -------------------------------------
+    # The row Task 3's note deferred, and the gate demanded it in the same
+    # commit for the same reason: leaving the stub set removes the name from
+    # `stub_names()`, so `including_stubs() - stub_names()` grew by a name and a
+    # name with no happy-path row reddens the coverage test.
+    #
+    # **The definition is used, not merely declared**, so the row crosses the
+    # seam in both directions: `{% partialdef %}` calls
+    # `Host::register_partial_def` and `{% partial %}` calls
+    # `Host::partial_node`, and the mapping the node holds resolves against what
+    # the definition stored. It is still a *parse* success row — nothing renders
+    # here — but a shell that stored the partial and then failed to hand the same
+    # nodelist back would show up as a description diff rather than a difference
+    # no one looks at.
+    "{% partialdef p %}body{% endpartialdef %}{% partial p %}",
 ]
 
 

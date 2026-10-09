@@ -31,12 +31,19 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
         // Both mean "no such cycle", so a miss in the map is the whole story —
         // the absent-attribute case is the map being empty.
         //
-        // The value is a reference-table *slot*, not a node: the `CycleNode` is
-        // Python's and is built at materialisation. `{% cycle %}` reserved the
-        // slot, so this resolves to that same object.
-        return match parser.named_cycle_nodes.get(name) {
+        // The value is the definition's **descriptor**, not a node: the
+        // `CycleNode` is Python's and is built at materialisation
+        // (`{% cycle %}` reserved the slot, so this resolves to that same
+        // object). The slot is read off it rather than stored separately, so a
+        // reset and a `{% cycle c %}` reference cannot disagree about which
+        // slot the name means.
+        return match parser
+            .named_cycle_nodes
+            .get(name)
+            .and_then(|node| node.slot)
+        {
             Some(slot) => {
-                Ok(NodeDesc::new("ResetCycleNode").attr("node", AttrValue::NodeSlot(*slot)))
+                Ok(NodeDesc::new("ResetCycleNode").attr("node", AttrValue::NodeSlot(slot)))
             }
             None => Err(Error::syntax(format!(
                 "Named cycle '{name}' does not exist."
@@ -89,7 +96,9 @@ mod tests {
         // Task 6 writes the other end, and `tests/test_ref_table.py` resolves
         // this operand against a real `CycleNode`.
         let mut parser = Parser::new(Lexer::new("{% resetcycle named %}").tokenize(), &NoHost);
-        parser.named_cycle_nodes.insert("named".to_string(), 11);
+        parser
+            .named_cycle_nodes
+            .insert("named".to_string(), NodeDesc::new("CycleNode").slot(11));
         let nodelist = parser.parse(&[]).unwrap();
 
         assert_eq!(nodelist.nodes[0].class_name, "ResetCycleNode");

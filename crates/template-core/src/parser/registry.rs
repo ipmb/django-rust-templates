@@ -114,24 +114,29 @@
 //! subtracted. The discriminator is on the **compile** side, and specifically on
 //! the lifetime of the state it touches.
 //!
-//! **Flagged, not resolved: `partialdef` alone is left, and the analysis below
-//! is why `partial` could leave first.** Both touch `parser.extra_data`
+//! **Both candidates are placed — the rule settled, not flagged, and the stub
+//! list is empty because of it.** Both touch `parser.extra_data`
 //! (`defaulttags.py:1251`, `defaulttags.py:1279`), the same *kind* of host parse
-//! state the rule subtracts, so neither can be compiled from a token alone as
+//! state the rule subtracts, so neither could be compiled from a token alone as
 //! written. `partial` is the stronger of the two and it is worth recording what
-//! it actually does: `partial_func` constructs `DeferredSubDict(extra_data,
-//! "partials")` — a **live view over the parser's dict** — and hands it to
+//! it actually does: `partial_func` constructs `DeferredSubDict(extra_data,`
+//! `"partials")` — a **live view over the parser's dict** — and hands it to
 //! `PartialNode` (`defaulttags.py:1279-1280`), so the compiled node closes over
 //! parse state that outlives the parse. That is not "reads host state at
 //! compile"; it is a value a `NodeDesc` cannot represent at all, and it is what
-//! `Host::partial_node` exists for — Task 3 placed the name when it landed that
-//! method. The reviewer's argument distinguished the pair (only `partial`'s
-//! *render* re-enters host state); that distinction does not hold under this
-//! rule, which acts at compile time, where both are the same case. What is
-//! recorded here is the measurement, which the placement has now vindicated,
-//! and `partialdef` is the second name it applies to.
+//! `Host::partial_node` exists for. `partialdef` crosses for a second reason —
+//! it stores and returns the **same** nodelist (`defaulttags.py:1257-1265`), so
+//! the body comes back out of the host instead of being built twice
+//! (`Host::register_partial_def`). The reviewer's argument distinguished the
+//! pair (only `partial`'s *render* re-enters host state); that distinction does
+//! not hold under this rule, which acts at compile time, where both are the
+//! same case — and the choice it left open, widen the seam or grow the wire an
+//! `extra_data` channel, was taken as the seam.
 //!
-//! The count is 25 = 27 built-ins minus those two, and the metric matters:
+//! The count is 25 = 27 built-ins minus `load` and `querystring` — the two
+//! bullets earlier in this note, *not* the pair in the paragraph above, which is
+//! in the table at `REGISTRY`'s `partial` and `partialdef` rows. The metric
+//! matters:
 //! `Engine().template_builtins[0].tags` is 24 (`defaulttags` alone), while the
 //! union across all three builtin libraries is 27 (`defaulttags` 24 +
 //! `loader_tags` 3). Both are right answers to different questions, and this
@@ -307,13 +312,25 @@ pub fn library_tag_names() -> Vec<&'static str> {
 /// The name says what the function answers, because the old one
 /// (`builtin_tag_names`, its name until M9's rename) did not, and the misreading
 /// it invited has now been made three times: this is the registry's *keys*, not
-/// the set of tags Rust implements. A stub is a key whose body raises
-/// `Unimplemented`, so anyone who takes this list whole claims `partial` and
-/// `partialdef` for Rust and then has to hand them back — measured at 245
-/// failures of the 1547 when `ShellHost` did exactly that. The implemented set is
-/// this minus [`builtin_tag_stub_names`], and the subtraction is written at each
-/// call site rather than offered as a third function because two spellings of
-/// one set is the drift this table exists to prevent.
+/// the set of tags Rust implements. A key can have a stub body — one that raises
+/// `Unimplemented` — and taking the list whole on the reading that every key is
+/// implemented is what measured 245 failures of the 1547 when `ShellHost` did
+/// exactly that. The implemented set is this minus [`builtin_tag_stub_names`],
+/// and the subtraction is written at each call site rather than offered as a
+/// third function because two spellings of one set is the drift this table
+/// exists to prevent.
+///
+/// **As of M13 Task 4 the subtraction is a no-op.** `partial` and `partialdef`
+/// were the last two stub bodies; both have real compile functions now, so
+/// [`builtin_tag_stub_names`] answers `[]` and this list is itself the
+/// implemented set. The two names this paragraph used to instance — the ones a
+/// caller who took the list whole had to hand back — are still in the table and
+/// are still the interesting case, because they cross to the host *mid-compile*
+/// (`Host::partial_node`, `Host::register_partial_def`); what changed is that the
+/// crossing is a seam rather than a refusal. The pair of functions keeps its
+/// shape because the *relationship* is what the Python cross-check consumes, not
+/// the current value: an entry added with a stub body is claimed here and
+/// excluded there again, with no change to either function.
 pub fn builtin_tag_names_including_stubs() -> Vec<&'static str> {
     REGISTRY.iter().map(|(name, _)| *name).collect()
 }
@@ -362,14 +379,32 @@ pub fn builtin_tag_names_including_stubs() -> Vec<&'static str> {
 /// drive a real tag's compile function builds its own token, as the corpus does;
 /// reusing this one would couple a real tag's behaviour to a predicate that must
 /// stay insensitive to it.
+///
+/// **The derivation is [`stub_names_in`] over [`REGISTRY`], and the split is
+/// what keeps it checkable now that its answer is empty.** With no stub body
+/// left, this function and a hardcoded `vec![]` return the same value, so no row
+/// can tell them apart — which is a hole a *later* milestone falls into, when a
+/// half-built entry arrives and the copy would still answer `[]`. Handing the
+/// derivation a fabricated table separates them today, in both directions.
 pub fn builtin_tag_stub_names() -> Vec<&'static str> {
+    stub_names_in(REGISTRY)
+}
+
+/// [`builtin_tag_stub_names`] over an arbitrary table — same probe, same
+/// predicate, table as a parameter.
+///
+/// Private, and not a second entry point for a caller: its one use outside this
+/// file's tests is the one above, and its own row is
+/// `the_stub_derivation_is_not_a_copy_of_the_table`, which needs a table whose
+/// stub set is *not* empty because `REGISTRY`'s is.
+fn stub_names_in(table: &[Entry]) -> Vec<&'static str> {
     let probe = Token {
         token_type: TokenType::Block,
         contents: "x".to_string(),
         lineno: 1,
         position: None,
     };
-    REGISTRY
+    table
         .iter()
         .filter(|(_, compile)| {
             let mut parser = Parser::new(Vec::new(), &NoHost);
@@ -475,6 +510,34 @@ mod tests {
 
     #[test]
     fn a_stub_names_its_milestone_and_says_it_is_the_engine_not_the_template() {
+        // **M13's Task 4 left this row as `registry::unimplemented`'s only
+        // caller.** The two stub bodies in `tags/partial.rs` and
+        // `tags/partialdef.rs` were the production callers, and
+        // `builtin_tag_stub_names()` reached the function *through* them; both
+        // have real implementations now, so no stub calls it and the derivation
+        // returns `[]`. The kind stays — the shell's `except ParseError` and
+        // `describe()`'s dispatch are written against it, and `tags/verbatim.rs`
+        // still returns an `Unimplemented` for a verbatim body that is not text,
+        // an arm its own row pins — so what this row holds is the *message*: the
+        // string a user sees for an engine gap, now that no template can produce
+        // one. (Amended from the plan, whose reason was that the function would
+        // otherwise be deleted as dead code: it is `pub`, so it would not be.)
+        //
+        // `parser/mod.rs`'s `an_unimplemented_builtin_says_so_rather_than_denying_the_tag_exists`
+        // is the row this commit had to **delete**, not move: it named a stub
+        // through `Parser::parse` and asserted the message reached the caller
+        // with the token attached, and with the stub set empty there is no input
+        // that reaches the `Unimplemented` arm from the table. Both halves stay
+        // asserted where they *are* reachable, each by name: the message by this
+        // row, which is a literal assertion on the same function's output; the
+        // token by `tags/extends.rs`'s
+        // `a_second_extends_is_rejected_from_inside_the_first`, an error raised
+        // inside a compile function whose attached token is the whole raw block
+        // `extends "a"`, arguments included — the shape the deleted row pinned as
+        // `"partialdef x"`; and the one live `Unimplemented` producer by
+        // `tags/verbatim.rs`'s `render_text_only_refuses_a_non_text_body`. So
+        // nothing was replaced by nothing; a third row asserting the same message
+        // through a second route would have been.
         assert_eq!(
             unimplemented("for", "M5").kind,
             ErrorKind::Unimplemented(
@@ -497,11 +560,18 @@ mod tests {
         // **All eleven M5 tags landed**, leaving the four names M5 was never
         // going to touch; **M6 then took two of them out of the table
         // entirely** — `load` and `querystring` are host-owned now, so they are
-        // not stubs, they are absent. **M13 takes the last two out one at a
-        // time**, and this literal shrinks with each rather than at the end of
-        // the milestone, which is what keeps every commit in between green:
-        // `partial`'s body landed in Task 3, so one name is left.
-        let stubs = ["partialdef"];
+        // not stubs, they are absent. **M13 took the last two out one at a
+        // time**, and this literal shrank with each rather than at the end of
+        // the milestone, which is what kept every commit in between green:
+        // `partial` in Task 3, `partialdef` in Task 4. **So the pin is now
+        // empty, and an empty pin is a weaker claim than the one it replaced**
+        // — it says the table has no unimplemented entry, and a registry that
+        // lost its entries entirely would satisfy it too. That is why the
+        // Python row reading this list carries a positive control beside it
+        // (`tests/test_tag_inventory.py`), and why every assertion here that the
+        // emptiness cannot carry is still made over the *names*: the loop below,
+        // and `expected` under it.
+        let stubs: [&str; 0] = [];
         assert_eq!(
             builtin_tag_stub_names(),
             stubs,
@@ -514,12 +584,16 @@ mod tests {
         // The *implemented* names, which is the other half of the same pin:
         // every table entry is either here or in `stubs`, and the two halves
         // move in opposite directions — a tag that lands leaves `stubs` for
-        // this list while the table's size stays put. **This is 24 and `stubs`
-        // is 1, summing to the table's 25**, which
+        // this list while the table's size stays put. **This is 25 and `stubs`
+        // is 0, summing to the table's 25**, which
         // `the_registry_has_the_twenty_five_names_rust_owns` asserts directly —
         // so the two numbers in this sentence are checkable against a row
-        // rather than asserted twice from the same source. M13's Task 3 is what
-        // moved `partial` from `stubs` to here; Task 4 moves `partialdef`.
+        // rather than asserted twice from the same source. M13's Task 3 moved
+        // `partial` from `stubs` to here and Task 4 moved `partialdef`, which is
+        // the last name *either* half ever moves in this direction: the pair were
+        // the rule's only two candidates, so no later milestone lands a tag by
+        // leaving `stubs`. A name that arrives after this one either leaves the
+        // table whole (as `load` did) or enters it whole (as `block` did).
         //
         // **The counts this comment carried until Task 3 were stale and were
         // re-derived rather than adjusted.** It read "this is 22, `stubs` is
@@ -549,6 +623,7 @@ mod tests {
             "lorem",
             "now",
             "partial",
+            "partialdef",
             "regroup",
             "resetcycle",
             "spaceless",
@@ -574,6 +649,41 @@ mod tests {
         // gives a tag a real body, the name leaves `stubs` and this still holds,
         // which is what makes it useful at every milestone rather than only at
         // M5's gate.
+        //
+        // **The partition half of that is vacuous as of M13 Task 4**, and the
+        // first half is why it is still written: with `REGISTRY`'s stub set empty
+        // the two sets are `[]` and all 25 names, so "no name in both" is true
+        // for any registry and a *copy* of the empty list satisfies it too. That
+        // is the hole a later milestone falls into rather than this one, so the
+        // two rows below hand [`stub_names_in`] a **fabricated** table that does
+        // have a stub in it — same predicate, same probe, a population this file
+        // does not otherwise contain. The last block still runs the partition
+        // over the live table, where its remaining power is that a name list that
+        // went unsorted or duplicated reddens here.
+        //
+        // The stub body is fabricated rather than borrowed for the reason
+        // `a_loaded_library_tag_rust_has_no_body_for_is_refused_rather_than_panicking`
+        // gives: a row naming a real unported tag expires the milestone the tag
+        // lands, and this one must not expire at all.
+        fn a_stub(_: &mut Parser<'_>, _: &Token) -> Result<NodeDesc, Error> {
+            Err(unimplemented("z_a_stub", "M00"))
+        }
+        let with_a_stub: &[Entry] = &[("a_real", tags::comment::compile), ("z_a_stub", a_stub)];
+        assert_eq!(
+            stub_names_in(with_a_stub),
+            ["z_a_stub"],
+            "the probe is reported for a stub body and not for a real one",
+        );
+
+        // The control over the same population and the *same name*: a real body
+        // under `z_a_stub` must stop the derivation reporting it, or the row
+        // above would pass on a predicate that answered by name.
+        let all_real: &[Entry] = &[
+            ("a_real", tags::comment::compile),
+            ("z_a_stub", tags::comment::compile),
+        ];
+        assert_eq!(stub_names_in(all_real), Vec::<&str>::new());
+
         let names = builtin_tag_names_including_stubs();
         let stubs = builtin_tag_stub_names();
         for name in &stubs {

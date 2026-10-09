@@ -32,12 +32,13 @@
 //! equal-but-distinct nodes get separate `itertools.cycle` iterators and the
 //! second mention restarts the sequence instead of continuing it.
 //!
-//! The object does not exist during the parse, so what the parser stores is the
-//! **slot** the materialiser will fill: the definition form carries `.slot(idx)`
-//! and `named_cycle_nodes[name] = idx`, and shape 2 emits a descriptor with no
-//! attributes and the *same* slot, which the materialiser resolves to the object
-//! already there (design spec §5.5; `tests/test_ref_table.py` pins the wire
-//! form).
+//! The object does not exist during the parse, so what the parser stores is a
+//! **descriptor** the materialiser will turn into it: the definition form
+//! carries `.slot(idx)` and `named_cycle_nodes[name] = ` that descriptor, and
+//! shape 2 returns the same descriptor with the *same* slot, which the
+//! materialiser resolves to the object already there — or, if it gets there
+//! first, builds from the echoed arguments (design spec §5.5;
+//! `tests/test_ref_table.py` pins the wire form).
 //!
 //! # Shape 2 returns early, and that is observable
 //!
@@ -87,18 +88,35 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
                 "No named cycles in template. '{name}' is not defined",
             )));
         }
-        let Some(slot) = parser.named_cycle_nodes.get(&name).copied() else {
+        let Some(definition) = parser.named_cycle_nodes.get(&name).cloned() else {
             // No trailing period, unlike `{% resetcycle %}`'s. Both are Django's.
             return Err(Error::syntax(format!(
                 "Named cycle '{name}' does not exist"
             )));
         };
-        // A node with a slot and **no attributes**: the materialiser returns
-        // what is already in the table and never reaches `cls(**kwargs)`.
+        // **The definition's own descriptor, not a bare slot.** Django returns
+        // `parser._named_cycle_nodes[name]` — the *node object* the definition
+        // built — so a reference is the definition, and modelling it as a slot
+        // alone says "look up what is already there", which is true only if the
+        // definition has been materialised.
         //
-        // The early return (`defaulttags.py:671`): `last_cycle_node` is deliberately *not*
-        // updated here — see the module docs.
-        return Ok(NodeDesc::new("CycleNode").slot(slot));
+        // It has not, when the reference is inside a `{% partialdef %}` body and
+        // the definition is outside it: `register_partial_def` materialises the
+        // body *during the parse*, so the slot is empty, and a slot-only
+        // descriptor then has no constructor arguments to build from —
+        // `TypeError: CycleNode.__init__() missing 1 required positional
+        // argument: 'cyclevars'`, on `{% cycle 'a' 'b' as c %}{% partialdef p
+        // %}{% cycle c %}{% endpartialdef %}{% partial p %}`, a template Django
+        // renders. Echoing the arguments makes whichever namer materialises
+        // first the one that builds the node; the rest find it in the table and
+        // return it, so `CycleNode.render`'s render-context key is still one
+        // object and the sequence still advances once.
+        //
+        // Nothing is recompiled here: the values are the definition's already
+        // compiled `AttrValue`s, cloned. The early return
+        // (`defaulttags.py:671`) still does not touch `last_cycle_node` — see
+        // the module docs.
+        return Ok(definition);
     }
 
     let mut as_form = false;
@@ -130,12 +148,15 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
     let node = if as_form {
         let name = args[args.len() - 1].clone();
         let values = compile_values(parser, &args[1..args.len() - 2])?;
-        parser.named_cycle_nodes.insert(name.clone(), slot);
-        NodeDesc::new("CycleNode")
+        let node = NodeDesc::new("CycleNode")
             .attr("cyclevars", AttrValue::List(values))
-            .attr("variable_name", AttrValue::Str(name))
+            .attr("variable_name", AttrValue::Str(name.clone()))
             .attr("silent", AttrValue::Bool(silent))
-            .slot(slot)
+            .slot(slot);
+        // The descriptor, not the slot: a reference is "this node", and it may
+        // be materialised before this line's node is (see the reference arm).
+        parser.named_cycle_nodes.insert(name, node.clone());
+        node
     } else {
         let values = compile_values(parser, &args[1..])?;
         NodeDesc::new("CycleNode")
@@ -243,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn a_name_reference_reuses_the_slot_and_carries_no_attributes() {
+    fn a_name_reference_reuses_the_slot_and_echoes_the_definitions_arguments() {
         // Two nodes, so the counting host gives the definition slot 0 and the
         // reference none of its own — the reference must not reserve.
         let host = CountingHost::default();
@@ -260,10 +281,21 @@ mod tests {
             Some(0),
             "the reference names the definition's slot"
         );
-        assert!(
-            reference.attrs.is_empty(),
-            "a reference has no constructor arguments: the object already exists",
+        // **The arguments, not an empty attribute list.** The row this replaced
+        // asserted `attrs.is_empty()` with the reason "the object already
+        // exists" — and M13 falsified the reason, not the assertion: a
+        // `{% partialdef %}` body is materialised mid-parse, so a reference
+        // inside one whose definition is outside reaches an *empty* slot, and a
+        // descriptor with nothing to build from is a `TypeError` there where
+        // Django renders. Django's map holds the node itself, so a reference
+        // *is* the definition; a descriptor carrying the definition's arguments
+        // is what that looks like one step earlier.
+        assert_eq!(values(reference), vec!["'a'", "'b'"]);
+        assert_eq!(
+            attr(reference, "variable_name"),
+            &AttrValue::Str("c".to_string())
         );
+        assert_eq!(attr(reference, "silent"), &AttrValue::Bool(false));
     }
 
     #[test]
