@@ -119,6 +119,7 @@ base.py:1203-1206	django/template/base.py	1203	1206	-	-
 defaultfilters.py:6	django/template/defaultfilters.py	6	-	from decimal import ROUND_HALF_UP, Context, Decimal, InvalidOperation, getcontext	-
 defaultfilters.py:14	django/template/defaultfilters.py	14	-	-	-
 defaultfilters.py:38-52	django/template/defaultfilters.py	38	52	def stringfilter(func):	return _dec
+defaultfilters.py:44-48	django/template/defaultfilters.py	44	48	first = str(first)	-
 defaultfilters.py:46	django/template/defaultfilters.py	46	-	first = str(first)	-
 defaultfilters.py:48	django/template/defaultfilters.py	48	-	if isinstance(first, SafeData) and getattr(unwrap(func), "is_safe", False):	-
 defaultfilters.py:60-68	django/template/defaultfilters.py	60	68	addslashes	-
@@ -416,8 +417,12 @@ html.py:214	django/utils/html.py	214	-	for long_open_tag in long_open_tag_withou
 html.py:221-222	django/utils/html.py	221	222	if strip_tags_depth >= MAX_STRIP_TAGS_DEPTH:	raise SuspiciousOperation
 html.py:222	django/utils/html.py	222	-	raise SuspiciousOperation	-
 html.py:319	django/utils/html.py	319	-	safe_input = isinstance(text, SafeData)	-
+html.py:337-405	django/utils/html.py	337	405	def handle_word(	return word
 html.py:363-366	django/utils/html.py	363	366	settings.URLIZE_ASSUME_HTTPS	-
 html.py:383	django/utils/html.py	383	-	nofollow_attr = ""	-
+html.py:387-389	django/utils/html.py	387	389	if autoescape and not safe_input:	trimmed = escape(trimmed)
+html.py:397-398	django/utils/html.py	397	398	if safe_input:	return mark_safe(word)
+html.py:401-402	django/utils/html.py	401	402	elif safe_input:	return mark_safe(word)
 html.py:407-410	django/utils/html.py	407	410	def trim_url(self, x, *, limit):	return "%s…" % x[: max(0, limit - 1)]
 html.py:492	django/utils/html.py	492	-	-	-
 html.py:496-499	django/utils/html.py	496	499	def urlize(text, trim_url_limit=None, nofollow=False, autoescape=False):	-
