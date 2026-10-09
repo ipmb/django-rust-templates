@@ -30,6 +30,7 @@ for _path in (DJANGO_CHECKOUT, DJANGO_TESTS):
 from django.template import defaulttags  # noqa: E402
 from django.template.base import DebugLexer, Lexer, Parser  # noqa: E402
 from django.template.engine import Engine  # noqa: E402
+from django.template.exceptions import TemplateSyntaxError  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 from django_rust_templates.host import ShellHost  # noqa: E402
@@ -230,6 +231,46 @@ class ErrorParityTests(unittest.TestCase):
         self.assertNotIsInstance(ours, _native.ParseError, "not a parse error here")
         self.assertEqual(str(theirs), str(ours))
         self.assertEqual(token_shape(theirs.token), token_shape(ours.token))
+
+    def test_a_host_exception_keeps_its_class_across_the_seam(self):
+        """`badtag` raises `RuntimeError`, and nothing that reads text can tell.
+
+        Django's `Parser.parse` re-raises the *same object* after
+        `Parser.error` attaches a token (`base.py:583-585`), so a compile
+        function that raises something other than `TemplateSyntaxError` leaves
+        Django as that class. The seam used to flatten it — every assertion
+        above compares `str()` or the token, and `"I am a bad tag"` is the same
+        text either way — so this is the only test here that can see it.
+
+        The stakes are the acceptance suite, not taste:
+        `.django/tests/template_tests/tests.py:114-123` wraps
+        `Engine.from_string("{% load bad_tag %}{% badtag %}")` in
+        `assertRaises(RuntimeError)`. Unreachable until M9 routes
+        `Engine.from_string` through this parser; the class crosses the FFI as
+        data (`ParseError.class_name`) until then, which is what is asserted.
+        """
+        source = "{% load bad_tag %}{% badtag %}"
+        theirs = django_failure(source)
+        ours = ours_failure(source)
+        self.assertIsInstance(theirs, RuntimeError)
+        self.assertNotIsInstance(theirs, TemplateSyntaxError)
+        self.assertIs(ours.__class__, _native.ParseError)
+        self.assertEqual(
+            ours.class_name,
+            type(theirs).__name__,
+            "the class Django raises has to survive the seam by name, because "
+            "design decision 2 keeps the exception object on the Python side",
+        )
+        self.assertEqual(str(theirs), str(ours))
+        self.assertEqual(token_shape(theirs.token), token_shape(ours.token))
+
+    def test_a_host_exception_with_no_class_of_its_own_says_so(self):
+        # The control for the row above, and the reason `HostError::class` is an
+        # `Option`: an error this side raised without Python — `Syntax` here —
+        # has no class to name, and `None` says that rather than guessing
+        # `"TemplateSyntaxError"`, which is the M9 shell's mapping to make and
+        # not the parser's to presume.
+        self.assertIsNone(ours_failure("{% nope %}").class_name)
 
     def test_the_error_corpus_covers_every_m5_tag_that_can_fail_to_compile(self):
         """The error-side mirror of the success-corpus coverage test.

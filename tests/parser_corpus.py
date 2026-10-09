@@ -22,6 +22,15 @@ LIBRARIES = {
     "custom": "template_tests.templatetags.custom",
     "testtags": "template_tests.templatetags.testtags",
     "tag_27584": "template_tests.templatetags.tag_27584",
+    # The one pinned library whose tag raises something that is **not** a
+    # `TemplateSyntaxError` — `badtag` raises `RuntimeError` at compile time
+    # (`bad_tag.py:6-8`) — which is what makes it the only row that can tell a
+    # seam carrying the exception's class from one that flattens it. It is here
+    # rather than in a private fixture because `.django/tests/template_tests/
+    # tests.py:114-123` asserts exactly this: `Engine.from_string("{% load
+    # bad_tag %}{% badtag %}")` must raise `RuntimeError`, and that test is in
+    # the 1547.
+    "bad_tag": "template_tests.templatetags.bad_tag",
 }
 
 

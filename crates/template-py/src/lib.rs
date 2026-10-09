@@ -938,6 +938,14 @@ fn nodelist_desc_to_py(py: Python<'_>, nodelist: &NodeListDesc) -> PyResult<Py<P
 /// `BaseException` instance has a `__dict__`, so this needs no extra class and
 /// `e.token` is readable exactly as it will be on the shell's
 /// `TemplateSyntaxError`.
+///
+/// `class_name` rides the same way, for a host exception, and is the same trick
+/// for the same reason: design decision 2 gives the exception *object* to
+/// Python, so a `ParseError` cannot be the class Django would have raised — what
+/// the shell needs from here is **which** class to raise instead. See
+/// [`python_host_error`] for the measurement that made the class worth carrying,
+/// and note that nothing reads this attribute yet: the shell's conversion is
+/// M9's, and this is the information it will need.
 fn parse_error(py: Python<'_>, error: &Error) -> PyResult<PyErr> {
     let err = match &error.kind {
         // Django reaches `next(bits)` on an exhausted iterator and lets
@@ -966,6 +974,19 @@ fn parse_error(py: Python<'_>, error: &Error) -> PyResult<PyErr> {
         None => py.None(),
     };
     err.value(py).setattr("token", token)?;
+    let class_name = match &error.kind {
+        ErrorKind::Host(host) => match &host.class {
+            Some(class) => class
+                .name()
+                .to_string()
+                .into_pyobject(py)?
+                .into_any()
+                .unbind(),
+            None => py.None(),
+        },
+        _ => py.None(),
+    };
+    err.value(py).setattr("class_name", class_name)?;
     Ok(err)
 }
 
@@ -1038,29 +1059,46 @@ fn python_host_token(py: Python<'_>, error: &PyErr) -> Option<TokenDesc> {
 
 /// The [`Error`] a Python exception raised by `ShellHost.call_tag` becomes.
 ///
-/// [`python_error_message`] plus the token, and the token is why this exists:
-/// a tag's compile function can re-enter Django's parse, so when its body fails
+/// [`python_error_message`], plus the two things the tag seam was dropping: the
+/// token Django attached and the class Python raised. Both are why this exists,
+/// and both are measured on the pinned tree.
+///
+/// A tag's compile function can re-enter Django's parse, so when its body fails
 /// the exception arrives already carrying the **innermost** token, set by the
 /// nested frame. Flattening it to a message loses that, and Rust's own
 /// `Parser::error` — whose `token.or_else(...)` guard exists precisely to honour
-/// an already-set token — then attaches the **outer** tag's token instead.
+/// an already-set token — then attaches the **outer** tag's token instead:
 ///
-/// Measured on the pinned tree, `{% load custom %}{% div %}{% now a b %}{% enddiv %}`
-/// attributes `(2, 'now a b', 1, None)` in Django and `(2, 'div', 1, None)` here
-/// without this, with the message identical either way — so the divergence is
-/// invisible to every test that compares only text.
+/// ```text
+/// {% load custom %}{% div %}{% now a b %}{% enddiv %}
+/// → Django: "'now' statement takes one argument", token (2, 'now a b', 1, None)
+/// → ours without the token: the same message, token (2, 'div', 1, None)
+/// ```
 ///
-/// `None` — no `token_wire`, which is every exception the *filter* seam and the
-/// shell's own bookkeeping produce — falls back to [`Error::host`], and a token
-/// this side cannot read does too. That is the pre-existing behaviour rather
-/// than a guess, and the shell is the only producer of the attribute, so a
-/// missing one means no token was attached and not that one was lost.
+/// The class diverges for a plainer reason: Django's `Parser.parse` re-raises
+/// the *same object* (`base.py:583-585`), so a tag body that raises `TypeError`
+/// leaves the parse as one, and every comparison in `tests/test_parser_errors.py`
+/// compares text and would call the two equal:
+///
+/// ```text
+/// {% load cls %}{% boom %}     # boom raises TypeError("not a syntax error")
+/// → Django: TypeError('not a syntax error')
+/// → ours without the class: ParseError('not a syntax error')
+/// ```
+///
+/// The token comes from `token_wire`, the attribute `ShellHost.call_tag` sets on
+/// its way out (`python/django_rust_templates/host.py`), and the class from the
+/// exception object itself — [`py_error_kind`](filters::py_error_kind), the same
+/// mapping the filter seam has always used, so there is one Python→seam class
+/// table in this crate and not two. Neither can be missing for an exception that
+/// came through `call_tag`: the shell always attaches the first, and Python
+/// always has a class for the second.
 fn python_host_error(py: Python<'_>, error: &PyErr) -> Error {
-    let message = python_error_message(py, error);
-    match python_host_token(py, error) {
-        Some(token) => Error::host_with_token(message, token),
-        None => Error::host(message),
-    }
+    Error::host_exception(
+        python_error_message(py, error),
+        filters::py_error_kind(py, error),
+        python_host_token(py, error),
+    )
 }
 
 /// The [`Host`] that puts Django's filter checks where Django calls them.

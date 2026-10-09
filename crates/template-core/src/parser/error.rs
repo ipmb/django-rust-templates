@@ -72,6 +72,35 @@ pub struct FilterHostError {
     pub operation: &'static str,
 }
 
+/// A Python exception the **tag** seam let past, and what it was raised as.
+///
+/// The tag seam's twin of [`FilterHostError`], and boxed for the same reason
+/// ([`ErrorKind::FilterHost`] records the measurement). It is a struct rather
+/// than a bare `String` because the class is part of the observable behaviour
+/// and was being thrown away: Django's `Parser.parse` re-raises the **same
+/// object** after `Parser.error` attaches a token (`base.py:583-585`,
+/// `:619-630`), so a tag whose compile function raises `TypeError` leaves the
+/// parse as a `TypeError`. Measured on the pinned tree:
+///
+/// ```text
+/// Engine(libraries={"cls": "lib"}).from_string("{% load cls %}{% boom %}")
+///   with `boom` raising TypeError("not a syntax error")
+/// → django: TypeError('not a syntax error'), token attached
+/// → ours:   ParseError('not a syntax error'), and nothing named the class
+/// ```
+///
+/// `class` is `Option` because the variant has a **second** producer that never
+/// touched Python — [`Error::host`]'s "no host answers `to_str`" — and
+/// fabricating a class there would make the field lie about where the answer
+/// came from, which is the same objection that kept `FilterHost` a separate
+/// variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostError {
+    pub message: String,
+    /// Python's `e.__class__.__name__`, when Python is who raised.
+    pub class: Option<PyErrorKind>,
+}
+
 /// What the parser failed with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
@@ -80,8 +109,8 @@ pub enum ErrorKind {
     Syntax(String),
     /// An exception raised by a host tag, or a host that answered nothing.
     ///
-    /// M2 has no host tag that can fail, so the payload is the host's message.
-    /// M4 **adds `FilterHost` beside this rather than reshaping it**, because the
+    /// M2 has no host tag that can fail, so the payload was the host's message.
+    /// M4 **added `FilterHost` beside this rather than reshaping it**, because the
     /// two answer different questions: `FilterHost` is "Python raised class C",
     /// `Host` is "nobody answered". A host that never touched Python has no
     /// [`PyErrorKind`] to report, and fabricating one would make a body's `kind`
@@ -90,7 +119,15 @@ pub enum ErrorKind {
     /// `_culprit_node` and its `__traceback__`, which the annotation protocol
     /// depends on (§5.2). An enum variant that must change is preferable to a
     /// `String` that looks settled.
-    Host(String),
+    ///
+    /// **M6 takes the `String` up on that**, at the point the tag seam acquired
+    /// its first producer (the reviewer's finding of 2026-10-09): the payload is
+    /// [`HostError`], which is `message` plus the class Python raised. The class
+    /// is not decoration — see that struct for the measurement — and the
+    /// `Option` on it keeps the "nobody answered" producers honest rather than
+    /// inventing a class for them. Boxed, for [`ErrorKind::FilterHost`]'s
+    /// measured reason.
+    Host(Box<HostError>),
     /// A Python exception raised while a **filter body** asked the host for
     /// something (§D5).
     ///
@@ -162,7 +199,7 @@ pub struct Error {
     /// **innermost** token win when a compile error unwinds through nested
     /// `parse` frames (Review Focus item 5).
     ///
-    /// [`Error::host_with_token`] is the one producer that sets it ahead of any
+    /// [`Error::host_exception`] is the one producer that sets it ahead of any
     /// `error()` call, and for the same reason from the other end: the host is
     /// the *innermost* frame, and once an exception has crossed the seam Rust's
     /// `error()` frames are all outer.
@@ -177,41 +214,73 @@ impl Error {
         }
     }
 
+    /// A host that **answered nothing** — a refusal, or a seam bug.
+    ///
+    /// No class and no token, and both are claims rather than omissions: see
+    /// [`HostError::class`] for why a class would be a lie here, and
+    /// [`Error::host_exception`] for the constructor a Python exception uses.
+    /// Kept as the two-argument-free form because the "nobody answered"
+    /// producers — [`NoFilterHost`]'s refusals and their parser-side twins —
+    /// have neither to give, and a caller that has one has the other.
+    ///
+    /// [`NoFilterHost`]: crate::filters::host::NoFilterHost
     pub fn host(message: impl Into<String>) -> Self {
         Self {
-            kind: ErrorKind::Host(message.into()),
+            kind: ErrorKind::Host(Box::new(HostError {
+                message: message.into(),
+                class: None,
+            })),
             token: None,
         }
     }
 
-    /// A Python exception from the **tag** seam, with the token Django attached
-    /// to it.
+    /// A Python exception from the **tag** seam: its message, the class it was
+    /// raised as, and the token Django attached to it.
     ///
-    /// [`Error::host`]'s twin, and a second constructor rather than an
-    /// `Option` argument on the first, because the two are different claims:
-    /// `host` is "the host raised and had no token to give", this one is "the
-    /// host raised and Django would have blamed *this* token". A caller that
-    /// has a token and passes it through `host` would be silently indistinguishable
-    /// from one that has none, which is the state this exists to end.
+    /// [`Error::host`]'s twin, and a second constructor rather than `Option`
+    /// arguments on the first, because the two are different claims: `host` is
+    /// "the host raised and had nothing to give", this one is "Python raised
+    /// class C and Django would have blamed *this* token". A caller holding a
+    /// class and passing it through `host` would be indistinguishable from one
+    /// holding none, which is the state this exists to end.
     ///
-    /// The token is set **at construction**, so it is already present when the
-    /// first `error()` frame sees the error and [`Error::token`]'s
-    /// never-replace rule keeps it — the innermost token wins because the host
-    /// is the innermost frame. Why the tag seam and not the filter one: a tag's
-    /// compile function can re-enter the parse (`{% div %}`'s body is a
-    /// `parser.parse`), so a failure inside it is attributed by a *nested* frame
-    /// that this side never sees. Measured on the pinned tree, and the token is
-    /// the only part that moves:
+    /// Both are set **at construction**, so they are already present when the
+    /// first `error()` frame sees the error and the never-replace rules keep
+    /// them — the innermost token wins because the host is the innermost frame.
+    /// Why the tag seam and not the filter one: a tag's compile function can
+    /// re-enter the parse (`{% div %}`'s body is a `parser.parse`), so a failure
+    /// inside it is a failure in a *nested* frame this side never sees. Measured
+    /// on the pinned tree, where each of the two moves independently:
     ///
     /// ```text
     /// {% load custom %}{% div %}{% now a b %}{% enddiv %}
     /// → Django: "'now' statement takes one argument", token (2, 'now a b', 1, None)
-    /// → ours without this: the same message, token (2, 'div', 1, None)
+    /// → ours:   the same message,                    token (2, 'div', 1, None)
     /// ```
-    pub fn host_with_token(message: impl Into<String>, token: TokenDesc) -> Self {
+    ///
+    /// and, for the class, a library tag whose compile raises `TypeError`:
+    ///
+    /// ```text
+    /// {% load cls %}{% boom %}     # boom raises TypeError("not a syntax error")
+    /// → Django: TypeError('not a syntax error')
+    /// → ours:   ParseError('not a syntax error')
+    /// ```
+    ///
+    /// The class is carried as data rather than raised here because design
+    /// decision 2 gives the exception *object* to Python: `_native` raises its
+    /// own classes and the shell converts them (M9), so what has to survive the
+    /// seam is which class to convert to.
+    pub fn host_exception(
+        message: impl Into<String>,
+        class: PyErrorKind,
+        token: Option<TokenDesc>,
+    ) -> Self {
         Self {
-            kind: ErrorKind::Host(message.into()),
-            token: Some(token),
+            kind: ErrorKind::Host(Box::new(HostError {
+                message: message.into(),
+                class: Some(class),
+            })),
+            token,
         }
     }
 
@@ -295,7 +364,6 @@ impl Error {
     pub fn message(&self) -> String {
         match &self.kind {
             ErrorKind::Syntax(message)
-            | ErrorKind::Host(message)
             | ErrorKind::ValueError(message)
             | ErrorKind::Unimplemented(message)
             | ErrorKind::Internal(message) => message.clone(),
@@ -305,6 +373,7 @@ impl Error {
             // `Debug` shows it, so a mismatched `kind` match still names the
             // method that raised without corrupting the message.
             ErrorKind::FilterHost(error) => error.message.clone(),
+            ErrorKind::Host(error) => error.message.clone(),
             ErrorKind::UnterminatedMarker => "unterminated translation marker".to_string(),
         }
     }
@@ -402,10 +471,7 @@ mod tests {
     #[test]
     fn a_refusing_host_is_not_a_python_exception() {
         let refused = Error::host("no host answers `to_str`");
-        assert_eq!(
-            refused.kind,
-            ErrorKind::Host("no host answers `to_str`".to_string())
-        );
+        assert_eq!(refused.kind, Error::host("no host answers `to_str`").kind);
         assert_ne!(
             refused.kind,
             Error::filter_host(PyErrorKind::TypeError, "to_str", "no host answers `to_str`").kind,

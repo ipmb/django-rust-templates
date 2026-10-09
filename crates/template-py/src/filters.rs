@@ -648,7 +648,12 @@ impl PropertyResolver {
 /// class this crate does not know is *its name* — `pprint` prints
 /// `type(e).__name__` and `defaultfilters.py:996` is why
 /// [`PyErrorKind::name`] exists.
-fn py_error_kind(py: Python<'_>, err: &PyErr) -> PyErrorKind {
+///
+/// `pub(crate)` because the **tag** seam needs the identical mapping — an
+/// exception out of `ShellHost.call_tag` is as much a Python class as one the
+/// filter bodies catch — and two tables keyed on `__name__` is how one of them
+/// quietly stops covering a class the other still does.
+pub(crate) fn py_error_kind(py: Python<'_>, err: &PyErr) -> PyErrorKind {
     let name = err
         .get_type(py)
         .name()

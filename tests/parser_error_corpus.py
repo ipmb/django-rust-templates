@@ -10,6 +10,16 @@ Error text is pinned exactly: Django's own test suite compares it with
 `assertRaisesMessage`, and `Template.get_exception_info` exposes `e.token`.
 """
 
+from tests.parser_corpus import LIBRARIES
+
+# Django's own text for an unresolvable library name, `\n`.join over
+# `get_installed_libraries()` — that is, over the engine's library set, sorted.
+# **Derived from `LIBRARIES` rather than spelled out**, and it was spelled out
+# until it went stale: adding `bad_tag` to that dict rewrote this message, and
+# two rows here still carried the old text. They failed against Django, which is
+# the guard working, but the fix is one spelling of the list and not two.
+LIBRARY_LIST = "\n".join(sorted(LIBRARIES))
+
 TEMPLATETAG_ARGUMENTS = [
     "openblock",
     "closeblock",
@@ -331,13 +341,12 @@ ERRORS = [
     #
     # `{% load %}` is the tag that proves it on its own: `find_library` reads
     # `parser.libraries` (`defaulttags.py:1065-1075`) and the message embeds
-    # `"\n".join(sorted(parser.libraries))` — the caller's library set, not a
-    # constant. Ours matches Django's only because both sides are given the same
-    # `Engine.template_libraries`; see `parser_corpus.LIBRARIES`.
+    # `LIBRARY_LIST` is `"\n".join(sorted(parser.libraries))` — the caller's
+    # library set, not a constant. Ours matches Django's only because both sides
+    # are given the same `Engine.template_libraries`; see `parser_corpus.LIBRARIES`.
     (
         "{% load nope %}",
-        "'nope' is not a registered tag library. "
-        "Must be one of:\ncustom\ntag_27584\ntesttags",
+        "'nope' is not a registered tag library. Must be one of:\n" + LIBRARY_LIST,
     ),
     # A second name in the same tag, reaching the same raise site: `do_load`
     # treats every bit after the command as a library name when there is no
@@ -345,8 +354,7 @@ ERRORS = [
     # does not.
     (
         "{% load custom no_params %}",
-        "'no_params' is not a registered tag library. "
-        "Must be one of:\ncustom\ntag_27584\ntesttags",
+        "'no_params' is not a registered tag library. Must be one of:\n" + LIBRARY_LIST,
     ),
     # The *other* raise site, which the `from` form is the only way to reach
     # (`load_from_library`, `defaulttags.py:1086-1095`) — and it is a different
@@ -423,6 +431,19 @@ ERRORS = [
         "Invalid block tag on line 1: 'badtag', expected 'enddiv'. Did you "
         "forget to register or load this tag?",
     ),
+    # --- the class, which the seam was also flattening ----------------------
+    # `badtag`'s compile function raises `RuntimeError` (`bad_tag.py:6-8`), and
+    # Django's `Parser.parse` re-raises the *same object* (`base.py:583-585`),
+    # so the parse leaves Django as a `RuntimeError`. Every comparison in this
+    # file but one compares text — and the text is `"I am a bad tag"` either
+    # way — so a seam that turned it into a `ParseError` passed all of them.
+    #
+    # `.django/tests/template_tests/tests.py:114-123` is the acceptance test
+    # that cannot be fooled: it asserts `assertRaises(RuntimeError)` around
+    # `Engine.from_string("{% load bad_tag %}{% badtag %}")`. Unreachable until
+    # M9 routes `Engine.from_string` through this parser, which is why the class
+    # is carried as data now and converted there.
+    ("{% load bad_tag %}{% badtag %}", "I am a bad tag"),
     # --- and one row that is not an M6 tag, because grading the corpus is the
     # task and the gap is in it ---------------------------------------------
     # The only input that reaches `loopvar_split` on an *empty* haystack, and

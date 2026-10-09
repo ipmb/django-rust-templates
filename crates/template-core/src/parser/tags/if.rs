@@ -456,10 +456,7 @@ mod tests {
             &host,
         );
         let error = parser.parse(&[]).expect_err("the operand is refused");
-        assert_eq!(
-            error.kind,
-            ErrorKind::Host("Invalid filter: 'b|nope'".to_string())
-        );
+        assert_eq!(error.kind, Error::host("Invalid filter: 'b|nope'").kind);
         assert_eq!(
             *host.seen.borrow(),
             vec!["a", "b|nope"],

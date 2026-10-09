@@ -1557,7 +1557,7 @@ mod tests {
         ] {
             assert_eq!(
                 error.kind,
-                ErrorKind::Host(format!("no host answers `{operation}`")),
+                Error::host(format!("no host answers `{operation}`")).kind,
                 "an unset `{operation}` must refuse with `Error::host`, not \
                  default to a value"
             );
@@ -1670,10 +1670,11 @@ mod tests {
         let names = refused_result_operations();
         for (name, error) in names {
             match error.kind {
-                ErrorKind::Host(message) => {
+                ErrorKind::Host(host) => {
                     assert!(
-                        message.starts_with("no host answers `"),
-                        "{name}: {message}"
+                        host.message.starts_with("no host answers `"),
+                        "{name}: {}",
+                        host.message
                     );
                 }
                 other => {
@@ -1830,10 +1831,7 @@ mod tests {
         let scripted = TestFilterHost::default().to_str(&Value::None).unwrap_err();
         let absent = NoFilterHost.to_str(&Value::None).unwrap_err();
         assert_eq!(scripted.kind, absent.kind);
-        assert_eq!(
-            scripted.kind,
-            ErrorKind::Host("no host answers `to_str`".to_string())
-        );
+        assert_eq!(scripted.kind, Error::host("no host answers `to_str`").kind);
     }
 
     /// `FilterCall` is the only thing a body is handed, and §D1 says it is one

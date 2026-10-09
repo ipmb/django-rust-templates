@@ -560,7 +560,7 @@ mod tests {
         let error = parser
             .parse(&[])
             .expect_err("the host shadows the built-in");
-        assert_eq!(error.kind, ErrorKind::Host("the host refused".to_string()));
+        assert_eq!(error.kind, Error::host("the host refused").kind);
     }
 
     #[test]
