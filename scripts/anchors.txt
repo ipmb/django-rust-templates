@@ -35,7 +35,7 @@ base.py:669	django/template/base.py	669	-	self.tags.update	-
 base.py:676	django/template/base.py	676	-	return FilterExpression(token, self)	-
 base.py:678-682	django/template/base.py	678	682	def find_filter(self, filter_name):	raise TemplateSyntaxError("Invalid filter: '%s'" % filter_name)
 base.py:682	django/template/base.py	682	-	raise TemplateSyntaxError("Invalid filter: '%s'" % filter_name)	-
-base.py:688-699	django/template/base.py	688	699	-	-
+base.py:688-699	django/template/base.py	688	699	constant_string = r"""	constant_string = constant_string.replace("\n", "")
 base.py:690-698	django/template/base.py	690	698	re.escape(")")	-
 base.py:695	django/template/base.py	695	-	-	-
 base.py:696	django/template/base.py	696	-	-	-
