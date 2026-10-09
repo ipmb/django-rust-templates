@@ -2662,8 +2662,9 @@ CASES: list[dict] = [
     #
     # One `int()` inside a `try` for three classes, one negation, and a six-arm
     # branch compared on the **absolute** value — the negation at
-    # `defaultfilters.py:922` is three lines above the branch and reads like part
-    # of the output formatting. Every answer here is a plain `str` whatever the
+    # `defaultfilters.py:922` sits just above the branch
+    # (`defaultfilters.py:924-935`) and reads like part of the output formatting.
+    # Every answer here is a plain `str` whatever the
     # settings: the filter's
     # `is_safe=True` is the registry's flag and not the body's, which is why the
     # safety half of the comparison is a constant on this filter.
