@@ -392,6 +392,17 @@ impl<'py> PyFilterHost<'py> {
     /// `try: … except IndexError`, and Django lets a `TypeError` out of that
     /// handler. A Rust `Value::List` answers both halves; everything else goes to
     /// Python so that the exception class is Python's.
+    ///
+    /// **Only the class is Python's.** The `IndexError` on the `Value::List` path
+    /// is *synthesised* and its message is not CPython's: this raises
+    /// `list index out of range (5)` where CPython raises `list index out of
+    /// range` with no index. It is unobservable, and only because both callers
+    /// catch `IndexError` and answer `""` — so a third caller that lets it out
+    /// would make a synthetic message look like Python's. Left as it is rather
+    /// than made to match, on the grounds that the index is the more useful text
+    /// and no reader is promised CPython's; recorded because the previous draft
+    /// of this paragraph claimed the message was Python's as well, which is the
+    /// `json_dumps` lesson applied to a comment instead of a kwarg.
     fn index_of(&self, value: &Value, index: i64) -> PyResult<Value> {
         if let Value::List(items) = value {
             let len = items.len() as i64;
