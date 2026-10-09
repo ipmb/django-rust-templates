@@ -675,6 +675,12 @@ text could not be followed literally:
    Rust its place is taken by the registry's own invariants (ascending, no
    duplicates, 24 names, the three loader tags absent, every entry reachable,
    and the fifteen stubs by name).
+   **Correction (`34399f2`) to the sentence above, found by review:**
+   `csrf_token_and_debug_read_no_arguments` was not retired, it was *split* into
+   `csrf_token_reads_no_arguments` and `debug_reads_no_arguments`, and both are
+   present. Only `the_registry_holds_exactly_the_nine_m2_tags` was genuinely
+   retired. "Retired two, split none" and "retired one, split one" are different
+   claims about coverage and this record had the wrong one.
 2. **`csrf_token_and_debug_read_no_arguments` named two tags in one test.** Step
    5 moves each tag into its own file, so one test naming both would have had to
    live in one of the two files and reach across. Split into
@@ -699,6 +705,39 @@ text could not be followed literally:
    exactly one caller, so leaving them in the machinery would have made them
    `pub(crate)` items reached from one other module — the pattern the split
    exists to remove.
+6. **The registry now states the rule behind its subtraction, not just the
+   list.** Review asked for this and it is right: "which built-ins does Rust
+   own" has been asked four times and each time a different list was a correct
+   answer to a different question. `registry.rs`'s module doc now says the table
+   holds tags whose `CompileFn` is a function of *the token and the parser's
+   structural cursor alone*, and a tag is subtracted when its compile reads or
+   writes host-side parser state — `block`'s `parser.__loaded_blocks`,
+   `extends`' `parser.origin.template_name` and its `get_nodes_by_type` over
+   *materialised* nodes, `include`'s loader machinery. It also records what the
+   rule is **not**: "the node's render needs the host" would subtract all 24,
+   since every node is a materialised Django class and `NowNode.render` reads
+   `settings.USE_TZ` (`defaulttags.py:404-405`).
+7. **`partial` and `partialdef` are recorded as M13's to place, not resolved
+   here.** Review argued `partial` belongs with the three (its
+   `PartialNode.render` re-enters `PartialTemplate.render` → `push_state`/
+   `bind_template`, `base.py:334-345`) and `partialdef` does not (its render is
+   a plain nodelist render). The measurement does not support splitting the
+   pair *under the stated rule*: both touch `parser.extra_data`
+   (`defaulttags.py:1251` writes it, `:1279` reads it via `DeferredSubDict`), and
+   the rule acts at **compile** time, where they are the same case. Both stay in
+   the table as stubs — deleting an entry would make the engine claim the tag
+   does not exist, which is the error `Unimplemented` exists to avoid — and
+   M13 decides between widening the seam and growing the wire an `extra_data`
+   channel. Recorded as a measurement, not a verdict.
+8. **`Unimplemented` is now its own class at the FFI** (`_native.
+   UnimplementedTag`, a subclass of `_native.ParseError`). Review's condition on
+   the stub-rather-than-absent decision: a harness must be able to bucket an
+   outcome as "not implemented here" rather than "errored differently", and the
+   message cannot carry that — Django would compile `{% for %}` fine, so
+   comparing messages would score our one wrong case as a match. As a subclass,
+   the shell's single `except ParseError` and M2's
+   `test_a_variable_is_reported_rather_than_dropped` are unchanged;
+   `test_an_unimplemented_tag_is_its_own_kind_at_the_ffi` pins both halves.
 
 The guards were made to fail before being kept: a registry entry removed, `block`
 added, two entries swapped, the `standin_tag` arm deleted, and — through a
@@ -1404,7 +1443,8 @@ from Django's own filter_raw_string."
 
 **What this task does not do.** It does not build `filter_re` (Task 3), add a `_native` binding, or touch `kwarg_re` (Task 9). It adds no corpus entry, because at this point there is no variable path for a corpus entry to reach — the divergences are pinned at the class, which is where they are decidable now and where `filter_re` will read them later. If a `regex` upgrade moves `regex-syntax`'s UCD, the guard fails and the fix is a re-measure, not an edit to `PYTHON_WORD_*`: `\p{L}\p{N}_` is Python's definition, and a crate whose tables disagree with CPython is the thing that is wrong.
 
-**Task 2 as implemented — one correction.** Step 6's command,
+**Task 2 as implemented — one correction, and four changes from review (`68f69b9`).**
+Step 6's command,
 `.venv/bin/python -I -m unittest tests.test_pyregex_parity`, does not run: `-I`
 implies `-P`, so the repository root is not on `sys.path` and the loader reports
 `ModuleNotFoundError: No module named 'tests'` before any test is collected. The
@@ -1426,6 +1466,51 @@ are not vacuous — measured on the raw string, `filter_raw_string` holds exactl
 three bare `\w`: one `(?P<filter_name>\w+)` and two `[\w\.\+-]+`. That is the
 1 + 2 the test asserts, and a replacement that missed either form would leave a
 `\w` behind for `assertNotIn` to catch.
+
+**Four changes from review, `68f69b9`:**
+
+1. **Step 2's `the_other_splice_would_be_silent` is deleted, and the reason
+   generalises.** It probed five inputs to show that no *behavioural* test can
+   separate the two spellings. Review's point: nested classes are a **documented
+   `regex-syntax` guarantee** (`[[a][b]]` is union; `&&` and `--` are the same
+   documented syntax), so the two patterns are the same compiled class for every
+   input and the probe could not have failed however many probes there were. A
+   test that cannot fail is not a guard. Replaced by three that can:
+   `the_two_spellings_are_the_same_set_in_different_positions` (bracket shape,
+   plus `format!("[{IN_CLASS}]") == STANDALONE`, which catches an edit to one
+   constant that forgets the other),
+   `the_in_class_form_used_standalone_is_loudly_wrong` (the precedence claim,
+   made executable: `\p{L}\p{N}_+` binds `+` to `_`, so it is one letter then one
+   number then underscores, and it rejects `upper`), and
+   `the_alphabetic_spelling_is_rejected_so_it_cannot_be_simplified_into`.
+2. **The rejection is pinned for a different reason than the one this plan
+   gave.** Not UCD drift — under drift it is no more actionable than the counts —
+   but a **code change**: it is the test that fires when someone later
+   "simplifies" `[\p{L}\p{N}_]` to `[\p{Alphabetic}\p{Nd}\p{Nl}\p{No}_]` because
+   it reads more semantically. The test asserts the *shape* of the wrongness too
+   (a strict superset, so the failure mode is over-acceptance), and checks its
+   own helper is not vacuous.
+3. **The aggregate counts are marked inherited, not re-measured.** The 771
+   ranges / 142,940 code points are pinned here; Rust's `\w` at 144,667 and the
+   rejected spelling's 1,495 excess are from the task's measurement and stay
+   prose. Pinning them would be a second alarm for one event, since the engine
+   never compiles a bare `\w`.
+4. **`unicodedata.unidata_version == "16.0.0"` is no longer asserted on**, in
+   either the Python test or the generator. It answers "which UCD did CPython
+   ship", not "is the table still the one we generated against", and it is wrong
+   in both directions — a CPython upgrade that ships a new UCD without touching
+   the word table is a false alarm, a backport that fixes the table without
+   bumping the version is false silence. The counts are the metric; the version
+   now travels in the failure message as diagnostics.
+5. **The module doc names what is *not* verified**: nothing here compiles the
+   constants into a working `filter_re`. "These constants are verified" and "a
+   pattern built from these constants is verified" are different claims, and only
+   the first is true at Task 2.
+
+Review also checked all 13 `python -I` sites in this plan and confirmed line
+1353 was the only one with the `-m <dotted module from the repo root>` defect;
+the others are stdlib-only scripts or do an explicit `sys.path.insert`. Recorded
+so nobody "fixes" the safe ones.
 
 ---
 
@@ -1787,6 +1872,21 @@ inputs that distinguish it from `code - first`:
         assert_eq!(all, "0123456789".repeat(5));
     }
 ```
+
+**Correction, measured before this test was written (`U+1D7D8` is not a `1`).**
+The sketch above asserts `decimal_digit_value('\u{1d7d8}') == Some(1)` with the
+label "second alphabet's '1'". The pinned interpreter says
+`U+1D7D8 MATHEMATICAL DOUBLE-STRUCK DIGIT ZERO`, `unicodedata.decimal` = **0** —
+it is the second alphabet's *zero*, and `(0x1D7D8 - 0x1D7CE) % 10` is 0. The
+sketch contradicts the rule the same step measured, which is exactly the failure
+the step's own sweep exists to catch; the assertion as written would have failed
+the moment it ran, which is how it was found. Two labels were wrong with it:
+`U+116DA` is `MYANMAR EASTERN PWO KAREN DIGIT ZERO`, not "a second Modi cycle"
+(Modi is `U+116C0..U+116C9`, a range of its own), and `U+116D0` is
+`MYANMAR PAO DIGIT ZERO`. The implementation asserts the five zeros of the two
+fused runs by name with the measured value, and keeps the `"0123456789".repeat(5)`
+sweep, so the discriminating power the row was there for is unchanged and the
+labels are now derived from `unicodedata.name` rather than from memory.
 
 - [ ] **Step 4: Implement `python_int` and `python_float`**
 
