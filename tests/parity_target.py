@@ -38,6 +38,27 @@ DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 IMPL_DIR = PROJECT_ROOT / "python" / "django_rust_templates" / "_impl"
 
 
+def key_of(source: Path) -> str:
+    """``_impl``-relative posix path — the key the guard's tables use.
+
+    ``source.name`` was the key until M10, and it was correct while ``_impl`` was
+    flat. For the first file in a subpackage it is silently wrong in the worst
+    available way: ``loaders/base.py`` keys as ``base.py``, which *is* a
+    transcription — a different one — so ``DECLARED`` answers, the regions
+    returned are ``base.py``'s, and every clause here passes while checking the
+    wrong file. Nothing about that failure looks wrong: the regions are real
+    regions of a real transcription, and they simply do not cover the lines of
+    the file being interrogated, so the last two clauses — the ones that exist to
+    catch a region on the compared path — are the ones that go quiet.
+
+    The spelling is not chosen here. It is what ``_shim.shadowing_files()``
+    reports, what ``check_transcriptions.py``'s ``DECLARED`` and
+    ``COMPARED_PATH`` are keyed by, and what
+    ``.review/m10-measurements/m10_measure_compared_path.py`` prints its rows in.
+    """
+    return source.relative_to(IMPL_DIR.resolve()).as_posix()
+
+
 def assert_target_is_not_rust_owned(testcase, target, module_name):
     """Assert ``target``'s Python side is not Rust-delegated code.
 
@@ -68,10 +89,12 @@ def assert_target_is_not_rust_owned(testcase, target, module_name):
         "checks it against upstream",
     )
 
+    key = key_of(source)
+
     testcase.assertIn(
-        source.name,
+        key,
         guard.DECLARED,
-        f"{source.name} is interposed but declares no differences from "
+        f"{key} is interposed but declares no differences from "
         "upstream, so nothing checks it — add it to "
         "scripts/check_transcriptions.py in the commit that creates it",
     )
@@ -86,7 +109,7 @@ def assert_target_is_not_rust_owned(testcase, target, module_name):
 
     # The compared path must be inside the part of the file that is *unchanged*.
     # Two checks, because the first is a proxy for the second.
-    regions = guard.declared_regions(source.name)
+    regions = guard.declared_regions(key)
 
     # The target's own lines, cheap and general: it works for any module, and
     # it is the check that has teeth before anyone has measured a module.
@@ -98,7 +121,7 @@ def assert_target_is_not_rust_owned(testcase, target, module_name):
     testcase.assertEqual(
         [],
         covered,
-        f"{module_name} ({source.name}:{first}-{last}) is inside a declared "
+        f"{module_name} ({key}:{first}-{last}) is inside a declared "
         f"transcription region {covered}, so this comparison would be Rust "
         "against Rust",
     )
@@ -112,7 +135,7 @@ def assert_target_is_not_rust_owned(testcase, target, module_name):
     # `base.py` is 28 functions spanning lines 116-1209 — nearly the whole
     # module — so for a transcription with a `COMPARED_PATH` entry the practical
     # rule is that no region may be in the module body at all.
-    compared = guard.COMPARED_PATH.get(source.name, [])
+    compared = guard.COMPARED_PATH.get(key, [])
     executed = [
         (label, first_line, last_line)
         for first_line, last_line, label in compared
@@ -123,7 +146,7 @@ def assert_target_is_not_rust_owned(testcase, target, module_name):
     testcase.assertEqual(
         [],
         executed,
-        f"{source.name}: the parity harness executes {executed}, and a declared "
+        f"{key}: the parity harness executes {executed}, and a declared "
         "transcription region covers it, so this comparison would be Rust "
         "against Rust",
     )

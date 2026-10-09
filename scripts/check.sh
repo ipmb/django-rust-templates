@@ -77,6 +77,24 @@ step "transcriptions differ from upstream only where declared"
 # Fast path: it reads text and needs only `.django/`.
 "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_transcriptions.py"
 
+step "the transcriptions are generated, not edited"
+# The other half of the claim above, and the reason it sits here rather than
+# with the two generators on the slow path. `check_transcriptions.py` says
+# *which* regions of a transcription may differ from the pin; this says the rest
+# of each file is still what the generator produces, so a hand edit inside a
+# declared region — the one change the guard permits by construction — is
+# caught. Same inputs as the guard (four `_impl` files and `.django/`), so it
+# costs a read and belongs on the fast path; `gen_python_case_fixups.py` below
+# does not, because it compiles a Rust probe.
+#
+# Both scripts document `--check` as *the* way to verify currency and this one
+# was invoked by nothing, which is the failure mode the pair exists to close: a
+# drift guard nobody runs. Measured before wiring it up — `gen_impl_transcription.py
+# --check` was *already* failing on `base.py` when M10 found it, because `base.py`
+# delegates to Rust by hand and the generator can only write "the pin plus a
+# marker". That is now `HAND_WRITTEN`, and it refuses by name instead.
+"$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_impl_transcription.py" --check
+
 step "differential harness"
 "$PROJECT_ROOT/.venv/bin/python" "$HERE/differential.py"
 
@@ -84,10 +102,11 @@ if [ "$FAST" -eq 0 ]; then
   # `--check` regenerates and diffs, so it says *what* differs, and it is
   # self-maintaining: a legitimate move (a new `rustc`, a new CPython, a Django
   # pin bump) is fixed by re-running the generator, not by editing a count here.
-  # Both generators document `--check` as *the* way to verify currency and
+  # These generators document `--check` as *the* way to verify currency and
   # neither was invoked anywhere, which is the failure mode this closes: a drift
   # guard nobody runs. Not on the `--fast` path because the case generator
-  # compiles a Rust probe.
+  # compiles a Rust probe; the transcription generator reads text and is on the
+  # fast path above, with the guard whose claim it completes.
   step "generated files are current"
   "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_python_word_ranges.py" --check
   "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_python_case_fixups.py" --check

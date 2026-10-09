@@ -197,70 +197,110 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
     def test_a_partial_subpackage_still_falls_back_for_its_siblings(self):
         """The fallback has to be reapplied at every level, not just the top.
 
-        ``django.template.loaders`` is a package. The moment we provide
-        ``_impl/loaders/__init__.py``, that package's ``__path__`` is ours alone
+        ``django.template.backends`` is a package. The moment we provide
+        ``_impl/backends/__init__.py``, that package's ``__path__`` is ours alone
         unless the finder rebuilds it with Django's directory appended — and then
-        ``django.template.loaders.filesystem`` stops resolving at all. That would
+        ``django.template.backends.django`` stops resolving at all. That would
         make the fallback vanish exactly when a milestone is half-finished, which
         is when it is needed most.
 
         This creates that situation with one throwaway module and checks both
         that our module wins and that its Django sibling still resolves.
 
-        ``django.template.loaders`` and ``django.template.loaders.filesystem``
-        are the subjects because they are a package with siblings and are as far
-        from the interposition frontier as the tree allows. The spec's §10.3
-        schedules ``loaders`` for M10 (line 789), so this subject has a known
-        expiry rather than an open-ended one, and the next person should re-pick
-        it deliberately rather than by bisecting a failure.
+        ``django.template.backends`` and ``django.template.backends.probe`` are
+        the subjects because they are a package with siblings and are owned by
+        M13 (§10.3), not by the milestone being worked. The subject used to be
+        ``loaders``, chosen as "as far from the interposition frontier as the tree
+        allows" — which expired at M10. The re-pick alone would have expired
+        again at M13, because ``django/template/`` has only two subpackages
+        (``backends`` and ``loaders``), so the cleanup below is the part that
+        matters: the row now records what it found, writes only files that were
+        not there, and removes only what it wrote.
+
+        ``probe`` rather than asserting on the package's own ``__init__.py`` is
+        what gives the row no expiry left. It is a name Django does not have and
+        a file only this row writes, so the positive half of the assertion reads
+        *our* module whether or not a later milestone has transcribed
+        ``backends/__init__.py`` — where writing the marker into ``__init__.py``
+        would have turned the row into an assertion about a file M13 owns, and
+        into a failure on the day M13 landed. The package still has to be ours
+        for the submodule to be ours at all, and the meter row below is what says
+        so. It also leaves ``filesystem.py`` out of the probe set: ``backends``
+        has no such sibling.
 
         The cache-drop below is not incidental. The row writes a module and
         expects the finder to see it, but ``install()`` returns early when the
         shim is already installed (``_shim.py:399``), and a session-start install
         (which ``check.sh`` now does, so every test module binds the same
         classes) means the shim *is* already installed by the time this row
-        runs. A ``django.template.loaders`` cached earlier in the session then
+        runs. A ``django.template.backends`` cached earlier in the session then
         wins over the file just written, and the assertion below reads
         ``None != 'ours'``. Measured both ways before the fix.
         """
         package_dir = (
-            PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "loaders"
+            PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "backends"
         )
+        # **Record what was here before writing anything.** The first version of
+        # this row asserted the directory did not exist and removed it in
+        # `finally`, which is a row that can only run while its subject is
+        # absent — so it went from a test to a deletion the day M13 gave
+        # `_impl/backends/` a transcription, and the failure would have looked
+        # like a broken fallback rather than a test cleaning up after itself.
+        # Whether or not the subject exists is now the row's input rather than
+        # its premise: the probe file is ours to remove, and the `__init__.py`
+        # and the directory are ours to remove only if we made them.
+        created_package_dir = not package_dir.exists()
+        package_dir.mkdir(parents=True, exist_ok=True)
         init = package_dir / "__init__.py"
-        self.assertFalse(package_dir.exists(), "leftover from an earlier run")
-
-        package_dir.mkdir()
-        init.write_text("MARKER = 'ours'\n")
+        had_init = init.exists()
+        probe = package_dir / "probe.py"
         try:
+            if not had_init:
+                init.write_text("")
+            probe.write_text("MARKER = 'ours'\n")
             _shim.install()
 
             # Drop the cached bindings so the finder is consulted for the
             # package we just created — the purge `install()` would have done if
             # it were not already installed.
             for name in [
-                n for n in sys.modules if n.startswith("django.template.loaders")
+                n for n in sys.modules if n.startswith("django.template.backends")
             ]:
                 del sys.modules[name]
 
-            ours = importlib.import_module("django.template.loaders")
+            ours = importlib.import_module("django.template.backends.probe")
             self.assertEqual(getattr(ours, "MARKER", None), "ours")
 
-            sibling = importlib.import_module("django.template.loaders.filesystem")
+            sibling = importlib.import_module("django.template.backends.django")
             self.assertNotIn(
                 "_impl",
                 sibling.__file__,
                 "our partial package cut its Django sibling off from the fallback",
             )
 
-            # The meter must now tell the truth about this case too: `loaders` is
-            # ours, its siblings are not, and they still import.
+            # The meter must now tell the truth about this case too: `backends`
+            # is ours, its siblings are not, and they still import.
             remaining = _shim.unshimmed()
-            self.assertNotIn("django.template.loaders", remaining)
-            self.assertIn("django.template.loaders.filesystem", remaining)
+            self.assertNotIn("django.template.backends", remaining)
+            self.assertIn("django.template.backends.django", remaining)
         finally:
-            # Importing the package writes a __pycache__ into it, so this is a
-            # tree removal rather than an unlink+rmdir.
-            shutil.rmtree(package_dir, ignore_errors=True)
+            probe.unlink(missing_ok=True)
+            # The bytecode importing `probe` wrote, and only that — anything
+            # else in this cache belongs to a module the directory was already
+            # serving, and guessing at that is how the rmtree this replaced got
+            # its start.
+            cache = package_dir / "__pycache__"
+            if cache.is_dir():
+                for stale in cache.glob("probe.*.pyc"):
+                    stale.unlink(missing_ok=True)
+            if not had_init:
+                init.unlink(missing_ok=True)
+            # Importing the package writes a __pycache__ into it, so when we made
+            # the directory this is a tree removal rather than an unlink+rmdir —
+            # and when we did not, the directory and its cache are somebody
+            # else's and stay.
+            if created_package_dir:
+                shutil.rmtree(package_dir, ignore_errors=True)
 
     def test_install_is_idempotent(self):
         _shim.install()

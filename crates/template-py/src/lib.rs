@@ -2179,13 +2179,13 @@ fn log_resolution_failure(
 /// the rows they were built for.
 ///
 /// **A second version of this paragraph added that moving the handler to Python
-/// would be refused by `tests/parity_target.py:41`, and that was false too.**
+/// would be refused by `tests/parity_target.py:62`, and that was false too.**
 /// That guard's subject is the *target* — its own docstring at that line
 /// describes `target` as a class or function whose source file is the
 /// comparison's Python side, Django's — and routing the five harnesses through
 /// the shell's `_resolve_lookup` changes **our** side, not the target, which
 /// stays the ast-extraction out of the pinned checkout
-/// (`tests/parity_target.py:147`). That is the whole job of
+/// (`tests/parity_target.py:170`). That is the whole job of
 /// `pinned_resolve_lookup()`, so the guard would be satisfied and unmoved. The
 /// sentence conflated the side under test with the oracle.
 ///

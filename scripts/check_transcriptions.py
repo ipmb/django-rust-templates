@@ -674,7 +674,20 @@ def check() -> list:
     # clause is: a declared name with no file is a claim about nothing (caught
     # below as "declared but not present"), and a marked file with no
     # declaration is a transcription that has not been read.
-    marked = sorted(path.name for path in IMPL.glob("*.py") if _marked(path))
+    # `rglob`, not `glob`, and `_impl`-relative keys, not basenames. Both halves
+    # matter and both were latent until M10: `glob("*.py")` cannot see
+    # `loaders/base.py`, so a marker-bearing file in a subpackage is invisible to
+    # the clause below `_check_marker` and to this loop — and `path.name` would
+    # key it `base.py`, which is *another* transcription's key, so the entry it
+    # looked up would be the wrong file's while every clause passed.
+    #
+    # `loaders/base.py` is also the spelling `_shim.shadowing_files()` reports
+    # and the one `m10_measure_compared_path.py` prints `COMPARED_PATH` rows in,
+    # so this is the fourth table agreeing with the other three rather than a
+    # fourth convention.
+    marked = sorted(
+        path.relative_to(IMPL).as_posix() for path in IMPL.rglob("*.py") if _marked(path)
+    )
     undeclared = sorted(set(marked) - set(DECLARED))
     if undeclared:
         failures.append(
@@ -686,14 +699,18 @@ def check() -> list:
     # `_impl/__init__.py` is declared and *is* marked; a declared file that is
     # merely missing is reported by the per-module loop below, so only report
     # here the ones that exist and are somehow unmarked.
-    unmarked = [name for name in unmarked if (IMPL / name).is_file()]
+    unmarked = [
+        name for name in unmarked if IMPL.joinpath(*name.split("/")).is_file()
+    ]
     if unmarked:
         failures.append(
             f"{unmarked} is declared as a transcription but carries no "
             "`# TRANSCRIBED:` marker"
         )
     for name, (upstream, regions) in sorted(DECLARED.items()):
-        ours_path = IMPL / name
+        # `joinpath(*name.split("/"))`, the same reading of a key as the clause
+        # above: a key is a posix path relative to `_impl`, not one segment.
+        ours_path = IMPL.joinpath(*name.split("/"))
         theirs_path = CHECKOUT / upstream
         if not ours_path.is_file():
             failures.append(f"{name}: declared but not present at {ours_path}")

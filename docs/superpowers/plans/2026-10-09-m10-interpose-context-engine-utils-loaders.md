@@ -1466,31 +1466,52 @@ So do both. Re-pick to `django.template.backends` (correct for M10 — it is M13
         # `_impl/backends/` a transcription, and the failure would have looked
         # like a broken fallback rather than a test cleaning up after itself.
         # Whether or not the subject exists is now the row's input rather than
-        # its premise: the probe files are ours to remove, and the directory is
-        # ours to remove only if we made it.
+        # its premise: the probe file is ours to remove, and the `__init__.py`
+        # and the directory are ours to remove only if we made them.
         created_package_dir = not package_dir.exists()
         package_dir.mkdir(parents=True, exist_ok=True)
         init = package_dir / "__init__.py"
         had_init = init.exists()
+        probe = package_dir / "probe.py"
         try:
             if not had_init:
-                init.write_text(MARKER)
-            ...  # the row's existing probe files and assertions, unchanged —
-                 # read them in `tests/test_shim.py` and keep them verbatim;
-                 # only the name of the subject changes
+                init.write_text("")
+            probe.write_text("MARKER = 'ours'\n")
+            _shim.install()
+            ...  # the cache-drop, the three assertions and the meter row, as the
+                 # row has them today; only `loaders` → `backends.probe` changes
         finally:
+            probe.unlink(missing_ok=True)
+            cache = package_dir / "__pycache__"
+            if cache.is_dir():
+                for stale in cache.glob("probe.*.pyc"):
+                    stale.unlink(missing_ok=True)
             if not had_init:
                 init.unlink(missing_ok=True)
-            for probe in ("filesystem.py",):  # every probe file this row writes
-                (package_dir / probe).unlink(missing_ok=True)
             if created_package_dir:
                 shutil.rmtree(package_dir, ignore_errors=True)
 ```
 
+**Two corrections to the first draft of this step, both found while writing it.**
+
+`init.write_text(MARKER)` named a constant `tests/test_shim.py` does not have; the
+marker text was meant to be the probe module's *source line*, and writing it into
+`__init__.py` is the second mistake — it makes the positive half of the row an
+assertion about a file M13 will own, so the row expires at M13 with a `None !=
+'ours'` failure exactly where it was supposed to stop being able to expire. The
+probe is now a file only this row writes, at a name Django does not have
+(`probe.py`), and the finder serves it: `_ShimFinder.find_spec` returns a spec for
+any `_impl/*.py`, not only for names that shadow. `backends` has no
+`filesystem.py` sibling, which is why the probe set is `("probe.py",)` here and not
+the `("filesystem.py",)` the first draft carried over from `loaders`.
+
+The package still has to be ours for the submodule to be ours at all, and the
+meter row (`assertNotIn("django.template.backends", remaining)`) is what says so.
+
 and update the row's docstring paragraph that justifies the subject:
 
 ```
-        ``django.template.backends`` and ``django.template.backends.django`` are
+        ``django.template.backends`` and ``django.template.backends.probe`` are
         the subjects because they are a package with siblings and are owned by
         M13 (§10.3), not by the milestone being worked. The subject used to be
         `loaders`, chosen as "as far from the interposition frontier as the tree
@@ -1566,6 +1587,37 @@ shutil.rmtree(scratch, ignore_errors=True)
 
 Run it before Step 1's fix (with the working tree at the previous commit's guard) and after; record both outputs in the commit message.
 
+**Corrected while writing it: the sketch above does not run, and the M9 shape is
+better than the shape it imitates.** The copy at `scratch / "guard.py"` derives
+`ROOT` from its own `__file__`, so `CHECKOUT` becomes `<tmp>/.django`, which does
+not exist — patching `IMPL` alone leaves the guard looking for the pinned tree
+beside itself and it dies before reaching the clause under test. It also measures
+only the `glob` half.
+
+What was written instead keeps M9's mechanism — import the guard as a module and
+repoint `IMPL`, so no copy is made and no path is derived from a temp directory —
+and takes the *source* from `git show <rev>:scripts/check_transcriptions.py`,
+exec'd with `__file__` set to the real guard's so `ROOT` resolves correctly. Three
+variants, not two:
+
+* `before` — restored from the revision, not retyped;
+* `rglob-only` — the post-fix source with the key mutated back to `path.name`,
+  one token, **because the basename defect cannot be seen under the real `before`
+  clause**: there the file is invisible for the `glob` reason, so the second
+  defect would otherwise be fixed blind and untested;
+* `after` — the working tree.
+
+Each runs against a scratch copy of the real `_impl` with the real `DECLARED` and
+`COMPARED_PATH`, so the only differences between cells are the guard revision and
+the one planted file. Two plants: `loaders/probe.py` (a name Django lacks) and
+`loaders/base.py` (a real transcription's bytes at a subpackage path — the shape
+Task 7 creates for real, and the one that keys as `base.py`). Measured result:
+`before` is **silent on both**; `rglob-only` names `['probe.py']` — by basename,
+losing the subpackage — and stays **silent on `loaders/base.py`**; `after` names
+both correctly. The `BEFORE_REV` SHA is written into the script rather than
+`HEAD~1`, because the script outlives the commit it measures and `HEAD~1` would
+then quietly turn the `before` column into a second `after`.
+
 - [ ] **Step 5: Put the generator on the fast path.**
 
 `scripts/gen_impl_transcription.py --check` is invoked by nothing today, so a hand edit *inside* a declared region — the one change `check_transcriptions.py` permits by construction — is unguarded. In `scripts/check.sh`, beside the two existing generator checks:
@@ -1576,10 +1628,24 @@ Run it before Step 1's fix (with the working tree at the previous commit's guard
 
 with a comment naming why it belongs there: the transcription guard says *which* regions may differ, and this says the rest of each file is still generated rather than edited.
 
+**Corrected: "beside the two existing generator checks" and Step 6's expectation
+contradict each other, and Step 6 is right.** Those two sit inside `if [ "$FAST"
+-eq 0 ]`, because `gen_python_case_fixups.py` compiles a Rust probe — so a check
+placed literally beside them does *not* run on `--fast`, which is the run Step 6
+tells you to make and to read the new check's line out of. It went on the fast
+path instead, directly under the transcriptions guard, which is where it belongs
+on the merits: the two read the same four `_impl` files and `.django/`, and
+together they are one claim — the guard says which regions may differ, the
+generator says the rest of each file is still generated. Step 6's "all three
+transcriptions" is stale by two: `MODULES` holds four (`context`, `engine`,
+`smartif`, `utils`), and `base.py` is excluded by name — it delegates to Rust by
+hand, so `HAND_WRITTEN` refuses it and `--check` would otherwise have been
+rewriting that delegation with upstream's text.
+
 - [ ] **Step 6: Run the fast check and commit.**
 
 Run: `. scripts/env.sh && bash scripts/check.sh --fast`
-Expected: `all checks passed`, including the new generator check (which regenerates all three transcriptions and compares).
+Expected: `all checks passed`, including the new generator check (which regenerates all four transcriptions and compares).
 
 ```bash
 git add scripts/check_transcriptions.py tests/parity_target.py tests/test_shim.py \
