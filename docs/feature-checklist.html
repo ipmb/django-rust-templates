@@ -598,6 +598,17 @@
       deliberately edited test is the one failure that every other check here would report as
       green.
     </p>
+    <p class="sub" style="margin-top:16px">
+      <b>Speed is measured, and is not yet a win.</b> The port is checked against stock
+      Django 6.0.9 on four workloads — a pre-compiled 50-row i18n page, the same page parsed
+      and rendered, a generated ~200-node template, and a one-variable template — by running
+      one committed script under both engines and diffing the two transcripts. Both sides
+      print the file they loaded and a hash of every rendered page, and those hashes agree, so
+      the comparison is like for like rather than two different templates. Measured
+      2026-10-09, the port is <b>1.35× to 1.85× slower</b> — the compatibility work has been
+      the priority throughout, and the measurement is published here rather than only the
+      number that would flatter it.
+    </p>
   </section>
 
   <footer>
