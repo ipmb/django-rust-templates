@@ -18,8 +18,9 @@ pub mod error;
 pub mod host;
 pub mod registry;
 pub mod tags;
+pub mod variable;
 
-pub use desc::{AttrValue, NodeDesc, NodeListDesc, NodeRef, TokenDesc, TEXT_NODE};
+pub use desc::{AttrValue, NodeDesc, NodeListDesc, NodeRef, TokenDesc, VariableDesc, TEXT_NODE};
 pub use error::{Error, ErrorKind};
 pub use host::{Host, NoHost};
 pub use registry::CompileFn;

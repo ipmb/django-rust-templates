@@ -117,10 +117,16 @@ def _decode_value(value, resolve_ref):
     ``isinstance(value, int)`` arm ahead of it would turn every boolean
     attribute — ``{% autoescape on %}``'s ``setting`` — into ``0``/``1``, which
     compares equal and passes any ``assertEqual`` while being the wrong type.
+
+    ``float`` rides alongside ``int`` and ``str`` because it is already the
+    Python object the descriptor meant: ``Variable.literal`` for the
+    ``float(var)`` branch is a Python ``float`` on Django's side too, so there is
+    nothing to convert. Without the arm the value falls through to the
+    ``LookupError`` below, which is how a missing arm announces itself.
     """
     if isinstance(value, bool):
         return value
-    if value is None or isinstance(value, (int, str)):
+    if value is None or isinstance(value, (int, float, str)):
         return value
     if isinstance(value, _native.NodeRef):
         if resolve_ref is None:

@@ -11,7 +11,7 @@ use pyo3::types::PyTuple;
 // Aliased to keep the call site readable: `CoreLexer` names the crate's lexer,
 // as opposed to anything Python-side that might later be called a lexer.
 use template_core::lexer::Lexer as CoreLexer;
-use template_core::parser::desc::{AttrValue, NodeDesc, NodeListDesc, TokenDesc};
+use template_core::parser::desc::{AttrValue, NodeDesc, NodeListDesc, TokenDesc, VariableDesc};
 use template_core::parser::{Error, ErrorKind, NoHost, Parser as CoreParser};
 use template_core::token::{Token, TokenType};
 
@@ -215,9 +215,85 @@ fn attr_value_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
         // are singletons), which must be owned before `into_any` can consume it.
         AttrValue::Bool(b) => (*b).into_pyobject(py)?.to_owned().into_any().unbind(),
         AttrValue::Int(i) => (*i).into_pyobject(py)?.into_any().unbind(),
+        // A Python `float`, which is what Django's `Variable.literal` holds for
+        // the `float(var)` branch — `1e400` included, because `f64` inf is
+        // Python's inf.
+        AttrValue::Float(f) => (*f).into_pyobject(py)?.into_any().unbind(),
+        AttrValue::BigInt(text) => {
+            // `builtins.int(text)`, **never** `py.eval`. The text is a validated
+            // decimal produced by `pynum::python_int` — an optional ASCII sign
+            // then ASCII digits — so the only thing it can denote is a number,
+            // and Python's own `int()` is exact and arbitrary-precision, which
+            // is the whole reason the variant exists. The tempting
+            // `py.eval("int(%s)" % text)` would accept the text as *code*, which
+            // no lint catches; this form cannot, whatever the text says.
+            py.import("builtins")?
+                .getattr("int")?
+                .call1((text.as_str(),))?
+                .unbind()
+        }
         AttrValue::None => py.None(),
         AttrValue::Ref(r) => Py::new(py, NodeRef::new(r.0))?.into_any(),
     })
+}
+
+/// A `Variable` as it crosses the wire.
+///
+/// This is `VariableDesc` as Python sees it, and it is what the materialiser
+/// dispatches on: `isinstance(value, _native.Variable)` is how a descriptor
+/// attribute becomes a real `django.template.base.Variable`. The four readable
+/// attributes are Django's four parse-time slots. The fifth, `message_context`,
+/// is set to `None` by `Variable.__init__` and never assigned during a parse, so
+/// it is not on the wire — the materialiser sets it, which is where Django sets
+/// it too.
+#[pyclass(frozen)]
+#[derive(Debug)]
+pub struct Variable {
+    #[pyo3(get)]
+    pub var: String,
+    /// Already converted to the Python object Django would hold: an `int` (of
+    /// any size), a `float`, or a `SafeString`-to-be (`SafeStr`, which the shell
+    /// turns into `mark_safe`). Converting here keeps `_decode_value` from
+    /// needing to know which wire value means which Django type.
+    #[pyo3(get)]
+    pub literal: Py<PyAny>,
+    #[pyo3(get)]
+    pub lookups: Option<Vec<String>>,
+    #[pyo3(get)]
+    pub translate: bool,
+}
+
+#[pymethods]
+impl Variable {
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        let literal = self.literal.bind(py).repr()?.extract::<String>()?;
+        Ok(format!(
+            "<Variable {:?} literal={literal} lookups={:?} translate={}>",
+            self.var, self.lookups, self.translate,
+        ))
+    }
+}
+
+/// A [`VariableDesc`] as Python sees it.
+///
+/// `pub` rather than private for the same reason `attr_value_to_py` is: the two
+/// are mutually recursive, because a `Variable`'s literal is itself an
+/// `AttrValue`. Task 4's `AttrValue::Variable` arm is the other caller.
+pub fn variable_desc_to_py(py: Python<'_>, desc: &VariableDesc) -> PyResult<Py<PyAny>> {
+    let literal = match &desc.literal {
+        Some(value) => attr_value_to_py(py, value)?,
+        None => py.None(),
+    };
+    Ok(Py::new(
+        py,
+        Variable {
+            var: desc.var.clone(),
+            literal,
+            lookups: desc.lookups.clone(),
+            translate: desc.translate,
+        },
+    )?
+    .into_any())
 }
 
 /// A `(name, value)` pair as a 2-tuple.
@@ -317,6 +393,34 @@ fn parse_error(py: Python<'_>, error: &Error) -> PyResult<PyErr> {
     Ok(err)
 }
 
+/// Every code point Python's `unicodedata` reports as category `Nd`, ascending.
+///
+/// Exposed for the same reason `whitespace_codepoints` is: the comparison can
+/// only run where both languages exist, because a Rust `char` cannot hold a
+/// surrogate and CPython's table is not readable from Rust. Unlike the
+/// whitespace table — which *inherits* `char::is_whitespace`'s Unicode version —
+/// this one is a literal table inside `pynum.rs`, so the two can only move
+/// independently: a Python upgrade changes CPython's `unicodedata`, and nothing
+/// in this repository pins either.
+#[pyfunction]
+fn decimal_digit_codepoints() -> Vec<u32> {
+    template_core::pynum::decimal_digit_codepoints()
+}
+
+/// `Variable.__init__` for a token the caller already knows is a variable.
+///
+/// A separate entry point from `parse` rather than a flag on it: this is the
+/// function Task 5's `parse_filter_expression` and Task 6's materialiser tests
+/// drive directly, and the Python shell never calls it on a template's behalf
+/// (§5.5 — the shell materialises what Rust parsed, it does not re-parse).
+#[pyfunction]
+fn parse_variable(py: Python<'_>, raw: &str) -> PyResult<Py<PyAny>> {
+    match template_core::parser::variable::parse_variable(raw) {
+        Ok(desc) => variable_desc_to_py(py, &desc),
+        Err(error) => Err(parse_error(py, &error)?),
+    }
+}
+
 /// Parse `source` into a node descriptor tree.
 ///
 /// `debug` selects Django's `DebugLexer`, so token positions are recorded.
@@ -354,11 +458,14 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(builtin_tag_names, m)?)?;
     m.add_function(wrap_pyfunction!(engine_version, m)?)?;
     m.add_function(wrap_pyfunction!(whitespace_codepoints, m)?)?;
+    m.add_function(wrap_pyfunction!(decimal_digit_codepoints, m)?)?;
     m.add_function(wrap_pyfunction!(split_contents, m)?)?;
     m.add_function(wrap_pyfunction!(lex, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_variable, m)?)?;
     m.add_class::<NodeRef>()?;
     m.add_class::<SafeStr>()?;
+    m.add_class::<Variable>()?;
     m.add("ParseError", m.py().get_type::<ParseError>())?;
     m.add("UnimplementedTag", m.py().get_type::<UnimplementedTag>())?;
     Ok(())

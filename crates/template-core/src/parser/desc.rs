@@ -69,9 +69,56 @@ pub enum AttrValue {
     SafeStr(String),
     Bool(bool),
     Int(i64),
+    /// A float literal — `Variable.__init__`'s `float(var)` branch.
+    ///
+    /// `f64` rather than the decimal text. Django's `literal` for `1.5` is a
+    /// Python `float`, and `1e400` is `inf`: no text round-trip reproduces that
+    /// without a second parse, and the second parse would be Python's.
+    Float(f64),
+    /// An integer literal that does not fit `i64`. Materialises as `int(text)`.
+    ///
+    /// Python's `int` is arbitrary-precision, and `{{ 99999999999999999999 }}`
+    /// is a valid template that renders its own digits, so saturating to
+    /// `i64::MAX` would render a wrong number. `text` is the **canonical**
+    /// decimal form produced by `pynum::python_int` — an ASCII `-` if negative,
+    /// then ASCII digits, no underscores, no whitespace — so it is a validated
+    /// decimal and the materialiser hands it to `int()`. `int()` of that cannot
+    /// execute anything; the text never reaches `eval`, and the doc comment on
+    /// the FFI arm says so, because a reader cannot check it from here.
+    BigInt(String),
     None,
     /// A host-owned value, held by handle. See [`NodeRef`].
     Ref(NodeRef),
+}
+
+/// A `Variable` as it crosses the wire (`django.template.base.Variable`).
+///
+/// The pair `(literal, lookups)` is the discriminator, exactly as in Django:
+/// `lookups: Some(_)` means a real variable, `lookups: None` means a literal
+/// whose value is in `literal`. `Option<AttrValue>` alone could not express
+/// that, because `literal` is legitimately `None` for *every* real variable —
+/// and, one case further out, `Some` for one that also has `lookups` (see
+/// `variable::parse_variable`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct VariableDesc {
+    /// `Variable.var` — the token as it arrived, kept for `__str__`/`__repr__`.
+    ///
+    /// The **original**, not the form the parse worked on:
+    /// `Variable.__init__` reassigns its local `var` when it strips the
+    /// `_("…")` marker and never writes the slot again, so
+    /// `str(Variable('_("x")'))` is `_("x")` and not `"x"`.
+    pub var: String,
+    /// `Variable.literal`, already converted: `Int`/`BigInt`/`Float`/`SafeStr`
+    /// for the four kinds of literal, and `None` for everything else.
+    pub literal: Option<AttrValue>,
+    /// `Variable.lookups` — the token split on `.`. `Some` exactly when this is
+    /// a real variable; `None` for a literal.
+    pub lookups: Option<Vec<String>>,
+    /// `Variable.translate` — the token was wrapped in Django's `_("…")`
+    /// translation marker. Set **independently** of what the marker wrapped: a
+    /// marker around something that unescapes has a literal and no lookups,
+    /// while one around anything else keeps its lookups and gains the flag.
+    pub translate: bool,
 }
 
 /// A compiled nodelist: Django's `NodeList` as far as a parse can observe it.
