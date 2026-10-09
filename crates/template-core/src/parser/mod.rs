@@ -547,31 +547,49 @@ impl<'a> Parser<'a> {
 /// * the host answers whether the template loaded a library providing
 ///   `command` — `ShellHost.library_tag_loaded` is `command in parser.tags`,
 ///   which `{% load %}` mutates, and it is `true` for **all 18**
-///   `django.templatetags` names, 14 of which are Python's;
+///   `django.templatetags` names, 10 of which are Python's as of M12 Task 5;
 /// * the registry answers whether Rust has a body for it ([`registry`]'s
-///   `LIBRARY_REGISTRY` — seven names as of M12 Task 4).
+///   `LIBRARY_REGISTRY` — eight names as of M12 Task 5).
 ///
 /// Either question alone routes wrongly. The host's alone sends a loaded
 /// `{% trans %}` to a Rust compiler for `trans` that does not exist; the
 /// registry's alone compiles `{% static %}` in a template that never wrote
 /// `{% load static %}`, which Django refuses.
 ///
-/// **This replaced a `match` with a third arm, and that arm was dead.**
-/// Measured: the arm (`library_tag_loaded(name) && library_tag(name).is_none()`
-/// → `invalid_block_tag`) was replaced by `unreachable!()` and the whole gate
-/// stayed green — `cargo test --workspace`, the Python unit suite (408 rows
-/// then; this batch's own two rows are counted after it), the 48-case
-/// differential harness, and Django's 1547 — and it is unreachable in
-/// production too: the shell's `_rust_owned` takes its library half from
-/// `library_tag_names()`, the *same* table [`registry::library_tag`] reads, so
-/// a loaded name Rust owns always has a body here, while a loaded name Rust
-/// does not own makes `has_tag` return `true` in its second clause
-/// (`command not in self._rust_owned`,
-/// `python/django_rust_templates/host.py`) at the top of the chain, so this
-/// line is never consulted for it. Two branches with identical bodies are not
-/// defence in depth; they are a claim of coverage no input can distinguish. The
-/// two inputs that *do* distinguish the conjunction are rows in this module's
-/// tests, one per direction.
+/// **This replaced a `match` with a third arm, and deleting that arm is a
+/// no-op by construction.** The arm
+/// (`library_tag_loaded(name) && library_tag(name).is_none()` →
+/// `invalid_block_tag`) returned *the same call with the same three arguments*
+/// as the `else` directly below it: `git show b83ec01^` shows
+/// `return Err(self.invalid_block_tag(&token, &command, parse_until))` twice,
+/// differing only by a trailing `;`. Two branches no input can distinguish are
+/// not defence in depth; they are a claim of coverage, and removing one cannot
+/// change what any template does. **Identity is the load-bearing reason here,
+/// and unlike the two below it cannot expire.**
+///
+/// The *measurements* that also bear on the arm are supporting context, and
+/// each is a claim about today's two tables rather than about the deletion:
+///
+/// * replacing the arm's body with `unreachable!()` left the whole gate green —
+///   `cargo test --workspace`, the Python unit suite (408 rows then; this
+///   batch's own two rows are counted after it), the 48-case differential
+///   harness, and Django's 1547;
+/// * the routing that makes it unreachable in production: the shell's
+///   `_rust_owned` takes its library half from `library_tag_names()`, the
+///   *same* table [`registry::library_tag`] reads, so a loaded name Rust owns
+///   always has a body here, while a loaded name Rust does not own makes
+///   `has_tag` return `true` in its second clause
+///   (`command not in self._rust_owned`,
+///   `python/django_rust_templates/host.py`) at the top of the chain, so this
+///   line is never consulted for it. The reviewer confirmed the same routing
+///   from outside: a third-party library registering `if`/`static` sends all
+///   four cases (with and without `OPTIONS["builtins"]`) to the host, and
+///   compiling all **30** names in `_rust_owned` produces **zero**
+///   `Invalid block tag` refusals.
+///
+/// A later reader who falsifies either table should still not conclude the
+/// deletion was unsafe; identity is why. The two inputs that *do* distinguish
+/// the conjunction are rows in this module's tests, one per direction.
 fn loaded_library_tag(host: &dyn Host, command: &str) -> Option<CompileFn> {
     if !host.library_tag_loaded(command) {
         return None;

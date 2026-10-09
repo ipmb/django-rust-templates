@@ -260,8 +260,9 @@ pub fn library_tag(command: &str) -> Option<CompileFn> {
 /// `ShellHost.has_tag` for a library tag the way it answers for a built-in one —
 /// see `python/django_rust_templates/host.py`'s `_rust_owned`. The shell cannot
 /// derive it: the natural-looking source, `django_own_tags()`, holds **all 18**
-/// library tags, and claiming all 18 would send `trans`, `timezone` and the rest
-/// to `invalid_block_tag` instead of to the host that compiles them (the defect
+/// library tags, and claiming all 18 would send `trans`, `blocktranslate` and
+/// the rest to `invalid_block_tag` instead of to the host that compiles them
+/// (the defect
 /// M12's `245 failures of the 1547` measurement is about). So the list of
 /// library tags Rust actually compiles has to come from Rust.
 ///

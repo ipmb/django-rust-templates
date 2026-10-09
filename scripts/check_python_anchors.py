@@ -101,6 +101,19 @@ here goes stale the moment the manifest moves and a number in output cannot.
 The repair is not a tool change but the rule that the snippet be authored from
 the sentence's own claim in the same edit that names the file.
 
+**The authoring rule, and it is the only thing that puts a snippet in a row:**
+*when a sentence argues from a citation, quote the code it argues from, in that
+sentence, in the same edit that names the file.* The quote is what `--seed`
+records and what `--check` can later falsify; a row seeded for coverage that no
+sentence ever argues from stays unquoted, and that is correct rather than a
+backlog. Bulk-quoting the unquoted rows instead would ratify each sentence's
+subject along with its number — the misreading class below made permanent, one
+row per sentence, with `0 failures` to show for it. Measured at `b83ec01` over
+the 155 snippetless rows there: **59** have a citing file that already quotes a
+selective span beside the citation (28 ranges, 31 single lines), so a requote
+could take them from the prose as written; the other **96** have no quote
+anywhere in their citers and cannot be repaired without re-reading the claim.
+
 **Three ways a number goes wrong, and only two of them are repairs a tool can
 make.** Worth separating, because the remedy differs and the wrong remedy is
 applied with confidence:
