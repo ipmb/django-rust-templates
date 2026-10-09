@@ -201,6 +201,18 @@ close-out corrected the spec's `conditional_escape` span from `html.py:115-126`
 to `115-127` — the function's last line is `return escape(text)` — which brought
 the spec into line with the four places our own code already cited `115-127`.
 
+**The spec was also brought forward, in two places, and the first is the
+convention every close-out here follows.** §10.3's M8 row carried no ✅ and the
+plain plan-of-record sentence a milestone has *before* it lands; it now carries
+the milestone's status, its measured claim (the substitution is an assignment
+inside the bit loop), its gate and the numbers, in the M3/M7 rows' form — the
+same edit M7's close-out made to its own row. §5.2's *Open obligations* gained
+the second owed item: `render_value_in_context`'s sequence, which the recon
+recorded as obligation 5 and **which no M8 task delivered**, so a reader at M9
+meets it as an obligation rather than re-deriving it. The vacuity rule's scope
+paragraph, which said M8's row "owes that second question an answer of its own",
+now records the answer it got.
+
 ## The re-run, at close-out
 
 **2026-10-09, against `.django/` @ 6.0.9.** All eight scripts in

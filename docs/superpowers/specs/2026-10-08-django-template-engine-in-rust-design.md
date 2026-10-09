@@ -225,6 +225,17 @@ work still owed. A reader who meets the second where the first belongs stops.
   `tests/template_tests/test_nodelist.py:44-86`
   (`ErrorIndexTest.test_correct_exception_index`, exact `(start, end)` pairs for a
   Python tag nested in a Rust-owned `{% for %}`) and `tests.py:146,166-172`.
+- **`render_value_in_context`'s sequence** is **owed at M9, and no M8 task
+  delivered it.** It is Django's `template_localtime` → `localize` → the
+  autoescape branch (`base.py:1123-1136`), whose conversion test is
+  `issubclass(type(value), str)` and **not** `isinstance` — a `SafeString` is a
+  `str` and is not converted, while a `Promise` is not and is. It is on the
+  render path, which is Django's until M9 interposes `base`. M8 measured the
+  *consequence* of that — no forcing site is on the resolve path, so the
+  resolver hands the object back unforced — without owing the port, and the
+  forced-vs-unforced `Promise` distinction is latent for the same reason: M8's
+  identity gate at `_native.resolve` (`tests/test_escape_protocol.py`) is what
+  holds the contract in the meantime.
 
 ```rust
 /// Why this shape and not a flattened Python exception. Kept as a block because
@@ -769,7 +780,7 @@ the highest-risk milestone, and §5.5 is where the answer to it lives.
 | M5 | The eleven remaining built-in tags. **The set is cited, not copied**: it is `M5_TAGS` in `tests/test_tag_inventory.py`, and the assertion that keeps it current is the one that derives it — a list here would go stale the moment a tag moved | ✅ each of the eleven bodies landed, asserted as a *set* (`builtin_tag_stubs() & M5_TAGS == set()`); success corpus `tests/parser_corpus.py` (142 sources) + error corpus (78), every `expected` verified against Django as well as against the engine; `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; progress meter unchanged at 25. **The milestone's seam audit is `.review/m5-seams.md`** — it found `Host::repr`'s shell override and `IfParser::condition`'s `Raw` arm each guarded by a comment rather than by an input that discriminates |
 | M6 | `Library`, extension host callbacks; **and `querystring`**, moved here from M5 by the M5 plan's §D1 — it is `@register.simple_tag(…, takes_context=True)`, the sole non-`do_` registration among the built-ins, so it needs the extension host M5 does not build | ✅ Python-defined tags/filters work through the engine, incl. re-entrant `ParserHandle.parse`. Ownership, measured: `builtin_tag_names()` is **22** and `builtin_tag_stubs()` is `['partial', 'partialdef']` — `load` and `querystring` are **host-owned**, so Rust implements neither, and `partial`/`partialdef` are names the registry knows with no compile function behind them yet. `unshimmed()` is unchanged at 25; `cargo test` is 645. Gates: `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; the parity corpora are `tests/parser_corpus.py` (152 sources) and `tests/parser_error_corpus.py` (91 errors), plus the 48-case differential harness. **`block`/`extends`/`include` are excluded from the host at M6, so `{% extends %}` still raises `Invalid block tag`** — a divergence from Django, owned by M7, which owes both the removal *and* `must_be_first` across the seam |
 | M7 | Inheritance: `block`, `extends`, `include` | ✅ Rust compiles all three, so `builtin_tag_names()` is **25** and the host compiles only `load` and `querystring` (measured: `parser.tags` holds 27 names, Rust's 25 are exactly the registry's set). **The gate is `tests/test_inheritance_gate.py`, and what it takes from `test_include_cache` is the row's *shape*, not the row.** The `.django/` row cannot be M7's gate: the shim does not interpose `loader_tags`, so it runs on stock Django's parser and passes whether or not M7 shipped — §10.3's vacuity rule below. Both engines are compared in one row, and the row is paired with a **structural** one because the counter row is a *parity* instrument: the include cache is Django's own, both engines read it, and breaking it gives the same wrong output on both sides (`IncludeNode.render`, keyed on the node). `unshimmed()` unchanged at **25**; `scripts/check.sh` green with `Ran 1547 tests … OK (skipped=6)` |
-| M8 | Escaping and the Python object protocol | `SafeData`, `Promise`, callables, `alters_data`, `do_not_call_in_templates`; resolver complete |
+| M8 | Escaping and the Python object protocol | ✅ both remaining resolver arms are wired, and the second is not a call: `CallArm::Call` invokes, `CallArm::AltersData` **substitutes `string_if_invalid` by assignment inside `for bit in self.lookups:`** (`base.py:997`), which is the part a substitute-and-stop port gets wrong — measured with `string_if_invalid='<<invalid>>'`, `{{ x.upper }}` runs `.upper` on the *invalid* string, so a port that returns instead renders `x` right and `x.upper` wrong. `LookupTarget` gained two methods (`call`, `string_if_invalid`), nine → **eleven**. **Nothing forces a `Promise`**, so §5.2's third obligation is not a forcing site to build but a *contract* — hand the promise back unforced — and its gate asserts **identity**, because `str(proxy) == proxy` is `True` while `str(proxy) is proxy` is `False`. **The row is out of scope of the vacuity rule and owes its second question an answer** (below), and the answer is measured: the ten `.django` modules naming M8's surface run **88 tests, 0 failures while `_native.resolve` raised on every callable path**, because the render path is Django's own `_resolve_lookup` until M9. So the gate is four **direct-entry** modules — `tests/test_resolve_callarm.py`, `tests/test_resolve_invalid.py`, `tests/test_escape_protocol.py`, `tests/test_m8_side_effects.py` — comparing `_native.resolve`/`_native.filter` against `Variable._resolve_lookup`/`FilterExpression.resolve`. **And parity is only half of it**: what `alters_data` protects is "the method was not called", which is not a property of the output — with `string_if_invalid=''` a port that calls the callable renders the identical row — so `test_m8_side_effects.py` is a **counter with a positive control**, the milestone's only non-parity instrument. `unshimmed()` unchanged at **25**; `scripts/check.sh` green with `Ran 1547 tests … OK (skipped=6)`; `cargo test -p template-core` 682 |
 | M9 | Interpose `base`, `smartif` | ⚠️ **highest-risk milestone.** All 1547 tests flip onto our `NodeList.render`/`Node.render_annotated` at once (§5.5). Done when `test_base`, `test_parser`, `test_nodelist` (incl. `ErrorIndexTest`), `test_smartif` are real signal **and** the full suite is unchanged from §2 — budget accordingly, this is not a one-line step |
 | M10 | Interpose `context`, `engine`, `utils`, `loaders`, `origin` | `test_context`, `test_engine`, `test_loaders`, `test_origin`; project-side `FileSystemLoader` case-sensitivity test (§2) |
 | M11 | Interpose `defaulttags`, `defaultfilters`, `loader_tags` | bulk of `syntax_tests` and `filter_tests`, **and `test_url`** — moved here from M12 by the M5 plan's Scope section (measured: `syntax_tests/test_url.py` uses only `{% url %}`, `{% autoescape %}` and no `{% load %}`, and imports `URLNode` from `django.template.defaulttags`, so it becomes real signal when this milestone interposes that module) |
@@ -801,10 +812,13 @@ whether a gate names a module a *later* milestone interposes. A row naming no
 "not vacuous" is not a verdict it is entitled to return. The second question, the
 one this rule cannot answer, is whether the gate's *instrument* can see the
 defect it is for: a parity corpus comparing our engine with stock Django is blind
-to a defect both sides share, because they call the same helpers. M8's gate is
+to a defect both sides share, because they call the same helpers. M8's gate was
 the first row of that kind — escaping and the object protocol are exactly where
 both engines call `conditional_escape`, `SafeData` and `Promise` — so its row
-reads out of scope here and owes that second question an answer of its own.
+read out of scope here and owed that second question an answer of its own. **M8
+discharged it with a non-parity row**, because the property is not in the output
+at all: `tests/test_m8_side_effects.py` counts the call and carries a positive
+control, and the M8 row above records why a parity corpus could not have seen it.
 
 This is the question a reader at the next milestone should be able to answer
 without re-reading a plan, and it is why the rule lives here beside the table
