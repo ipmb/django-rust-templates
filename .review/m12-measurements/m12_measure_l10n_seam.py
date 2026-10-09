@@ -27,6 +27,24 @@ Measured at `ba64a52` (`M12: l10n is our module — the second count is 1`):
     {% localize %}     NODE_CLASSES : ['LocalizeNode', 'VariableNode']
                        localize_tag : (not called)
 
+**Read that as the *compile function* being dead, and not as the module being
+inert.** The recorder observes `localize_tag` — the tag body — and only it. The
+node class the Rust descriptor path materialises *is* this file's
+`LocalizeNode` (the reviewer confirmed the identity rather than the module name:
+`compiled node class: <class 'django.templatetags.l10n.LocalizeNode'>, defined
+in _impl/templatetags/l10n.py, is l10n.LocalizeNode: True`, and it renders), and
+both `localize`/`unlocalize` filters run through our file. What the transcription
+contributes here is the node class and the filters; what it carries and never
+runs is the tag body.
+
+That is unreachable on **every** path, not just the measured one: Rust owns the
+name, so `has_tag` answers `False` and Rust compiles; and if a third-party
+library rebinds `localize`, `has_tag` answers `True` and *that library's*
+function runs — still not ours. So an error in the transcribed `localize_tag` is
+invisible to the 1547, and the transcription guard's value is that it keeps the
+function honest against upstream rather than that anything executes it. This is
+true of every ported library tag, and it is Task 8's sentence to write.
+
 The control matters: without it, "(not called)" would be as consistent with a
 broken recorder as with Rust having compiled the tag. It calls the *patched*
 name, since calling the saved original would bypass the recorder — the first
