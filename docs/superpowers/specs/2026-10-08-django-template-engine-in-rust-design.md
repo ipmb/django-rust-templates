@@ -86,6 +86,31 @@ Any *new* skip appearing later is a regression, and is treated as a failure.
 Django 6.0 requires Python 3.12+, so 3.14 is in support. `tests/template_tests/`
 runs under Django's own `runtests.py` (unittest-based, not pytest).
 
+**Every Unicode table here is a two-version artifact, and that is a rule rather
+than a footnote repeated three times.** Three instances so far, and the two halves
+of each are built from Unicode versions that move independently:
+
+| table | Rust side | Python side |
+|---|---|---|
+| whitespace | `char::is_whitespace` (stdlib) | `str.isspace()` (CPython) |
+| `\w` | `\p{L}\p{N}` (regex-syntax) | `re` / `str.isalnum` (CPython) |
+| case | `char::to_uppercase` (stdlib) | `str.upper()` (CPython) |
+
+Neither side is pinned hard — "Rust stable" is a `rust-version = "1.82"` floor
+with no `rust-toolchain` file, and Python is fixed at 3.14.4 only by the venv. The
+divergences do not even share a direction: Rust is **behind** Python on `\w` and
+**ahead** of it on case, and the case count itself is a function of *which*
+interpreter you ask (28 code points per direction under the pinned 3.14.4, 95
+under this machine's system `python3`, measured 2026-10-08). So the rule is:
+**never compute a table from one side and assert it — generate it from the two
+live implementations and pin it with a test that compares them exhaustively.**
+`scripts/gen_python_word_ranges.py` and `scripts/gen_python_case_fixups.py` are
+the generators; `tests/test_pyregex_parity.py` and
+`tests/test_pyunicode_case_parity.py` are the guards. The absent `rust-toolchain`
+file is therefore a choice and not an oversight: a `rustc` upgrade fails a parity
+test with a named code point rather than silently changing what a template
+renders, and that test — not a version file — is the pin.
+
 ## 5. Architecture
 
 Three artifacts.

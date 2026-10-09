@@ -615,6 +615,7 @@ git commit -m "pyunicode: Python's uppercase mapping, which is not Rust's"
 - Create: `crates/template-core/src/filters/host.rs`
 - Create: `crates/template-core/src/filters/escape.rs` (the `conditional_escape` of §D4)
 - Modify: `crates/template-core/src/filters/mod.rs` (rewrite: the registry, `filter_names`, `filter`)
+- Modify: `crates/template-core/src/parser/error.rs` (**add** `PyErrorKind`, `ErrorKind::FilterHost` and `Error::filter_host`; add `Error::unimplemented_filter`; add one arm to `message()`. §D5 says why this is additive and not a reshape of the existing `ErrorKind::Host`.)
 - Create: 57 files under `crates/template-core/src/filters/`, one per filter, each a stub
 - Modify: `crates/template-core/src/lib.rs` (`pub mod filters;`)
 
@@ -665,6 +666,12 @@ pub trait FilterHost {
     fn to_float(&self, value: &Value) -> Result<f64, Error>;               // float(v)
     fn is_true(&self, value: &Value) -> Result<bool, Error>;               // bool(v)
     fn len(&self, value: &Value) -> Result<usize, Error>;                  // len(v)
+    /// `list(v)`, **not** an index walk: `unordered_list`'s whole-value case is a
+    /// generator (`test_unordered_list.py:141`), which has no `[]`. `first`/`last`
+    /// are the mirror image — they are `value[0]`/`value[-1]` and must go through
+    /// `get_index`, because Django's `except IndexError` lets a generator's
+    /// `TypeError` escape, and an `iter_values`-based implementation would return
+    /// a value where Django raises.
     fn iter_values(&self, value: &Value) -> Result<Vec<Value>, Error>;     // list(v)
     fn get_index(&self, value: &Value, index: i64) -> Result<Value, Error>;
     /// `value[start:stop:step]` — `slice_filter` (`defaultfilters.py:651-666`).
@@ -709,6 +716,30 @@ pub trait FilterHost {
     fn sort_by_property(
         &self, value: &Value, prop: &Value, reverse: bool,
     ) -> Result<Value, Error>;
+
+    // --- the one type question Rust cannot answer ---------------------------
+    /// `unordered_list`'s nested-sequence test (`:695-706`). `Some(items)` when
+    /// **both** halves hold — `isinstance(next_item, (list, tuple,
+    /// types.GeneratorType))` *and* `iter(next_item)` does not raise — and `None`
+    /// otherwise, meaning "a plain item".
+    ///
+    /// One method, not a predicate plus an iteration, by §D7.1's argument: Rust
+    /// cannot answer the isinstance for an `Opaque` element (a tuple and a
+    /// generator both arrive as `Opaque`; neither is a `Value::List`), and
+    /// `iter_values -> Vec<Value>` cannot represent a generator without
+    /// *consuming* it — which is the very branch being consulted. Splitting them
+    /// would put Python's `TypeError` classification on the Rust side of the
+    /// seam, which is what the seam exists to avoid.
+    ///
+    /// Measured, not inferred: the suite pins both halves, and an implementation
+    /// without this method gets one of them wrong.
+    /// `filter_tests/test_unordered_list.py:141` is
+    /// `unordered_list(item_generator())` — the **whole value** is a generator,
+    /// so `iter_values` must be `list(v)` and must not index — and `:150`'s
+    /// `test_nested_generators` is a list whose **element** is a generator, which
+    /// must nest: `"\t<li>A\n\t<ul>\n\t\t<li>B</li>…"`. A flat output there is a
+    /// silently wrong template, not an error.
+    fn as_nested_sequence(&self, value: &Value) -> Result<Option<Vec<Value>>, Error>;
 
     // --- CPython string-method semantics ------------------------------------
     /// `str.lower()`. **Not a per-code-point table**, and that is the finding:
@@ -781,7 +812,7 @@ pub trait FilterHost {
 ```
 
 **Three implementations of that trait, all written here**: the FFI's real one
-(Task 3), `NoFilterHost` (every method `Err(Error::host(name))`), and
+(Task 3), `NoFilterHost` (every method `Err(Error::host("<name>"))`), and
 `TestFilterHost` (scripted answers, recorded calls) — the last two in this task's
 `host.rs`, per Step 2. They are deliberately three names and not two: "no host at
 all" and "a host that answers what the test says" fail a test in opposite
@@ -810,11 +841,34 @@ get_digit(...)    → ValueError → the original value (:757-776)
 ```
 
 So the value-protocol methods return
-`Error::Host { kind: PyErrorKind, message, operation }`, with `PyErrorKind` ∈
+`Error::FilterHost { kind: PyErrorKind, message, operation }`, with `PyErrorKind` ∈
 `{AttributeError, IndexError, KeyError, TypeError, ValueError, ZeroDivisionError}`,
 and a body matches on `kind` rather than on a message. Task 6's `first(5)` row
 asserts the *escape*, not a value, and that is only expressible if the class
 survives the seam.
+
+**It is a new variant, not a reshape of `ErrorKind::Host`, and the reason is
+churn.** M1–M3's `ErrorKind::Host(String)` is the *parse-time* host's refusal —
+`filter_expr.rs:303`'s `Invalid filter: '…'`, `tags/mod.rs`'s "the host
+refused" — and it has no Python class to carry, by design (`resolve.rs:207` says
+so). Reshaping it would mean editing a frozen two-milestone-old surface, two
+`#[cfg(test)]` assertions that compare `ErrorKind::Host("the host refused"
+.to_string())`, and the `Host` trait's doc, in service of nothing M4 needs. So
+`PyErrorKind` and `ErrorKind::FilterHost` are **added** in `parser/error.rs`,
+`message()`'s match gains one arm, and the existing variant, its constructor and
+its three test assertions are untouched. The filter seam's constructor is
+`Error::filter_host(kind, operation, message)`, and `operation` is a
+`&'static str` naming the `FilterHost` method, so a mismatched match in a body
+names the operation in the failure.
+
+**`NoFilterHost` and `TestFilterHost`'s unset field use `Error::host`, not
+`Error::filter_host`, and that is deliberate.** They are hosts that *refuse*, with
+no Python exception class behind the refusal — the same shape `ErrorKind::Host`
+was built for, and fabricating a `PyErrorKind` for a host that never touched
+Python would make a `kind` match lie about where the answer came from. So the two
+variants split on their real question: `FilterHost` is "Python raised class C",
+`Host` is "nobody answered". A test can tell them apart, which is what Step 3's
+mutation check relies on.
 
 **What the first review round changed, and why each is a group that would have
 stalled.** All five were reported from Django's source and all five were then
@@ -828,11 +882,25 @@ plausible-sounding review is exactly where an unmeasured claim propagates:
 | 3 | `iriencode` | `:225-227` — the body is literally `return iri_to_uri(value)`, and no such method existed despite the filter being in the derived 18 | `iri_to_uri` |
 | 4 | the four `Truncator` filters | `Truncator.chars` calls `unicodedata.combining` per character (`text.py:220`) so combining marks do not count toward the length; answering that in Rust needs a third Unicode table | `truncate`, whole — better than the `unicode_combining` method the review offered, because it removes the table *and* the `gettext` marker question in one move |
 | 5 | `escape`, `force_escape`, `escapeseq`, `join`, `unordered_list`, `linenumbers`, `linebreaks`, `linebreaksbr` | `conditional_escape` (`html.py:115-127`) branches on `isinstance(text, Promise)` and `hasattr(text, "__html__")`, neither of which is `is_safe` — its own docstring says the convention is shared with `markupsafe`, which implements `__html__` **without being `SafeData`** | `conditional_escape`, whole (see §D4) |
+| 6 | `unordered_list` | `:695-706` tests `isinstance(next_item, (list, tuple, types.GeneratorType))` and then `iter()`, to decide whether an element nests; a tuple and a generator both reach Rust as `Opaque`, and `iter_values` cannot see a generator without consuming the branch it is being asked about. Both halves are in the suite (`test_unordered_list.py:141` whole-value generator, `:150` element generator that must nest) | `as_nested_sequence` (one method, not a predicate plus an iteration) |
 
 The fifth is the one that changes a milestone boundary, and it changes it in the
 direction of *removing* a reach rather than taking one: there is no small pure
 piece of `conditional_escape` to implement in Rust, because two of its three
-branches are Python-protocol questions. §D4 now says so.
+branches are Python-protocol questions. §D4 now says so. The sixth arrived in the
+second review round, after the trait was otherwise settled, and it is the one that
+would have produced a **silently wrong template** rather than a failure: an
+`unordered_list` without it renders a nested list flat.
+
+**And the trait is now walked against all 57, not five.** The second round
+re-checked the remaining filters for anything needing a method an agent cannot
+reach and found nothing else: `escapeseq`/`safeseq` are `iter_values` plus
+`conditional_escape`/`mark_safe`; `add`'s int-then-concat-then-`""` cascade is
+expressible through the taxonomy; `json_script` is `json_dumps` plus the escape
+table; `first`/`last` need `get_index` and not `iter_values`, which is agent
+discipline rather than a missing method. That claim is the reason the trait can
+now be frozen — it is a walk, not a reading, and it is recorded here so a later
+review can re-run it.
 
 **Two design questions the review raised and asked to be decided rather than
 inherited:**
@@ -983,10 +1051,21 @@ pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<V
 }
 ```
 
-Add `Error::unimplemented_filter` to `parser/error.rs` alongside the existing
-`Error::host`, with the same `#[cfg(test)]`-visible kind, and a test in
-`error.rs` that the message names the filter *and* the milestone that owns it —
-the `UnimplementedTag` precedent.
+Add, to `parser/error.rs` and **without touching `ErrorKind::Host`**:
+
+- `pub enum PyErrorKind { AttributeError, IndexError, KeyError, TypeError,
+  ValueError, ZeroDivisionError }` (§D5's taxonomy).
+- `ErrorKind::FilterHost { kind: PyErrorKind, message: String, operation: &'static str }`,
+  one new arm in `message()`, and the constructor
+  `Error::filter_host(kind, operation, message)`.
+- `Error::unimplemented_filter(name)`, alongside the existing `Error::host`, with
+  the same `#[cfg(test)]`-visible kind, and a test in `error.rs` that the message
+  names the filter *and* the milestone that owns it — the `UnimplementedTag`
+  precedent.
+
+Three tests in `error.rs` compare `ErrorKind::Host(….)` and must still pass
+unchanged; that they do is the evidence that this step is additive, and it is
+worth saying in the commit message rather than leaving a reviewer to notice.
 
 - [ ] **Step 4: Write the `m3_owns_no_filters` replacement**
 
@@ -1392,12 +1471,23 @@ The group that Task 1 unblocks, and the one that proves the seam end-to-end.
   reimplementing Python's exception classification, and `sorted` over `Opaque`
   values is not expressible in Rust at all. **What Rust owns is the filter's own
   behaviour**: the `(AttributeError, TypeError) → ""` catch, which is a match on
-  `Error::Host { kind, .. }` — the taxonomy above is what makes that a one-line
+  `Error::FilterHost { kind, .. }` — the taxonomy above is what makes that a one-line
   match rather than a string comparison.
 - `unordered_list` (`:669-743`) — `needs_autoescape`, recursive, and the largest
   body in the group. Its `escaper` is `conditional_escape` or identity depending
-  on `autoescape`, and its output indents with tabs. The corpus needs a nested
-  list three deep, because a one-level case passes with the recursion missing.
+  on `autoescape`, and its output indents with tabs. **The nesting decision is
+  `FilterHost::as_nested_sequence`, not `iter_values`** — `walk_items` asks
+  `isinstance(next_item, (list, tuple, types.GeneratorType))` and then `iter()`,
+  and both halves are load-bearing (a `dict` iterates but is not in the triple, so
+  the isinstance decides; a tuple is in the triple but is not a `Value::List`, so
+  the host decides). Rust owns the pairwise walk, the `StopIteration`-as-loop-end,
+  the two output formats and the recursion. The corpus needs **four** rows, all
+  from the suite: `test_nested_multiple` (`:94`, four levels deep — a one-level
+  case passes with the recursion missing), `unordered_list(item_generator())`
+  (`:141`, whole value is a generator — this is what pins `iter_values` as
+  `list(v)`), `test_nested_generators` (`:150`, an element that is a generator and
+  must nest), and `test_ulitem` (`:122`, an object whose `__str__` is not its
+  `repr`, which pins that the escaper goes through `to_str`).
 
 ### Task 7: numbers and logic — 10 filters
 
