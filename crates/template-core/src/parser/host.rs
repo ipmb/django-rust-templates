@@ -15,7 +15,7 @@
 //! back is already plain data, and the host is the only thing that touches
 //! Python.
 
-use crate::parser::desc::NodeDesc;
+use crate::parser::desc::{NodeDesc, NodeRef};
 use crate::parser::error::Error;
 use crate::token::Token;
 
@@ -155,6 +155,38 @@ pub trait Host {
     /// materialiser's `register_ref` is `list.__setitem__`, not `append`, and an
     /// entry that has been reserved but not filled is a `None` placeholder.
     fn alloc_slot(&self) -> usize;
+
+    /// `TemplateIfParser.create_var`'s `self.template_parser.compile_filter(
+    /// value)` (`defaulttags.py:928`) — the `FilterExpression` behind one
+    /// `{% if %}` operand.
+    ///
+    /// **A handle, not a descriptor, and that is the difference from
+    /// [`Parser::compile_filter`](crate::parser::Parser::compile_filter).** A
+    /// `{{ … }}` crosses as an `AttrValue::FilterExpr` and the *materialiser*
+    /// builds the `FilterExpression`; a condition's operand is the host's own
+    /// object, built while the tag compiles. Both are correct and they are not
+    /// interchangeable: `TemplateLiteral.value` has to answer
+    /// `value.resolve(context, ignore_failures=True)` (`:917-918`), and the
+    /// handle is what makes the object that answers it the *host's* rather than
+    /// one rebuilt to look like it. It is also the seam M3's `CompileFilter`
+    /// already reserved — `smartif.rs`'s `LiteralValue::Compiled(NodeRef)` —
+    /// and this is its first and only caller.
+    ///
+    /// `token` is one **merged** bit, not the whole condition: `smartif`'s
+    /// `merge_tokens` has already folded `is not` and `not in`, and an operator
+    /// bit never reaches here — `TemplateIfParser.translate_token` tries
+    /// `OPERATORS[token]` first (`smartif.py:166-172`) and only falls through to
+    /// `create_var` for the rest. So the call sequence is exactly Django's, left
+    /// to right and before the operator algorithm runs, which is what makes a
+    /// bad filter in a *later* operand beat an operator error. Measured:
+    /// `{% if a and and b|nope %}` reports the filter error on both engines.
+    ///
+    /// The error is the host's, flattened like [`Host::check_filter`]'s. That is
+    /// not a shortcut: measured, `{% if a|does_not_exist %}` must report
+    /// `Invalid filter: 'does_not_exist'` and `{% if 1>2 %}` must report
+    /// `Could not parse the remainder: '>2' from '1>2'`, both of which are the
+    /// host's own exception text.
+    fn compile_filter(&self, token: &str) -> Result<NodeRef, Error>;
 }
 
 /// A host with no tags at all.
@@ -189,5 +221,16 @@ impl Host for NoHost {
         // belongs in `tags::support`, not here — `NoHost` must stay free of
         // interior mutability so that `&NoHost` remains const-promotable.
         0
+    }
+
+    fn compile_filter(&self, _token: &str) -> Result<NodeRef, Error> {
+        // `NodeRef(0)`, for `alloc_slot`'s reason and with the same honesty: the
+        // null host has no table, so the handle names nothing — and nothing
+        // built under it is ever materialised. It accepts every token, which is
+        // the same blanket acceptance `check_filter`'s default gives and is why
+        // a Rust unit test cannot see a *filter* error in a condition; the
+        // descriptor-shape tests are about the tree, and the message parity for
+        // those errors is `_native.parse`'s with the shell's host.
+        Ok(NodeRef(0))
     }
 }

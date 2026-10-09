@@ -2042,7 +2042,7 @@ Errors: `("{% if a %}{% endif %}{% endif %}", 'Malformed template tag at line 1:
 and the smartif rows already in `ERRORS` from M3 — this task adds only the
 `do_if`-level row, because the smartif rows are already proven.
 
-- [ ] **Step A: assert the condition is a host object, not a re-parse.** In
+- [x] **Step A: assert the condition is a host object, not a re-parse.** In
   `tests/test_ref_table.py`, the `{% if %}` branch's condition must be the
   object Python's `parser.compile_filter` returned:
 
@@ -2057,8 +2057,8 @@ def test_if_conditions_are_the_hosts_filter_expressions():
   One condition, so exactly one slot; identity, so a Rust-side re-parse that
   happens to stringify the same would still fail. Fill nothing in — the counts
   are derived from the template in the test.
-- [ ] **Step B: run it against the stub** — red.
-- [ ] **Step C: run the seven steps.**
+- [x] **Step B: run it against the stub** — red.
+- [x] **Step C: run the seven steps.**
 
 ```bash
 git add crates/template-core/src/parser/tags/if.rs \
@@ -2066,7 +2066,7 @@ git add crates/template-core/src/parser/tags/if.rs \
         tests/parser_corpus.py tests/parser_error_corpus.py tests/test_ref_table.py
 git commit -m "tags: if, and the real compile_filter behind its condition"
 ```
-- [ ] **Step D: run the switch and confirm M5 is closed.**
+- [x] **Step D: run the switch and confirm M5 is closed.**
 
 Run: `./scripts/check.sh`
 Expected: `test_no_m5_tag_is_still_a_stub` **PASS** — `builtin_tag_stubs()`
@@ -2088,6 +2088,107 @@ from fifteen names to these four, and `deferred` in
 commit, with the `{% cycle %}` corpus row. A pin that did not have to move would
 not have been a pin, and leaving either unmoved is a red `check.sh`, which is the
 point.
+
+**Six corrections to the draft, every one of them found by running it.**
+
+*1. Step A asserts the identity at the wrong layer, and the draft's own wording
+is the clue.* The draft asserts `condition is refs[0]` on the parse result.
+Measured, that is **False**: on the wire a branch's condition is an `IfCondition`
+whose `.expression` is a `_native.NodeRef` — an *index* into the table,
+deliberately not the `FilterExpression`. The identity is real one layer down:
+after materialisation the condition is Django's `TemplateLiteral` and
+`condition.value is refs[0]` is `True`. Both are pinned in
+`test_ref_table.py::IfConditionRefTests`, the handle shape *and* the object it
+resolves to — asserting only the identity would pass for a shell that resolved
+the index eagerly into a copy, which is precisely the re-parse the handle exists
+to make impossible.
+
+*2. The Errors row the draft predicted is not the error that template
+produces.* The draft has
+`("{% if a %}{% endif %}{% endif %}", 'Malformed template tag at line 1: "endif"')`.
+Measured on the pinned tree that template raises `Invalid block tag on line 1:
+'endif'. Did you forget to register or load this tag?` — the first `endif` closes
+the tag and the second is an ordinary unknown tag, so no `do_if` code path sees
+it. The Malformed literal is reached by the *terminator's trailing bits*:
+`{% if a %}x{% endif foo %}` → `… "endif foo"` and
+`{% if a %}x{% else foo %}y{% endif %}` → `… "else foo"`.
+
+*3. "the smartif rows already in `ERRORS` from M3" — there were none.* The
+draft's error paragraph says this task adds only the `do_if`-level row "because
+the smartif rows are already proven". Measured: `ERRORS` carried no `{% if %}`
+row at all, which is exactly why the error-side coverage gate was one of the two
+reds Task 1 declared. **Eleven** rows went in, and they arrive by four different
+routes — smartif's expression parser (four: two share the `EndToken.nud` raise
+site, one is `Unused …` from `IfParser.parse`, one is prefix-`and`), the host's
+`compile_filter` (two: the filter lookup and `Variable`'s remainder error), the
+base parser (three: the unclosed-tag terminator list, the unknown `elif`, and a
+second `endif` that is an ordinary unknown tag), and `do_if` (two Malformed
+spellings from its **one** raise site at `defaulttags.py:1015` — `grep Malformed
+.django/django/template/` is a single hit in `defaulttags`, so the draft's
+attribution of `else foo` to smartif was wrong).
+
+*4. The real `CompileFilter` did not go into `smartif.rs`, which the draft's
+Files list says it does.* Measured, the production seam is
+`Host::compile_filter` on the `Host` trait — implemented by `host.rs`'s default,
+by the counting and filter hosts in `tags/mod.rs`, and by the FFI's
+`FilterCheckHost` — and `smartif.rs`'s `CompileFilter` trait keeps its two test
+stand-ins, because that module's own tests are about the *parser* and not about
+the host. What `if.rs` supplies is `HostCompiler`, an adapter over
+`Host::compile_filter`, and what this task added to `smartif.rs` is
+`IfParser::condition` (the arena → `IfConditionDesc` walk, which the draft's
+Interfaces block does not mention) plus a rewritten module doc. So the file did
+change — but the draft describes the wrong change in it. The `git add` list
+below is the measured one, which is also why it is longer than the draft's: the
+draft omits `desc.rs`, `host.rs`, `tags/mod.rs`, `registry.rs`,
+`template-py/src/lib.rs`, `_impl/parser.py`, `render.py`,
+`test_parser_parity.py` and `test_parser_errors.py`, every one of which this task
+changes.
+
+*5. Every real caller has to pass `compile_filter`, and `None` is not a
+permissive default.* Unlike `check_filter` — where `None` means "do not check",
+and is what the earlier corpus rows were measured against — there is no
+permissive answer here: the object has to exist, because `TemplateLiteral.eval`
+resolves it at render time (`defaulttags.py:917-918`). So the FFI raises
+`ErrorKind::Internal` naming the missing argument, which means three call sites
+had to move with the tag: `_native.render` builds its own from the parser it was
+handed (so the shell's end-to-end path cannot forget),
+`tests/test_parser_parity.ours_parse` and `tests/test_parser_errors.ours_failure`.
+Both tests pass **only** `compile_filter`, leaving `check_filter` at its
+permissive `None`, so no earlier row's filter-error ordering moved. And
+`test_parser_parity`'s `describe()` needed an arm for smartif's nodes — nothing
+in smartif defines `__eq__`, so without one every `{% if %}` compared two live
+objects by identity. The operator arm keys on `.id`, because all fourteen
+operator classes are a local `Operator` and `type(...).__name__` is `"Operator"`
+for every one of them.
+
+*6. The seven-step task shape is missing a step, and `check.sh`'s order hides
+it.* The shape for Tasks 3–7 (Step 5 "run `check.sh`") has no formatting step,
+but `check.sh` runs `cargo fmt --all -- --check` (step 2) **before** clippy and
+the Python tests (steps 3 and 4), so a
+non-`rustfmt`-clean file reports a wall of diffs and no test results at all —
+which reads like a code red and is not. `if.rs` was not clean, and the first
+acceptance run of this task stopped there. The fix is `cargo fmt --all` before
+Step 5's run, and the signal to recognise is a `Diff in …` header with no
+`Ran <N> tests` line after it.
+
+```bash
+git add crates/template-core/src/parser/desc.rs \
+        crates/template-core/src/parser/filter_expr.rs \
+        crates/template-core/src/parser/host.rs \
+        crates/template-core/src/parser/mod.rs \
+        crates/template-core/src/parser/registry.rs \
+        crates/template-core/src/parser/smartif.rs \
+        crates/template-core/src/parser/tags/if.rs \
+        crates/template-core/src/parser/tags/mod.rs \
+        crates/template-py/src/lib.rs \
+        python/django_rust_templates/_impl/parser.py \
+        python/django_rust_templates/render.py \
+        tests/parser_corpus.py tests/parser_error_corpus.py \
+        tests/test_parser_errors.py tests/test_parser_parity.py \
+        tests/test_ref_table.py \
+        docs/superpowers/plans/2026-10-09-m5-remaining-built-in-tags.md
+git commit -m "tags: if, and the real compile_filter behind its condition"
+```
 
 ---
 

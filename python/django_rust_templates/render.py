@@ -67,7 +67,9 @@ def materialiser():
     Returned as a module rather than as two functions because ``_native.render``
     wants both halves — ``check_filter(parser)`` for the parse and
     ``materialise(desc, None, None, parser)`` for the tree — and handing over one
-    object keeps the seam to a single argument.
+    object keeps the seam to a single argument. It wants a third since M5's
+    ``if``: ``compile_filter(parser)``, the ``FilterExpression`` behind each
+    ``{% if %}`` operand, which Django also builds during the parse.
 
     Idempotent: both branches go through ``sys.modules``, so the file is executed
     once however many times this is called.

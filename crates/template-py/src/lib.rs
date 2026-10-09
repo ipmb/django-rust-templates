@@ -24,7 +24,8 @@ mod filters;
 // as opposed to anything Python-side that might later be called a lexer.
 use template_core::lexer::Lexer as CoreLexer;
 use template_core::parser::desc::{
-    AttrValue, FilterExprDesc, FilterVar, NodeDesc, NodeListDesc, TokenDesc, VariableDesc,
+    AttrValue, FilterExprDesc, FilterVar, IfConditionDesc, NodeDesc, NodeListDesc, TokenDesc,
+    VariableDesc,
 };
 // Aliased because this crate already exports a `NodeRef` — the Python-facing
 // handle a *descriptor* carries. The resolver's handles are `template-core`'s
@@ -483,6 +484,59 @@ impl NodeSlot {
     }
 }
 
+/// `AttrValue::IfCondition` — one node of a `{% if %}` condition.
+///
+/// The one attribute on the wire whose value is a parse **tree**, and the reason
+/// is that its leaves are Python objects: `IfNode.render` calls
+/// `condition.eval(context)` on each branch (`defaulttags.py:1037`), an
+/// `Operator`'s `eval` recurses through its own `first`/`second`, and a
+/// `TemplateLiteral`'s calls `self.value.resolve(context, ignore_failures=True)`
+/// (`:917-918`). So the shell rebuilds real `smartif` objects and this is the
+/// shape it rebuilds them from.
+///
+/// **One class with two kind-specific halves rather than two classes**, because
+/// the materialiser dispatches on `kind` and both halves are needed at once by
+/// nothing. `key`/`first`/`second` are the operator's — `key` is one of
+/// `smartif.OPERATORS`' thirteen, and `second` is `None` for the prefix `not`,
+/// which `nud` sets (`smartif.py:73`). `text`/`expression` are the literal's:
+/// `TemplateLiteral.text` is what `display()` returns and `expression` is the
+/// **host's** `FilterExpression`, by handle into the same table `NodeRef`
+/// indexes.
+#[pyclass(frozen)]
+#[derive(Debug)]
+pub struct IfCondition {
+    /// `"operator"` or `"literal"`.
+    #[pyo3(get)]
+    pub kind: String,
+    /// The `OPERATORS` key; `None` on a literal.
+    #[pyo3(get)]
+    pub key: Option<String>,
+    /// The operator's left operand; `None` on a literal.
+    #[pyo3(get)]
+    pub first: Option<Py<PyAny>>,
+    /// The operator's right operand — `None` on a literal, and also `None` on a
+    /// **prefix** operator, which is a different fact with the same spelling and
+    /// is why the materialiser branches on `kind` first.
+    #[pyo3(get)]
+    pub second: Option<Py<PyAny>>,
+    /// `TemplateLiteral.text`; `None` on an operator.
+    #[pyo3(get)]
+    pub text: Option<String>,
+    /// The literal's `FilterExpression`, as a `NodeRef`; `None` on an operator.
+    #[pyo3(get)]
+    pub expression: Option<Py<PyAny>>,
+}
+
+#[pymethods]
+impl IfCondition {
+    fn __repr__(&self) -> String {
+        match self.kind.as_str() {
+            "literal" => format!("<IfCondition literal {:?}>", self.text),
+            _ => format!("<IfCondition operator {:?}>", self.key),
+        }
+    }
+}
+
 create_exception!(
     _native,
     ParseError,
@@ -579,7 +633,52 @@ fn attr_value_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
         }
         AttrValue::NodeListRef(index) => Py::new(py, NodeListRef::new(*index))?.into_any(),
         AttrValue::NodeSlot(index) => Py::new(py, NodeSlot::new(*index))?.into_any(),
+        AttrValue::Tuple(items) => {
+            // A real `tuple`, and the container type is the contract:
+            // `IfNode.conditions_nodelists` holds `(condition, nodelist)` pairs
+            // that `IfNode.render` *unpacks* (`defaulttags.py:1035`), and the
+            // parity suite can tell a list from a tuple because `describe`'s
+            // tuple arm carries a marker. Recursed, for the `List` arm's reason.
+            let items: Vec<Py<PyAny>> = items
+                .iter()
+                .map(|item| attr_value_to_py(py, item))
+                .collect::<PyResult<_>>()?;
+            PyTuple::new(py, items)?.into_any().unbind()
+        }
+        AttrValue::IfCondition(tree) => if_condition_to_py(py, tree)?,
     })
+}
+
+/// One `{% if %}` condition node, as the tree the shell rebuilds `smartif` from.
+///
+/// Recursive, and the recursion is the shape: an `Operator` is two more
+/// conditions and a `TemplateLiteral` is a leaf. `first` is `Some` on every
+/// operator — `nud` and `led` both set it (`smartif.py:56-58`, `:73`) — and the
+/// `expect` says so rather than emitting a `None` the shell would turn into an
+/// `AttributeError` three frames away.
+fn if_condition_to_py(py: Python<'_>, tree: &IfConditionDesc) -> PyResult<Py<PyAny>> {
+    let condition = match tree {
+        IfConditionDesc::Operator { key, first, second } => IfCondition {
+            kind: "operator".to_string(),
+            key: Some(key.clone()),
+            first: Some(if_condition_to_py(py, first)?),
+            second: match second {
+                Some(second) => Some(if_condition_to_py(py, second)?),
+                None => None,
+            },
+            text: None,
+            expression: None,
+        },
+        IfConditionDesc::Literal { text, expression } => IfCondition {
+            kind: "literal".to_string(),
+            key: None,
+            first: None,
+            second: None,
+            text: Some(text.clone()),
+            expression: Some(attr_value_to_py(py, &AttrValue::Ref(*expression))?),
+        },
+    };
+    Ok(Py::new(py, condition)?.into_any())
 }
 
 /// A `Variable` as it crosses the wire.
@@ -897,6 +996,25 @@ struct FilterCheckHost<'py> {
     /// which is what the Rust-only tests and the parity corpus's "no host"
     /// rows use.
     check_filter: Option<Bound<'py, PyAny>>,
+    /// The shell's `token -> FilterExpression` callable — that is, Django's own
+    /// `Parser.compile_filter` (`base.py:697-701`), which is
+    /// `TemplateIfParser.create_var`'s
+    /// `self.template_parser.compile_filter(value)` (`defaulttags.py:928`).
+    ///
+    /// **A second callable rather than "the parser", because the first one is
+    /// already composed in Python** — `check_filter(parser)` is `find_filter`
+    /// followed by `args_check`, which is the pair Django calls at
+    /// `base.py:771-772`, and moving that composition into Rust would put a
+    /// shape into the seam that the seam does not have. This one is the shell's
+    /// `parser.compile_filter`, one call and no composition.
+    ///
+    /// `None` means the caller gave us none, which is an **error and not a
+    /// default**: unlike `check_filter`, there is no permissive answer. The
+    /// object this returns is a real `FilterExpression` that
+    /// `TemplateLiteral.eval` resolves at render time, so "accept every token"
+    /// cannot be spelled. A parse that reaches a condition without one fails
+    /// loudly — see `Host::compile_filter` below.
+    compile_filter: Option<Bound<'py, PyAny>>,
     /// The per-parse reference table — the one side collection two tags share.
     ///
     /// One entry per `Host::alloc_slot`, a `None` placeholder until something
@@ -989,6 +1107,46 @@ impl Host for FilterCheckHost<'_> {
         refs.push(None);
         refs.len() - 1
     }
+
+    fn compile_filter(&self, token: &str) -> Result<CoreNodeRef, Error> {
+        let Some(compile) = &self.compile_filter else {
+            // Reachable, and reachable *only* through a caller that forgot: a
+            // template with no `{% if %}` in it never gets here, which is why
+            // `_native.parse(source)` without a compiler works for every other
+            // tag. So the message names the argument rather than the template —
+            // this is an integration bug in the caller, and a `TemplateSyntaxError`
+            // shaped like a template error would send the reader to the wrong file.
+            //
+            // `Internal` rather than `Host`, because nothing raised it: `Host` is
+            // this project's spelling for "a Python exception, flattened", and
+            // there is no Python exception here.
+            return Err(Error::internal(
+                "this parse reached an {% if %} condition with no compile_filter \
+                 callable; pass the shell's `compile_filter(parser)` to `_native.parse`",
+            ));
+        };
+        // `TemplateIfParser.create_var`'s line: build the operand now, at this
+        // point in the token walk, so a bad filter raises before the operator
+        // algorithm runs and carries Django's own message (`Host::compile_filter`
+        // in `template-core` has the measurements).
+        match compile.call1((token,)) {
+            Ok(expression) => {
+                // Stored in the same table `alloc_slot` reserves into, because
+                // the descriptor names it by a `NodeRef` and the materialiser
+                // resolves that through the same two callbacks `{% resetcycle %}`
+                // uses. Reserved-and-filled in one step here, which is why no
+                // `None` placeholder is ever visible for this producer.
+                let mut refs = self.refs.borrow_mut();
+                refs.push(Some(expression.unbind()));
+                Ok(CoreNodeRef((refs.len() - 1) as u64))
+            }
+            // The callable raises Django's own `TemplateSyntaxError`, from
+            // `find_filter` or from `FilterExpression.__init__`'s variable
+            // parsing — both must read as themselves, which is why the message is
+            // flattened rather than replaced.
+            Err(error) => Err(Error::host(python_error_message(compile.py(), &error))),
+        }
+    }
 }
 
 /// `FilterExpression.__init__` for a token the caller already knows is one.
@@ -1007,6 +1165,10 @@ fn parse_filter_expression(
 ) -> PyResult<Py<PyAny>> {
     let host = FilterCheckHost {
         check_filter,
+        // A `{{ … }}` body is not a `{% if %}` condition, so no token here can
+        // reach `Host::compile_filter`; `None` is the honest spelling of "this
+        // entry point has no such seam".
+        compile_filter: None,
         refs: RefCell::new(Vec::new()),
     };
     match template_core::parser::filter_expr::parse_filter_expression(token, &host) {
@@ -1100,17 +1262,29 @@ fn with_ref_table(
 /// measured, `x|nope:1:2` reports `Invalid filter: 'nope'` with the host and
 /// `Could not parse the remainder: ':2'` without it, and Django reports the
 /// former. `render` passes one; see its comment.
+///
+/// `compile_filter` is `{% if %}`'s half of the same discharge: the operand of a
+/// condition is a **host-built `FilterExpression`**, not a wire descriptor,
+/// because `TemplateLiteral.value` has to answer
+/// `value.resolve(context, ignore_failures=True)` (`defaulttags.py:917-918`).
+/// Unlike `check_filter` there is no permissive default — the object has to
+/// exist — so a source containing `{% if %}` parsed without one fails at the
+/// condition with `ErrorKind::Internal` naming this argument. Callers with a
+/// `Parser` in hand pass `materialiser.compile_filter(parser)`; `render` builds
+/// its own, so the shell's end-to-end path cannot forget it.
 #[pyfunction]
-#[pyo3(signature = (source, debug = false, origin_template_repr = None, check_filter = None))]
+#[pyo3(signature = (source, debug = false, origin_template_repr = None, check_filter = None, compile_filter = None))]
 fn parse(
     py: Python<'_>,
     source: &str,
     debug: bool,
     origin_template_repr: Option<String>,
     check_filter: Option<Bound<'_, PyAny>>,
+    compile_filter: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     let host = FilterCheckHost {
         check_filter,
+        compile_filter,
         refs: RefCell::new(Vec::new()),
     };
     let nodelist = parse_source(py, source, debug, origin_template_repr, &host)?;
@@ -1703,8 +1877,14 @@ fn render(
 ) -> PyResult<String> {
     let tree = tree.bind(py);
     let check = tree.getattr("check_filter")?.call1((parser.bind(py),))?;
+    // `{% if %}`'s other half, from the same module and for the same reason:
+    // `TemplateIfParser.create_var` builds each operand during the parse, so the
+    // callable has to be here rather than in the shell. Built from the *same*
+    // parser, so the filters a condition resolves are the caller's engine's.
+    let compile = tree.getattr("compile_filter")?.call1((parser.bind(py),))?;
     let host = FilterCheckHost {
         check_filter: Some(check),
+        compile_filter: Some(compile),
         refs: RefCell::new(Vec::new()),
     };
 
@@ -1757,6 +1937,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<NodeRef>()?;
     m.add_class::<NodeListRef>()?;
     m.add_class::<NodeSlot>()?;
+    m.add_class::<IfCondition>()?;
     m.add_class::<SafeStr>()?;
     m.add_class::<Variable>()?;
     m.add_class::<FilterExpr>()?;

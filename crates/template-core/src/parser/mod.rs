@@ -146,6 +146,19 @@ impl<'a> Parser<'a> {
             .map(|expression| AttrValue::FilterExpr(Box::new(expression)))
     }
 
+    /// One `{% if %}` operand's `FilterExpression`, by handle — a thin forward
+    /// to [`Host::compile_filter`], for `alloc_slot`'s reason: the seam is the
+    /// host's while the *tag* is the caller, and `Parser::host` is private so a
+    /// tag cannot reach around it.
+    ///
+    /// **Not the same thing as [`Parser::compile_filter`] above**, which returns
+    /// the `{{ … }}` descriptor. This one returns the *object*, because that is
+    /// what `smartif`'s `LiteralValue::Compiled` holds and what
+    /// `TemplateLiteral.value` must be.
+    pub fn compile_condition_filter(&self, token: &str) -> Result<NodeRef, Error> {
+        self.host.compile_filter(token)
+    }
+
     /// Python's `repr()` of `s`, through the host — see [`Host::repr`].
     ///
     /// A forward rather than a call to `py_repr_str`, because the shell's
@@ -543,18 +556,19 @@ mod tests {
         // anything. Now it is an `Unimplemented` naming the milestone that
         // supplies it.
         //
-        // The example is `{% if %}`, not `{% for %}`: this test is one of the
-        // few that names a *specific* unimplemented tag, so M5's tasks move it
-        // as they land. Any still-stubbed M5 tag serves; `if` is the last one
-        // besides `cycle`, and Task 7 rewrites this line again.
-        let error = failure("{% if x %}y{% endif %}");
+        // The example is `{% load %}`, and it moved *to* `load` in Task 7: this
+        // test is one of the few that names a *specific* unimplemented tag, so
+        // M5's tasks move it as they land. It named `{% if %}` until Task 7
+        // implemented that tag, and `load` is now the first still-stubbed entry
+        // in the registry — it is M6's, so this line outlives M5.
+        let error = failure("{% load x %}");
         assert_eq!(
             error.kind,
             ErrorKind::Unimplemented(
-                "'if' is a built-in tag this engine does not implement yet (M5)".to_string(),
+                "'load' is a built-in tag this engine does not implement yet (M6)".to_string(),
             ),
         );
-        assert_eq!(error.token.unwrap().contents, "if x");
+        assert_eq!(error.token.unwrap().contents, "load x");
     }
 
     #[test]

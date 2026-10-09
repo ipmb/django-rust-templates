@@ -17,6 +17,7 @@ Flagged rather than silently relocated, because if Django ever grows a
 
 from __future__ import annotations
 
+from django.template import smartif
 from django.template.base import (
     FilterExpression,
     Node,
@@ -40,10 +41,12 @@ from django.template.defaulttags import (
     ForNode,
     LoremNode,
     IfChangedNode,
+    IfNode,
     NowNode,
     RegroupNode,
     ResetCycleNode,
     SpacelessNode,
+    TemplateLiteral,
     TemplateTagNode,
     URLNode,
     VerbatimNode,
@@ -57,6 +60,7 @@ from django_rust_templates import _native
 __all__ = (
     "NODE_CLASSES",
     "check_filter",
+    "compile_filter",
     "materialise",
     "materialise_node",
     "template_for",
@@ -106,6 +110,7 @@ NODE_CLASSES = {
     "FirstOfNode": FirstOfNode,
     "ForNode": ForNode,
     "IfChangedNode": _ifchanged_factory,
+    "IfNode": IfNode,
     "LoremNode": LoremNode,
     "NowNode": NowNode,
     "RegroupNode": RegroupNode,
@@ -361,6 +366,33 @@ def check_filter(parser):
     return check
 
 
+def compile_filter(parser):
+    """The ``compile_filter`` callable for ``_native.parse``, for a ``Parser``.
+
+    ``TemplateIfParser.create_var``'s
+    ``self.template_parser.compile_filter(value)`` (``defaulttags.py:928``) —
+    the ``FilterExpression`` behind one ``{% if %}`` operand. Django's own
+    ``Parser.compile_filter`` *is* that call (``base.py:697-701``:
+    ``return FilterExpression(token, self)``), so this hands the bound method
+    over rather than wrapping it.
+
+    **A peer of ``check_filter`` and not a variant of it**, because the two are
+    different calls at different points: ``check_filter`` is the ``find_filter``
+    + ``args_check`` pair Django runs *inside* ``FilterExpression.__init__``'s
+    loop (``base.py:771-772``), while this is the whole ``FilterExpression``,
+    built once per operand before the operator algorithm runs. A condition's
+    operand cannot be validated and left as a name — ``TemplateLiteral.eval``
+    calls ``self.value.resolve(context, ignore_failures=True)``
+    (``defaulttags.py:917-918``) at render time, so a real object has to exist.
+
+    ``None`` is not a permissive default for this one, unlike ``check_filter``'s
+    — see ``Host::compile_filter`` in ``template-core``. A caller that has a
+    ``Parser`` should pass it; ``_native.render`` builds its own from the parser
+    it was handed, so the shell's end-to-end path cannot forget.
+    """
+    return parser.compile_filter
+
+
 def _materialise_filter_expression(desc, parser=None):
     """A real :class:`FilterExpression` from a descriptor, without re-parsing.
 
@@ -491,6 +523,24 @@ def _decode_value(value, resolve_ref=None, parser=None, child_lists=None):
         return _materialise_filter_expression(value, parser)
     if isinstance(value, _native.Variable):
         return _materialise_variable(value, parser)
+    if isinstance(value, _native.IfCondition):
+        # `AttrValue::IfCondition`: one `{% if %}` condition, as the `smartif`
+        # tree. It comes first among the container-shaped arms below because it
+        # is its own `#[pyclass]` and not a sequence — but it is placed here with
+        # the others rather than with `NodeRef` because its *leaf* is a
+        # reference, so it needs `resolve_ref` for the same reason they do.
+        return _decode_condition(value, resolve_ref)
+    if isinstance(value, tuple):
+        # `AttrValue::Tuple` — `IfNode.conditions_nodelists`' `(condition,
+        # nodelist)` pairs. A real `tuple` and not a list: `IfNode.render`
+        # *unpacks* each pair (`defaulttags.py:1035`), and the parity suite can
+        # tell the two containers apart, because `describe`'s tuple arm carries a
+        # marker the list arm deliberately does not. Recursed exactly as the list
+        # arm is, so a `None` condition, an `IfCondition` and a `NodeListRef` in
+        # one pair are each decoded by their own arm.
+        return tuple(
+            _decode_value(item, resolve_ref, parser, child_lists) for item in value
+        )
     if isinstance(value, list):
         # `AttrValue::List`. Recursed rather than returned as-is: the Rust side
         # converts eagerly, so the elements are already Python objects of the
@@ -510,3 +560,71 @@ def _decode_value(value, resolve_ref=None, parser=None, child_lists=None):
     raise LookupError(
         f"cannot decode descriptor value {value!r} of type {type(value).__name__}"
     )
+
+
+def _decode_condition(condition, resolve_ref=None):
+    """One ``{% if %}`` condition node, as a real ``smartif`` object.
+
+    **Real ones, and not look-alikes**, because ``IfNode.render`` calls
+    ``condition.eval(context)`` on each branch's first element
+    (``defaulttags.py:1037``): ``Operator.eval`` recurses through its own
+    ``self.first``/``self.second`` and ``TemplateLiteral.eval`` calls
+    ``self.value.resolve(context, ignore_failures=True)`` (``:917-918``). So the
+    two shapes here are Django's two, built from Django's own table and Django's
+    own class.
+
+    ``OPERATORS[key]()`` rather than a class kept on the wire, because that is
+    exactly what ``IfParser.translate_token`` does (``smartif.py:166-172``) — one
+    instance per occurrence, whose ``id`` was set by the module-level loop
+    (``smartif.py:117-118``). ``first``/``second`` are then assigned, which is
+    what ``led`` and ``nud`` do (``:56-58``, ``:73``), and the assignment rather
+    than a constructor is deliberate: ``Operator`` is built inside a closure in
+    ``infix``/``prefix`` and its signature is not part of anything we may rely on.
+
+    The two error paths are both wire bugs rather than template bugs, so they are
+    loud. Django cannot produce either — ``create_var`` always compiles a real
+    ``FilterExpression``, and ``nud``/``led`` always set ``first`` — so a
+    condition that reached here without them means the Rust side emitted a shape
+    it does not build.
+    """
+    if condition.kind == "literal":
+        if resolve_ref is None:
+            raise LookupError(
+                f"{condition!r} needs a resolve_ref callback; none was passed "
+                "to materialise"
+            )
+        expression = resolve_ref(condition.expression.index)
+        if expression is None:
+            # An *empty* slot rather than a missing callback: the host reserves
+            # the handle and fills it in the same call, so this means the table
+            # handed to the materialiser is not the one the parse filled.
+            raise LookupError(
+                f"{condition!r} names an empty reference-table slot; the refs "
+                "passed to materialise are not the parse's own"
+            )
+        # `TemplateLiteral(value, text)` (`defaulttags.py:909-911`) — the
+        # `FilterExpression` first, the raw token second.
+        return TemplateLiteral(expression, condition.text)
+
+    if condition.first is None:
+        raise LookupError(
+            f"{condition!r} is an operator with no `first` operand; every "
+            "smartif operator sets one (`nud` at smartif.py:73, `led` at :56-58)"
+        )
+    try:
+        make = smartif.OPERATORS[condition.key]
+    except KeyError:
+        raise LookupError(
+            f"{condition!r} names an operator {condition.key!r} that "
+            "smartif.OPERATORS does not have"
+        ) from None
+    node = make()
+    node.first = _decode_condition(condition.first, resolve_ref)
+    # `None` on a prefix operator, and that is `nud`'s own line rather than an
+    # omission — see `IfConditionDesc::Operator::second`.
+    node.second = (
+        None
+        if condition.second is None
+        else _decode_condition(condition.second, resolve_ref)
+    )
+    return node

@@ -48,6 +48,7 @@ from django.template.base import (  # noqa: E402
 )
 from django.template.base import FilterExpression, Variable  # noqa: E402
 from django.template.engine import Engine  # noqa: E402
+from django.template import smartif  # noqa: E402
 from django.utils.safestring import SafeData  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
@@ -105,7 +106,23 @@ def filter_parser():
 
 
 def ours_parse(source, debug=False):
-    return materialise(_native.parse(source, debug), parser=filter_parser())
+    # **One** parser, handed to both halves — the same shape `_native.render`
+    # uses. It is the filter registry the parse builds each `{% if %}` operand
+    # from (`compile_filter`) *and* the one materialisation turns the wire
+    # filter names back into functions with, and `find_filter` reads one
+    # `self.filters` dict, so two instances would be two registries where Django
+    # has one.
+    #
+    # `compile_filter` is reached through the shell's own `compile_filter`, not
+    # re-spelled here, so the function the tests exercise is the function the
+    # render path uses. `check_filter` is deliberately not passed: it is a
+    # different seam, and leaving it `None` keeps every earlier row's
+    # filter-error ordering exactly as it was measured.
+    parser = filter_parser()
+    tree = _native.parse(
+        source, debug, compile_filter=materialise_module.compile_filter(parser)
+    )
+    return materialise(tree, parser=parser)
 
 
 def token_shape(token):
@@ -159,6 +176,36 @@ def describe(value):
         # `mark_safe` (`base.py:755`, `:906`), so both sides are safe today and
         # losing the mark should fail here rather than at M9.
         return {"safe_str": str(value)}
+    # M5's `if`. A condition is a smartif tree, which is neither a `Node` nor
+    # any of the value types above, and **nothing in smartif defines `__eq__`**
+    # — so without these two arms every `{% if %}` compared two live objects by
+    # identity and could never be equal, the same failure the `FilterExpression`
+    # and `Variable` arms above exist for.
+    if isinstance(value, smartif.Literal):
+        # `TemplateLiteral` is the one `TemplateIfParser.create_var` builds; the
+        # bare `Literal` is the base parser's and has no `text`. One arm for
+        # both, with Django's own class name carried so the two stay
+        # distinguishable in a diff, and `text` present-but-`None` for the one
+        # that has none.
+        return {
+            "type": type(value).__name__,
+            "text": getattr(value, "text", None),
+            "value": describe(value.value),
+        }
+    if isinstance(value, smartif.TokenBase):
+        # Every operator class is a local `Operator` defined inside
+        # `infix`/`prefix` (`smartif.py:51`, `:78`), so `type(...).__name__` is
+        # `"Operator"` for all fourteen of them and cannot tell `and` from `==`.
+        # `id` is the operator's own spelling (`"and"`, `"not in"`, `">="`, …)
+        # and is the property that differs. The two children are described
+        # recursively, which is what makes precedence — `a and b or not c`
+        # nesting one way and not the other — a diff rather than a coincidence.
+        return {
+            "type": "smartif.Operator",
+            "id": value.id,
+            "first": describe(value.first),
+            "second": describe(value.second),
+        }
     if isinstance(value, list):
         return [describe(item) for item in value]
     if isinstance(value, tuple):
@@ -600,21 +647,25 @@ class ShapeTests(unittest.TestCase):
     def test_an_unimplemented_tag_is_its_own_kind_at_the_ffi(self):
         """`Unimplemented` is not just a `ParseError` with a different message.
 
-        Django compiles `{% if %}` successfully, so our refusing it is a fact
-        about *this engine*. A harness that compared messages would match our
-        text against Django's "Did you forget to register or load this tag?" and
-        score the one case where we are wrong as a pass. The class carries it
-        instead — and as a subclass, so the shell's single `except ParseError`
-        still converts it to `TemplateSyntaxError` exactly as before.
+        Django compiles `{% load %}`, so our refusing it is a fact about *this
+        engine*. A harness that compared messages would match our text against
+        Django's "Did you forget to register or load this tag?" and score the
+        one case where we are wrong as a pass. The class carries it instead —
+        and as a subclass, so the shell's single `except ParseError` still
+        converts it to `TemplateSyntaxError` exactly as before.
 
-        The example is a tag that is **still** a stub: M5's tasks implement the
-        rest one at a time, and a test that named an implemented tag would stop
-        exercising this path entirely. `if` is the last one but `cycle`.
+        The example is a tag that is **still** a stub, enumerated rather than
+        guessed: `_native.builtin_tag_stubs()` is `['load', 'partial',
+        'partialdef', 'querystring']` on this tree, and `load` is the one of the
+        four Django's base parser will not reject first. `{% if %}` was the
+        example until M5's Task 7 landed it, which is exactly the rot this test
+        was written to survive: it names a stub, so the milestone that implements
+        the last stub has to move it.
         """
         with self.assertRaises(_native.UnimplementedTag) as caught:
-            _native.parse("{% if x %}y{% endif %}")
+            _native.parse("{% load x %}")
         self.assertIsInstance(caught.exception, _native.ParseError)
-        self.assertEqual(caught.exception.token[1], "if x")
+        self.assertEqual(caught.exception.token[1], "load x")
 
         # The classes are genuinely different, and a syntax error is not
         # silently swept into the "not built yet" bucket.

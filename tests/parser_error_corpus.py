@@ -254,6 +254,56 @@ ERRORS = [
         "Invalid block tag on line 1: 'else', expected 'endifchanged'. "
         "Did you forget to register or load this tag?",
     ),
+    # --- if -----------------------------------------------------------------
+    # Three sources of failure in one tag, and they are all here because they
+    # arrive by different routes: smartif's expression parser (the first four),
+    # the host's filter compiler (the next two), and the base parser's
+    # terminator handling (the last five).
+    #
+    # An empty condition and a dangling operator are the *same* raise site —
+    # `EndToken.nud` (`smartif.py:149-150`) reached through `IfParser.expression`,
+    # once as the very first token and once as an infix operator's right
+    # operand. Measured, not assumed: the draft predicted two different
+    # messages here.
+    ("{% if %}{% endif %}", "Unexpected end of expression in if tag."),
+    ("{% if a and %}{% endif %}", "Unexpected end of expression in if tag."),
+    # `IfParser.parse`'s exhaustion check (`smartif.py:198-200`), not a nud.
+    ("{% if a b %}{% endif %}", "Unused 'b' at end of if expression."),
+    # `and` in prefix position, so `TokenBase.nud` (`smartif.py:22-26`).
+    ("{% if a and and b %}{% endif %}", "Not expecting 'and' in this position in if tag."),
+    # Both compiled during the parse by `TemplateIfParser.create_var`, so both
+    # are the host's `compile_filter` failing — one on the filter lookup
+    # (`FilterExpression.__init__`), one inside `Variable` — and neither is a
+    # render-time lookup miss.
+    ("{% if a|does_not_exist %}{% endif %}", "Invalid filter: 'does_not_exist'"),
+    ("{% if 1>2 %}{% endif %}", "Could not parse the remainder: '>2' from '1>2'"),
+    # `do_if`'s own `parser.parse` with the three terminators; the "Looking for
+    # one of" list is Django's, in Django's order.
+    ("{% if a %}", "Unclosed tag on line 1: 'if'. Looking for one of: elif, else, endif."),
+    # `elif` is not a registered tag — the block parser never starts it.
+    (
+        "{% elif a %}",
+        "Invalid block tag on line 1: 'elif'. "
+        "Did you forget to register or load this tag?",
+    ),
+    # The terminator line's trailing bits, from `do_if`'s **single** check —
+    # `if token.contents != "endif"` (`defaulttags.py:1013-1017`), which the
+    # `else foo` spelling reaches too because `token.contents == "else"` is
+    # already false by then. One raise site, two spellings (measured; the draft
+    # attributed `else foo` to smartif, which raises no such message — `grep
+    # Malformed .django/django/template/` is one hit). The token is the `if`'s,
+    # not the terminator's, because the error is raised on the tag's own stored
+    # token (measured).
+    ("{% if a %}x{% endif foo %}", 'Malformed template tag at line 1: "endif foo"'),
+    ("{% if a %}x{% else foo %}y{% endif %}", 'Malformed template tag at line 1: "else foo"'),
+    # A second `endif` is *not* Malformed: the first one closed the tag and the
+    # second is an ordinary unknown tag. The plan predicted Malformed here, and
+    # the prediction was wrong — measured on the pinned tree.
+    (
+        "{% if a %}{% endif %}{% endif %}",
+        "Invalid block tag on line 1: 'endif'. "
+        "Did you forget to register or load this tag?",
+    ),
     # --- the innermost token, across a nested parse -------------------------
     (
         "{% autoescape on %}\n{% now a b %}\n{% endautoescape %}",

@@ -2,11 +2,13 @@
 //!
 //! A direct port of Django's top-down parser (`smartif.py`, 215 lines at
 //! 6.0.9). Rust owns the parse and Python owns the tree that renders, so this
-//! module builds the parse tree and detects syntax errors — and nothing in the
-//! engine calls it yet: `{% if %}` is M5, so `smartif` is machinery with no
-//! consumer at M3. The one caller Django has, `TemplateIfParser`
-//! (`defaulttags.py:921`), differs from the base `IfParser` in exactly two
-//! ways, both measured against the pinned tree and both pinned by tests here:
+//! module builds the parse tree and detects syntax errors. **M5 wired the
+//! consumer**: `tags/if.rs` drives [`IfParser::template`], walks the arena into
+//! [`IfConditionDesc`] with [`IfParser::condition`], and the materialiser turns
+//! that back into real `smartif` nodes. The one caller Django has,
+//! `TemplateIfParser` (`defaulttags.py:921`), differs from the base `IfParser`
+//! in exactly two ways, both measured against the pinned tree and both pinned
+//! by tests here:
 //!
 //! - `error_class`: the base parser raises `ValueError`, the subclass raises
 //!   `TemplateSyntaxError` (`smartif.py:157`, `defaulttags.py:922`);
@@ -15,10 +17,13 @@
 //!   so the subclass runs `compile_filter` during `__init__` and can fail
 //!   before `parse` is reached.
 //!
-//! `nud`/`led` and the operator table are ported; `eval` (the boolean
-//! semantics) is M5's, because nothing renders an `{% if %}` until then.
+//! `nud`/`led` and the operator table are ported. `eval` — the boolean
+//! semantics — is **not**, and this is the last place the split is visible:
+//! Python evaluates the tree, because that is where Django's `lambda`s live and
+//! because `TemplateLiteral.eval` calls `FilterExpression.resolve` with
+//! `ignore_failures=True`. The port builds shape; Python keeps meaning.
 
-use crate::parser::desc::NodeRef;
+use crate::parser::desc::{IfConditionDesc, NodeRef};
 use crate::parser::error::Error;
 use crate::parser::tags::py_repr_str;
 
@@ -256,9 +261,15 @@ enum Tag {
 /// `TemplateIfParser.create_var` calls `self.template_parser.compile_filter(
 /// value)` and stores the result. The result is a host-owned
 /// `FilterExpression`, which `template-core` cannot hold, so it crosses as the
-/// [`NodeRef`] handle `desc.rs` reserves. `template-core`'s real
-/// `compile_filter` (M3 Tasks 2-3) is not wired here: nothing calls `smartif`
-/// at M3, so the only M3 implementation is the test stand-in.
+/// [`NodeRef`] handle `desc.rs` reserves.
+///
+/// **M5 wired the real implementation**: `if.rs` passes an adapter over
+/// [`Host::compile_filter`](crate::parser::host::Host::compile_filter), so the
+/// `FilterExpression` is Django's own object built by Django's own
+/// `Parser.compile_filter`. M3 shipped the trait with test stand-ins only,
+/// because nothing called `smartif` then; those stand-ins are still here and
+/// still used by this module's own tests, which are about the parser rather
+/// than about the host.
 pub trait CompileFilter {
     /// `Parser.compile_filter(token)`.
     fn compile_filter(&self, token: &str) -> Result<NodeRef, Error>;
@@ -364,6 +375,41 @@ impl IfParser {
     /// `self.error_class`.
     pub fn error_class(&self) -> ErrorClass {
         self.error_class
+    }
+
+    /// The condition rooted at `root`, as the plain data `{% if %}` crosses.
+    ///
+    /// Called once per branch by `do_if`, after [`Self::parse`] has succeeded —
+    /// so every child an operator names is present, and the two `expect`s below
+    /// are statements about `nud`/`led` rather than hopes. `nud` gives a prefix
+    /// operator a `first` and explicitly `None` for `second` (`smartif.py:73`);
+    /// `led` gives an infix operator both (`:56-58`). A `TokenBase.led` or
+    /// `TokenBase.nud` fall-through never returns, so nothing else reaches here.
+    ///
+    /// The literals are `Compiled` because `IfParser::template` is the only
+    /// constructor `do_if` uses — the base parser's `Raw` literals belong to
+    /// `smartif.IfParser`, which no tag builds.
+    pub fn condition(&self, root: NodeId) -> IfConditionDesc {
+        let node = &self.arena[root];
+        match &node.kind {
+            IfToken::Operator(operator) => IfConditionDesc::Operator {
+                key: operator.key().to_string(),
+                first: Box::new(
+                    self.condition(node.first.expect("nud/led always set an operator's first")),
+                ),
+                second: node.second.map(|id| Box::new(self.condition(id))),
+            },
+            IfToken::Literal(Literal { value, display }) => {
+                let LiteralValue::Compiled(expression) = value else {
+                    unreachable!("IfParser::template compiles every literal it builds")
+                };
+                IfConditionDesc::Literal {
+                    text: display.clone(),
+                    expression: *expression,
+                }
+            }
+            IfToken::End => unreachable!("a parsed condition never roots at the sentinel"),
+        }
     }
 
     fn tag(&self, id: NodeId) -> Tag {

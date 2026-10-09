@@ -63,9 +63,26 @@ def django_failure(source, debug=False):
 
 
 def ours_failure(source, debug=False):
-    """The exception `_native.parse` raises, or None."""
+    """The exception `_native.parse` raises, or None.
+
+    `compile_filter` is passed because M5's `{% if %}` needs it: the operand's
+    `FilterExpression` is built *during* the parse, by the host, and the host
+    refuses to guess one (`Host::compile_filter`). `check_filter` stays out —
+    only one of the two seams is new here, and leaving the other `None` (its
+    permissive default) keeps every earlier row's filter-error ordering exactly
+    as it was measured.
+
+    The parser is a filter registry and nothing else: Rust owns the tokens, so
+    the ones this `Parser` is built over are irrelevant, and the same
+    construction as `django_failure`'s is the one that has the engine's filters.
+    """
+    parser = Parser(
+        lexer(source, debug).tokenize(),
+        _ENGINE.template_libraries,
+        _ENGINE.template_builtins,
+    )
     try:
-        _native.parse(source, debug)
+        _native.parse(source, debug, compile_filter=parser.compile_filter)
     except Exception as exc:  # noqa: BLE001
         return exc
     return None

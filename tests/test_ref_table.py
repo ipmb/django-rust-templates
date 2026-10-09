@@ -55,7 +55,8 @@ its slot as a fifth element.
 # writes: `ParsedCycleTests` parses the sources end to end. The module docstring
 # above is kept in its original tense because it records *why* the hand-built
 # half exists, and those tests still carry the empty-slot and
-# token-overwriting cases a parsed template cannot produce.
+# token-overwriting cases a parsed template cannot produce. Task 7 landed the
+# other filler — `IfConditionRefTests` below parses a real `{% if %}`.
 
 import importlib.util
 import sys
@@ -69,7 +70,11 @@ if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
 from django.template.base import Parser  # noqa: E402
-from django.template.defaulttags import CycleNode, ResetCycleNode  # noqa: E402
+from django.template.defaulttags import (  # noqa: E402
+    CycleNode,
+    ResetCycleNode,
+    TemplateLiteral,
+)
 from django.template.engine import Engine  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
@@ -181,6 +186,93 @@ class WireShapeTests(unittest.TestCase):
         # `materialise(_native.parse(source), parser=…)` call site working.
         nodelist = materialiser.materialise(_native.parse("ab"), parser=parser())
         self.assertEqual(nodelist[0].s, "ab")
+
+
+class IfConditionRefTests(unittest.TestCase):
+    """The table's *parse-time* filler: `{% if %}`'s operands.
+
+    The other half of this file. A condition's operand is built by the host
+    while the tag compiles — `TemplateIfParser.create_var` calls
+    `self.template_parser.compile_filter(value)` (`defaulttags.py:928`) — so the
+    table is already filled when `_native.parse` returns, with no
+    materialisation step needed to see it. What is left to check is that what it
+    was filled with is the *host's own object* rather than a re-parse, which is
+    the reason the handle exists at all.
+    """
+
+    def parse(self, source):
+        """`_native.parse` as the shell calls it: with a real `compile_filter`.
+
+        The parser comes back with the tree because materialisation needs the
+        same one — `find_filter` reads one `self.filters`, and the parse builds
+        its operands from it.
+        """
+        parser_ = parser()
+        tree = _native.parse(
+            source, False, compile_filter=materialiser.compile_filter(parser_)
+        )
+        return tree, parser_
+
+    def condition_of(self, nodelist):
+        return nodelist[0].conditions_nodelists[0][0]
+
+    def test_the_wire_form_is_a_handle_and_not_the_expression_itself(self):
+        # **Step A, corrected.** The plan asserted `condition is refs[0]` on the
+        # wire form; measured, the wire condition is an `IfCondition` whose
+        # `expression` is a `NodeRef` — an index into the table, deliberately not
+        # the `FilterExpression`. That distinction is the whole point of the
+        # handle: a `FilterExpression` on the wire would be a re-parse, and
+        # `TemplateLiteral.eval` resolves *the host's* object
+        # (`defaulttags.py:917-918`), so a copy would be a different pipeline.
+        source = "{% if a|lower %}x{% endif %}"
+        (nodes, _, refs), _ = self.parse(source)
+        wire = dict(nodes[0][1])["conditions_nodelists"][0][0]
+        self.assertNotIsInstance(wire.expression, TemplateLiteral)
+        self.assertIsInstance(wire.expression, _native.NodeRef)
+        self.assertEqual(wire.expression.index, 0)
+        self.assertEqual(wire.kind, "literal")
+        self.assertEqual(wire.text, "a|lower")
+        self.assertEqual(len(refs), 1, "one operand, one reserved slot")
+
+    def test_the_condition_is_the_object_the_table_holds(self):
+        # And the handle resolves to that same object — the identity claim the
+        # plan was reaching for, at the layer where it is actually true. The
+        # condition is a `TemplateLiteral` (Django's own wrapper) whose `.value`
+        # **is** `refs[0]`: the `FilterExpression` the host compiled.
+        source = "{% if a|lower %}x{% endif %}"
+        (nodes, _, refs), parser_ = self.parse(source)
+        nodelist = materialiser.materialise((nodes, False, refs), parser=parser_)
+        condition = self.condition_of(nodelist)
+        self.assertIsInstance(condition, TemplateLiteral)
+        self.assertIs(condition.value, refs[0])
+        self.assertEqual(condition.text, "a|lower")
+        self.assertEqual(
+            [func.__name__ for func, _ in condition.value.filters], ["lower"]
+        )
+
+    def test_every_operand_gets_its_own_slot_in_source_order(self):
+        # Three operands, three slots, and the slots are filled in the order the
+        # operands appear — which is what makes a wrong one a wrong *object*
+        # rather than a wrong count. The tree is Django's own shape, so the
+        # leaves are reached the way Django reaches them.
+        source = "{% if a and b or not c %}x{% endif %}"
+        (nodes, _, refs), parser_ = self.parse(source)
+        self.assertEqual(len(refs), 3)
+        nodelist = materialiser.materialise((nodes, False, refs), parser=parser_)
+        condition = self.condition_of(nodelist)
+        self.assertEqual(condition.id, "or")
+        self.assertEqual(condition.first.id, "and")
+        self.assertEqual(condition.second.id, "not")
+        self.assertIs(condition.first.first.value, refs[0])
+        self.assertIs(condition.first.second.value, refs[1])
+        self.assertIs(condition.second.first.value, refs[2])
+        # Django's own parse builds the same shape from the same source, so the
+        # structure compared above is not this file's invention.
+        theirs = Engine().from_string(source).nodelist[0].conditions_nodelists[0][0]
+        self.assertEqual(
+            (condition.id, condition.first.id, condition.second.id),
+            (theirs.id, theirs.first.id, theirs.second.id),
+        )
 
 
 class CycleIdentityTests(unittest.TestCase):

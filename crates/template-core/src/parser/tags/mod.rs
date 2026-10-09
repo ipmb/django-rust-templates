@@ -224,7 +224,7 @@ pub(crate) fn standin_tag(command: &str) -> Option<CompileFn> {
 #[cfg(test)]
 pub(crate) mod support {
     use crate::lexer::Lexer;
-    use crate::parser::desc::{AttrValue, NodeDesc, NodeListDesc};
+    use crate::parser::desc::{AttrValue, NodeDesc, NodeListDesc, NodeRef};
     use crate::parser::error::Error;
     use crate::parser::host::NoHost;
     use crate::parser::Parser;
@@ -309,6 +309,23 @@ pub(crate) mod support {
             let slot = self.next.get();
             self.next.set(slot + 1);
             slot
+        }
+
+        fn compile_filter(&self, _token: &str) -> Result<NodeRef, Error> {
+            // The counter, not the null handle, because this host's whole point
+            // is that a second reservation gets a second index — and a
+            // condition's operand *is* a reservation. Handing back `0` for every
+            // operand would make `{% if a and b %}`'s two `NodeRef`s
+            // indistinguishable, which is the same blind spot `alloc_slot`'s
+            // doc comment says this host exists to close.
+            //
+            // It does not build anything: the handle names a table entry no
+            // test fills, and nothing parsed under this host is materialised.
+            //
+            // The `as u64` is `NodeRef`'s width, not a narrowing: `NodeRef` is a
+            // `u64` handle into the same table `alloc_slot` indexes, which is
+            // why the counter and the handle number together.
+            Ok(NodeRef(self.alloc_slot() as u64))
         }
     }
 
@@ -503,6 +520,14 @@ mod tests {
             // builds names a slot. Zero rather than a counter so that `&TestHost`
             // stays a promotable unit struct.
             0
+        }
+
+        fn compile_filter(&self, _token: &str) -> Result<NodeRef, Error> {
+            // Accepted, like `NoHost`, and for the same reason: this host exists
+            // to make dispatch order observable, and `{% if %}` is not one of
+            // the tags it dispatches. A test that wants a condition's handle to
+            // be meaningful needs the shell's host.
+            Ok(NodeRef(0))
         }
     }
 

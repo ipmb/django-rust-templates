@@ -118,6 +118,23 @@ pub enum AttrValue {
     /// A nodelist inside one is [`AttrValue::NodeListRef`], never inlined; see
     /// that variant.
     List(Vec<AttrValue>),
+    /// A **tuple** of values, and the container type is the whole point.
+    ///
+    /// `{% if %}` is the only producer: `IfNode.conditions_nodelists` is a list
+    /// of `(condition, nodelist)` **tuples** (`defaulttags.py:996`), `do_if`
+    /// builds them with tuple literals, and `IfNode.render` unpacks them
+    /// (`:1035`). A list would render identically and be a different node — the
+    /// same argument `IfChangedNode._varlist` is pinned by — and the parity
+    /// suite can tell the two apart, because `describe`'s tuple arm carries a
+    /// `"tuple"` marker the list arm deliberately does not have.
+    ///
+    /// It exists rather than a node-specific "branch" type because the pair is
+    /// exactly a two-element tuple and nothing else: the condition half is
+    /// [`AttrValue::IfCondition`], the nodelist half is
+    /// [`AttrValue::NodeListRef`], and naming the *container* is all this
+    /// variant adds. A second type would have to be decoded by a second arm
+    /// while producing the same object.
+    Tuple(Vec<AttrValue>),
     /// A `token_kwargs` result — `WithNode.extra_context`,
     /// `IncludeNode.extra_context`, `parse_bits`' kwargs.
     ///
@@ -167,6 +184,70 @@ pub enum AttrValue {
     /// integer attribute is a Python `int` too, and a materialiser dispatching
     /// on `isinstance(value, int)` could not tell them apart.
     NodeSlot(usize),
+    /// One `{% if %}` condition, as the `smartif` tree `IfParser.parse`
+    /// returned.
+    ///
+    /// **The tree, and not a handle to one, because `template-core` is what
+    /// builds it.** `{% if %}`'s condition is the one attribute whose value is
+    /// a parse *tree*: `do_if` runs `TemplateIfParser(parser, bits).parse()`
+    /// (`defaulttags.py:995`) and `IfNode.render` then calls
+    /// `condition.eval(context)` on the result (`:1037`). Python therefore needs
+    /// real `smartif` nodes at render time, and the descriptor is how the shape
+    /// gets there.
+    ///
+    /// The operators are named rather than rebuilt from Python's table by index:
+    /// `smartif.OPERATORS[key]` is the class and `translate_token` instantiates
+    /// it per occurrence (`smartif.py:166-172`), so a key plus two children is
+    /// everything the materialiser needs — and an *index* into `OPERATORS` would
+    /// be a second, order-dependent way to say the same thing.
+    ///
+    /// Its leaves are [`AttrValue::Ref`]s, not [`AttrValue::FilterExpr`]s: the
+    /// `FilterExpression` behind a `TemplateLiteral` is built by the **host**
+    /// during the parse, which is where Django builds it (`create_var` calls
+    /// `self.template_parser.compile_filter(value)`, `defaulttags.py:928`), so a
+    /// bad filter in a condition raises at parse time carrying Django's message.
+    ///
+    /// **Boxed**, for [`AttrValue::Variable`]'s reason: `IfConditionDesc` holds
+    /// two more `IfConditionDesc`s, so an unboxed variant is an infinitely sized
+    /// type (`E0072`).
+    IfCondition(Box<IfConditionDesc>),
+}
+
+/// One node of a `{% if %}` condition — `smartif.TokenBase` and its two
+/// subclasses.
+///
+/// `defaulttags.TemplateLiteral` is the only subclass that occurs here, and it
+/// is a `Literal` with a `text` (`defaulttags.py:909-918`); the base
+/// `smartif.Literal` is unreachable through `{% if %}` because
+/// `TemplateIfParser.create_var` overrides `create_var`. So the two arms below
+/// are the whole set `do_if` can produce.
+#[derive(Debug, Clone, PartialEq)]
+pub enum IfConditionDesc {
+    /// An `infix`/`prefix` `Operator` instance, with its two operands.
+    ///
+    /// `second` is `None` for a prefix operator: `nud` sets
+    /// `self.second = None` (`smartif.py:73`) where `led` sets both
+    /// (`:56-58`). Emitted rather than omitted so the materialiser assigns it,
+    /// which is what Django does.
+    Operator {
+        /// One of `smartif.OPERATORS`' thirteen keys — `and`, `not in`, `==`, …
+        key: String,
+        first: Box<IfConditionDesc>,
+        second: Option<Box<IfConditionDesc>>,
+    },
+    /// A `TemplateLiteral`: the compiled `FilterExpression` and the raw token.
+    ///
+    /// `text` is `TemplateLiteral.text`, which `display()` returns
+    /// (`defaulttags.py:914-915`). The message that reads it — `"Unused '%s' at
+    /// end of if expression."` (`smartif.py:181`) — is raised in Rust, so the
+    /// text is carried for the materialised object's own sake: it is what
+    /// `display()` returns, and a `TemplateLiteral` without it would raise
+    /// `AttributeError` the first time anything asked.
+    Literal {
+        text: String,
+        /// The host's `FilterExpression`, by handle.
+        expression: NodeRef,
+    },
 }
 
 /// A `Variable` as it crosses the wire (`django.template.base.Variable`).

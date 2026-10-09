@@ -286,10 +286,16 @@ mod tests {
         // **It moves once per task, not once per milestone**, which is the
         // smaller thing the same argument buys: the fan-out tasks land their
         // tags one group at a time, and a literal left at fifteen until the end
-        // would fail every commit in between. Ten of the eleven have landed —
-        // `cycle`, `filter`, `firstof`, `for`, `ifchanged`, `lorem`, `regroup`,
-        // `url`, `widthratio` and `with` — so those ten are gone from the list.
-        let stubs = ["if", "load", "partial", "partialdef", "querystring"];
+        // would fail every commit in between. **All eleven M5 tags have landed**
+        // — `cycle`, `filter`, `firstof`, `for`, `if`, `ifchanged`, `lorem`,
+        // `regroup`, `url`, `widthratio` and `with` — so the four names left are
+        // exactly the ones M5 was never going to touch. `querystring` is §D1's
+        // move to M6; `load`, `partial` and `partialdef` are M6's and M13's.
+        //
+        // This is the last time this literal moves for M5, and it is what Task
+        // 7's Step D checks: `builtin_tag_stubs() & M5_TAGS` is empty iff the
+        // eleven are all gone from here.
+        let stubs = ["load", "partial", "partialdef", "querystring"];
         assert_eq!(
             builtin_tag_stubs(),
             stubs,
@@ -301,8 +307,9 @@ mod tests {
         }
         // The *implemented* names, which is the other half of the same pin:
         // every table entry is either here or in `stubs`, and the two halves
-        // move in opposite directions as M5 lands. The nine are M2's; the ten
-        // after them have landed across M5's tasks.
+        // move in opposite directions as M5 lands. The nine are M2's; the
+        // eleven after them landed across M5's tasks, and this list is now
+        // complete for the milestone.
         let mut expected: Vec<&str> = [
             "autoescape",
             "comment",
@@ -312,6 +319,7 @@ mod tests {
             "filter",
             "firstof",
             "for",
+            "if",
             "ifchanged",
             "lorem",
             "now",

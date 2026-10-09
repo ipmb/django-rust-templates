@@ -250,7 +250,7 @@ fn variable_of(raw: &str) -> Result<AttrValue, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::desc::VariableDesc;
+    use crate::parser::desc::{NodeRef, VariableDesc};
     use crate::token::Token;
 
     /// A host that rejects exactly what it is told to, and accepts the rest.
@@ -318,6 +318,22 @@ mod tests {
             // slot. Returning 0 keeps it `Cell`-free, which is what lets
             // `&Rejecting::default()` be passed where a `'static` host is wanted.
             0
+        }
+
+        fn compile_filter(&self, _token: &str) -> Result<NodeRef, Error> {
+            // Same reason as `alloc_slot`, and the same honesty: this host is
+            // here to reject *filter names* through `check_filter`, which the
+            // tests below observe through `seen`. No test compiles a `{% if %}`,
+            // so there is no handle to hand back and `0` is the null one.
+            //
+            // It does **not** consult `unknown`, because the two seams are not
+            // the same call in Django either: `check_filter` is
+            // `FilterExpression.__init__`'s `find_filter`, and this is
+            // `TemplateIfParser.create_var`'s `compile_filter`, which builds a
+            // whole `FilterExpression` and fails with its error rather than the
+            // name alone. Making this one reject too would put a filter error on
+            // a path no test here walks.
+            Ok(NodeRef(0))
         }
     }
 

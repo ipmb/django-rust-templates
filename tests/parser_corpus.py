@@ -194,6 +194,22 @@ TEMPLATES = [
     # `args[-3]` is `b`, so this is the non-silent `as` form named `silent` —
     # not the silent flag. Measured.
     "{% cycle a b as silent %}",
+    # --- if: one branch, two, and the else that has no condition -------------
+    # The condition is not a `FilterExpression` at the seam Django uses: it is a
+    # `TemplateLiteral` wrapping one, and an operator node wrapping those. These
+    # rows are what makes `describe` grow an arm for the second kind.
+    "{% if a %}x{% endif %}",
+    "{% if a %}x{% else %}y{% endif %}",
+    "{% if a %}x{% elif b %}y{% endif %}",
+    "{% if a %}x{% elif b %}y{% elif c %}z{% else %}w{% endif %}",
+    # The operator tree, in both spellings: `not` is a prefix operator and `and`
+    # binds looser than it, so the nesting is the thing being compared.
+    "{% if a and b or not c %}x{% endif %}",
+    # A filter inside an operand: the filter *name* is checked through the host,
+    # and the `FilterExpression` itself is the host's own object.
+    "{% if a|lower == 'x' %}x{% endif %}",
+    "{% if a > 1 and b < 2 %}x{% endif %}",
+    "{% if not a %}x{% endif %}",
     # --- variables, and the `contains_nontext` they set ---------------------
     # M3's half of §10.4's ordering gate. `{{ … }}` is what sets
     # `contains_nontext` — measured: `text{% extends %}` is legal and
