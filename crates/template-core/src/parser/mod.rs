@@ -19,6 +19,7 @@ pub mod filter_expr;
 pub mod host;
 pub mod registry;
 pub mod resolve;
+pub mod smartif;
 pub mod tags;
 pub mod variable;
 

@@ -111,7 +111,7 @@ fn strip_first_and_last(s: &str) -> String {
 /// host's `repr` rather than widen this function (design spec §10.4) — and this
 /// assertion is what makes that a decision someone has to make rather than a
 /// silently wrong message.
-fn py_repr_str(s: &str) -> String {
+pub(crate) fn py_repr_str(s: &str) -> String {
     debug_assert!(
         s.is_ascii(),
         "py_repr_str is exact for ASCII only: Python's repr also escapes \
