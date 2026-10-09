@@ -283,3 +283,30 @@ with the host node (one `bool`), and note that M6's design already gives M7 its
 arbitrary-attribute requirement for free — the handle handed to a compile
 function *is* Django's `Parser`, so `parser.__loaded_blocks` works with no proxy
 and no `AttributeError` emulation.
+
+## The stranded list is a detector, not a backlog
+
+`unmigrated` says how much naming is left. The stranded list says something the
+other counts cannot: an unquoted row whose every citing file is already
+shorthand-free will never be requoted by any pass, so if it is wrong it stays
+wrong and green. That is not residue — it is the only instrument that fires on
+anchored-but-wrong rows cited exclusively from files that have finished.
+
+It fires when a *file* finishes, which is why its size says nothing. The whole
+history so far, as entries rather than as a count that went 76 -> 81 -> 76:
+
+| entered at | file that went shorthand-free | rows that entered | read? |
+| --- | --- | --- | --- |
+| `0876b22` | `template-py/src/filters.rs`, `template-core/src/filters/mod.rs` | `html.py:246`, `html.py:412-415`, `defaultfilters.py:38-52`, `:48`, `:558-570` | 5 read; **2 wrong** (`:246` is a blank line; `:412-415` is `wrapping_punctuation_openings`, not `trim_url`) — fixed in `0876b22`, the three correct ones requoted in `a73dccb` |
+| `a3798f3` | `template-core/src/parser/resolve.rs` | `base.py:1014`, `:959-1029`, `:963-995`, `:972`, `:999`, `:999-1029` | 6 read; **5 wrong** (`959-1029` ends on a blank line; `963-995` runs past the arms it claims; `999` is not the callable arm's guard; `999-1029` misses two of its three branches and ends past the handler; `972` is right for the predicate but was cited for a `raise` at 980) — fixed in the commit that adds this table |
+
+Eleven rows have passed through; seven were wrong or cited for the wrong line.
+Both batches were found by reading the list as a list at the commit that
+stranded it — never by a count, and never by any earlier check, because
+"anchored" hides a row from the naming pass and "cited only from finished files"
+hides it from the migration's arithmetic.
+
+The order of the sweep decides when each row becomes visible: a row cited only
+from files swept last surfaces last. So the list still has to be read once, at
+the end — but the end is when the last row becomes visible, not when the
+cleanup is done.

@@ -67,7 +67,7 @@ impl std::fmt::Debug for Step {
 /// Which branch of Django's callable arm a value takes.
 ///
 /// Three-way rather than the "is it callable" boolean the plan first specified,
-/// because the three branches do three different things (`base.py:999-1029`) and
+/// because the three branches do three different things (`base.py:993-1013`) and
 /// a boolean folds two of them into a behaviour Django never produces. All three
 /// rows were measured:
 ///
@@ -217,7 +217,7 @@ pub enum LookupOutcome {
     Unimplemented(String),
 }
 
-/// Resolve a dotted path, in Django's arm order (`base.py:959-1029`).
+/// Resolve a dotted path, in Django's arm order (`base.py:959-1028`).
 pub fn resolve_lookup(lookups: &[String], mut current: Box<dyn LookupTarget>) -> LookupOutcome {
     for bit in lookups {
         current = match step_one(&*current, bit) {
@@ -226,7 +226,7 @@ pub fn resolve_lookup(lookups: &[String], mut current: Box<dyn LookupTarget>) ->
         };
 
         // Django's callable arm is **inside the loop**, one bit at a time
-        // (`base.py:999`), not once at the end — and the difference is a value,
+        // (`base.py:993`), not once at the end — and the difference is a value,
         // not an error. Measured: `{{ f.b }}` with `f = lambda: {"b": "B"}`
         // renders `'B'`, because Django calls `f` after the first bit and then
         // looks up `b` on the result. A check after the loop would look up `b`
@@ -261,14 +261,14 @@ pub fn resolve_lookup(lookups: &[String], mut current: Box<dyn LookupTarget>) ->
     LookupOutcome::Found(current.node())
 }
 
-/// One bit, through Django's three arms in order (`base.py:963-995`).
+/// One bit, through Django's three arms in order (`base.py:960-992`).
 ///
 /// The arm order is the obvious part. The part worth writing down is **where
 /// Django's `dir()` rule lives**, because reading `base.py` quickly suggests it
 /// belongs to "an exception the lookup raised" and it does not: it belongs to
 /// the attribute arm's *swallowed* exception, and nowhere else.
 ///
-/// The structure of `base.py:963-995` is three nested `try`s. The inner
+/// The structure of `base.py:960-992` is three nested `try`s. The inner
 /// `except (TypeError, AttributeError)` guards **only** `getattr`, and it is
 /// inside it that `bit in dir(current)` is consulted:
 ///
@@ -566,12 +566,12 @@ mod tests {
         // third and differ from it only in `dir()`; the fourth is a different
         // arm, where no `dir()` answer changes anything.
         //
-        // `@property` raising AttributeError, name in `dir()` → Django's `raise`
-        // on `base.py:972`. Note the fixture: `get_attr` returns `Step::Miss`,
-        // *not* `Step::Raised` — the exception is inside the attr arm's
-        // swallowing set, and the re-raise is the `dir()` line's doing. A
-        // fixture that modelled this as `Raised` would pass against a resolver
-        // that had the rule in the wrong place.
+        // `@property` raising AttributeError, name in `dir()` → Django re-raises
+        // on the `dir()` guard (`base.py:979-980`). Note the fixture: `get_attr`
+        // returns `Step::Miss`, *not* `Step::Raised` — the exception is inside
+        // the attr arm's swallowing set, and the re-raise is the `dir()` line's
+        // doing. A fixture that modelled this as `Raised` would pass against a
+        // resolver that had the rule in the wrong place.
         let property_in_dir = Fake {
             swallowed: vec!["boom"],
             dir: vec!["boom"],
