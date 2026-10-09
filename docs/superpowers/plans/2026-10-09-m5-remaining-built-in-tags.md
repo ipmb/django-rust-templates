@@ -70,13 +70,18 @@ first.
    not a gate until something *derives the set and iterates it*. **Owned by
    Task 1 (A1-A3); pinned by the three mutations in Task 1 Step 7, each run and
    restored.**
-2. **A descriptor class Python cannot materialise is silent until a corpus row
-   hits it.** `NODE_CLASSES` is an explicit allow-list
+2. **A descriptor class Python cannot materialise — or cannot *construct* — is
+   silent until a corpus row hits it.** `NODE_CLASSES` is an explicit allow-list
    (`python/django_rust_templates/_impl/parser.py:60-72`) and `materialise_node`
    raises `LookupError` on a miss (`:117-122`) — but only for a node the corpus
    actually builds. A tag can emit `"ForrNode"` and every test stays green until
    someone writes a `{% for %}` template. The class name is derivable from the
-   Rust source, so the check can be static. **Owned by Task 1 (A4).**
+   Rust source, so the check can be static. **And a name in the list is not
+   enough:** `IfChangedNode`'s `__init__` is variadic, so a correct class name
+   still raises `TypeError` under `cls(**kwargs)` (§E) — which is why §E's
+   factory has its own seen-to-fail step in Task 5 and why A4 checks keys
+   against the Rust source rather than trusting the list. **Owned by Task 1
+   (A4) and Task 5 (the factory).**
 3. **`{% if %}` and `{% cycle %}` are the first real producers of
    `AttrValue::Ref`, and the render path cannot resolve one.** Today `Ref` is
    exercised only by hand-built descriptors in `tests/test_materialise.py:178-206`;
@@ -451,6 +456,46 @@ mirrors `do_if`. One message of its own —
 `'Malformed template tag at line {}: "{}"'.format(token.lineno, token.contents)`
 (`:1014-1017`); the smartif parser raises the rest through
 `ErrorClass::TemplateSyntax`.
+
+### §E — `NODE_CLASSES` entries become factories, because `ifchanged` is variadic
+
+**This is the second defect the plan's own Step-1 re-measurement found, and it
+is a mechanism, not a name.** `materialise_node` builds every node with
+`cls(**kwargs)` (`parser.py:135`) — keyword-only. `IfChangedNode.__init__(self,
+nodelist_true, nodelist_false, *varlist)` (`defaulttags.py:262`) has **no
+keyword** for `varlist`, so no descriptor can build it through that path: it
+raises `TypeError: __init__() missing 1 required positional argument` or, worse,
+silently loses the values. A scan of all twelve M5 node classes found
+`IfChangedNode` to be the **only** variadic one, so this is one adapter, not a
+pattern.
+
+**Decision: a `NODE_CLASSES` value is the callable that builds the node from its
+kwarg set, not necessarily the class.** For every existing entry the class is
+its own factory — a class is a callable taking keywords, so nothing changes, and
+`NODE_CLASSES["SpyNode"] = SpyNode` (`test_materialise.py:140`) and
+`set(NODE_CLASSES)` (`:484`) keep working unchanged. `IfChangedNode` gets an
+adapter beside the dict:
+
+```python
+def _ifchanged_factory(nodelist_true, nodelist_false, _varlist=()):
+    """`IfChangedNode`'s `__init__` is variadic, so it needs the splice.
+
+    The kwarg is named `_varlist` because that is Django's own attribute name
+    for it (`defaulttags.py:265`, `self._varlist = varlist`); the descriptor
+    emits that name and this is the only place it is unpacked.
+    """
+    return IfChangedNode(nodelist_true, nodelist_false, *_varlist)
+```
+
+Rejected alternative: a reserved `"__args"` key in the descriptor vocabulary.
+It would work, but it puts a construction detail into the descriptor language
+and makes every reader of `desc.rs` learn a rule that exists for one node. The
+adapter keeps it in the one file that knows about node construction.
+
+`NODE_CLASSES`'s doc (`parser.py:55-72`) must say "factory" and state that the
+class is the factory in every case but `IfChangedNode`; otherwise the next
+person to add a variadic node writes a descriptor that cannot work. A4's static
+check is unaffected — it compares **keys**.
 
 ---
 
@@ -1182,20 +1227,26 @@ git commit -m "tags: regroup and url — both compile a derived string, not a to
 
 **Files:**
 - Modify: `crates/template-core/src/parser/tags/{ifchanged,for}.rs`
-- Modify: `tests/parser_corpus.py`, `tests/parser_error_corpus.py`
+- Modify: `python/django_rust_templates/_impl/parser.py` (the `IfChangedNode` factory and the `NODE_CLASSES` doc — §E)
+- Modify: `tests/parser_corpus.py`, `tests/parser_error_corpus.py`, `tests/test_materialise.py`
 
 **Interfaces:**
-- Consumes: the parser's block-parsing entry point (`parser.parse(("else",
-  "endifchanged"))` and `parse(("empty", "endfor"))` have Rust equivalents in
-  `parser/mod.rs`; Step 1 confirms the names), `AttrValue::{Str, Bool, FilterExpr, List}`.
+- Consumes: `Parser::parse(&["else", "endifchanged"])` / `parse(&["empty",
+  "endfor"])`, `Parser::next_token` (`parser/mod.rs:110`),
+  `Parser::delete_first_token` (`:126`) — **measured, they exist** — plus
+  `AttrValue::{Str, Bool, FilterExpr, List}` and the §E factory indirection.
 
 **`ifchanged`** — `IfChangedNode(nodelist_true, nodelist_false, *varlist)`
 (`:1024-1073`). **Argument order is true, false, then the values.** Two *named*
 nodelists; without an `else`, `nodelist_false` is an **empty `NodeList()`**
 (`:1057-1058`), not absent — a descriptor that omits it materialises a node
 whose `nodelist_false` is missing and `describe` differs. `varlist` is an
-`AttrValue::List` of `FilterExpr` over `bits[1:]` (`:1059`). No message of its
-own; the two block tags raise through the parser.
+`AttrValue::List` of `FilterExpr` over `bits[1:]` (`:1059`), emitted under the
+kwarg name **`_varlist`** and spliced by the `NODE_CLASSES` adapter §E
+describes. This is the only M5 tag whose node cannot be built by `cls(**kwargs)`
+directly, and adding `"IfChangedNode"` to `NODE_CLASSES` *without* §E's adapter
+is the failure this task exists to prevent. No message of its own; the two block
+tags raise through the parser.
 
 Corpus:
 
@@ -1242,13 +1293,21 @@ Errors: one per message, e.g. `("{% for x in %}", "'for' statements should have 
 `("{% for x of y %}", "'for' statements should use the format 'for x in y': for x of y")`,
 `("{% for a|b in y %}{% endfor %}", "'for' tag received an invalid argument: for a|b in y")`.
 
-- [ ] Run the seven steps for both.
+- [ ] **Step A: add the `IfChangedNode` factory *first*, and see it fail on its
+  own.** In `tests/test_materialise.py`, a test that a descriptor with
+  `_varlist` of two `FilterExpr`s builds an `IfChangedNode` whose `_varlist` is
+  a 2-tuple. Run it *before* the factory exists: expected **FAIL**,
+  `TypeError: __init__() takes 3 positional arguments but 4 were given` — which
+  is the proof that `cls(**kwargs)` cannot express this node (§E). Then add the
+  factory and the `NODE_CLASSES` entry; run again, expected PASS.
+- [ ] **Step B: then run the seven steps** for `ifchanged` and `for`.
 
 ```bash
 git add crates/template-core/src/parser/tags/ifchanged.rs \
         crates/template-core/src/parser/tags/for.rs \
-        tests/parser_corpus.py tests/parser_error_corpus.py
-git commit -m "tags: ifchanged and for, and the empty-nodelist default they share"
+        python/django_rust_templates/_impl/parser.py \
+        tests/parser_corpus.py tests/parser_error_corpus.py tests/test_materialise.py
+git commit -m "tags: ifchanged and for, and the factory NODE_CLASSES needed for a variadic node"
 ```
 
 ---
@@ -1443,15 +1502,22 @@ names any of M5's eleven. `Ran <N> tests … OK (skipped=6)`.
 - [ ] **Step 2: Record the Step-1 mismatches.** Every place a tag's real
   descriptor differed from §D is evidence the re-measure step is load-bearing —
   list them in this file's close-out, and if there were none, say that too and
-  note that §D was written from the same source. **One is already known, found
-  during this plan's own self-review rather than at implementation time:** §D4's
-  `with` said "the two legacy positionals are `None`", and the real signature is
-  `WithNode.__init__(self, var, name, nodelist, extra_context=None)` with
-  `cls(**kwargs)` construction, so the descriptor must emit kwargs *named* `var`
-  and `name`; unnamed positionals raise `TypeError`. The other ten node
-  signatures were measured and match §D. Record this one first, and keep
-  measuring — a plan whose only found defect is the one it went looking for has
-  not been checked.
+  note that §D was written from the same source. **Two are already known, both
+  found during this plan's own self-review rather than at implementation time:**
+
+  1. §D4's `with` said "the two legacy positionals are `None`", and the real
+     signature is `WithNode.__init__(self, var, name, nodelist,
+     extra_context=None)` with `cls(**kwargs)` construction, so the descriptor
+     must emit kwargs *named* `var` and `name`; unnamed positionals raise
+     `TypeError`.
+  2. §D9's `ifchanged` was described as an ordinary descriptor, and
+     `IfChangedNode.__init__(self, nodelist_true, nodelist_false, *varlist)` is
+     variadic, so `cls(**kwargs)` **cannot build it at all** — §E adds the
+     factory indirection, and it is the only M5 node that needs one.
+
+  The other ten node signatures were measured and match §D. Record these two
+  first, and keep measuring — a plan whose only found defects are the ones it
+  went looking for has not been checked.
 
 - [ ] **Step 3: Update the spec's `§10.3` rows.** M5's row becomes the eleven
   names (`M5_TAGS`, cited to `tests/test_tag_inventory.py`, not copied); M6's row
