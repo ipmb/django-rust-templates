@@ -55,7 +55,6 @@ base.py:771-772	django/template/base.py	771	772	-	-
 base.py:771-774	django/template/base.py	771	774	-	-
 base.py:773	django/template/base.py	773	-	filters.append((filter_func, args))	-
 base.py:774	django/template/base.py	774	-	-	-
-base.py:777	django/template/base.py	777	-	is_var = isinstance(var_obj, Variable)	-
 base.py:783	django/template/base.py	783	-	self.is_var = isinstance(var_obj, Variable)	-
 base.py:788-792	django/template/base.py	788	792	-	-
 base.py:793	django/template/base.py	793	-	-	-
@@ -206,7 +205,6 @@ defaulttags.py:914-915	django/template/defaulttags.py	914	915	-	-
 defaulttags.py:917-918	django/template/defaulttags.py	917	918	value.resolve(context, ignore_failures=True)	-
 defaulttags.py:921	django/template/defaulttags.py	921	-	class TemplateIfParser(IfParser):	-
 defaulttags.py:922	django/template/defaulttags.py	922	-	error_class = TemplateSyntaxError	-
-defaulttags.py:928	django/template/defaulttags.py	928	-	self.template_parser.compile_filter(value)	-
 defaulttags.py:928-929	django/template/defaulttags.py	928	929	TemplateLiteral(self.template_parser.compile_filter(value), value)	-
 defaulttags.py:929	django/template/defaulttags.py	929	-	return TemplateLiteral(self.template_parser.compile_filter(value), value)	-
 defaulttags.py:932-1021	django/template/defaulttags.py	932	1021	@register.tag("if")	-

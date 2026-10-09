@@ -262,6 +262,31 @@ class AnchorManifestTests(unittest.TestCase):
             "manifest and drop it from OUR_OWN",
         )
 
+    def test_no_manifest_row_lacks_a_citation_in_the_tree(self):
+        """The thirtieth dead row, gated rather than remembered.
+
+        `--check` cannot see one by construction — it walks the tree's citations
+        and looks each up, so a row nothing cites is never asked for — and
+        `--prune` runs only when someone remembers to run it. Two rows were left
+        behind by the previous sweep, one of them recording a snippet that is not
+        on its line, i.e. a claim that was false and unreachable.
+
+        Asserted over the live manifest and the live tree, like the `.review/`
+        dated-name test above, because no fixture can state a property of the
+        manifest that ships. A repair that re-points a citation must replace the
+        entry in the same commit; this is what says so.
+        """
+        cited_in_tree = set()
+        for _path, text in anchor_manifest.scan_tree():
+            for match in anchor_manifest.ANCHOR_RE.finditer(text):
+                cited_in_tree.add(match.group(0).strip("`"))
+        self.assertEqual(
+            sorted(set(anchor_manifest.MANIFEST) - cited_in_tree),
+            [],
+            "a manifest row the tree no longer cites: run --prune, or replace it "
+            "with the row for the anchor the prose now writes",
+        )
+
     def test_an_unbackticked_reference_is_prose_and_anchor_builds_a_real_one(self):
         """The escape rule as a property of the scanner, not a convention somebody
         remembers to apply.
