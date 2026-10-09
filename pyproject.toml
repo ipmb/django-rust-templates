@@ -5,12 +5,35 @@ build-backend = "maturin"
 [project]
 name = "django-rust-templates"
 description = "Django's template engine, reimplemented in Rust as a drop-in replacement"
+readme = "README.md"
 requires-python = ">=3.12"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+authors = [{ name = "Peter Baumgartner" }]
 dynamic = ["version"]
+
+# Django is a hard dependency and is declared bounded, and both halves are
+# deliberate. The engine reimplements `django.template` *by reproducing one
+# Django's behaviour*, so it cannot run without Django (the rest of the
+# framework is Django's — see §3 of the design) — an undeclared dependency would
+# mean a `pip install` that imports fine and then fails at `install()`.
+#
+# The bound is the version claim, and `_shim._require_django` enforces the same
+# one at runtime. `>=6.0` is Django 6.0's own floor, which is also the floor of
+# the source the engine was transcribed from; `<6.1` is the other side of it.
+# A wheel that installed against Django 6.1 was measured to load, report an empty
+# `unshimmed()` and render — every gate this project has would have said green
+# while the transcription and the running Django were different versions.
+dependencies = ["Django>=6.0,<6.1"]
+
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ipmb/django-rust-templates"
+Repository = "https://github.com/ipmb/django-rust-templates"
 
 [tool.maturin]
 python-source = "python"

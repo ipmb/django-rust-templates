@@ -74,6 +74,19 @@ from pathlib import Path
 
 TARGET = "django.template"
 
+# The Django this engine is a *transcription* of — the version §4 pins and
+# `django.lock` records the SHA of, and the only one every gate in this project
+# has ever been run against.
+#
+# It is a tuple beside the code rather than a lookup into `django.lock` because
+# the two answer different questions: the lock pins the *checkout the suite
+# runs*, and this names the *behaviour the Rust engine reproduces*. An installed
+# wheel has no `.django/` and no lock file to read, so the claim has to travel
+# with the artifact or it does not exist. `_require_django` is the reader;
+# `tests/test_packaging_guard.py` is the guard that the two cannot drift, and
+# `scripts/check_packaging.sh` checks it against a real venv.
+TRANSCRIBED_DJANGO = (6, 0, 9)
+
 # The namespaces this package serves, and where each one's files live under
 # `_impl`. The values are `_impl`-relative subdirectories, `""` for a namespace
 # served from the root.
@@ -652,8 +665,85 @@ def _refuse_if_incomplete() -> None:
         )
 
 
-def install(strict: bool = False) -> None:
+def _require_django(allow_mismatch: bool) -> None:
+    """Refuse a Django that this engine was not transcribed from.
+
+    **Why a version check earns its keep, measured rather than argued.** The
+    engine reproduces one Django's template machinery, and every gate this
+    project owns — the acceptance suite, the differential harness, the meter —
+    runs against that checkout, so none of them can speak about any other
+    Django. Before this function existed, two outcomes fell out of that gap and
+    both were measured on wheels installed into a clean venv:
+
+    * **Django 6.1.2** — ``install()`` succeeded, ``unshimmed()`` was ``[]``, and
+      a template rendered. Nothing anywhere said the transcription and the
+      running Django were different versions. This is the direction that matters,
+      because it is silent: it is the shape this project keeps finding, a green
+      result that means nothing.
+    * **Django 5.2.7** — ``install()`` died with ``ImportError: cannot import
+      name 'django_file_prefixes' from 'django.utils.deprecation'``, an error
+      that names Django for a problem that is ours. The module docstring above
+      already warns about exactly this: the ``render.py``-at-``engine.py`` case,
+      where "the error names Django, not the shim".
+
+    **The check runs before anything is mutated, and that ordering is the
+    contract.** A caller that catches the refusal is left precisely where it
+    started — no finder in ``sys.meta_path``, ``installed()`` still false — so
+    "report and carry on without the engine" is a supported response, which it
+    could not be if the refusal arrived with a half-built substitution standing.
+    ``test_a_refused_install_leaves_the_interpreter_untouched`` is the row.
+
+    **A missing Django is the third case and gets our own message**, because
+    ``pip install django-rust-templates`` with no Django beside it must not read
+    as a broken Django. It is exercised in ``scripts/check_packaging.sh``, where
+    the population is a real venv; a hermetic version of it was tried and thrown
+    away, for the reason recorded at the foot of ``tests/test_packaging_guard.py``.
+
+    **The bound is major.minor, not the patch.** Any 6.0.x passes, which matches
+    the declared dependency ``Django>=6.0,<6.1``; treating a patch release as a
+    new engine would make the guard fire on routine security updates and train
+    the reader to reach for ``allow_mismatch``. The message still names 6.0.9,
+    because that is the version the behaviour was actually pinned against and
+    the one worth reporting.
+    """
+    try:
+        import django
+    except ImportError as exc:  # pragma: no cover - covered end-to-end, see above
+        raise ShimError(
+            "django-rust-templates substitutes for django.template and needs "
+            "Django, which is not importable in this interpreter. Install it "
+            "(`pip install 'Django>=6.0,<6.1'`) before installing this engine."
+        ) from exc
+
+    if allow_mismatch:
+        return
+
+    found = django.VERSION[:2]
+    if found == TRANSCRIBED_DJANGO[:2]:
+        return
+
+    pin = ".".join(str(part) for part in TRANSCRIBED_DJANGO)
+    raise ShimError(
+        f"this engine is a transcription of Django {pin}, but Django "
+        f"{django.get_version()} is installed. The Rust engine reimplements "
+        f"Django's template machinery by reproducing one version's behaviour, "
+        f"and it is proven against that version only — run it against another "
+        f"and every check this project has would still report success. Install "
+        f"Django {TRANSCRIBED_DJANGO[0]}.{TRANSCRIBED_DJANGO[1]}.x, or pass "
+        f"install(allow_django_mismatch=True) if you mean to test a "
+        f"transcription against a Django it was not taken from."
+    )
+
+
+def install(strict: bool = False, allow_django_mismatch: bool = False) -> None:
     global _installed_finder
+
+    # Before the idempotence check and before any mutation — see
+    # `_require_django`. It runs on *both* paths for the reason
+    # `_refuse_if_incomplete` does: the caller that matters is not always the
+    # one that performed the install (`scripts/shimpath/sitecustomize.py`
+    # installs first, so an application's `install()` is the second call).
+    _require_django(allow_django_mismatch)
 
     if installed():
         if strict:
