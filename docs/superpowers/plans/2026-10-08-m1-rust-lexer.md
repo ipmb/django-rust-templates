@@ -1574,7 +1574,18 @@ Run:
 
 ```bash
 .venv/bin/python -c "
+import sys
+from pathlib import Path
+
+# Nothing puts the pinned checkout on the path automatically; env.sh only sets
+# DJANGO_RUST_TEMPLATES. Same two lines as tests/test_shim.py.
+sys.path.insert(0, str(Path('.').resolve() / '.django'))
+
 from django_rust_templates import _shim
+
+# unshimmed() raises ShimError('not installed; call install() first') until the
+# finder is in place, so install() is not optional here.
+_shim.install()
 remaining = _shim.unshimmed()
 print(len(remaining), 'modules still Django\'s')
 assert 'django.template.exceptions' not in remaining, 'exceptions regressed'
@@ -1584,7 +1595,10 @@ print('django.template.exceptions is ours;', len(remaining), 'still fall back')
 
 `unshimmed()` returns sorted dotted names, e.g. `['django.template.base', ...]`.
 
-Expected: `django.template.exceptions` is ours; everything else still falls back. M1 changes the engine, not the integration, which is exactly what §10.1 predicts — the count here should equal M0's count.
+Expected: `django.template.exceptions` is ours and **25** modules still fall
+back — the same 25 M0 recorded, listed above in `.review/round-1-response.md`.
+M1 changes the engine, not the integration, which is exactly what §10.1
+predicts.
 
 - [ ] **Step 3: Update the spec's milestone table**
 
