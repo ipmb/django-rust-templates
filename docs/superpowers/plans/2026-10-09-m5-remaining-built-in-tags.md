@@ -1129,35 +1129,49 @@ Task 2 is not the place to churn them. Three edits:
 ```
 
 2. `materialise` and `materialise_node` gain `register_ref=None` after
-   `resolve_ref`, threaded through both recursive calls (`:87`, `:125`) and into
+   `resolve_ref`, threaded through both recursive calls and into
    `_decode_value`.
-3. `materialise_node` gains a `NodeSlot` arm in the attribute loop (`:131-133`),
-   beside where `token` is attached. It is **not** a kwarg — `CycleNode.__init__`
-   takes no such parameter — so it is handled where the attribute value is
-   decoded, not passed on:
+3. `materialise_node` reads the slot as a **fifth wire element** on the node
+   descriptor, beside the token, and handles it on both sides of the
+   construction. **This is where the draft above was wrong** and it was corrected
+   while implementing: it carried the slot as an `AttrValue::NodeSlot` inside
+   `attrs` and unpacked it in the attribute loop, which fails twice. On
+   `{% cycle c %}` — the later mention — the descriptor has *no other attributes*,
+   so `_pending_slot` is read before anything assigns it (`UnboundLocalError`),
+   and `register_ref` is typed `None` by default while the loop calls it
+   unconditionally (`TypeError`). Both are reachable from
+   `{% cycle 'a' 'b' as c %}{% cycle c %}`, which is the shape the tag exists for.
+
+   What landed, as it stands in `python/django_rust_templates/_impl/parser.py`:
 
 ```python
-    node = None
-    for name, value in attrs:
-        if isinstance(value, _native.NodeSlot):
-            existing = resolve_ref(value.index) if resolve_ref else None
-            if existing is not None:
-                return existing          # {% cycle name %} — the same object
-            node = None                  # first construction: build below, fill after
-            _pending_slot = value.index
-            continue
-        kwargs[name] = _decode_value(value, resolve_ref, parser, child_lists)
+    class_name, attrs, nodelists, token, *rest = desc
+    slot = rest[0] if rest else None
+    slot_index = slot.index if isinstance(slot, _native.NodeSlot) else None
 
-    node = cls(**kwargs)
-    if _pending_slot is not None:
-        register_ref(_pending_slot, node)
+    # … NODE_CLASSES lookup, then, before anything is built:
+    if slot_index is not None:
+        existing = resolve_ref(slot_index) if resolve_ref is not None else None
+        if existing is not None:
+            existing.token = _decode_token(token) if token is not None else None
+            existing.origin = origin
+            return existing
+    # … children, attrs, node = cls(**kwargs), token/origin, then:
+    if slot_index is not None:
+        register_ref(slot_index, node)
     return node
 ```
 
-   with the rest of `materialise_node` unchanged for every other node. Written
-   this way the slot is filled *after* the node exists, which is what makes the
-   second occurrence return the first's object rather than a second one; and the
-   slot never reaches `cls(**kwargs)`, which would raise.
+   Read *before* anything else, because a node already in the table is not built
+   at all — that is what makes the second occurrence return the first's object
+   rather than a second one. `register_ref` is guarded by the same
+   `slot_index is not None` that implies a table was supplied.
+
+   `AttrValue::NodeSlot` still exists and is still what it was for: an attribute
+   *value* naming a slot, which is `{% resetcycle %}`'s operand alone
+   (`ResetCycleNode.node`). The two are the same idiom from opposite ends — a
+   `NodeRef` entry is filled by the host during the parse, a `NodeSlot` entry by
+   the materialiser as it builds — and `_decode_value` reads both the same way.
 
 - [ ] **Step 4b: Add the identity assertion in `tests/test_ref_table.py`, beside
   `ours_parse`, so it runs the moment the table exists.** This is the property
@@ -1266,7 +1280,7 @@ would be an entry in a table of constructor kwargs that `CycleNode.__init__`
 reuse form there is no attribute list to put it in at all.
 
 *4. The draft missed the token re-attachment.* Django's `extend_nodelist` does
-`node.token = token` at **every** append (`base.py:598`), not only on
+`node.token = token` at **every** append (`base.py:615`), not only on
 construction, so the one shared object ends up carrying the *last* occurrence's
 token and **both** positions read it. Measured on the pinned tree:
 

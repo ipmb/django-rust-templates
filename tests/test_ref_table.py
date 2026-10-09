@@ -31,7 +31,7 @@ theoretical::
 
 The second line is the detail a "return the existing object and stop" shortcut
 gets wrong: ``extend_nodelist`` sets ``node.token = token`` at **every** append
-(``base.py:598``), so the shared object ends up carrying the *last* occurrence's
+(``base.py:615``), so the shared object ends up carrying the *last* occurrence's
 token and every position reads that one. The test below pins it, because the
 shortcut passes without it.
 
@@ -290,7 +290,7 @@ class CycleIdentityTests(unittest.TestCase):
         self.assertIs(refs[0], nodelist[0], "the slot holds the object it built")
 
     def test_the_shared_object_carries_the_last_occurrences_token(self):
-        # `extend_nodelist` assigns `node.token` on every append (`base.py:598`),
+        # `extend_nodelist` assigns `node.token` on every append (`base.py:615`),
         # so the second occurrence overwrites the first's token on the object
         # they share — and both positions then read the second's. Measured above.
         first_token = (0, "cycle 'a' 'b' as c", 1, None)

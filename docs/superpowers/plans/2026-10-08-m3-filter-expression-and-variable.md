@@ -2953,7 +2953,7 @@ name up a second time, on the claim that "nothing mutates `parser.filters`
 between a token's compile and its materialisation". That claim is true about the
 wrong interval: the interval that matters is compile → **materialisation**, which
 spans the whole parse, and `Parser.add_library` is
-`self.filters.update(lib.filters)` (`base.py:668-670`) — `update`, so a later
+`self.filters.update(lib.filters)` (`base.py:669-670`) — `update`, so a later
 `{% load %}` **rebinds** an existing name. Measured on the pinned tree: the
 registry's `upper` is the builtin before a load and the loaded function after it,
 `rebound = True`. So
@@ -5975,7 +5975,7 @@ Three things follow, and the third is the problem.
 2. **Without an origin the tag cannot even compile.** `Parser(...).parse()` on `{{ x }}{% extends "a" %}` with no `origin` raises `AttributeError: 'NoneType' object has no attribute 'template_name'` from `ExtendsNode.__init__`. The parity harness's `django_parse` passes no origin, so the corpus case needs the harness extended to supply one — and the error message's tail is `repr(origin.template_name)`, so Rust's `origin_template_repr` and the harness's `Origin` have to agree on the name for the comparison to mean anything.
 3. **Rust cannot produce that error at M3, and the two ways to make it would each be worse than the gap.**
 
-   Django compiles the tag *first* and checks the ordering *after* (`base.py:600-610`, called from the dispatch path): `{{ x }}{% extends %}` — no argument — raises `'extends' takes at least one argument`, **not** the ordering error. So an ordering error produced by Rust *ahead* of dispatch would be wrong for that input, and that input is reachable by any user template.
+   Django compiles the tag *first* and checks the ordering *after* (`base.py:564-569`, called from the dispatch path): `{{ x }}{% extends %}` — no argument — raises `'extends' takes at least one argument`, **not** the ordering error. So an ordering error produced by Rust *ahead* of dispatch would be wrong for that input, and that input is reachable by any user template.
 
    Checking `must_be_first` by *name* without compiling is therefore not an emulation of Django; it is a new divergence, traded for a corpus win. The other route — implementing `{% extends %}`'s compile function early — puts a loader tag in Rust, which §6 assigns to M7 and the M2 plan's scope note deliberately keeps out of the Rust registry.
 

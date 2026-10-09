@@ -137,7 +137,7 @@ impl<'a> Parser<'a> {
     ///
     /// **The error comes back bare, carrying no token.** Django wraps the whole
     /// `compile_func(self, token)` call in `except Exception as e: raise
-    /// self.error(token, e)` (`base.py:566-567`), so the token attached to a
+    /// self.error(token, e)` (`base.py:585`), so the token attached to a
     /// tag's filter failure is the *tag's* — attaching one here would pre-empt
     /// that and make `error()`'s innermost rule unreachable. The `{{ … }}` arm
     /// has to call `self.error` itself only because it is not inside that `try`.

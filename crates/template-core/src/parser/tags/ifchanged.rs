@@ -22,7 +22,7 @@
 //! # `parser.next_token()` reads the terminator
 //!
 //! `parser.parse(("else", "endifchanged"))` stops *before* the terminator and
-//! prepends it back (`base.py:600-601`), so the `next_token()` at `:1054` is what
+//! prepends it back (`base.py:568`), so the `next_token()` at `:1054` is what
 //! consumes it — the same shape `{% for %}` uses for its `empty` branch. Reading
 //! the terminator here rather than inside `parse` is what lets the tag tell
 //! `else` from `endifchanged`.

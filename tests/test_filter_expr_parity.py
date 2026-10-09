@@ -63,7 +63,7 @@ def _parser():
     `Engine.__init__` puts `django.template.defaulttags` and
     `django.template.defaultfilters` at the front of `builtins`
     (`engine.py:15-16`), and `Parser.add_library` folds each library's `filters`
-    dict in (`base.py:668-671`). Reaching the same dict through
+    dict in (`base.py:669-671`). Reaching the same dict through
     `defaultfilters.register` skips `Engine`, which would need Django settings
     configured — and the rest of this suite deliberately runs without them
     (`tests/test_materialise.py` records what configuring them does to

@@ -119,7 +119,7 @@ pub enum ErrorKind {
     /// Not a `Syntax`, for [`ErrorKind::UnterminatedMarker`]'s reason: it is not
     /// a verdict on the template but a CPython exception from a tag body, and
     /// Django's `parse` re-raises the *same object* after attaching `.token`
-    /// (`base.py:566-567` catches `Exception`, not `TemplateSyntaxError`). A
+    /// (`base.py:585` catches `Exception`, not `TemplateSyntaxError`). A
     /// drop-in replacement raises the same class, so the shell needs to be told
     /// which one — see the FFI arm.
     ///

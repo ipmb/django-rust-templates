@@ -207,7 +207,7 @@ def materialise_node(desc, origin=None, resolve_ref=None, register_ref=None, par
     #
     # The token is re-attached on the way out, and that is not tidiness — it is
     # `extend_nodelist` doing `node.token = token` at *every* append
-    # (`base.py:598`), so the shared object ends up carrying the **last**
+    # (`base.py:615`), so the shared object ends up carrying the **last**
     # occurrence's token and every position reads that one. Measured on the
     # pinned tree: `[n.token.contents for n in …] == ['cycle c', 'cycle c']`.
     if slot_index is not None:
@@ -403,7 +403,7 @@ def _materialise_filter_expression(desc, parser=None):
     The filter *functions* are looked up a second time here — Rust asked the
     host for them during the parse and kept only the names. **That double lookup
     is wrong for `{% load %}`** and is scheduled to become a handle at M6:
-    `add_library` is `self.filters.update(...)` (`base.py:668-670`), so a load
+    `add_library` is `self.filters.update(...)` (`base.py:669-670`), so a load
     *after* this token's position rebinds the name, and this call happens after
     the whole parse. ``Host::check_filter`` carries the measurement and the fix.
 

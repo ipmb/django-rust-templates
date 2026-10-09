@@ -263,7 +263,7 @@ def filter_identity(func):
     property under test is *both parsers selected the same function*, and
     `__name__` cannot see a difference the moment two libraries register
     different functions under one name — which is not hypothetical. Django's
-    `Parser.add_library` is `self.filters.update(lib.filters)` (`base.py:668`),
+    `Parser.add_library` is `self.filters.update(lib.filters)` (`base.py:669`),
     so `{% load %}` shadowing a built-in *replaces* the entry, and the
     registered `escape` is already a different object from the module-level
     `defaultfilters.escape` (measured: `defaultfilters.escape.__module__` is

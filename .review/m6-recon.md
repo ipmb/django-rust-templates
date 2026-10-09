@@ -14,7 +14,7 @@ which it corrects in three places.
    entire public surface is `tag`, `tag_function`, `filter`, `filter_function`,
    `simple_tag`, `simple_block_tag`, `inclusion_tag` (`library.py:29-292`,
    measured by reading the class body). `add_library` is a method of **`Parser`**
-   (`base.py:668`). The spec contradicts itself: lines 538-539 of the same
+   (`base.py:669`). The spec contradicts itself: lines 538-539 of the same
    document get this right ("consumed via `add_library` and **not stored**";
    "There is **no** `add_libraries`"). The behaviour the gate argues for is real —
    see below — but the sentence names two methods that do not exist, and a plan
@@ -78,7 +78,7 @@ p.add_library(lib)                                                              
 
 So a library reaches the tag table **only** through `{% load %}` →
 `parser.add_library` (`defaulttags.py:1125,1130`) → `self.tags.update(lib.tags)`
-(`base.py:668-670`). Because `builtins` merge first and libraries merge later,
+(`base.py:669-670`). Because `builtins` merge first and libraries merge later,
 **a loaded library shadows a built-in of the same name** — that is the spec's
 gate, and it holds, by a route that involves neither `Library.add_tag` nor
 `Library.add_library`.
@@ -249,14 +249,37 @@ the mechanism is the host seam rather than a Rust compile function.
 ## What the host registry must *not* contain at M6
 
 `block`, `extends`, `include` are in `parser.tags` (they are Django's builtins)
-and are not in `RUST_OWNED`, so a naive `has_tag` would hand them to Django — and
-`{% extends %}` would then skip the ordering check, because
-`ExtendsNode.must_be_first = True` is enforced by `Parser.extend_nodelist`
-(`base.py:598-610`), a line our parse never runs (Rust returns a descriptor, not
-a `NodeList`). Measured: `{{ x }}{% extends "a" %}` raises "must be the first tag
-in the template" under stock Django.
+and are not in `RUST_OWNED`, so a naive `has_tag` would hand them to Django.
+
+**This section's first version gave the wrong reason, and the reviewer falsified
+it by reading the code.** It said `{% extends %}` would skip the ordering check
+"because `Parser.extend_nodelist` … a line our parse never runs". Our parse runs
+it: `crates/template-core/src/parser/mod.rs:392-418` is a full port of
+`extend_nodelist`, `must_be_first && contains_nontext` and Django's message
+included, called from `Parser::parse` at `:218`, `:252` and `:304`. A host tag's
+descriptor reaches `:304` like any other block node.
+
+The real mechanism is one level down and *smaller*: `NodeDesc.must_be_first` is
+documented "Not carried on the wire" (`desc.rs:369`) and defaults to `false`
+(`:407`), so a host-built node arrives with the flag cleared, the check runs, and
+it passes. Measured: `ExtendsNode.must_be_first is True`, `BlockNode` and
+`IncludeNode` are `False`, and `{{ x }}{% extends "a" %}` raises "must be the
+first tag in the template" under stock Django.
+
+**The exclusion survives, on a different argument** — and the distinction
+matters, because "the check never runs" implies a `bool` cannot fix it:
+
+**M6 must not newly accept a tag it cannot render.** Today `{% extends %}` raises
+`Invalid block tag` — an honest "not yet". Let it reach the host and M6 accepts
+it at parse time while `ExtendsNode.render` still needs `render_context` and
+`Template._render` (M7, M9). The divergence would move from loud to silent. Same
+for `{% block %}` (`do_block` writes `parser.__loaded_blocks`,
+`loader_tags.py:228-234`) and `{% include %}` (`render_context` cache keyed by
+template identity).
 
 So `ShellHost.has_tag` **excludes all three at M6**, leaving them exactly as they
-are today (`Invalid block tag`), and Task 6 records that M7 must remove the
-exclusion *and* carry `must_be_first` across the host seam with the node —
-otherwise shipping inheritance would ship this divergence.
+are today. Task 7 records for M7: remove the exclusion, carry `must_be_first`
+with the host node (one `bool`), and note that M6's design already gives M7 its
+arbitrary-attribute requirement for free — the handle handed to a compile
+function *is* Django's `Parser`, so `parser.__loaded_blocks` works with no proxy
+and no `AttributeError` emulation.

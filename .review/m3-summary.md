@@ -96,7 +96,7 @@ exactly one (`loader_tags.py:87`): `{% extends %}`, which §10.3 puts in **M7**.
 
 Rust cannot produce the ordering error for `{{ x }}{% extends %}` at M3, and
 both routes to it are worse than the gap. Django compiles the tag *first* and
-checks the ordering *after* (`base.py:600-610`), so `{{ x }}{% extends %}` — no
+checks the ordering *after* (`base.py:564-569`), so `{{ x }}{% extends %}` — no
 argument — raises the argument error instead; an ordering check ahead of
 dispatch would be wrong for an input any user can write. The other route puts a
 loader tag in Rust, which §6 assigns to M7.

@@ -38,7 +38,7 @@
 //!
 //! **A separate bucket, and `load` is its only member — it is in the table for
 //! now, and M6 must decide.** `do_load` writes host state too
-//! (`parser.add_library` → `self.tags.update`, `base.py:668`), and the effect
+//! (`parser.add_library` → `self.tags.update`, `base.py:669`), and the effect
 //! must be visible to a *later* compile: `Parser::parse` consults
 //! `self.host.has_tag(&command)` **first** (`parser/mod.rs:210`), so a tag
 //! registered by `{% load %}` reaches Rust only through the host. Under the rule
@@ -183,6 +183,22 @@ pub fn builtin_tag_names() -> Vec<&'static str> {
 /// The probe is well-formed and minimal (`{% x %}`), so a panic here would mean
 /// the tag panics on ordinary input — already a defect, and not one this
 /// function should hide.
+///
+/// **The probe must stay body-free, and this is the whole insulation.** The
+/// predicate is sound only because a stub body ignores both the parser and the
+/// token and returns `Unimplemented` unconditionally; the probe's *content* is
+/// therefore irrelevant to a stub and decisive for a real tag. Give the probe a
+/// body — an argument, a name a real tag also recognises — and a real tag could
+/// answer `Unimplemented` for that one input, at which point it would be
+/// reported as a stub, leave the set, and quietly stop demanding the corpus row
+/// this function exists to demand. The same reasoning makes the reverse safe:
+/// no real tag returns `Unimplemented` for *any* input, because `unimplemented`
+/// is only ever called from a stub.
+///
+/// The probe is also **not** a fixture for anything else. A test that wants to
+/// drive a real tag's compile function builds its own token, as the corpus does;
+/// reusing this one would couple a real tag's behaviour to a predicate that must
+/// stay insensitive to it.
 pub fn builtin_tag_stubs() -> Vec<&'static str> {
     let probe = Token {
         token_type: TokenType::Block,

@@ -952,7 +952,7 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
 
   **Rust cannot produce the ordering error for `{{ x }}{% extends %}` at M3,
   and both ways to make it would be worse than the gap.** Django compiles the
-  tag *first* and checks the ordering *after* (`base.py:600-610`), so
+  tag *first* and checks the ordering *after* (`base.py:564-569`), so
   `{{ x }}{% extends %}` — no argument — raises `'extends' takes one argument`
   rather than the ordering error, and an ordering check placed ahead of dispatch
   would be wrong for that input, which any user can write. The other route,

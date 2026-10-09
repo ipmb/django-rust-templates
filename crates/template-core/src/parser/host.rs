@@ -59,7 +59,7 @@ pub trait Host {
     /// (`base.py:773`) is what renders — so the shell looks the name up a second
     /// time when it materialises the `FilterExpression`. That lookup is a dict
     /// read, but not a *stable* one: `Parser.add_library` is
-    /// `self.filters.update(lib.filters)` (`base.py:668-670`), and `update`
+    /// `self.filters.update(lib.filters)` (`base.py:669-670`), and `update`
     /// **rebinds** a name that is already there. Measured on the pinned tree:
     ///
     /// ```text

@@ -65,9 +65,9 @@ exercise, most likely first. Each is pinned by a test in the task that owns the
 code.
 
 1. **The nested region of a host tag's body is parsed by Django, not by Rust, and that is invisible to the corpus.** Under this plan a host tag is compiled by Django's own `compile_func` against a cursor Rust hands over (Task 3). When that function calls `parser.parse(("enddiv",))` — `Library.simple_block_tag` at `library.py:211-212`, `tag_27584.badtag` at `:8-9` — the body is parsed by *Django's* `Parser.parse`, so every tag inside it is compiled by Django. The tree still matches (`describe` compares Django nodes to Django nodes) and renders correctly, but **the parity corpus would report a pass for a body our engine never touched**, which is the vacuous-gate failure this project has now hit twice. **Owned by Task 3; pinned by a test that asserts a Rust-owned tag inside a host block tag's body still reports Rust's error text for a Rust-only failure mode** (not merely that the tree matches).
-2. **`{% load %}`'s shadowing gate is a test nobody in `.django/` wrote.** Measured across the whole checkout: no test registers a library tag under a built-in name. The behaviour is real — `Parser.add_library` is `self.tags.update(lib.tags)` (`base.py:668-670`) and libraries merge *after* `builtins` (`base.py:522-523`) — so a loaded library shadows a built-in, and the suite will not catch a regression in that. The spec names this as M6's gate and states it against two methods that do not exist (`Library.add_tag`/`add_library`; see `.review/m6-recon.md` §"The three spec errors"). **Owned by Task 3; the test is a sandwich** — a built-in use, the `{% load %}`, then a shadowed use — because a test with the shadowed use alone passes under either dispatch order.
+2. **`{% load %}`'s shadowing gate is a test nobody in `.django/` wrote.** Measured across the whole checkout: no test registers a library tag under a built-in name. The behaviour is real — `Parser.add_library` is `self.tags.update(lib.tags)` (`base.py:669-670`) and libraries merge *after* `builtins` (`base.py:522-523`) — so a loaded library shadows a built-in, and the suite will not catch a regression in that. The spec names this as M6's gate and states it against two methods that do not exist (`Library.add_tag`/`add_library`; see `.review/m6-recon.md` §"The three spec errors"). **Owned by Task 3; the test is a sandwich** — a built-in use, the `{% load %}`, then a shadowed use — because a test with the shadowed use alone passes under either dispatch order.
 3. **The filter-name rebinding `Host::check_filter`'s doc has carried since M5 is now reachable.** `add_library` rebinds a filter name (`update`, not `setdefault`), and our materialisation happens after the whole parse, so a `{% load %}` *anywhere* in a template retroactively rebinds an earlier token's filter. Before M6 no tag could cause it; `{% load %}` ships here, so this is the task that must not ship the double lookup. **Owned by Task 1; the sandwich is `{{ x|upper }}{% load custom %}{{ y|upper }}` asserting the *first* rendered with the built-in.**
-4. **A host node is opaque to Rust, and its `token`/`origin` are attached by Django rather than by `extend_nodelist`.** Every existing descriptor is built by Rust and gets `token`/`origin` from `extend_nodelist` (`base.py:598`). A host tag's node is built *inside* Django's compile function and never passes through that line, so a node whose `token` is `None` would fail `render_annotated`'s debug path only for templates using user tags — a class of template the corpus did not have before M6. **Owned by Task 3; pinned by a debug-mode corpus row over a user tag, asserting `token.contents == "{% echo x %}"`.**
+4. **A host node must get its `token` from the same code path as every other node.** This line's first version claimed the token is attached by Django and that our parse "never runs" that line — both false. Rust ports `extend_nodelist` (`crates/template-core/src/parser/mod.rs:392-418`) and calls it at `:304` for a host descriptor like any other block node, so `node.token` **is** set, and the *only* new risk is that Task 2's `materialise_node` arm returns the stored Python object **before** the generic token/origin attachment runs — making a user tag's node the one shape that renders without a token, in the debug traceback path only. **Owned by Task 2's arm and Task 5's debug-mode row; the assertion is that the arm attaches rather than bypasses**, checked by comparing the host node's `token` to a Rust-built node's in the same template.
 5. **A `Template` must not carry `extra_data` after a failed parse.** The
    assignment is `nodelist = parser.parse(); self.extra_data = parser.extra_data`
    **inside `Template.__init__`'s `try`** (`base.py:198-200`), so a parse that
@@ -95,7 +95,7 @@ Three decisions, each argued from a measurement in `.review/m6-recon.md`. Read t
   `parser/tags/mod.rs`'s `builtin_tag_stubs()` loses it. `registry.rs`'s doc
   comment currently says M6 "must decide"; M6 decides and the comment records
   the answer. `test_tag_inventory.py::RustRegistryTests.test_the_rust_registry_matches_the_loader_tags_subtraction`
-  subtracts `{block, extends, include}` today; by Task 6 it must subtract
+  subtracts `{block, extends, include}` today; by the end of Task 3 it must subtract
   `{block, extends, include, load, querystring}` — **the Python-owned built-ins**,
   three by §6's rule, `load` by A1, `querystring` by A4. Its name ("the
   loader_tags subtraction") stops being accurate; the test is about §6 now.
@@ -120,7 +120,7 @@ smaller:
   and runs `parser.tags[command](parser, token)`; Rust replaces its cursor with
   `list(reversed(parser.tokens))` afterwards. Django's `Parser.parse` already
   leaves the end tag on the stack for `delete_first_token` to remove
-  (`base.py:600-610`), so a callback that calls `parse` then
+  (`base.py:564-569`), so a callback that calls `parse` then
   `delete_first_token` works **unmodified**.
 - **Rejected — a Rust-owned `ParserHandle`.** It needs `Parser` behind
   `Rc<RefCell<…>>` with no borrow held across a host call, which is a
@@ -200,19 +200,45 @@ seam, not a Rust compile function. `builtin_tag_names()` drops 24 → 22 and
 
 ### A5. `block`, `extends` and `include` are *excluded* from the host at M6
 
-They are in `parser.tags` and not in `RUST_OWNED`, so a naive `has_tag` would
-hand them to Django — and `{% extends %}` would then skip its ordering check.
-Measured: `ExtendsNode.must_be_first is True` (`BlockNode`/`IncludeNode` are
-`False`), and `{{ x }}{% extends "a" %}` raises `must be the first tag in the
-template.` under stock Django. That check is `Parser.extend_nodelist`
-(`base.py:598-610`) — **which our parse never runs**, because Rust returns a
-descriptor rather than a `NodeList`. `extend_nodelist` is also the line that sets
-`node.token`/`node.origin`, so A3's attachment (Review Focus 4) and M7's ordering
-check are the same Django line and belong to the same task.
+They sit in `parser.tags` and not in `RUST_OWNED`, so a naive `has_tag` hands
+them to Django. The conclusion is to exclude them; the reason is **not** that the
+ordering check is unreachable. This section's first version said that, and it was
+false: `Parser::extend_nodelist` is a full port
+(`crates/template-core/src/parser/mod.rs:392-418`), `must_be_first && contains_nontext`
+check and Django's exact message included, and `Parser::parse` calls it at
+`:218`, `:252` and `:304`. A host tag's descriptor leaves `call_tag`, returns
+through the dispatch arm, and reaches `:304` like any other block node.
 
-**M6 excludes all three**, leaving them exactly as they are today (`Invalid block
-tag`). Task 6 records that M7 removes the exclusion *and* carries
-`must_be_first` across the seam with the node.
+**What actually fails is one `bool` on the wire.** `NodeDesc.must_be_first` is
+documented "Not carried on the wire" (`desc.rs:369`) and `NodeDesc::default`
+sets it `false` (`:407`); only `NodeDesc::first()` (`:440`) turns it on, and the
+one built-in that sets it is `{% extends %}`. So a host-built node arrives with
+the flag cleared, the check runs, and it passes — the same conclusion by a
+different mechanism. The remedy is therefore *small*: one boolean, reported by
+the shell from the Python node's own `must_be_first`, and `{% extends %}` could
+reach the host and still be position-checked.
+
+That is why the exclusion needs an argument of its own, and it has a better one:
+
+**M6 must not newly accept a tag it cannot render.** Today `{% extends %}`
+raises `Invalid block tag` — an honest "not yet", because Rust's registry omits
+it and no host has tags. Let it reach the host and M6 would *accept*
+`{% extends %}` at parse time while `ExtendsNode.render` needs
+`context.render_context` and `Template._render` (M7's, and M9's). The divergence
+would move from loud to silent, which is worse: a template that renders wrong
+beats a template that refuses to compile only in a benchmark. The same holds for
+`{% block %}`, whose `do_block` writes `parser.__loaded_blocks`
+(`loader_tags.py:228-234`), and `{% include %}`, whose `render_context` cache is
+keyed by template identity — both render-path machinery this milestone does not
+have.
+
+**So M6 excludes all three**, leaving them exactly as they are today. Task 7
+records three things for M7: remove the exclusion, carry `must_be_first` with the
+host node (a one-`bool` change to `NodeDesc::host` and the shell's `call_tag`
+return), and note that this milestone's own design already satisfies M7's
+arbitrary-attribute requirement for free — the handle handed to a compile
+function *is* Django's `Parser`, so `parser.__loaded_blocks` works with no proxy
+and no `AttributeError` emulation.
 
 ---
 
@@ -231,10 +257,13 @@ tag`). Task 6 records that M7 removes the exclusion *and* carries
 | `python/django_rust_templates/render.py` | **Modify.** `parser_for` gains `libraries`; `render_string` builds a `ShellHost`. |
 | `python/django_rust_templates/_impl/parser.py` | **Modify.** `HOST_NODE` in `materialise_node`; `NODE_CLASSES` gains `SimpleNode`; `_materialise_filter_expression` takes a handle instead of re-looking-up the name. |
 | `tests/parser_corpus.py` | **Modify.** `{% load %}` and `{% querystring %}` rows. |
-| `tests/test_parser_parity.py` | **Modify.** The library-aware harness (`django_parse`/`ours_parse` gain `libraries`), and the host-node `describe` arm. |
+| `tests/test_parser_parity.py` | **Modify.** The library-aware harness (`django_parse`/`ours_parse` gain `libraries`). No `describe` arm for a host node: `describe` sees materialised Django nodes, where the host node is an ordinary `SimpleNode`, and its generic `Node` arm already recurses into `SimpleBlockNode`'s real `NodeList` (Self-Review 4). |
 | `tests/test_load_shadowing.py` | **Create.** Review Focus 2's gate. |
 | `tests/test_host_tags.py` | **Create.** Review Focus 1 and 4. |
-| `docs/superpowers/specs/…-design.md` | **Modify.** §10.3's M6 row and §10.4's M6 gate text (Task 6). |
+| `scripts/check_python_anchors.py` | **Create.** Task 6's checker: every `` `name.py:N` `` anchor in the tree against the pinned checkout. Exit 1 on drift, `--update` to repair. |
+| `scripts/anchors.txt` | **Create (generated).** The manifest — anchor as written, path, line, end line, snippet at each. Sorted by file then line so it reads as a table of what we claim each line says. |
+| `tests/test_anchor_manifest.py` | **Create.** Task 6's four behaviours, each driven by the defect it names rather than by a green run over the tree. |
+| `docs/superpowers/specs/…-design.md` | **Modify.** §10.3's M6 row and §10.4's M6 gate text (Task 7). |
 
 ---
 
@@ -266,7 +295,7 @@ host tag exists.
 # tests/test_filter_rebinding.py
 """`{% load %}` rebinds a filter name; the parse must bind at the token's position.
 
-`Parser.add_library` is `self.filters.update(lib.filters)` (`base.py:668-670`) —
+`Parser.add_library` is `self.filters.update(lib.filters)` (`base.py:669-670`) —
 `update`, not `setdefault` — so a name already in the table is *rebound*, and a
 `{% load %}` anywhere in a template retroactively changes what an earlier
 `{{ x|name }}` resolves to, if the name is looked up late.
@@ -329,7 +358,7 @@ establish that the fixture is reachable, not to be green yet.
     /// args))` (`base.py:773`) — and looking the *name* up again when the
     /// `FilterExpression` is built is a different answer whenever a
     /// `{% load %}` sits between the two moments: `add_library` is
-    /// `self.filters.update(lib.filters)` (`base.py:668-670`), which rebinds.
+    /// `self.filters.update(lib.filters)` (`base.py:669-670`), which rebinds.
     /// This seam is called at `base.py:771`, so it is where the binding is
     /// still Django's; the shell stores the object it found in the same arena
     /// `{% cycle %}`'s slot lives in and returns its index. The name is
@@ -488,12 +517,27 @@ change it to `"StandinHostNode"`, and the assertion at `:538`, and
     # reference table. Checked before the registry so that the reserved name
     # cannot be captured by an entry someone adds later, and so the error for a
     # genuinely unknown class name stays a `LookupError`.
-    if class_name == "HostNode":
+    #
+    # The two attachment lines are the same ones every other node gets
+    # (`:232-233`), and skipping them is the failure this arm's shape invites.
+    # Rust's `extend_nodelist` sets `NodeDesc.token` for a host descriptor
+    # exactly as for any other block node — it is called at `:304`, host arm
+    # included — so a bare `return resolve_ref(...)` would hand back a node whose
+    # token is whatever the *host* left on it, making a user tag's node the one
+    # shape that renders tokenless in the debug traceback path.
+    if class_name == HOST_NODE:
         node = resolve_ref(attrs[0][1].index)
         node.token = _decode_token(token) if token is not None else None
         node.origin = origin
         return node
 ```
+
+Verified against the tree before this was written down: `Parser::extend_nodelist`
+is at `crates/template-core/src/parser/mod.rs:392-418` and sets
+`node.token = Some(TokenDesc::of(token))` (`:415`); `Parser::parse` calls it at
+`:218` (text), `:252` (variable) and `:304` (block). An earlier draft of this
+plan said that line "never runs", which the reviewer falsified by reading
+`:392-418` — the port was already there.
 
 - [ ] **Step 6: Pin the sentinel against Django's own classes**
 
@@ -587,7 +631,7 @@ wording: the only hits are library-*name* precedence in
 `template_backends/test_django.py` and the E003 check in
 `check_framework/test_templates.py`, both about `Engine.libraries`' dotted paths
 rather than tag names. The behaviour is real — `add_library` is
-`self.tags.update(lib.tags)` (`base.py:668-670`) and libraries merge after
+`self.tags.update(lib.tags)` (`base.py:669-670`) and libraries merge after
 `builtins` (`base.py:522-523`) — so the suite will not catch a regression in it,
 and the spec names this as M6's gate.
 
@@ -676,7 +720,7 @@ This is the declared red for this task.
     /// Whether `command` is a tag the **host** will compile.
     ///
     /// Django's own test, plus one clause. `parser.tags` is one dict and
-    /// `Parser.add_library` updates it in place (`base.py:668-670`), so a
+    /// `Parser.add_library` updates it in place (`base.py:669-670`), so a
     /// library loaded *after* the engine's builtins wins — which is why the
     /// parse asks the host first. But every built-in has an entry in
     /// `parser.tags` too, so a bare membership test would route `{% for %}` to
@@ -809,7 +853,7 @@ division is what §5.2's `ParserHandle` describes, realised the smaller of the t
 ways it can be: rather than a Rust handle proxying into a shared `Parser`, one
 real `django.template.base.Parser` is kept for the whole parse, and Rust hands it
 the tokens it may consume. `Parser.parse` already leaves the end tag on the stack
-for `delete_first_token` (`base.py:600-610`), so a callback that does
+for `delete_first_token` (`base.py:564-569`), so a callback that does
 ``nodelist = parser.parse((end_name,)); parser.delete_first_token()`` — which is
 `Library.simple_block_tag` (`library.py:211-212`) and `tag_27584.badtag`
 (`:8-9`) verbatim — runs unmodified.
@@ -830,13 +874,18 @@ from django_rust_templates import _native
 
 __all__ = ("ShellHost",)
 
-# A5: M7's three. They are Django's builtins and not Rust's, so without this
-# they would reach the host — and `{% extends %}` would lose its ordering check,
-# because `ExtendsNode.must_be_first` is enforced by `Parser.extend_nodelist`
-# (`base.py:598-610`), which our descriptor path never runs. Measured:
-# `{{ x }}{% extends "y" %}` raises under stock Django; `BlockNode` and
-# `IncludeNode` have `must_be_first = False`. M7 removes this and carries
-# `must_be_first` with the node.
+# A5: M7's three. They are Django's builtins and not Rust's, so without this they
+# would reach the host. The ordering check itself is *not* the reason — Rust
+# ports `extend_nodelist` (`crates/template-core/src/parser/mod.rs:392-418`) and
+# runs it for a host descriptor like any other block node. The reason is that
+# `NodeDesc.must_be_first` does not cross the seam (`desc.rs:369`, default
+# `false` at `:407`), so `{% extends %}` would be accepted *and* uncheckable —
+# and accepting a tag whose render path is M7's is worse than today's honest
+# `Invalid block tag`. Measured: `ExtendsNode.must_be_first is True`
+# (`BlockNode`/`IncludeNode` are `False`) and `{{ x }}{% extends "y" %}` raises
+# under stock Django. M7 removes this, carries `must_be_first` with the node —
+# one `bool` — and gets `parser.__loaded_blocks` for free, since the handle *is*
+# Django's `Parser`.
 _M7_OWNED = frozenset({"block", "extends", "include"})
 
 
@@ -873,17 +922,17 @@ class ShellHost:
         if func is None:
             return False
         if command in _M7_OWNED:
-            # A5. Excluded until M7, which must *also* carry `must_be_first`
-            # across the seam: `{{ x }}{% extends "y" %}` raises under Django
-            # from `Parser.extend_nodelist` (`base.py:598-610`), the line our
-            # descriptor path never runs.
+            # A5. Excluded until M7, which must also carry `must_be_first`
+            # across the seam — `NodeDesc.must_be_first` defaults false and is
+            # not on the wire (`desc.rs:369`, `:407`), so reaching the host
+            # would *accept* `{% extends %}` in a position Django rejects.
             return False
         if command not in self._rust_owned:
             # `load`, `querystring`, and everything a `{% load %}` brought in.
             return True
         # Rust's, unless a `{% load %}` replaced Django's own callable for the
         # name — `add_library` is `self.tags.update(lib.tags)`
-        # (`base.py:668-670`), so the load wins and this is where we notice.
+        # (`base.py:669-670`), so the load wins and this is where we notice.
         return func is not self._builtins.get(command)
 
     def call_tag(self, command, token, tokens):
@@ -893,7 +942,7 @@ class ShellHost:
         the way `Parser.__init__` does (`base.py:504-505`); what is left is
         reversed back. **Replacing the caller's cursor with the result, not
         counting a delta, is what makes `prepend_token` correct** — Django's
-        `Parser.parse` prepends the end tag it stopped on (`base.py:600-610`)
+        `Parser.parse` prepends the end tag it stopped on (`base.py:564-569`)
         and the tag removes it with `delete_first_token`, and a count would
         have to know that dance rather than observe it.
         """
@@ -1206,17 +1255,24 @@ is **not** a parse row: it takes `takes_context=True` and raises from inside
 `render` (`defaulttags.py:1325-1349`) — put it in the render-level tests, not
 here.
 
-- [ ] **Step 6: Pin Review Focus 4 — a host node still gets `token`/`origin`**
+- [ ] **Step 6: Pin Review Focus 4 — a host node's token comes from Rust's `extend_nodelist`**
 
 ```python
 # tests/test_parser_parity.py
-def test_a_host_node_carries_its_token_in_debug_mode(self):
-    """`extend_nodelist` sets `node.token`/`node.origin` (`base.py:598-610`) —
-    the same method that enforces `must_be_first`. Our parse returns a
-    descriptor, so that line never runs for a host node, and the code that reads
-    `token` is the debug traceback path. A template using a user tag is the one
-    shape the corpus did not have before M6, so this is exactly the class of
-    template the gap would have hidden in.
+def test_a_host_node_carries_the_token_rust_attached(self):
+    """The host node must be token-bearing *by the same route* as every other
+    node, which is the thing Task 2's arm can quietly break.
+
+    Rust ports `extend_nodelist` (`crates/template-core/src/parser/mod.rs:392-418`)
+    and calls it at `:304` for a host descriptor exactly as for a Rust-built block
+    node, so `node.token` is set on the descriptor either way. The failure mode is
+    therefore not "Django forgot to attach it" — this plan's first version claimed
+    that, and it was false — but "the `materialise_node` arm returned the stored
+    object before the attachment at `_impl/parser.py:232-233` ran", leaving a user
+    tag's node as the one shape that renders tokenless in the debug traceback
+    path. Comparing the host node's token against a *Rust-built* node's in the
+    same template is what distinguishes the two: asserting only that the host
+    node has a token would pass for a node the host itself had already stamped.
     """
     tree = ours_parse("{% load custom %}{% echo x %}", debug=True)
     host = [node for node in tree if type(node).__name__ == "SimpleNode"][0]
@@ -1235,7 +1291,205 @@ git commit -m "parity: corpus rows for the tags the host compiles"
 
 ---
 
-### Task 6: close-out — the spec corrected, the reconnaissance committed, the counts re-measured
+### Task 6: stop the citation drift, mechanically
+
+**Why this is a task and not a tidy-up.** The reviewer checked fourteen `base.py`
+5xx–6xx citations in our tree and reported **seven wrong**: `:598` for
+`node.token = token`, `:566-567` for `raise self.error(token, e)`, `:600-610` for
+the `parse_until` prepend, `:668` for `self.tags.update`, `:598-610` for
+`extend_nodelist`, and two more in the `Parser.__init__` region. Five of those
+were right — measured, `:615` is `node.token = token`, `:585` is
+`raise self.error(token, e)`, `:568` is `self.prepend_token(token)`, `:669` is
+`self.tags.update(lib.tags)`, `:600` opens `def extend_nodelist`. **Two were
+themselves wrong, and repairing them broke two anchors that had been correct:**
+
+| claim | reviewer said | the tree said | measured |
+|---|---|---|---|
+| `` `builtins=None` → `[]` `` | `:517-518` | `:518-519` | **`518-519`** — `518` is `if builtins is None:`, `519` is `builtins = []` |
+| libraries merge after builtins | `:521-522` | `:522-523` | **`522-523`** — `522` is `for builtin in builtins:`, `523` is `self.add_library(builtin)` |
+
+(`521` is `self.libraries = libraries` and `516-517` is the `libraries` guard, so
+both reported pairs pointed one line short and at the *other* variable's guard.)
+
+So this class has now produced errors in **both directions** — in the anchor, and
+in the correction of the anchor — and the second round was caught only because
+the numbers happened to sit next to a variable whose name they contradicted. The
+remedy "be careful" has failed three times and "trust the report" has failed
+once. What remains is mechanical.
+
+**And the size is not fourteen.** Measured over `crates python tests docs .review`:
+
+```
+grep -rhoE '`[a-z_]+\.py:[0-9]+(-[0-9]+)?`' … | tr -d '`' | sort -u | wc -l   → 426
+minus anchors naming our own files (_shim, differential, parser,
+  test_materialise, test_parser_parity)                                       → 415
+of which name a module under django/template/                                 → 332
+```
+
+**415 anchors, of which at most a handful have ever been checked.** The two
+known-wrong ones are fixed (commit pending); what the number of *unknown* wrong
+ones is cannot be stated without the guard.
+
+**Files:**
+- Create: `scripts/check_python_anchors.py`
+- Create: `scripts/anchors.txt` (the generated manifest)
+- Modify: `scripts/check.sh` (add the `--check` pass — it belongs on the full
+  path beside the other two generators, which are already there and already
+  documented as "the way to verify currency")
+- Test: `tests/test_anchor_manifest.py`
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces: `python -I scripts/check_python_anchors.py --check` → exit 1 on drift,
+  modelled on `scripts/gen_python_word_ranges.py --check`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Four behaviours, each driven by the failure it names rather than by a green run
+over the tree — a checker that has never been *seen* to fail is the defect it
+exists to catch, one level up.
+
+```python
+# tests/test_anchor_manifest.py
+"""The checker's own tests: each drives it with the defect it exists for.
+
+`anchor_manifest` is `scripts/check_python_anchors.py` imported by path (the
+`scripts/` directory is not a package), the same way the other script tests do.
+"""
+
+import importlib.util
+import unittest
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
+
+
+class AnchorManifestTests(unittest.TestCase):
+    def test_a_cited_line_that_does_not_contain_its_snippet_fails(self):
+        """The whole value is failing on a *wrong number*, so the test moves a
+        number rather than trusting a clean sweep over the tree."""
+        anchor_manifest.MANIFEST = {
+            "base.py:node_token": ("django/template/base.py", 616, "node.token = token", None)
+        }
+        with self.assertRaises(SystemExit):
+            anchor_manifest.check(checkout=DJANGO_CHECKOUT, tree=self.tree_with("`base.py:616`"))
+
+    def test_an_anchor_in_the_tree_with_no_manifest_entry_fails(self):
+        """This is the half that catches drift introduced *after* this task: a
+        fresh `` `base.py:123` `` written into a comment fails here, which is what
+        makes the check a gate rather than a snapshot of today's tree."""
+        with self.assertRaises(SystemExit):
+            anchor_manifest.check(
+                checkout=DJANGO_CHECKOUT, tree=self.tree_with("`defaulttags.py:99999`")
+            )
+
+    def test_a_basename_that_is_not_unique_needs_an_explicit_path(self):
+        """38 files in the checkout are named `base.py`, 89 `formats.py`, 210
+        `tests.py`. A manifest entry that gives a bare basename for one of those
+        is ambiguous, and ambiguity is an error rather than a guess."""
+        with self.assertRaises(SystemExit):
+            anchor_manifest.resolve("base.py", manifest={})
+
+    def test_the_two_anchors_that_were_wrong_twice_are_pinned(self):
+        """`base.py:518-519` and `base.py:522-523` were reported wrong, repaired
+        to `517-518`/`521-522`, and were correct all along. Named here so the
+        regression is a row rather than a memory."""
+        for anchor, snippet in (
+            ("base.py:518-519", "if builtins is None:"),
+            ("base.py:522-523", "for builtin in builtins:"),
+        ):
+            line = int(anchor.split(":")[1].split("-")[0])
+            text = (DJANGO_CHECKOUT / "django/template/base.py").read_text().splitlines()
+            self.assertIn(snippet, text[line - 1] + text[line])
+```
+
+- [ ] **Step 2: Run them; expect all four to FAIL** — `--update` does not exist
+yet, so the first three fail on the import and the fourth on the anchors being
+`517-518`/`521-522` if the revert has not landed. **Land the revert first** (both
+files: the seven sed'd files and the plan) so the fourth test is a regression row
+and not a to-do.
+
+- [ ] **Step 3: The manifest records the snippet; the number is derived from it**
+
+The direction matters: **the snippet is the specification and the line number is
+computed from it**, so a wrong number has exactly one repair and cannot be
+authored by hand. The reverse (record the number, compare the text) can only
+*detect* drift; this can fix it.
+
+```python
+# scripts/check_python_anchors.py
+"""Every `` `name.py:N` `` and `` `name.py:N-M` `` anchor in our tree, checked
+against the pinned checkout at `.django/`.
+
+Three defects of this class were found by reading; a fourth round found that the
+*repair* of those numbers introduced two more. So the numbers are **derived, not
+authored**: `scripts/anchors.txt` records, for each anchor as it is written in
+the tree, the file it names and the source text that must appear at the cited
+line. `--check` fails when the tree's number and that text disagree; `--update`
+re-derives the numbers from the text.
+
+    python -I scripts/check_python_anchors.py --check    # gate, exit 1 on drift
+    python -I scripts/check_python_anchors.py --update   # rewrite cited numbers
+
+What this does **not** check: that the snippet *supports the claim being made
+next to it*. It is a number-versus-text guard, not a reviewer. Its whole value is
+that it removes the class of defect where the two disagree, which is the class
+that has actually occurred four times.
+
+Manifest line format (tab-separated, sorted by file then line, so it reads as a
+table of what we claim each line says):
+
+    <anchor as written>\t<path relative to .django/>\t<line>\t<end line or ->
+    \t<snippet at line>\t<snippet at end line or ->
+"""
+
+# Ambiguous basenames: 415 anchors, of which 188 name one of these. Each needs an
+# explicit path in the manifest, decided once and recorded, because a bare
+# basename cannot resolve. `formats.py` is the awkward one — 89 candidates under
+# `django/conf/locale/*/` — and the entry must name which locale's formats the
+# claim is about.
+AMBIGUOUS = {
+    "base.py": 38, "html.py": 2, "text.py": 2, "formats.py": 89,
+    "custom.py": 2, "tests.py": 210, "test_base.py": 6, "test_partials.py": 2,
+}
+
+ANCHOR_RE = re.compile(r"`([a-z_]+\.py):(\d+)(?:-(\d+))?`")
+TREE_ROOTS = ["crates", "python", "tests", "docs", ".review"]
+OUR_OWN = {"_shim.py", "differential.py", "parser.py", "test_materialise.py", "test_parser_parity.py"}
+```
+
+`resolve(basename, ...)` walks `.django/` for that basename, excluding
+`__pycache__`; exactly one hit resolves, more than one requires the manifest's
+explicit path, zero fails. The two snippets (`line`, `end line`) are exact
+substrings of those lines, so a Django pin bump that reflows the line reports
+"snippet not found" rather than silently re-pointing at whatever now occupies
+the old number.
+
+- [ ] **Step 4: Add the pass to `check.sh` and run it**
+
+In the existing `step "generated files are current"` block:
+
+```bash
+  "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_python_anchors.py" --check
+```
+
+Run: `python -I scripts/check_python_anchors.py --check`
+Expected: exit 0. Every failure it reports on the first run is either a real
+stale number (fix the tree to match the derived number) or a snippet that is not
+unique in its file (record a longer snippet). **Both are hand decisions on a
+row the tool names**, which is the point: the tool found them, not a reader.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add scripts/check_python_anchors.py scripts/anchors.txt scripts/check.sh tests/test_anchor_manifest.py
+git commit -m "scripts: derive django source anchors instead of authoring them"
+```
+
+---
+
+### Task 7: close-out — the spec corrected, the reconnaissance committed, the counts re-measured
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-10-08-django-template-engine-in-rust-design.md`
@@ -1248,7 +1502,7 @@ Each correction states the measurement, not just the fix:
 
 1. **The M6 gate sentence** (~line 989) attributes `add_tag`/`add_library` to
    `Library`. Neither exists; the merge is `Parser.add_library`
-   (`base.py:668-670`) and the gate's behaviour is real by that route. Note that
+   (`base.py:669-670`) and the gate's behaviour is real by that route. Note that
    the spec's own §6 text already gets this right ("consumed via `add_library`
    and **not stored**") — the two sentences disagree and the later is wrong.
 2. **`LibraryParseError`** → `InvalidTemplateLibrary` (`library.py:13`), raised by
@@ -1304,13 +1558,14 @@ in the order they were found.
 **1. Spec coverage.** §10.3's M6 row names four things: `Library`, extension host
 callbacks, `{% load %}`, `querystring`. Tasks 1 (the handle prerequisite), 2 (the
 wire form), 3 (the seam, the load, the gate), 4 (the state), 5 (the comparison),
-6 (the record) cover all four. §5.2's `ParserHandle` contracts are each given a
-task: re-entrant `parse` → Task 3's handoff, proved in Task 4 Step 6; `extra_data`
-→ Task 4; the failure-path return → Task 4 Step 4; arbitrary attributes →
-explicitly **out of scope** (A-consequence in the recon, Task 6 Step 1). §9's
-three test layers: the unit layer is `cargo test` in each task's `check.sh`; the
-parity layer is Task 5; the suite layer is unchanged and stated in Global
-Constraints. No section of the spec is left without a task.
+7 (the record) cover all four; Task 6 is not spec coverage but the removal of a
+defect class the spec's own citations carry. §5.2's `ParserHandle` contracts are
+each given a task: re-entrant `parse` → Task 3's handoff, proved in Task 4 Step 6;
+`extra_data` → Task 4; the failure-path return → Task 4 Step 4; arbitrary
+attributes → explicitly **out of scope** (A-consequence in the recon, Task 7
+Step 1). §9's three test layers: the unit layer is `cargo test` in each task's
+`check.sh`; the parity layer is Task 5; the suite layer is unchanged and stated in
+Global Constraints. No section of the spec is left without a task.
 
 **2. Placeholder scan.** Two were found and fixed rather than shipped:
 (a) Task 3's Step 11 was a docstring with no assertion — a step describing what
@@ -1355,4 +1610,40 @@ M6 claims the `filter`/`simple_tag`/`simple_block_tag`/`{% load %}`-error and
 is loader machinery (M7). `test_library.py`'s 28 are a gate on Python behaviour
 M6 must not break, not work M6 does. Saying which tests a milestone claims,
 rather than asserting a module, is the correction the M5 close-out recorded.
+
+**7. An argument that survived review but its premise did not.** A5 first excluded
+`block`/`extends`/`include` from the host on the grounds that `{% extends %}`'s
+ordering check lives in `Parser.extend_nodelist` and "our descriptor path never
+runs that line". The reviewer falsified it by naming
+`crates/template-core/src/parser/mod.rs:392-418` — a full port of
+`extend_nodelist`, `must_be_first && contains_nontext` and Django's message
+included, called from `Parser::parse` at `:218`, `:252` and `:304`. I re-measured
+it myself and confirmed the reviewer: a host tag's descriptor reaches `:304` like
+any other block node. The exclusion **stands on a different argument** — the real
+mechanism is one level down and smaller: `NodeDesc.must_be_first` is documented
+"Not carried on the wire" (`desc.rs:369`) and defaults to `false` (`:407`), so a
+host node arrives with the flag cleared and the check passes. M6 must not newly
+accept a tag it cannot render (its render path is M7/M9), because that moves the
+divergence from loud (`Invalid block tag`) to silent. Rewritten in A5, Review
+Focus 4, Task 2 Step 5, the `_M7_OWNED` comment, Task 5 Step 6 and the recon. The
+reviewer's framing of the failure is the one worth keeping: *the symptom's
+distribution was diagnosed instead of its propagation path.*
+
+**8. The citation class, and why Task 6 exists.** The reviewer checked fourteen
+`base.py` 5xx–6xx anchors and reported seven wrong. Five were: `:598`→`:615`,
+`:566-567`→`:585`, `:600-610`→`:564-569`, `:668`→`:669`, `:598-610`→`:600-617`.
+**Two were themselves wrong** — `:518-519` and `:522-523` were correct and the
+reported replacements (`:517-518`, `:521-522`) pointed one line short, at the
+*other* variable's guard (`521` is `self.libraries = libraries`; `516-517` is the
+`libraries` guard). I applied them without measuring, so a repair round introduced
+two defects into a tree that did not have them, and they were caught only because
+the numbers sat beside a name they contradicted. Measured now: `:518-519` is
+`if builtins is None: / builtins = []`, `:522-523` is `for builtin in builtins: /
+self.add_library(builtin)`, both cited correctly again, and Task 6 pins them as a
+named regression row. The inventory is not fourteen: **426 distinct anchors in our
+tree, 415 of them into the pinned checkout, 332 naming `django/template/`** — and
+the count of unknown-wrong among them cannot be stated without the guard. Three
+occurrences of this class, one failed repair, and the remedy each time was "be
+careful"; hence Task 6, which derives the numbers from the snippets instead of
+authoring them.
 
