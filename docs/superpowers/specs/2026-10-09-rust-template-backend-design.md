@@ -541,8 +541,9 @@ pays a bytecode for.
 
 **A loop's cost is invisible to a node census.** One body copy over `n` iterations renders
 the same bytes as `n` unrolled copies, at every `n` from 1 to 200, and stock's loop control
-measures **≈ 2.0 µs fixed + 0.242 µs per iteration**. A `{% for %}` is **one node** at every
-`n`. This is the axis the census cannot see, and it is where §3's motivating number lives.
+measures **≈ 2.0 µs fixed + 0.242 µs per iteration** (`transcript-forloop-axis.txt`). A
+`{% for %}` is **one node** at every `n`. This is the axis the census cannot see, and it is
+where §3's motivating number lives.
 
 **The crossover is at 0.85 steps, not at 1.** The floor's whole depth-0 advantage is
 0.058 µs per variable and an extra lookup component costs it 0.068 more than stock —
@@ -551,6 +552,18 @@ render win exists for variables that are bare names and is already slightly nega
 against a one-dot variable. §3's corpus has no bare names at all: `bench.py` writes
 `section{i}.field{j}`, `section{i}.enabled`, `section{i}.label`, `item.name`,
 `item.value`, every one at depth 1, and the loop body's two are depth 1 *per iteration*.
+
+**That 0.85 is the least durable number in this section, and it is the one that gets
+quoted.** The table above is a single run — the run it was taken from was not saved —
+and five re-runs of the same probe put `{{ a }}` between **0.945 and 0.965** and
+`{{ a.b }}` between **1.007 and 1.020**. The sign and the monotonicity hold in every
+one of them; what moves is the crossover, because it is `(1 − r₀) / (r₁ − r₀)` and its
+denominator is a difference of about 0.06 that the numerator divides into, so a
+thousandth either side moves it by ~0.02 steps. Re-derived from the re-runs it is
+**0.73**, not 0.85. The claim to carry out of this section is that a one-dot variable
+is already the crossover and that §3's corpus is entirely one-dot variables — not the
+second decimal. `transcript-lookup-depth.txt` in `.review/m18-measurements/` is one of
+the re-runs, so the spread is re-derivable rather than asserted here.
 
 **What that leaves open is the next slice, and it is a fork whose winning arm has to be
 weighted.** Stock renders a loop at 1.436 µs per item against 1.194 unwrapped, and the
@@ -570,7 +583,8 @@ entirely Rust-handled. Census per body, parse-only, over §3's own corpus:
 | `LARGE` | 20 | **20/20** — every body is `TextNode×3 + VariableNode×2` |
 
 So the weight is a property of the template, not of the design, and it is 20/20 on the
-template §3's parse number was taken on and 0/1 on another. `PAGE` is also the design's
+template §3's parse number was taken on and 0/1 on another (`transcript-body-census.txt`).
+`PAGE` is also the design's
 worst case and worth keeping as a row rather than a footnote: a body that is both
 unhandled *and* filtered per iteration (`row.value|floatformat:2`) crosses the boundary a
 third way, distinct from both the lookup chain and the escaper call.
