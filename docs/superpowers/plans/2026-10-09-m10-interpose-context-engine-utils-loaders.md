@@ -2189,6 +2189,37 @@ git add tests/test_loader_case_sensitivity.py
 git commit -m "M10: §2's FileSystemLoader case-sensitivity hole, closed project-side"
 ```
 
+**Corrected in Step 1, and the correction is measured.** The second `sources`
+expectation above is not upstream's verbatim, and the difference was checked
+rather than argued. Upstream's `source_checker(["/dir1", "/DIR2"])` pairs the
+name `/DIR1/index.HTML` with **both** directories and asserts it comes back as
+`["/DIR1/index.HTML"]` — an answer only `normcase` folding produces. On this
+platform:
+
+    upstream pairing -> []
+    normcase('/TEST') == normpath('/test'): False
+
+`[]` is the same `safe_join` containment guard that `test_directory_security`
+exercises, comparing `/DIR1/index.HTML` against `/dir1/` without folding and
+rejecting both directories. So the module pairs the name with directories whose
+case matches (`["/DIR1", "/DIR2"]`), which is the shape the question is actually
+about — the name's case is preserved, not folded onto the directory's — and the
+docstring records why. The `False` is also the confirmation that upstream's row
+is skipped here for the reason §2 gives: the guard is `normcase`, evaluated
+before any file is opened.
+
+**And the filesystem row's branch is measured too.** On this volume
+`Path(tmpdir, "PROBE.HTML").exists()` is True, so `case_sensitive` is False and
+the `else` arm is the live one: the loader finds `Index.html` for `index.html`
+through a real `get_template` and `render`, not through a mock. The
+case-sensitive arm is unreachable here by construction, which the row states
+rather than hides.
+
+Step 4's `git add` is superseded: the fast check fails on the collection pin
+(361 → 364, exactly the three rows this task adds), so the commit carries
+`tests/test_collected_tests.py` as well — the rule that file states about
+itself.
+
 ---
 
 ### Task 9: Close-out
