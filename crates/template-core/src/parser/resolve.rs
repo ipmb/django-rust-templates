@@ -30,9 +30,9 @@ pub enum Step {
     Found(Box<dyn LookupTarget>),
     /// The arm's exception is one this arm swallows — `TypeError,
     /// AttributeError, KeyError, ValueError, IndexError` on the item arm,
-    /// `TypeError, AttributeError` on the attribute arm, `IndexError, ValueError,
-    /// KeyError, TypeError` on the index arm (all three read off `base.py:964`,
-    /// `:966` and `:975`).
+    /// `TypeError, AttributeError` on the attribute arm, `IndexError,
+    /// ValueError, KeyError, TypeError` on the index arm (all three read off
+    /// `base.py:968`, `base.py:977` and `base.py:983-988`).
     ///
     /// The host must still have **stashed** the exception: on the attribute arm
     /// a swallowed exception can be the one Django re-raises, because that is

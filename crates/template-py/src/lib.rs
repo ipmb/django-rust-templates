@@ -1547,14 +1547,14 @@ fn parse(
 /// Which of Django's three `except` clauses a failed arm is being judged by, so
 /// each swallowed set is read off `base.py` in one place instead of three.
 enum Arm {
-    /// `base.py:964` — `TypeError, AttributeError, KeyError, ValueError,
+    /// `base.py:968` — `TypeError, AttributeError, KeyError, ValueError,
     /// IndexError`.
     Item,
-    /// `base.py:966` — `TypeError, AttributeError`. This is the arm whose
+    /// `base.py:977` — `TypeError, AttributeError`. This is the arm whose
     /// swallowed exception can still be re-raised, because Django's `dir()` line
-    /// (`:970-977`) sits inside this `except`.
+    /// (`base.py:979`) sits inside this `except`.
     Attr,
-    /// `base.py:975` — `IndexError, ValueError, KeyError, TypeError`.
+    /// `base.py:983-988` — `IndexError, ValueError, KeyError, TypeError`.
     Index,
 }
 

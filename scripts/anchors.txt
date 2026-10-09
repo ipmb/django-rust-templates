@@ -82,13 +82,13 @@ base.py:932-939	django/template/base.py	932	939	gettext_lazy(msgid)	-
 base.py:959-1029	django/template/base.py	959	1029	-	-
 base.py:963-995	django/template/base.py	963	995	-	-
 base.py:963	django/template/base.py	963	-	hasattr(type(current), "__getitem__")	-
-base.py:964	django/template/base.py	964	-	-	-
-base.py:966	django/template/base.py	966	-	-	-
+base.py:968	django/template/base.py	968	-	except (TypeError, AttributeError, KeyError, ValueError, IndexError):	-
 base.py:972-976	django/template/base.py	972	976	-	-
 base.py:972	django/template/base.py	972	-	-	-
-base.py:975	django/template/base.py	975	-	-	-
-base.py:977	django/template/base.py	977	-	-	-
+base.py:977	django/template/base.py	977	-	except (TypeError, AttributeError):	-
 base.py:979-980	django/template/base.py	979	980	if not isinstance(current, BaseContext) and bit in dir(current):	raise
+base.py:979	django/template/base.py	979	-	if not isinstance(current, BaseContext) and bit in dir(current):	-
+base.py:983-988	django/template/base.py	983	988	IndexError,  # list index out of range	):  # unsubscriptable object
 base.py:993-996	django/template/base.py	993	996	if callable(current):	elif getattr(current, "alters_data", False):
 base.py:997	django/template/base.py	997	-	current = context.template.engine.string_if_invalid	-
 base.py:999-1029	django/template/base.py	999	1029	-	-
