@@ -23,6 +23,22 @@ use crate::token::{Token, TokenType};
 /// silently treating a text node as non-text.
 pub const TEXT_NODE: &str = "TextNode";
 
+/// The reserved `class_name` of a descriptor that names a **host-owned** node.
+///
+/// A user tag's compile function runs in Python and returns a Python `Node`;
+/// `template-core` cannot read it and does not try (§5.2, [`NodeRef`]). So the
+/// descriptor carries the slot and nothing else, and the materialiser returns
+/// what the host stored there.
+///
+/// A reserved name rather than a new [`AttrValue`] variant, because everything
+/// else about such a node is ordinary: it is a node in a nodelist, it gets
+/// `token`/`origin` from `extend_nodelist`, and `describe` compares it as the
+/// Python object it is. No Django module at 6.0.9 defines `HostNode`
+/// (measured: `grep -rn 'class HostNode' .django/` is empty), and
+/// `materialise_node` tests this name before `NODE_CLASSES`, so a future
+/// Django that grew one could not capture it.
+pub const HOST_NODE: &str = "HostNode";
+
 /// An opaque handle to a host-owned value.
 ///
 /// `template-core` stores it and hands it back; it never reads it. The first
@@ -471,6 +487,12 @@ impl NodeDesc {
         self.slot = Some(index);
         self
     }
+
+    /// A descriptor for a node the **host** built. `template-core` stores the
+    /// handle and never reads it; see [`HOST_NODE`].
+    pub fn host(node: NodeRef) -> Self {
+        Self::new(HOST_NODE).attr("node", AttrValue::Ref(node))
+    }
 }
 
 #[cfg(test)]
@@ -487,6 +509,21 @@ mod tests {
         assert_eq!(
             node.attrs,
             vec![("s".to_string(), AttrValue::Str("hi".to_string()))],
+        );
+    }
+
+    #[test]
+    fn a_host_node_carries_the_slot_under_the_name_the_materialiser_reads() {
+        // The Python side looks the attribute up **by name** (`"node"`), so the
+        // name is part of the contract exactly as `TextNode`'s `"s"` is, and the
+        // value must be a `Ref` because it is type-checked as one. Renaming or
+        // retyping either end fails `test_a_host_node_is_the_object_the_table_holds`.
+        // `{% load %}` (Task 3) is the first production caller of this builder.
+        let node = NodeDesc::host(NodeRef(3));
+        assert_eq!(node.class_name, HOST_NODE);
+        assert_eq!(
+            node.attrs,
+            vec![("node".to_string(), AttrValue::Ref(NodeRef(3)))],
         );
     }
 

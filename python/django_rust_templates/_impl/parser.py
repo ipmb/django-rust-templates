@@ -58,6 +58,7 @@ from django.utils.safestring import mark_safe
 from django_rust_templates import _native
 
 __all__ = (
+    "HOST_NODE",
     "NODE_CLASSES",
     "check_filter",
     "compile_filter",
@@ -65,6 +66,19 @@ __all__ = (
     "materialise_node",
     "template_for",
 )
+
+
+# The reserved `class_name` of a descriptor that names a **host-owned** node —
+# the Python object a user tag's compile function returned, which
+# `template-core` stores behind a `NodeRef` and never reads (§5.2). The value is
+# the wire literal Rust's `desc::HOST_NODE` emits; the two are asserted equal by
+# `test_a_host_node_is_the_object_the_table_holds`.
+#
+# A reserved *name* rather than a registry entry, because it is not a class:
+# `NODE_CLASSES` maps a name to a callable that builds a node, and there is
+# nothing to build — the node is already in the reference table. The
+# materialiser tests this name before the registry lookup.
+HOST_NODE = "HostNode"
 
 
 def _ifchanged_factory(nodelist_true, nodelist_false, _varlist=()):
@@ -189,6 +203,36 @@ def materialise_node(desc, origin=None, resolve_ref=None, register_ref=None, par
     class_name, attrs, nodelists, token, *rest = desc
     slot = rest[0] if rest else None
     slot_index = slot.index if isinstance(slot, _native.NodeSlot) else None
+
+    # `HostNode` is not a Django class and is deliberately not in
+    # `NODE_CLASSES`: it names a node the *host* built, which is already in the
+    # reference table. Checked before the registry so that the reserved name
+    # cannot be captured by an entry someone adds later, and so the error for a
+    # genuinely unknown class name stays a `LookupError`.
+    #
+    # The two attachment lines are the same ones every other node gets, and
+    # skipping them is the failure this arm's shape invites. Rust's
+    # `extend_nodelist` sets `NodeDesc.token` for a host descriptor exactly as it
+    # does for any other block node, so a bare `return resolve_ref(...)` would
+    # hand back a node whose token is whatever the *host* left on it — making a
+    # user tag's node the one shape that renders tokenless in the debug
+    # traceback path.
+    #
+    # The attribute is found by *name* and type-checked rather than read
+    # positionally as `attrs[0][1]`, because the positional form turns a
+    # descriptor whose attributes were reordered, or whose first value is not
+    # the handle at all, into a silently wrong node. The missing-resolver case
+    # is left to `_decode_value`, which is already loud about it.
+    if class_name == HOST_NODE:
+        ref = dict(attrs).get("node")
+        if not isinstance(ref, _native.NodeRef):
+            raise LookupError(
+                f"a {HOST_NODE} descriptor must carry a 'node' NodeRef; got {ref!r}"
+            )
+        node = _decode_value(ref, resolve_ref)
+        node.token = _decode_token(token) if token is not None else None
+        node.origin = origin
+        return node
 
     try:
         cls = NODE_CLASSES[class_name]

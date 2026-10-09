@@ -509,7 +509,7 @@ mod tests {
 
         fn call_tag(&self, command: &str, _token: &Token) -> Result<NodeDesc, Error> {
             if command == "hosty" {
-                Ok(NodeDesc::new("HostNode"))
+                Ok(NodeDesc::new("StandinHostNode"))
             } else {
                 Err(Error::host("the host refused"))
             }
@@ -535,7 +535,7 @@ mod tests {
     fn a_host_tag_is_dispatched_to_the_host() {
         let mut parser = Parser::new(Lexer::new("{% hosty %}").tokenize(), &TestHost);
         let nodelist = parser.parse(&[]).unwrap();
-        assert_eq!(nodelist.nodes[0].class_name, "HostNode");
+        assert_eq!(nodelist.nodes[0].class_name, "StandinHostNode");
         assert_eq!(nodelist.nodes[0].token.as_ref().unwrap().contents, "hosty");
     }
 

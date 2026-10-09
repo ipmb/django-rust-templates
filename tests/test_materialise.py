@@ -207,6 +207,54 @@ class MaterialiseTests(unittest.TestCase):
             materialiser.materialise_node(desc)
         self.assertIn("resolve_ref", str(caught.exception))
 
+    def test_a_host_node_is_the_object_the_table_holds(self):
+        """`HostNode` is a *reserved descriptor name*, not a Django class.
+
+        §5.2: a `NodeRef` is "an opaque handle to a Python-owned `Node` returned
+        by a user tag callback. `template-core` never dereferences it." So the
+        descriptor's job for one is to name the slot; the materialiser returns
+        what the host stored there, with `token`/`origin` attached the way
+        `extend_nodelist` attaches them to every other node.
+        """
+        held = TextNode("held")
+        desc = ("HostNode", (("node", _native.NodeRef(0)),), (), None)
+
+        node = materialiser.materialise_node(desc, resolve_ref=lambda index: held)
+        self.assertIs(node, held)
+
+        # The literal above is the wire, and `NodeDesc::host` emits it; the
+        # module constant is this side's name for it, so the two must agree.
+        self.assertEqual(materialiser.HOST_NODE, "HostNode")
+
+        # `extend_nodelist` sets `NodeDesc.token` for a host descriptor exactly
+        # as it does for any other block node, so materialisation has to
+        # re-attach it. A bare `return resolve_ref(...)` instead hands back a
+        # node carrying whatever token the *host* left on it, and a user tag's
+        # node is then the one shape that renders tokenless in the debug
+        # traceback path.
+        tokened = ("HostNode", (("node", _native.NodeRef(0)),), (), (2, "echo", 1, (0, 4)))
+        node = materialiser.materialise_node(
+            tokened, origin="origin.html", resolve_ref=lambda index: held
+        )
+        self.assertIs(node.token.token_type, TokenType.BLOCK)
+        self.assertEqual(node.token.contents, "echo")
+        self.assertEqual(node.origin, "origin.html")
+
+    def test_the_host_node_sentinel_is_not_a_django_class(self):
+        """`desc::HOST_NODE` must not name a class Django could materialise.
+
+        The materialiser tests the name before `NODE_CLASSES`, so a collision
+        would not *break* — it would silently make every real `HostNode`-named
+        Django node unmaterialisable, which is the worse failure because it is
+        invisible until someone uses that class.
+        """
+        from django.template import base, defaulttags, loader_tags
+
+        for module in (base, defaulttags, loader_tags):
+            self.assertFalse(
+                hasattr(module, "HostNode"), f"django {module.__name__} defines HostNode"
+            )
+
     def test_a_safe_str_becomes_a_safe_string(self):
         desc = ("VerbatimNode", (("content", _native.SafeStr("{{ raw }}")),), (), None)
         node = materialiser.materialise_node(desc)
@@ -951,7 +999,7 @@ CORE_EMITTED_CLASSES = {"TextNode", "VariableNode"}
 # to remove them, which is the only way to know it removed the right region:
 # a stripper that silently cut real code would fail the second assertion instead,
 # so the pair brackets it from both sides.
-TEST_ONLY_CLASSES = {"StandinBlockNode", "StandinFirstNode", "StandinRefNode", "HostNode"}
+TEST_ONLY_CLASSES = {"StandinBlockNode", "StandinFirstNode", "StandinRefNode", "StandinHostNode"}
 
 
 def strip_cfg_test(source):
