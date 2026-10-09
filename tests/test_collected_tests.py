@@ -113,7 +113,17 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # namespace package itself being declined. The fourth is Review Focus 3's row and
 # the fifth guards a refusal that is deliberate rather than a side effect of no
 # `__init__.py` existing.
-PINNED = 397
+#
+# 397 → 403 is M12 Task 2, `test_interposition.py::LibraryTagPredicateTests`,
+# **six** rows. `git diff tests/` since the previous commit is `+6` rows in that
+# one file and no removals, so 397 + 6 = 403. The six are the coverage of all 18
+# library tags, the measured disjointness the merge order rests on, the sentinel
+# that stages a library shadowing a builtin name, the cache's tracking of the
+# registries it was built from, the caller's `builtins` versus the parse's own
+# table, and the staged reading of `has_tag`'s clause for a library tag. Five of
+# the six redden when `django_own_tags()` is reverted to the two-module merge —
+# the second does not, because it measures the registries rather than the table.
+PINNED = 403
 
 
 def collected() -> unittest.TestSuite:

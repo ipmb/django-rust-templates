@@ -201,12 +201,14 @@ class NamespaceTests(unittest.TestCase):
 ### Task 2: the library names enter the tag predicate
 
 **Files:**
-- Modify: `python/django_rust_templates/host.py`, `crates/template-core/src/parser/registry.rs`
+- Modify: `python/django_rust_templates/host.py`
 - Test: `tests/test_interposition.py`
 
 **Interfaces:**
-- Produces: `django_own_tags()` covering all five modules; the 18 names present in `_native.builtin_tag_names_including_stubs()` but **no Rust compile function yet** — so `has_tag` must still send them to the host.
+- Produces: `django_own_tags()` covering all five modules, carrying each library's own callable under its own tag names — so once Rust owns a name, `has_tag`'s identity clause reads False and Rust compiles Django's tag, and a `{% load %}`ed rebinding still reads True. The 18 names stay absent from Rust's registry until Tasks 3–6 port them, so today `has_tag` reaches them one clause earlier and sends them to the host.
 - Consumes: Task 1's namespace table.
+
+**Amended after implementation — `registry.rs` is *not* touched, and the reason is `Produces` read as two questions.** The original `Produces` line said "the 18 names present in `_native.builtin_tag_names_including_stubs()` but **no Rust compile function yet**", which is a forward statement about Tasks 3–6 written as if it were this task's deliverable. Adding 18 stubs to `REGISTRY` here would aggravate the "registry keys ≠ implemented set" misreading `registry.rs` warns about three times, and would force rewrites of `tests/test_tag_inventory.py`'s pinned 25 and `{"partial","partialdef"}` rows — which is not what "the routing table … *unchanged*" (Step 4) can mean. The Steps bind: the widening **alone**, routing unchanged. The unchanged 18-`theirs/theirs` table is the measurement; `registry.rs` and its pinned inventory are untouched by this commit.
 
 **This task is the one the recon's §3 exists for.** Adding the names to Rust's registry *without* widening `django_own_tags()` changes nothing, silently: `_django_tags.get("trans")` is `None`, so `has_tag`'s escape inverts and the tag goes to the host exactly as before, with the 1547 green. The order is: widen the predicate first, prove the tags still route to the host, then port the bodies.
 
@@ -218,24 +220,21 @@ class NamespaceTests(unittest.TestCase):
 
 The reviewer's other consequence — that the nine filters are therefore not a separate decision because the unit of transcription is the file — is also adopted, and it is why Task 7 is scoped as **Rust bodies only**. The five files are fully transcribed by Tasks 3-6; a per-file table (`DECLARED`, `SHADOWING`, `COMPARED_PATH`, the anchors) cannot express a half-transcribed file, so "tags now, filters later" was never the choice it looked like.
 
-- [ ] **Step 1: Write the failing test** — `LibraryTagPredicateTests` in `tests/test_interposition.py`:
+- [ ] **Step 1: Write the failing test** — `LibraryTagPredicateTests` in `tests/test_interposition.py`, six rows: the coverage-and-identity row below, the measured disjointness of the five libraries from `defaulttags`/`loader_tags`, the merge-order sentinel (a library shadowing `if`, with a control that the library table really reached the merge), the cache tracking a replaced registry, the caller's `template_builtins` versus the parse's own table, and the clause read for a library tag with `"trans"` staged into `_rust_owned` (with an unstaged control showing the staging is what makes the answers differ).
 
 ```python
 def test_the_predicate_covers_every_registered_library_tag(self):
-    from django.templatetags import cache, i18n, l10n, static, tz
-    from django_rust_templates.host import django_own_tags
+    # Identity, not presence: `has_tag` asks `func is not _django_tags.get(command)`,
+    # so a table carrying a *different* callable under `trans` answers True and the
+    # tag stays Django's even after Rust owns it. 18 names, counted.
+    for module, tags in sorted(self.libraries.items()):
+        for name, func in sorted(tags.items()):
+            self.assertIs(own.get(name), func, ...)
 
-    own = django_own_tags()
-    for module in (cache, i18n, l10n, static, tz):
-        for name, func in module.register.tags.items():
-            self.assertIs(
-                own.get(name), func, f"{module.__name__}.{name} is not in the predicate"
-            )
-
-def test_a_library_tag_still_routes_to_the_host_before_it_is_ported(self):
-    # The escape hatch's own control: with the name in the predicate but not in
-    # `_rust_owned`, `has_tag` must say "host compiles" — which is what happens
-    # today, and what this task must not change.
+def test_the_clause_reads_a_library_tag_the_way_it_will_once_rust_owns_it(self):
+    # `"trans"` staged into a *local* host's `_rust_owned`, so the shipped routing
+    # is untouched: Django's own `trans` → False, a rebinding library → True, and
+    # both True without the staging.
     ...
 ```
 

@@ -1699,7 +1699,7 @@ class TagPredicateCoverageTests(unittest.TestCase):
 
     `has_tag` answers a Rust-owned name with
     `func is not self._django_tags.get(command)`
-    (`python/django_rust_templates/host.py:327`), so the merge
+    (`python/django_rust_templates/host.py:422`), so the merge
     `django_own_tags()` returns is not decoration — it is the *other side of the
     comparison*. A name in `_rust_owned` that the merge does not carry has
     nothing to be compared against, `func is not None` is True, and the escape
@@ -1752,14 +1752,340 @@ class TagPredicateCoverageTests(unittest.TestCase):
         """The control the row above cannot be read without.
 
         A containment assertion over a set that happens to satisfy it is green
-        on arrival and proves nothing until it has been shown to fail. `trans` is
-        not an arbitrary stand-in: it is the first name M12 adds to Rust's
-        registry, so this stages that milestone's own failure mode one task
-        early — and if the widening Task 2 performs were ever undone, this is the
-        row that reddens rather than the 1547 staying green.
+        on arrival and proves nothing until it has been shown to fail. The
+        fabricated name is the point: after M12 Task 2 widened the table, no
+        real name is both Rust-owned and absent from it, which is the containment
+        the row above asserts. **This control used `trans` until that widening**,
+        chosen as the first name M12 adds to Rust's registry — and Task 2 broke
+        it, which is the widening measured from the other side: a name that was
+        absent from the table in Task 0b is in it now.
         """
         with self.assertRaises(AssertionError):
-            self.assert_covers(self.host._rust_owned | {"trans"}, self.own)
+            self.assert_covers(self.host._rust_owned | {"m12_not_a_tag"}, self.own)
+
+
+class LibraryTagPredicateTests(unittest.TestCase):
+    """M12 Task 2: the tag predicate carries the five libraries' tags.
+
+    `django_own_tags()` is the *other side* of `has_tag`'s identity clause
+    (`python/django_rust_templates/host.py:422`), so a library tag Rust ports
+    must be in it before the port means anything. Widen Rust's registry alone
+    and the clause still reads `None` against a real callable —
+    `func is not None` is True — so the host keeps compiling the tag Rust just
+    implemented, and **every row stays green**:
+    ``.review/m12-recon.md`` §3 measured exactly that.
+
+    What the widening buys, stated as the comparison rather than as the port:
+    after `{% load i18n %}`, `parser.tags["trans"]` *is* the callable this table
+    carries for `trans` (`Library.tags` is a plain dict and `Parser.add_library`
+    is `self.tags.update(lib.tags)`, `base.py:669-670`), so once Rust owns the
+    name the clause reads False and Rust compiles Django's own tag. A library
+    that *rebinds* `trans` puts a different callable there, the clause reads
+    True, and the host compiles the rebinding. Both halves are asserted below,
+    with `"trans"` staged into `_rust_owned` so the row exercises the clause
+    instead of the early return — the same staging `TagPredicateCoverageTests`
+    performs one class up, and for the same reason.
+
+    **The merge order is a safety property, not a preference**, and it needs a
+    row because the collision it guards against does not exist yet: a library
+    registering a name Django's two modules also register. `update` gives the
+    last writer the name, so libraries merge *first* and `defaulttags`/
+    `loader_tags` last. Were it the other way, this table's `if` would become a
+    library's, a `{% load %}`ed rebind of `if` would compare equal to it, and
+    Rust's `do_if` would compile over the caller's tag. The row stages that
+    collision with a sentinel rather than waiting for a future pin to introduce
+    it.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib
+
+        _shim.install()
+        from django_rust_templates import host as host_module
+
+        cls.host_module = host_module
+        cls.libraries = {
+            name: importlib.import_module(name).register.tags
+            for name in host_module._LIBRARY_TAG_MODULES
+        }
+
+    def setUp(self):
+        _shim.install()
+
+    def test_the_predicate_covers_every_registered_library_tag(self):
+        """18 names, and the *same object* under each, counted rather than prose.
+
+        Identity is the claim, not presence: `has_tag` asks
+        `func is not _django_tags.get(command)`, and a table carrying a
+        *different* callable under `trans` answers True — so the tag stays
+        Django's even after Rust owns it, with every row green. Coverage alone
+        would not say that.
+
+        The union is taken from the registries themselves, not from a list here,
+        so a pin that adds a tag to one of the five moves this number and the row
+        says by how much. The count is the measured inventory the M12 plan
+        carries: cache 1, i18n 10, l10n 1, static 3, tz 3.
+        """
+        own = self.host_module.django_own_tags()
+        registered = set().union(*(tags for tags in self.libraries.values()))
+        self.assertEqual(
+            len(registered),
+            18,
+            f"the five libraries register {len(registered)} tags, not 18: "
+            f"{sorted(registered)}",
+        )
+        self.assertEqual(
+            sorted(registered - set(own)),
+            [],
+            "library tags the predicate does not carry: `has_tag` decides these "
+            "with `func is not _django_tags.get(command)`, so an absent name "
+            "leaves the tag to the host however Rust's registry spells it",
+        )
+        for module, tags in sorted(self.libraries.items()):
+            for name, func in sorted(tags.items()):
+                with self.subTest(module=module, tag=name):
+                    self.assertIs(
+                        own.get(name),
+                        func,
+                        f"{module}.{name} is not the callable the predicate "
+                        f"carries, so the identity clause cannot clear it",
+                    )
+
+    def test_the_five_libraries_share_no_name_with_the_two_builtin_modules(self):
+        """The measurement the merge-order argument rests on, held as a row.
+
+        Disjoint at 6.0.9 — so the merge order changes no answer today, and the
+        sentinel row below is the only thing standing between the order and a
+        future pin that makes it matter. Written down here because a claim of
+        disjointness that lives in a comment is one nothing re-reads, which is
+        the correction M12 Task 0b exists for.
+        """
+        from django.template import defaulttags, loader_tags
+
+        library_names = set().union(*(tags for tags in self.libraries.values()))
+        base_names = set(defaulttags.register.tags) | set(loader_tags.register.tags)
+        self.assertEqual(
+            sorted(library_names & base_names),
+            [],
+            "a library now shares a name with Django's own builtins, so the "
+            "merge order in `django_own_tags()` decides which callable the "
+            "predicate carries for it",
+        )
+        self.assertEqual(len(base_names), 27, sorted(base_names))
+
+    def test_a_library_rebinding_a_builtin_name_cannot_take_it_from_the_predicate(
+        self,
+    ):
+        """The order, staged with the collision it guards against.
+
+        A sentinel goes into `static.register.tags` under `if` — a name
+        `defaulttags` also registers — and under `get_static_prefix`, a name no
+        other merged table has. The second placement is the control: it shows
+        the library table really is merged, so the first assertion cannot be
+        passing because the patch never reached the merge.
+        """
+        import importlib
+
+        from django.template import defaulttags
+
+        def sentinel(parser, token):  # pragma: no cover - named, never compiled
+            raise AssertionError("the sentinel is a name, not an implementation")
+
+        sentinel.__name__ = "if"
+
+        static = importlib.import_module("django.templatetags.static")
+        before = static.register.tags
+        static.register.tags = {
+            **before,
+            "if": sentinel,
+            "get_static_prefix": sentinel,
+        }
+        try:
+            table = self.host_module.django_own_tags()
+            self.assertIs(
+                table["get_static_prefix"],
+                sentinel,
+                "the control: the library's table did not reach the merge at all",
+            )
+            self.assertIsNot(
+                table["if"],
+                sentinel,
+                "a library's `if` entered the predicate, so a `{% load %}`ed "
+                "rebind of `if` now compares equal to it and Rust compiles over "
+                "the caller's tag",
+            )
+            self.assertIs(table["if"], defaulttags.register.tags["if"])
+        finally:
+            static.register.tags = before
+
+        self.assertIs(
+            self.host_module.django_own_tags()["if"],
+            defaulttags.register.tags["if"],
+            "restoring the registry did not restore the table",
+        )
+
+    def test_the_predicate_map_tracks_the_registries_it_was_built_from(self):
+        """The cache's key is the registry *object*, one table over from filters.
+
+        `django_own_filters()` has the same row for the same reason: caching on
+        `None` alone lets the table outlive a re-executed library, and the arm
+        then misses on every handle it was built with while the suite stays
+        green. Here the failure is quieter still — a table built from a
+        library module that has since been re-executed carries callables no
+        parse will ever bind, so `has_tag` answers True for tags Rust owns.
+        """
+        import importlib
+
+        def sentinel(parser, token):  # pragma: no cover - named, never compiled
+            raise AssertionError("the sentinel is a name, not an implementation")
+
+        tz = importlib.import_module("django.templatetags.tz")
+        before = tz.register.tags
+        self.assertNotIn("m12_sentinel", self.host_module.django_own_tags())
+        tz.register.tags = {**before, "m12_sentinel": sentinel}
+        try:
+            self.assertIs(
+                self.host_module.django_own_tags()["m12_sentinel"],
+                sentinel,
+                "the table did not track a replaced library registry, so a "
+                "re-executed library would be answered for by a stale table",
+            )
+        finally:
+            tz.register.tags = before
+        self.assertNotIn(
+            "m12_sentinel",
+            self.host_module.django_own_tags(),
+            "the table kept the sentinel after its registry was restored",
+        )
+
+    def test_a_callers_builtins_are_not_what_the_predicate_carries(self):
+        """The snapshot defect, for a builtin and a library tag alike.
+
+        The table used to be a snapshot of `parser.tags` at `ShellHost`
+        construction — which is *after* `Parser.__init__` merged the engine's
+        `builtins`, so it captured the caller's callables rather than Django's.
+        The predicate then answered "Rust's" for a tag the caller had just
+        replaced, and Rust compiled over it.
+
+        Both halves are asserted: identity, which is what the clause reads, and
+        the render, which is what the user sees. The `for` render is the
+        discriminator — `12` is the correct render of the same template without
+        the caller's library, so a row that reported `shadow(for)` for both
+        would not be evidence of anything.
+        """
+        from django.template import Library, Node, defaulttags
+
+        class ShadowNode(Node):
+            def __init__(self, label):
+                self.label = label
+
+            def render(self, context):
+                return "shadow(%s)" % self.label
+
+        def compile_shadow_for(parser, token):
+            nodelist = parser.parse(("endfor",))
+            parser.delete_first_token()
+            return ShadowNode("for")
+
+        def compile_shadow_trans(parser, token):
+            return ShadowNode("trans")
+
+        shadow = Library()
+        shadow.tag("for", compile_shadow_for)
+        shadow.tag("trans", compile_shadow_trans)
+
+        engine = Engine()
+        engine.template_builtins = [*Engine().template_builtins, shadow]
+
+        table = self.host_module.django_own_tags()
+        self.assertIsNot(table["for"], shadow.tags["for"], "the caller's `for`")
+        self.assertIs(table["for"], defaulttags.register.tags["for"])
+        self.assertIsNot(
+            table["trans"],
+            shadow.tags["trans"],
+            "the caller's `trans`: a library tag the caller registered is not "
+            "Django's own callable, and the clause must compare against Django's",
+        )
+        self.assertIs(
+            table["trans"],
+            self.libraries["django.templatetags.i18n"]["trans"],
+        )
+
+        template = "{% for i in xs %}{{ i }}{% endfor %}"
+        self.assertEqual(
+            engine.from_string(template).render(Context({"xs": [1, 2]})),
+            "shadow(for)",
+            "the caller's `for` did not run: the predicate carried the parse's "
+            "own table, so it answered `Rust's` for the caller's callable",
+        )
+        self.assertEqual(
+            Engine().from_string(template).render(Context({"xs": [1, 2]})),
+            "12",
+            "the discriminator: Rust's own `for` does not render `shadow(for)`",
+        )
+
+    def test_the_clause_reads_a_library_tag_the_way_it_will_once_rust_owns_it(self):
+        """The exact comparison `has_tag` makes, with the port staged.
+
+        `"trans"` is added to this host's `_rust_owned` and no further — a local
+        host, so nothing about the shipped routing changes and Task 2's
+        unchanged 18-`theirs` table stays the evidence that the widening alone
+        is behaviour-preserving.
+
+        Two answers, and each is a different input: Django's own `trans` bound by
+        `{% load i18n %}` is **Rust's** to compile (False), and a library that
+        rebinds `trans` is **the host's** (True). Without the staging both names
+        answer True by the early return, which is why this row stages at all —
+        an unstaged version asserts the early return twice and says nothing
+        about the clause.
+        """
+        import importlib
+
+        from django.template import Library, Node
+
+        from django_rust_templates.render import parser_for
+
+        class ShadowNode(Node):
+            def render(self, context):
+                return "shadow(trans)"
+
+        def compile_shadow_trans(parser, token):
+            return ShadowNode()
+
+        shadow = Library()
+        shadow.tag("trans", compile_shadow_trans)
+
+        def routed(library):
+            parser = parser_for("", Engine())
+            parser.add_library(library)
+            host = self.host_module.ShellHost(parser)
+            host._rust_owned = host._rust_owned | {"trans"}
+            return host.has_tag("trans")
+
+        i18n = importlib.import_module("django.templatetags.i18n")
+        self.assertFalse(
+            routed(i18n.register),
+            "`{% load i18n %}` binds Django's own `trans`, so Rust owns it — "
+            "this is False only because the predicate now carries that callable",
+        )
+        self.assertTrue(
+            routed(shadow),
+            "a library rebinding `trans` must still run its own body",
+        )
+
+        # And the same two names without the staging: both True, so the row
+        # above is measuring the clause and not the early return.
+        def unstaged(library):
+            parser = parser_for("", Engine())
+            parser.add_library(library)
+            return self.host_module.ShellHost(parser).has_tag("trans")
+
+        self.assertTrue(
+            unstaged(i18n.register) and unstaged(shadow),
+            "the unstaged control did not answer True for both, so the staging "
+            "above is not what makes the two answers differ",
+        )
 
 
 class DefaultTagsInterpositionTests(unittest.TestCase):

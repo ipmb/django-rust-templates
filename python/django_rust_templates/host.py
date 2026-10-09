@@ -41,14 +41,89 @@ from django_rust_templates import _native
 __all__ = ("ShellHost",)
 
 
+# The five `django.templatetags` libraries M12 interposes, as module paths.
+_LIBRARY_TAG_MODULES = (
+    "django.templatetags.cache",
+    "django.templatetags.i18n",
+    "django.templatetags.l10n",
+    "django.templatetags.static",
+    "django.templatetags.tz",
+)
+
+
+def _library_tag_tables():
+    """The five libraries' `register.tags`, imported **lazily**.
+
+    Lazy rather than at module level, because importing a library *executes* it,
+    and these files capture names out of the modules M9 interposed. Measured in
+    the pinned tree: ``django/templatetags/i18n.py:5`` is ``from
+    django.template.base import TokenType, render_value_in_context``, and its
+    line 4 takes ``Node`` from ``django.template`` — the two shapes
+    ``_shim._stale_captures`` exists to refuse, a captured class making every
+    ``isinstance`` false and a captured enum making every comparison false.
+
+    **Deferred, the capture is of the served modules; deferred to import, it is
+    of Django's.** ``_shim._CAPTURE_NAMESPACES`` already lists
+    ``django.templatetags`` for exactly this reason, and ``install()`` raises
+    when it finds a copy from the other universe — so executing one of these at
+    ``host`` import time, whenever that import lands before ``install()``, is a
+    loud failure rather than a silent one. Deferring the import to the first
+    ``ShellHost`` — constructed by the parser, so after ``install()`` on every
+    path the package supports — keeps the two universes apart instead of relying
+    on the guard.
+    """
+    import importlib
+
+    return tuple(
+        importlib.import_module(name).register.tags for name in _LIBRARY_TAG_MODULES
+    )
+
+
+_DJANGO_OWN_TAGS = None
+
+# The registry objects the merge above was built from, in merge order. Kept for
+# `django_own_filters`' reason one table over: `None` alone cannot tell "not
+# built yet" from "built from a registry that is no longer in force", and the
+# second is the case where the escape silently resolves the wrong way.
+_DJANGO_OWN_TAGS_SOURCE = None
+
+
 def django_own_tags():
     """The tag callables Rust ports — read from the modules it ports, once.
 
     The predicate's question is *"is this callable the one Rust implements?"*,
     and the only configuration-independent answer names the modules Rust ports:
-    `django.template.defaulttags` and `django.template.loader_tags`. Frozen at
-    import, so neither a `{% load %}` nor a caller mutating either `register`
-    mid-parse can move it.
+    `django.template.defaulttags`, `django.template.loader_tags`, and — from M12,
+    whether or not they are interposed yet — the five `django.templatetags`
+    libraries. Cached at first use against the registry objects it was built
+    from, so neither a `{% load %}` nor a caller mutating a `register` mid-parse
+    can move it, and a *replaced* registry is rebuilt rather than served stale.
+
+    **The five libraries are a precondition, not a tidy-up, and the reason is
+    measured.** `has_tag` answers a Rust-owned name with
+    `func is not self._django_tags.get(command)`, so for a library tag this table
+    is the *other side of the comparison*: with the library's callable absent,
+    `get` is `None`, `func is not None` is True, and the escape sends the tag to
+    the host. Before Tasks 3-6 that is what we want — but it is also what
+    *porting a name first* would silently keep, because widening Rust's registry
+    does not touch this clause at all. Rust's new `do_trans` would never run and
+    every row would stay green, which is the trap ``.review/m12-recon.md`` §3
+    measured. So the order is widen-then-port: this table covers a library
+    *before* Rust's registry claims any of its names.
+
+    **Libraries merge *first*, defaulttags and loader_tags last, and that order
+    is the safety property rather than a preference.** `update` gives the last
+    writer the name, and what this table must never lose is Django's *own*
+    callable for the 27 built-ins. Were a library to register `if`, a
+    libraries-last merge would make this table's `if` the library's — so a
+    `{% load %}`ed rebind of `if` would compare *equal* to it, `has_tag` would
+    answer "Rust's", and Rust's `do_if` would compile over the caller's tag.
+    Merging the libraries first makes that hypothetical collision resolve to
+    Django's callable and leaves the clause correct for every Rust-owned name.
+    The collision does not exist at 6.0.9 — measured, the five registries and
+    the two share no name — so both halves are held by
+    `LibraryTagPredicateTests`: the measurement, and the order that keeps the
+    hazard from being a silent one if a future pin introduces it.
 
     **This replaced a snapshot of `parser.tags`, and the reason is measured.**
     The snapshot was taken at `ShellHost` construction, which is *after*
@@ -85,12 +160,14 @@ def django_own_tags():
 
     **Rust's registry is a subset of this table, never equal to it, and this
     paragraph said "exactly the union" until M12 measured it.** Measured against
-    `.django` @ 6.0.9: the union of these two tables is **27** names, Rust's
-    registry is **23**, and `rust - django` is `[]`. Containment is the only
-    direction that has to hold, because the clause below compares against this
-    table — and a Rust-owned name missing from it would put `None` on the right
-    of an `is not`, so the escape resolves the wrong way and the host compiles a
-    tag Rust owns, silently, with the suite green.
+    `.django` @ 6.0.9: the union of `defaulttags`' and `loader_tags`' tables is
+    **27** names, Rust's registry is **23**, and `rust - django` is `[]`. The
+    five libraries' 18 names are the *other* direction of the same inequality —
+    in this table and not in Rust's registry at all, until Tasks 3-6 port them.
+    Containment is the only direction that has to hold, because the clause below
+    compares against this table — and a Rust-owned name missing from it would put
+    `None` on the right of an `is not`, so the escape resolves the wrong way and
+    the host compiles a tag Rust owns, silently, with the suite green.
 
     The four names here that Rust does not own — `load`, `querystring`,
     `partial`, `partialdef` — never reach that comparison: `load` and
@@ -107,7 +184,25 @@ def django_own_tags():
     `TagPredicateCoverageTests` in `tests/test_interposition.py` holds the
     containment now, and was added with this correction.
     """
-    return {**_defaulttags.register.tags, **_loader_tags.register.tags}
+    global _DJANGO_OWN_TAGS, _DJANGO_OWN_TAGS_SOURCE
+    sources = (
+        *_library_tag_tables(),
+        _defaulttags.register.tags,
+        _loader_tags.register.tags,
+    )
+    cached = _DJANGO_OWN_TAGS_SOURCE
+    if (
+        _DJANGO_OWN_TAGS is None
+        or cached is None
+        or len(cached) != len(sources)
+        or any(old is not new for old, new in zip(cached, sources))
+    ):
+        merged = {}
+        for table in sources:
+            merged.update(table)
+        _DJANGO_OWN_TAGS = merged
+        _DJANGO_OWN_TAGS_SOURCE = sources
+    return _DJANGO_OWN_TAGS
 
 
 _DJANGO_OWN_FILTERS = None
