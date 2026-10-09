@@ -352,6 +352,11 @@ fresh materialisation resets `count` and yields `"000000000"`.
 So `test_include_cache` is an explicit **M7 gate**, and the shadow tree must be
 reachable by identity from Rust for the template's lifetime.
 
+Materialisation must also reproduce `Parser.extend_nodelist` exactly — that is
+where each node acquires `token` and `origin`, and `render_annotated` reads both.
+The contract is written out in §6; it is a correctness requirement for blocker 2's
+annotation protocol, not a detail.
+
 A structural-equality test per milestone guards against drift.
 
 ## 6. Ownership split
@@ -359,7 +364,51 @@ A structural-equality test per milestone guards against drift.
 **Rust owns:** tokenization and positions; `Parser` and tag dispatch;
 `FilterExpression`/`Variable` compilation; the smart-if grammar; variable
 resolution and auto-calling; `conditional_escape`; all built-in tags and filters;
-block/extends/include resolution.
+**compiling** the inheritance structure — which nodes are blocks, the `blocks`
+mapping, `get_nodes_by_type` results, and the `must_be_first` ordering rule.
+
+**Python owns the render-time inheritance dance**, and this is a correction to an
+earlier draft that assigned "block/extends/include resolution" to Rust wholesale.
+`BlockNode.render`, `ExtendsNode.render` and `IncludeNode.render` are coupled to
+a protocol that lives in Python:
+
+- `ExtendsNode.render` reads and mutates `context.render_context`
+  (`BLOCK_CONTEXT_KEY`, `setdefault`, `push_state(compiled_parent,
+  isolated_context=False)`) and calls `compiled_parent._render(context)` — the
+  very method `setup_test_environment` replaces (§5.5).
+- `BlockNode.render` pops and pushes on a `BlockContext`, and constructs a fresh
+  instance via `type(self)(block.name, block.nodelist)`.
+- `IncludeNode.render` caches in `context.render_context.dicts[0].setdefault(self, {})`,
+  keyed on the Python node instance.
+
+Modelling all of that across the seam would mean Rust owning a Python object's
+mutation protocol for no gain. Under §5.5's decision the boundary is already at
+Python frames, so these three node classes are **Python shell code, ported
+verbatim** — which is also why the Python side is larger than an earlier draft
+implied (§13). Rust supplies the compiled structure they operate on.
+
+**Compiling the structure means reproducing `Parser.extend_nodelist`
+(`base.py:600-617`) exactly**, since it — not each node's `__init__` — is where a
+node acquires its position:
+
+```python
+def extend_nodelist(self, nodelist, node, token):
+    if node.must_be_first and nodelist.contains_nontext:
+        ...  raise "{%% %s %%} must be the first tag in %s."
+    if not isinstance(node, TextNode):
+        nodelist.contains_nontext = True
+    # Set origin and token here since we can't modify the node __init__()
+    # method.
+    node.token = token
+    node.origin = self.origin
+    nodelist.append(node)
+```
+
+The shadow tree must run the equivalent for **every** node: `token` and `origin`
+are what `render_annotated` reads when annotating an exception (§5.2), so a
+materialised node missing them turns a template error into an `AttributeError`
+inside the exception handler. `contains_nontext` and `must_be_first` are the
+`{% extends %}` ordering rule, with that exact message.
 
 **Python owns:** the `Library` registry and dotted-path loading; `Engine` and the
 configured loader classes (framework-coupled: `override_settings`,
@@ -602,6 +651,12 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   of `Lexer`/`DebugLexer` must preserve `token.lineno` and
   `token.position` exactly, since `template_debug` reports both.
 - **§2's case-sensitivity coverage hole** — project-side test at M10.
+- **§6's `extend_nodelist` contract** — `token`/`origin` attached at parse time,
+  plus `contains_nontext`/`must_be_first`; M2, but its consequence lands at M9 via
+  `render_annotated`.
+- **§6's ownership correction** — `block`/`extends`/`include` render-time logic is
+  Python, ported verbatim; Rust supplies the compiled structure. Affects M7's and
+  M11's sizing, and §6's estimate of the Python side.
 
 ## 11. Review workflow
 
