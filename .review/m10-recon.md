@@ -6,8 +6,12 @@ Written 2026-10-09, before M10's plan. Pinned tree: `.django/` at **6.0.9**
 
 This recon's first job was to size the milestone, and sizing it turned up a
 scope error in §10.3 before any code was written. §1 is that error. §2 is the
-meter arithmetic it changes. §3–§6 are what the milestone has to decide, with
-the measured ones marked as measured and the surveyed ones marked as surveyed.
+meter arithmetic it changes — and, once checked against the whole meter rather
+than the one name the row is ambiguous about, three more names with no owner at
+all. §3 is the surveyed surface, §3a the blast radius it sits on, and §3b the
+pre-flight that interposed the whole milestone verbatim in a scratch universe
+and found it green. §4–§6 are what the milestone has to decide, with the
+measured ones marked as measured and the surveyed ones marked as surveyed.
 
 ## 1. §10.3's M10 row names five modules; one of them does not exist
 
@@ -211,6 +215,44 @@ script prints that caveat on stderr). Nor does it answer the vacuity question �
 `check_transcriptions.py` does that — and it cannot show that any of these tests
 would *fail* if our module were wrong, only that they run through it.
 
+## 3b. The pre-flight: the whole milestone, interposed verbatim, keeps all 1,547 green
+
+Instrument: `.review/m10-measurements/m10_probe_verbatim_interposition.py`. It
+builds a scratch universe — a copy of `_impl` plus verbatim copies of the nine
+files M10 would add — repoints `_shim._IMPL_DIR` at it before `install()`, and
+runs `runtests.py template_tests --parallel 1` in-process, the same labels
+`scripts/run_django_suite.sh` uses, against the scratch universe's modules.
+Nothing in the real tree is touched.
+
+```
+unshimmed: 23 -> 14
+Ran 1547 tests in 3.755s
+OK (skipped=6)
+```
+
+Three things follow, and the third is the one that shapes the plan:
+
+1. **The meter lands exactly where §2 said.** 14 is §2's arithmetic — 23 minus
+   the 9 M10 takes — computed independently of the run, so the run is a check
+   on the partition rather than the source of it. The 14 left over are M11's
+   three, M13's eight, and the three orphans §2 found unowned.
+2. **`loaders` interposes with no import surgery**, as §3 said: `Engine` names
+   its loaders by dotted string, so `_impl/loaders/*` is picked up through the
+   string and not through a Python import.
+3. **M10 can be *done* today by copying nine files**, which is the whole of its
+   hazard and none of its value. The milestone's evidence therefore cannot be
+   the suite — §3a's 1232 tests now run through our modules and would run
+   identically through Django's — so the plan's real content is per file: which
+   of the nine are transcriptions (§6's "behaviour *is* its structure") and
+   which are written fresh (§6's "algorithms, control flow and internal
+   structure are written against Django as a spec"), plus the direct-entry rows
+   that make the interposition visible at all — M9's finding 3, which this
+   probe reproduces at the scale of a whole milestone rather than one function.
+
+The probe is also the plan's fallback: if a fresh file for one of these modules
+turns out to be wrong in a way the suite cannot see, this is the oracle that
+says what the correct behaviour was, and it is one command.
+
 ## 4. The vacuity question M9 bequeathed, applied to M10
 
 M9's finding 3 stands as the rule for every interposition milestone after it:
@@ -323,14 +365,15 @@ own unit count** rather than repeating the one above it.
 
 Named so the plan does not read silence as a clean bill:
 
-- **No blast-radius count yet.** M9 sized its seams by running the suite with
-  instruments (`m9_measure_*.py`); M10 has not. Whether `test_context` and
-  friends are *gated* by our modules in the M9 sense — or are, like M9's
-  `test_engine` module name suggests, merely *named* for them — is unmeasured.
-  §4 now says why this number is not M10's *evidence* — the meter is, for a
-  Python-owned module — but unmeasured is still unmeasured, and §10.1's premise
-  ("its Django tests become real signal") is a claim about this number.
-- **No check of what `Engine.from_string`/`get_template` do once interposed.**
-  M9 left the Python node tree as the render path; how much of the *load* path
-  M10 actually moves is unmeasured.
+- **~~No blast-radius count yet.~~ Measured in §3a** (1232 of 1547, 79.6%), and
+  the pre-flight in §3b is the related but different number: not which tests
+  *reach* these modules but what happens to the suite when all of them are ours.
+  §4 says why neither number is M10's *evidence* — the meter is, for a
+  Python-owned module — but §10.1's premise ("its Django tests become real
+  signal") is a claim about the first of them, and it is now a measurement.
+- **~~No check of what `Engine.from_string`/`get_template` do once interposed.~~**
+  §3b answers the load path: with all nine files ours, the suite is green, so
+  the load path moves without a break. What it still does *not* say is which
+  tests would notice a wrong loader, which is the direct-entry gap §3b point 3
+  names and the plan has to close.
 - **The survey's line ranges and importer lists are unverified** (§3).
