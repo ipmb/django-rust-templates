@@ -221,8 +221,8 @@ def describe(value):
         # `SafeString` subclasses `str`, so a value-only comparison cannot tell
         # a marked-safe literal from a plain one — and the mark is what decides
         # autoescaping at render time. Django builds a constant's value with
-        # `mark_safe` (`base.py:755`, `:906`), so both sides are safe today and
-        # losing the mark should fail here rather than at M9.
+        # `mark_safe` (`base.py:755`, `base.py:906`), so both sides are safe
+        # today and losing the mark should fail here rather than at M9.
         return {"safe_str": str(value)}
     # M5's `if`. A condition is a smartif tree, which is neither a `Node` nor
     # any of the value types above, and **nothing in smartif defines `__eq__`**
@@ -242,12 +242,13 @@ def describe(value):
         }
     if isinstance(value, smartif.TokenBase):
         # Every operator class is a local `Operator` defined inside
-        # `infix`/`prefix` (`smartif.py:51`, `:78`), so `type(...).__name__` is
-        # `"Operator"` for all fourteen of them and cannot tell `and` from `==`.
-        # `id` is the operator's own spelling (`"and"`, `"not in"`, `">="`, …)
-        # and is the property that differs. The two children are described
-        # recursively, which is what makes precedence — `a and b or not c`
-        # nesting one way and not the other — a diff rather than a coincidence.
+        # `infix`/`prefix` (`smartif.py:51`, `smartif.py:78`), so
+        # `type(...).__name__` is `"Operator"` for all fourteen of them and
+        # cannot tell `and` from `==`. `id` is the operator's own spelling
+        # (`"and"`, `"not in"`, `">="`, …) and is the property that differs. The
+        # two children are described recursively, which is what makes precedence
+        # — `a and b or not c` nesting one way and not the other — a diff rather
+        # than a coincidence.
         return {
             "type": "smartif.Operator",
             "id": value.id,
