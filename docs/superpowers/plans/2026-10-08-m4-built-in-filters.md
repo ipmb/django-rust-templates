@@ -2403,8 +2403,37 @@ no-op mutation in this project already produced one false "passed".
   catch it — `floatformat("1.5", 70000)` has `len(digits) + abs(exponent)` of 3.
   Assemble by string/repetition, not through a runtime precision.
 - `filesizeformat` (`:899-940`) — `formats.number_format` plus `ngettext`, so it
-  needs both host calls, and the corpus needs `USE_THOUSAND_SEPARATOR` in both
-  states.
+  needs both host calls. **Which setting its rows need was measured, and the
+  measurement refutes what this bullet used to say** ("the corpus needs
+  `USE_THOUSAND_SEPARATOR` in both states"). Django's own call wrapped in
+  `override_settings` on the pinned tree:
+
+  | row | default | `USE_THOUSAND_SEPARATOR=True` | `LANGUAGE_CODE='de'` |
+  |---|---|---|---|
+  | `floatformat(1234567.5, 'g')` | `'1,234,567.5'` | `'1,234,567.5'` — **unmoved** | `'1.234.567,5'` |
+  | `floatformat(1234567.5, '2')` | `'1234567.50'` | `'1,234,567.50'` | `'1234567,50'` |
+  | `filesizeformat(1234567890)` | `'1.1\xa0GB'` | `'1.1\xa0GB'` — **unmoved** | `'1,1\xa0GB'` |
+  | `stringformat(1234567, 'd')` | `'1234567'` | unmoved | unmoved |
+
+  `USE_THOUSAND_SEPARATOR` therefore has leverage on **one** row shape only — a
+  `floatformat` argument *without* `'g'` — because `floatformat` passes
+  `force_grouping=True` on the `'g'` path, so the separator is there either way.
+  `stringformat` moves under neither, so a settings row for it would be a row that
+  tests nothing. **`LANGUAGE_CODE` is the axis**, and the `filesizeformat` row is
+  the one that matters: `'1,1\xa0GB'` is reachable only through the host's
+  `number_format`, where a Rust `format!("{:.1}")` answers `'1.1'` in every locale.
+  `fr` moves them too, and moves the separator to `'\xa0'` — a second locale row is
+  cheap and separates "the locale is read" from "the separator is a literal".
+
+  Two mechanics this design depends on, both measured rather than assumed.
+  `django.test.signals.reset_format_cache` is registered on `setting_changed`, so
+  `formats`' cache does not survive an override — an inner override nested inside
+  an outer `LANGUAGE_CODE='de'` was honoured, and after the inner one exited the
+  outer was still in force. And **every row on this axis pins an `expected`
+  literal**, because a misspelt setting name is a silent no-op: measured,
+  `USE_THOUSAND_SEPERATOR=True` (one letter transposed) moved *nothing* anywhere,
+  so without the literal a row with a typo'd key is green and asserts nothing. The
+  literal is the whole test on those rows, not a nicety.
 
 **What Task 7's design round found, and the three corrections it makes to this
 section.** Written before the bodies, because the first changes what the group's
@@ -2534,6 +2563,13 @@ pub struct DecimalTuple {
 /// rest of this crate does — answers `0.4` where Django answers `0.3`.
 fn filesize_number_format(&self, value: f64) -> String;
 
+/// `bytes_ / (1 << shift)` — the division **alone**, and it takes the
+/// already-converted `IntValue` so the body's single `int()` (`:905`) stays
+/// single. `KB`…`PB` are the five shifts. CPython's `int.__truediv__` is a
+/// correctly-rounded long division that does not convert its operands, so this
+/// keeps the in-range answer *and* Django's own `OverflowError` message.
+fn int_divide_by_power_of_two(&self, value: &IntValue, shift: u32) -> Result<f64, Error>;
+
 /// `int(value) % int(arg) == 0` — `divisibleby` (`:854-858`), which has **no**
 /// `try`: `arg == 0` is `ZeroDivisionError`, a non-numeric operand is
 /// `ValueError` or `TypeError`, and all three escape. Rust compares the result
@@ -2582,13 +2618,14 @@ them it cannot take at all:
   `format!("%{}", to_str(arg))`, which is the source's own `"%" + str(arg)`.
 
 So `ngettext` and `gettext` are still called by `filesizeformat` — for the format
-string — and `percent_format`/`percent_mapping` are the operator. Six new
-methods, two of them the `%`'s two operand shapes.
+string — and `percent_format`/`percent_mapping` are the operator. Seven new
+methods, two of them the `%`'s two operand shapes and one of them the division
+below.
 
-**A seventh is a live question, and the division is what raises it.** The five
-unit branches divide by a power of two (`:927-935`) — **outside** the `try`, so an
-`OverflowError` there escapes while the same class from `int()` above is caught.
-Measured:
+**The seventh is the division, and it is decided: the seam, taking the `int`.**
+The five unit branches divide by a power of two (`:927-935`) — **outside** the
+`try`, so an `OverflowError` there escapes while the same class from `int()` above
+is caught. Measured:
 
 ```text
   int(float("inf"))       OverflowError: cannot convert float infinity to integer
@@ -2605,12 +2642,12 @@ source's behaviour for `|bytes_| > f64::MAX`**, and the predicted divergence is
 `'inf.0\xa0PB'` where Django raises. The `inf`/`nan` rows do **not** depend on
 this: they are `int()`'s, and `to_int` already propagates them (measured through
 `int_modulo`, whose `OverflowError` crosses the FFI with its class intact). Only
-the >308-digit case does. Three candidate fixes:
+the >308-digit case does. Three candidate fixes were weighed:
 
-* **A seventh method** doing `int(value) / (1 << shift)` whole. The division is
-  then Python's and the boundary is exact by construction. Leaves
-  `filesize_number_format`'s doc intact — a doc whose whole content is that
-  `round` on a **float** rounds against the binary value, not the decimal one.
+* **A seventh method** doing the division whole. The division is then Python's
+  and the boundary is exact by construction. Leaves `filesize_number_format`'s doc
+  intact — a doc whose whole content is that `round` on a **float** rounds against
+  the binary value, not the decimal one.
 * **Folding the division into `filesize_number_format`'s signature**, which
   changes a signature already written down and gives that method four operations
   and one doc.
@@ -2619,11 +2656,38 @@ the >308-digit case does. Three candidate fixes:
   becomes a synthesis, not a pass-through. That is the `cut.rs` pattern and it is
   legitimate provided an `ERROR_CASES` row pins Django's wording; the cost is
   that the **condition** would have no authority above the corpus, where an
-  approximate test diverges only on inputs right at the boundary. Whichever
-  lands, the row at the boundary is what checks it.
+  approximate test diverges only on inputs right at the boundary.
 
-Decide when the body lands and the divergence is measured rather than predicted,
-not before.
+**Landed: the first, with the signature narrowed from `&Value` to `&IntValue`,
+and the reason is the fusion rule rather than convenience.** Fusion is for
+operations that are one semantic unit with **non-separable** failures; these
+separate cleanly — the division's `OverflowError` escapes and
+`filesize_number_format` on a finite float does not raise at all — and the source
+itself keeps them apart, the division inline in each branch against a nested
+`def`. Folding them under the second candidate would merge what Python separates.
+The narrowing is the half that a `&Value` signature would have got wrong: the body
+needs the int **before** this call to choose its branch (`bytes_ < KB`) and to
+compute the sign (`negative = bytes_ < 0`), so a `&Value` signature would convert
+once in the body and once in the method — two `int()` calls, which differ for any
+object whose `__int__` has a side effect, and Django calls `int(bytes_)` exactly
+once at `:905`. Taking the `IntValue` puts the method at the division alone, which
+is exactly the source's own boundary: `int()` inside the `try`, the division
+outside it.
+
+**The seam is worth it for a worse reason than a divergence.** Without it, Rust
+parses a >308-digit decimal to `f64`, gets `inf`, and answers `'inf.0\xa0PB'` — a
+plausible-looking string, silently wrong, where Django raises. That is worse than
+the `try_reserve` case, where the alternative was an abort that announces itself;
+here the alternative is a wrong answer that looks right, and nothing downstream
+would question it. And the cheaper fix is ruled out by the table above rather than
+by taste: `float(10**400)` and `10**400 / 2**50` raise `OverflowError` with
+**different messages**, so a body reaching for `to_float` would produce the right
+class and the wrong text.
+
+The reachability caveat is a reason to put the row in the differential corpus,
+not a reason to skip the seam: a >300-digit int in a context is trivially
+constructible and never in the suite. The row either side of the boundary is what
+checks it.
 
 **3. What measurement says about the individual bullets above**, three of which
 the plan got wrong and the rest of which it got only partly:
@@ -2887,7 +2951,9 @@ because it is the opposite of the `floatformat` half: `pluralize` reaches
 answers correctly under `NoFilterHost` rather than panicking into it. All four
 are `is_safe=False`, so none calls `mark_safe`.
 
-The trait is **42 methods, 25 of them `Result`**.
+The trait is **43 methods, 26 of them `Result`** — the 42/25 that wave 2 closed
+on, plus wave 3's seventh seam (the `filesizeformat` division, below), which is
+the first method added since the trait was first written down.
 
 **7. The wave landed, and it found a defect in the seam that no body test could
 have found.** The four bodies, 56 `CASES` rows and 5 `ERROR_CASES` rows are in;

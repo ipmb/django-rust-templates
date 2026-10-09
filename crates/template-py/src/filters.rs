@@ -1184,6 +1184,30 @@ impl FilterHost for PyFilterHost<'_> {
         outcome.unwrap_or_else(|e| self.infallible_failure("filesize_number_format", e))
     }
 
+    fn int_divide_by_power_of_two(&self, value: &IntValue, shift: u32) -> Result<f64, Error> {
+        let py = self.py;
+        let outcome = (|| {
+            let int_type = py.get_type::<PyInt>();
+            // `Big` holds canonical decimal text by construction, so rebuilding
+            // through Python's own `int()` is exact — the route `get_index`
+            // takes, never `eval` and never a formatted source string.
+            let left = match value {
+                IntValue::Small(n) => (*n).into_pyobject(py)?.into_any(),
+                IntValue::Big(digits) => int_type.call1((digits.as_str(),))?,
+            };
+            // `1 << shift`, built in Rust because it is exact and bounded: the
+            // five branches are 10, 20, 30, 40 and 50, well inside `i64`.
+            let divisor = (1i64 << shift).into_pyobject(py)?;
+            // `__truediv__`, not `float(left) / float(divisor)`: CPython divides
+            // the two ints exactly and rounds the *quotient* once, so this keeps
+            // Django's answer for every value in range and Django's
+            // `OverflowError: integer division result too large for a float` out
+            // of it — where converting first would raise a different message.
+            left.div(divisor)?.extract::<f64>()
+        })();
+        outcome.map_err(|e| self.host_error("int_divide_by_power_of_two", e))
+    }
+
     fn int_modulo(&self, a: &Value, b: &Value) -> Result<IntValue, Error> {
         let py = self.py;
         let outcome = (|| {

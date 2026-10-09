@@ -535,6 +535,56 @@ pub trait FilterHost {
     /// gives `0.4`. A Rust `round` over the decimal text — what the rest of this
     /// crate does — would answer `0.4`.
     fn filesize_number_format(&self, value: f64) -> String;
+    /// `bytes_ / (1 << shift)` — the division half of `filesizeformat`
+    /// (`defaultfilters.py:914-925`), where `bytes_` is the already-converted
+    /// `int`, `KB = 1 << 10` and the branches `MB`, `GB`, `TB`, `PB` are
+    /// `1 << 20`, `1 << 30`, `1 << 40`, `1 << 50`.
+    ///
+    /// **It takes the `int`, not the `Value`, and that is the whole reason it is
+    /// a seam rather than a Rust expression.** `filesizeformat` calls `int()`
+    /// **once** at `:905`; the body needs the result before this call to choose
+    /// its branch (`bytes_ < KB`) and to compute the sign (`negative = bytes_ < 0`).
+    /// A `&Value` signature would make the body convert, then the method convert
+    /// again — two calls, which for an object whose `__int__` has side effects is
+    /// two answers. Taking the `IntValue` puts the method at the division alone,
+    /// which is exactly the source's own boundary: the `int()` sits inside the
+    /// `try` at `:905-907` (its `ValueError`/`TypeError` become `'0 bytes'`), and
+    /// the division sits **outside** it, so its `OverflowError` escapes the
+    /// filter. One method, one statement of the source, one failure mode.
+    ///
+    /// The division must run in Python rather than over two `f64`s. CPython's
+    /// `int.__truediv__` is a correctly-rounded long division that does not
+    /// convert its operands, which is what makes the two failure messages below
+    /// differ; `float(a) / float(b)` would answer for inputs in range and change
+    /// the text out of range.
+    ///
+    /// **Measured on the pinned interpreter** (`.django/` @ 6.0.9, CPython
+    /// 3.14.4) — the five shapes that fix the boundary, and none of them is
+    /// reachable from the suite:
+    ///
+    /// | expression | outcome |
+    /// |---|---|
+    /// | `filesizeformat(inf)` | `OverflowError: cannot convert float infinity to integer` — from `int()`, inside the `try`, so it is **not** caught: the `except` names `(TypeError, ValueError, UnicodeDecodeError)` |
+    /// | `filesizeformat(nan)` | `'0\xa0bytes'` — `int(nan)` is a `ValueError`, which **is** caught |
+    /// | `10**400 / 2**50` | `OverflowError: integer division result too large for a float` |
+    /// | `float(10**400)` | `OverflowError: int too large to convert to float` |
+    /// | `number_format(inf, 1)` | `'inf.0'` |
+    ///
+    /// The last three are why this cannot be answered by a Rust `f64`: a
+    /// >308-digit decimal parses to `inf`, and `inf.0` formats to `'inf.0\xa0PB'`
+    /// — a plausible string, silently wrong, where Django raises. The last two
+    /// are why it cannot be answered by [`FilterHost::to_float`] either: both
+    /// raise `OverflowError` and the **messages differ**, so a body reaching for
+    /// the float seam would produce the right class and the wrong text.
+    ///
+    /// Not folded into [`FilterHost::filesize_number_format`] as one
+    /// `int_and_divide`-style call, and the reason is the fusion rule rather than
+    /// convenience: fusion is for operations that are one semantic unit with
+    /// non-separable failures. Here they separate cleanly — the division's
+    /// `OverflowError` escapes and the formatter on a finite float raises at all —
+    /// and the source itself keeps them apart, inline in each branch against a
+    /// nested `def`. Folding them would merge what Python separates.
+    fn int_divide_by_power_of_two(&self, value: &IntValue, shift: u32) -> Result<f64, Error>;
     /// `int(a) % int(b)` — `divisibleby` (`:854-858`), which has **no** `try`, so
     /// `b == 0` is a `ZeroDivisionError` and a non-numeric operand a `ValueError`
     /// or `TypeError`; all three escape the filter.
@@ -759,6 +809,10 @@ impl FilterHost for NoFilterHost {
         refused_panic("filesize_number_format")
     }
 
+    fn int_divide_by_power_of_two(&self, _value: &IntValue, _shift: u32) -> Result<f64, Error> {
+        Err(refused("int_divide_by_power_of_two"))
+    }
+
     fn int_modulo(&self, _a: &Value, _b: &Value) -> Result<IntValue, Error> {
         Err(refused("int_modulo"))
     }
@@ -786,7 +840,7 @@ impl FilterHost for NoFilterHost {
 /// `#[cfg(test)]`, because the only thing that needs it is a test: this crate's
 /// `cargo test` compiles every `#[cfg(test)] mod tests` in `filters/<name>.rs`
 /// against the same crate, so it is visible everywhere an agent's filter tests
-/// live. Shipping it in the library would put 41 `Option` fields and two
+/// live. Shipping it in the library would put 43 `Option` fields and two
 /// `RefCell`s in the real build, reachable from a non-test path with nothing to
 /// stop it. The one cost is that a *doc* test cannot demonstrate it — doc tests
 /// link against the crate compiled normally — so its demonstrations live in the
@@ -797,7 +851,7 @@ pub struct TestFilterHost {
     // Crate-visible rather than private, and the reason is a Rust rule worth
     // stating: functional-update syntax (`..TestFilterHost::default()`) requires
     // *every* field to be visible at the construction site, so two private fields
-    // here would stop a filter module's test from scripting any of the 42 answers
+    // here would stop a filter module's test from scripting any of the 43 answers
     // — the struct's whole purpose. `pub(crate)` is the narrowest visibility that
     // restores it, and it costs nothing in this struct's case, since the struct is
     // itself `#[cfg(test)]` and so unconstructible from outside the crate anyway.
@@ -856,6 +910,7 @@ pub struct TestFilterHost {
     pub decimal_parse: Option<DecimalParse>,
     pub decimal_quantize: Option<DecimalTuple>,
     pub filesize_number_format: Option<String>,
+    pub int_divide_by_power_of_two: Option<f64>,
     pub int_modulo: Option<IntValue>,
     pub now: Option<Value>,
 }
@@ -1205,6 +1260,12 @@ impl FilterHost for TestFilterHost {
         self.filesize_number_format
             .clone()
             .unwrap_or_else(|| refused_panic("filesize_number_format"))
+    }
+
+    fn int_divide_by_power_of_two(&self, _value: &IntValue, _shift: u32) -> Result<f64, Error> {
+        self.record("int_divide_by_power_of_two")?;
+        self.int_divide_by_power_of_two
+            .ok_or_else(|| refused("int_divide_by_power_of_two"))
     }
 
     fn int_modulo(&self, _a: &Value, _b: &Value) -> Result<IntValue, Error> {
