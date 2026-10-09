@@ -23,6 +23,7 @@ instrument and the pin cannot agree with each other about a wrong number.
 """
 
 import inspect
+import os
 import pathlib
 import sys
 import types
@@ -49,6 +50,21 @@ class HandRolledDescriptor:
 
     def __get__(self, instance, owner):
         return self.func.__get__(instance, owner)
+
+
+def _passthrough(func):
+    """A decorator that returns a wrapper written **here**, around ``func``."""
+    import functools
+
+    @functools.wraps(func)
+    def inner(*args, **kwargs):
+        return func(*args, **kwargs)
+
+    return inner
+
+
+# A member whose ``def`` is in this file and whose ``__wrapped__`` is not.
+wrapped_foreign = _passthrough(os.path.join)
 
 
 def _hand_rolled(self):
@@ -335,10 +351,138 @@ class DescriptorCountingTests(unittest.TestCase):
 
         member = vars(base.TokenType)["_new_member_"]
         self.assertTrue(
-            inspect.isbuiltin(_innermost(member)),
+            inspect.isbuiltin(_innermost(member, os.path.realpath(base.__file__))),
             "the premise: this member resolves to something with no source",
         )
         self.assertNotIn("TokenType._new_member_", residue(base))
+
+    def test_a_wrapper_we_wrote_around_a_foreign_function_stays_ours(self):
+        """The mirror of the ``@contextmanager`` case: the walk must not leave.
+
+        ``functools.wraps`` sets ``__wrapped__`` and the walk follows it to reach
+        the ``def`` behind a decorator artifact. Followed unconditionally it also
+        walks *out* of our file when the wrapper **is** the ``def`` we wrote and
+        the thing under it is somebody else's. Measured on the closed tree:
+        ``getsourcefile`` says this file, ``_innermost`` returned
+        ``os.path.join``, ``_is_ours`` said False, and ``definitions`` dropped
+        the member — an owned, recognised, executed function missing from the
+        compared path, which is the ``args_check`` under-count arriving *through*
+        the fix for ``args_check``.
+
+        The premise is asserted first, because a negative result from a fixture
+        nobody showed to be positive is how both of this instrument's last two
+        wrong readings happened.
+
+        This row is about the *walk* only. The span is a second question with a
+        second answer, and it is refused — see the row below, which turns this
+        same fixture into the case the first version of the span guard could not
+        see.
+        """
+        from tests.compared_path import _defining_file, _innermost, _is_ours
+
+        own = os.path.realpath(__file__)
+        self.assertNotEqual(
+            _defining_file(wrapped_foreign.__wrapped__),
+            own,
+            "the premise: whatever it wraps is somebody else's",
+        )
+        self.assertEqual(
+            _defining_file(wrapped_foreign),
+            own,
+            "the premise: and the wrapper itself was written here",
+        )
+
+        subject = types.ModuleType("wrapper_owner")
+        subject.__file__ = __file__
+        subject.wrapped_foreign = wrapped_foreign
+
+        self.assertTrue(
+            _is_ours(wrapped_foreign, subject),
+            "the walk must stop at the wrapper — it is the def we wrote, and "
+            "following __wrapped__ out of the file made definitions drop an "
+            "owned, recognised, executed function from the compared path",
+        )
+        self.assertEqual(
+            _defining_file(_innermost(wrapped_foreign, own)),
+            own,
+            "following __wrapped__ left this file",
+        )
+
+    def test_a_span_read_from_another_file_is_refused(self):
+        """A span is two integers, so nothing downstream can ask where it came from.
+
+        ``COMPARED_PATH`` is a list of line ranges and clause (4) compares them
+        to declared regions as integers, so a span read out of a foreign file is
+        indistinguishable from one of ours — this row and the next execute the
+        two ways that happens, because a guard nobody has seen fire is a guard
+        nobody knows works.
+
+        This is the plain arm: the member's ``def`` *is* in another file. It
+        needs ``_is_ours`` true and the span foreign at once, which is the
+        hand-written-descriptor arm — a local ``staticmethod`` subclass is this
+        module's, and the ``def`` it wraps is not.
+        """
+        from tests.compared_path import ForeignSpan, definitions
+
+        subject = types.ModuleType("span_owner")
+        subject.__file__ = str(PROJECT_ROOT / "tests" / "span_owner.py")
+        subject.__dict__["FOREIGN"] = _passthrough
+        exec(
+            compile(
+                "class LocalStatic(staticmethod):\n"
+                "    pass\n"
+                "\n"
+                "class C:\n"
+                "    member = LocalStatic(FOREIGN)\n",
+                subject.__file__,
+                "exec",
+            ),
+            subject.__dict__,
+        )
+
+        with self.assertRaises(ForeignSpan) as caught:
+            definitions(subject)
+        self.assertIn("member", str(caught.exception))
+        self.assertIn("span_owner.py", str(caught.exception))
+
+    def test_a_wrapper_whose_span_unwraps_out_of_the_file_is_refused(self):
+        """The arm the first version of the guard could not see, on the same fixture.
+
+        ``getsourcelines`` unwraps ``__wrapped__`` before it reads, so the span
+        of a wrapper *we* wrote around a foreign function comes out of that
+        function's file while the wrapper's own ``co_filename`` is ours. The
+        guard's first version compared the wrapper's file, agreed with itself,
+        and recorded 72-92 of ``<frozen posixpath>`` as this file's ``def
+        inner`` — measured, and the assertion that caught it quoted the *test
+        file's* lines 72-92, which is the hazard in one sentence: two files can
+        share a line number and the span is only two integers.
+
+        The fix asks about the object ``getsourcelines`` actually read —
+        ``inspect.unwrap`` of the member, the same expression :func:`span_of`
+        uses — so the refusal lands exactly where the read does.
+        """
+        from tests.compared_path import ForeignSpan, _defining_file, definitions
+
+        own = os.path.realpath(__file__)
+        self.assertEqual(
+            _defining_file(wrapped_foreign),
+            own,
+            "the premise: the wrapper's own file is this one",
+        )
+        self.assertNotEqual(
+            _defining_file(inspect.unwrap(wrapped_foreign)),
+            own,
+            "the premise: and the file the span is read from is not",
+        )
+
+        subject = types.ModuleType("unwrapped_span_owner")
+        subject.__file__ = __file__
+        subject.wrapped_foreign = wrapped_foreign
+
+        with self.assertRaises(ForeignSpan) as caught:
+            definitions(subject)
+        self.assertIn("wrapped_foreign", str(caught.exception))
+        self.assertIn("posixpath", str(caught.exception))
 
     def test_the_residue_check_is_silent_on_the_transcriptions(self):
         """The control for the row above, and the reason it is not vacuous.

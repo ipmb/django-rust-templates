@@ -63,6 +63,17 @@ class UnhandledMember(RuntimeError):
     """
 
 
+class ForeignSpan(RuntimeError):
+    """A ``definitions`` span read out of a file the module does not own.
+
+    The companion of :class:`UnhandledMember` for the other way this instrument
+    can lie: a member recognised, owned, and measured — at somebody else's line
+    numbers. ``COMPARED_PATH`` is a list of integers and nothing downstream can
+    tell where they came from, so the check has to happen where the span is
+    taken.
+    """
+
+
 _CACHED_PROPERTY_KINDS = frozenset(
     {
         ("functools", "cached_property"),
@@ -87,7 +98,7 @@ def _is_cached_property(value):
     return (kind.__module__, kind.__name__) in _CACHED_PROPERTY_KINDS
 
 
-def _innermost(value):
+def _innermost(value, own_file):
     """The ``def`` a member was written as, under any decorator or descriptor.
 
     ``Engine.get_default`` is ``@staticmethod`` over ``@functools.lru_cache``
@@ -95,17 +106,12 @@ def _innermost(value):
     did this module write it — is about the ``def``, and it is two wrappers
     down. ``None`` for a member that holds no function at all.
 
-    ``__wrapped__`` is followed too, for a different reason. ``context.py``'s
-    ``Context.bind_template``, ``RenderContext.push_state`` and
-    ``RequestContext.bind_template`` are ``@contextlib.contextmanager``, whose
-    *result* is a helper function created in ``contextlib.py`` — so the object
-    in the class dict is real, callable, `inspect.isfunction`-true, and **written
-    in another file**, in both senses: its ``co_filename`` is ``contextlib.py``
-    and a span read from it is a line number in ``contextlib.py``. The previous
-    sweep included all three on the strength of ``isfunction`` alone and gave
-    them spans from the wrong file; none of them happened to be on the compared
-    path, so no pin ever carried the nonsense. ``functools.wraps`` sets
-    ``__wrapped__``, and it is the ``def`` this module wrote.
+    ``own_file`` is the realpath of the file the module under instrument was
+    loaded from, and it is what stops the ``__wrapped__`` arm walking *out* of
+    that file — see :func:`_written_elsewhere`. It is a required argument rather
+    than an optional one because there is no useful answer without it: the walk
+    is a question about whose file a function is in, and a caller that has no
+    module in hand cannot ask it.
     """
     for _ in range(8):
         if isinstance(value, (staticmethod, classmethod)):
@@ -118,11 +124,59 @@ def _innermost(value):
             value = value.func
         elif _LRU_CACHE_WRAPPER is not None and isinstance(value, _LRU_CACHE_WRAPPER):
             value = value.__wrapped__
-        elif inspect.isfunction(value) and getattr(value, "__wrapped__", None) is not None:
+        elif _written_elsewhere(value, own_file) and getattr(
+            value, "__wrapped__", None
+        ) is not None:
             value = value.__wrapped__
         else:
             return value
     return None  # pragma: no cover — no real member nests eight deep
+
+
+def _written_elsewhere(value, own_file):
+    """Whether ``value`` is a function some *other* file wrote.
+
+    This is the reviewer's second finding, and it is the mirror of the one the
+    ``__wrapped__`` arm was added for. ``functools.wraps`` sets ``__wrapped__``,
+    and whether that is a decorator artifact to look through depends on whose
+    file the *current* function is in:
+
+    * ``@contextlib.contextmanager`` — the class dict holds a helper created in
+      ``contextlib.py``, so the object is real, ``isfunction``-true, and written
+      in another file. Looking through lands on the ``def`` ``context.py`` wrote,
+      which is the answer.
+    * a wrapper **we** wrote around a foreign function::
+
+          def deco(f):
+              @functools.wraps(f)
+              def inner(*a, **k):
+                  return f(*a, **k)
+              return inner
+
+          joined = deco(os.path.join)
+
+      — the ``def`` that executes *is* ``inner``, written in our file, and
+      following ``__wrapped__`` leaves the file. Measured on the closed tree
+      before this was fixed: ``getsourcefile(joined)`` is the subject's own
+      file, but ``_innermost`` returned ``os.path.join``, so ``_is_ours`` said
+      False, ``definitions`` dropped the member, and ``residue`` stayed quiet —
+      the ``args_check`` under-count arriving *through* the fix for
+      ``args_check``.
+
+    So the arm follows only while the current function is not already ours.
+
+    **The two ``inspect`` functions differ in exactly this, and the difference is
+    why the walk exists.** ``inspect.getsourcelines`` unwraps ``__wrapped__``
+    internally, so a span read from a ``@contextmanager`` member was *always*
+    ``context.py``'s lines — measured: ``Context.bind_template`` reports
+    ``co_firstlineno`` 303 in ``contextlib.py`` and a span of 157-165 in
+    ``context.py``. ``inspect.getsourcefile`` reads ``__code__.co_filename``
+    directly and does not unwrap, so *ownership* is the question the walk
+    answers, and it is the only one.
+    """
+    if not inspect.isfunction(value):
+        return False
+    return _defining_file(value) != own_file
 
 
 def _plain(wrapper):
@@ -186,9 +240,9 @@ def _defining_file(written):
         return None
 
 
-def _owning_file(value):
+def _owning_file(value, own_file):
     """The file the function behind ``value`` was written in, or ``None``."""
-    written = _innermost(value)
+    written = _innermost(value, own_file)
     if written is None:
         return None
     return _defining_file(written)
@@ -209,7 +263,8 @@ def _is_ours(value, module):
     here, so a function it hands back is this module's function whatever
     ``getsourcefile`` can see.
     """
-    return _owning_file(value) == os.path.realpath(module.__file__) or (
+    own = os.path.realpath(module.__file__)
+    return _owning_file(value, own) == own or (
         hasattr(type(value), "__get__")
         and getattr(type(value), "__module__", None) == module.__name__
     )
@@ -269,16 +324,28 @@ def _is_foreign(value, module):
     reviewer on the example above: ``inspect.isroutine(Lazy_instance)`` is
     ``True``, and a draft of this rule using it returned ``[]`` for the very case
     it was written to catch.
+
+    **A ``functools.partial`` member is loud, and that is this arm working.**
+    The reviewer raised it as the one shape whose polarity they were unsure of:
+    a class-level ``partial(os.path.join, "/tmp")`` written here has no
+    ``__func__``-shaped ``def`` to reach and no source of its own, so
+    ``_owning_file`` returns ``None`` — and arm 4 turns that into a report.
+    Measured: ``_is_ours`` False, ``_is_foreign`` False, ``residue``
+    ``['holder']``, ``definitions`` ``{}``. Reported rather than silently
+    dropped is the right direction, and if a real module ever grows one the
+    answer is to add ``partial.func`` to :func:`_innermost`'s table — a new row
+    for a new shape — not to soften this arm.
     """
     if inspect.ismemberdescriptor(value) or inspect.isgetsetdescriptor(value):
         return True
-    written = _innermost(value)
+    own = os.path.realpath(module.__file__)
+    written = _innermost(value, own)
     if written is None or inspect.isbuiltin(written):
         return True
     source = _defining_file(written)
     if source is None:
         return False
-    return source != os.path.realpath(module.__file__)
+    return source != own
 
 
 def _callable_member(value):
@@ -338,12 +405,34 @@ def residue(module):
 
 
 def span_of(func):
-    """The ``(first, last)`` lines ``func`` occupies, 1-based, or ``None``."""
+    """The span ``func`` occupies, and the file those lines were read out of.
+
+    ``((first, last), path)`` — 1-based lines, and ``os.path.realpath`` of the
+    file they came from — or ``(None, None)`` when ``inspect`` can find no
+    source for ``func`` at all.
+
+    **The file is returned because ``inspect.getsourcelines`` unwraps
+    ``__wrapped__`` before it looks**, and the two shapes that matters for here
+    do *not* land in the same place:
+
+    * a ``@contextlib.contextmanager`` member — the wrapper in the class dict
+      was created in ``contextlib.py`` and the ``def`` behind it is ours, so
+      unwrapping is exactly what makes the span ``context.py``'s. Correct, and
+      the reason the ownership walk exists at all.
+    * a wrapper **we** wrote around a foreign function (``functools.wraps`` over
+      ``os.path.join``) — the wrapper's own ``co_filename`` is ours and the
+      ``def`` behind it is somebody else's, so unwrapping makes the span
+      *theirs*. Measured: ``span_of`` there is 72-92 of ``<frozen posixpath>``
+      while ``getsourcefile`` of the wrapper names the caller's file. A bare
+      pair of integers from another file is what :class:`ForeignSpan` exists to
+      refuse, and nothing downstream can tell the difference — so the file
+      travels with the lines and :func:`definitions` checks it.
+    """
     try:
         lines, first = inspect.getsourcelines(func)
     except (OSError, TypeError):
-        return None
-    return (first, first + len(lines) - 1)
+        return None, None
+    return (first, first + len(lines) - 1), _defining_file(inspect.unwrap(func))
 
 
 def _one_level(value):
@@ -406,13 +495,43 @@ def definitions(module):
     recover source lines from an ``lru_cache`` wrapper or a ``cached_property``,
     and a label whose span is ``None`` is dropped by :func:`measure`, which is
     the measurement quietly going missing rather than the instrument saying so.
+
+    **And the span's own file is asserted to be this module's**, because a span
+    is a bare pair of integers and the only consumers of it are ``COMPARED_PATH``
+    and clause (4), which compare integers. A span read from another file is
+    numerically indistinguishable from one of ours.
+
+    The check has to ask about the file :func:`span_of` read from, and that is
+    the file of the **unwrapped** function, not of ``written``: the first
+    version of this guard compared ``_defining_file(written)`` and was blind to
+    exactly the shape it was written for — a ``functools.wraps`` wrapper we
+    wrote around a foreign function has *our* ``co_filename`` and a *foreign*
+    ``__wrapped__``, so it passed the check while its lines came out of
+    ``<frozen posixpath>``. The mirror of the ``_innermost`` defect, one
+    function later: the walk and the read have to agree about which object they
+    are talking about, and ``getsourcelines`` unwraps while ``getsourcefile``
+    does not. ``read_from`` is that agreement, taken from the same expression
+    ``getsourcelines`` uses.
+
+    Measured on the closed tree with the unwrapping comparison: no span of any
+    of the twelve comes from a foreign file, so the class remains *absent* in
+    the corpus — and the two rows in ``test_compared_path_instrument`` execute
+    both arms of the raise, because a guard nobody has seen fire is a guard
+    nobody knows works.
     """
+    own = os.path.realpath(module.__file__)
     out = {}
     for owner, name, value in members(module):
         if _invoked(value) is None or not _is_ours(value, module):
             continue
+        written = _innermost(value, own)
+        span, read_from = span_of(written)
+        if span is not None and read_from != own:
+            raise ForeignSpan(
+                f"{name}: span {span} was read from {read_from}, not {own}"
+            )
         label = name if owner is module else f"{label_of(owner)}.{name}"
-        out[label] = span_of(_innermost(value))
+        out[label] = span
     return out
 
 

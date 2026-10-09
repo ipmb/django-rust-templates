@@ -2027,11 +2027,22 @@ more members joined `definitions` without joining any pin — `Origin.loader_nam
   version of the fix dropped `Context.bind_template`, `RenderContext.push_state`
   and `RequestContext.bind_template` from `definitions`, because they are
   `@contextlib.contextmanager` and the object in the class dict is a helper
-  *created in `contextlib.py`*. The previous sweep included them on the strength
-  of `isfunction` alone and gave them spans read out of `contextlib.py` — real
-  line numbers, wrong file, and no pin ever carried one because none of the three
-  is reached by the corpus. Following `__wrapped__` restores them with the span
-  this file wrote.
+  *created in `contextlib.py`*. Following `__wrapped__` restores them with the
+  span this file wrote.
+
+  **Corrected in the close-out: the reason first written here was wrong, and the
+  measurement that falsifies it is one line.** This block said the previous sweep
+  "gave them spans read out of `contextlib.py`". It did not.
+  `inspect.getsourcelines` unwraps `__wrapped__` **internally** before it reads,
+  so those three spanned `context.py` then exactly as they do now — measured,
+  `Context.bind_template`'s helper has `co_firstlineno` 303 in `contextlib.py`
+  and a span of 157-165 in `context.py`. The file was never the defect. What the
+  old sweep got wrong was **ownership**: `_innermost` returned the `contextlib.py`
+  helper, so `_is_ours` was False and the member was dropped. The distinction is
+  the whole reason the walk and the span read are separate questions —
+  `getsourcelines` unwraps, `getsourcefile` reads `__code__.co_filename` and does
+  not — and it is the confusion the finding below then reproduced one function
+  later.
 * **`TokenType.__new__` is no longer listed, and that is the correct answer.**
   It is `Enum.__new__`, injected into the class by the metaclass from `enum.py`.
   The previous sweep listed it with a span read out of `enum.py`. It is not
@@ -2092,6 +2103,42 @@ the exclusion to reach for: it includes `ismethoddescriptor`, true for any
 object with `__get__` and no `__set__`, so it swallows precisely the case being
 hunted — `inspect.isroutine(Lazy_instance)` is `True`, and the reviewer's first
 draft of the rule returned `[]` for the very example it was written to catch.
+
+**Reviewer finding, fixed in the close-out: the `__wrapped__` walk was
+unconditional, and it could leave the file.**
+
+The same arm, one direction over. `_innermost` followed `__wrapped__` without
+asking whose file the current function was in. Correct for
+`@contextlib.contextmanager`, where the wrapper is `contextlib.py`'s and the
+`def` behind it is ours; wrong for a `functools.wraps` wrapper **we** wrote
+around a foreign function, where the current function *is* the `def` we wrote
+and `__wrapped__` points out of the file. Measured with the reviewer's
+reproduction: `getsourcefile(joined)` is the subject's own file, `_innermost`
+returned `os.path.join`, `_is_ours` said False, `definitions` carried only the
+other member — **an owned, recognised, executed function missing from the
+compared path**, which is the `args_check` under-count arriving *through* the fix
+for `args_check`.
+
+The fix is one condition — follow `__wrapped__` only while the current function
+is not already ours (`_written_elsewhere`) — and it serves both directions.
+Measured pin-neutral: **0 of the twelve `COMPARED_PATH` modules' `definitions`
+change**, fast check green.
+
+**And the span read had the same disagreement, which the first version of the
+`ForeignSpan` guard could not see.** `span_of` uses `getsourcelines`, which
+unwraps; the guard's first version compared `_defining_file(written)` — the
+*wrapper's* `co_filename` — so for that same wrapper it agreed with itself and
+recorded **72-92 of `<frozen posixpath>`** (that is `def join`) as this module's
+`def inner`. Measured: the span for `functools.wraps`-wrapped `os.path.join` is
+posixpath's lines 72-92, and `span_of`'s first version reported only the
+integers. The row that caught it printed the *test file's* lines 72-92 in its
+failure message, which is the hazard in one sentence — **two files can share a
+line number and a span is two integers** — and it is why `span_of` now returns
+the file alongside the span and `definitions` compares *that*, taken from the
+same `inspect.unwrap` `getsourcelines` uses. Re-measured with the unwrapping
+comparison: still **0 of the twelve** read a span from a foreign file, so the
+class is absent from the corpus and now impossible rather than merely unlikely.
+Two rows execute both arms of the raise.
 
 ---
 
