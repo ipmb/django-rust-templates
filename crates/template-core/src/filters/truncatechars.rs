@@ -15,7 +15,7 @@
 //! **Rust owns the `int(arg)` and its silent failure; the host owns the
 //! truncation.** The split is the plan's, and the reason is that
 //! `Truncator.chars` reaches `unicodedata.normalize("NFC")` and
-//! `unicodedata.combining` per character (`text.py:205`, `:220`) and the
+//! `unicodedata.combining` per character (`text.py:205`, `text.py:220`) and the
 //! translatable `add_truncation_text` marker — a Rust `chars` would need a third
 //! Unicode table. Delegating it whole is also what makes the combining-mark rule
 //! testable in one place: `truncatechars("e\u{301}x", 2)` is `"\u{e9}x"`

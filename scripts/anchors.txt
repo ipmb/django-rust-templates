@@ -478,7 +478,7 @@ safestring.py:64-78	django/utils/safestring.py	64	78	@keep_lazy(SafeString)	retu
 text.py:36	django/utils/text.py	36	-	\r\n	-
 text.py:193-261	django/utils/text.py	193	261	-	-
 text.py:203-204	django/utils/text.py	203	204	if length <= 0:	return ""
-text.py:205	django/utils/text.py	205	-	-	-
+text.py:205	django/utils/text.py	205	-	text = unicodedata.normalize("NFC", self._wrapped)	-
 text.py:220	django/utils/text.py	220	-	if unicodedata.combining(char):	-
 text.py:236	django/utils/text.py	236	-	-	-
 django/utils/text.py:282	django/utils/text.py	282	-	-	-
