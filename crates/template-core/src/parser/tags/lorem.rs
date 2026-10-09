@@ -21,7 +21,7 @@
 //!
 //! # `common` is a bool, not a flag on the presence of `random`
 //!
-//! `common = bits[-1] != "random"` (`:1160`), so `{% lorem %}` — whose last bit
+//! `common = bits[-1] != "random"` (`:1162`), so `{% lorem %}` — whose last bit
 //! is the tag name — is `True` without any pop happening. The negation is easy
 //! to invert by accident and the field feeds `words`/`paragraphs` at render
 //! time.
