@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+
+# Rust
+target/
+
+# Pinned Django checkout (fetched, never committed)
+.django/
+
+# Build artifacts
+*.so
+dist/
+build/
