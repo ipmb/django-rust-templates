@@ -82,10 +82,10 @@ DEFERRED_NO_FILTER_EXPRESSION = {"block", "load", "partial", "partialdef"}
 # has fourteen members, and the three it must shed are shed for three different
 # reasons: `extends` and `include` are the loader tags §6 assigns to Python
 # outright, and `querystring` is deferred *within* the FilterExpression bucket
-# because it is the only `simple_tag` in `defaulttags.py` (`:1286`) — parsing it
-# needs `SimpleNode` in `NODE_CLASSES`, a host handle to the Python callable, and
-# `parse_bits` driven by that callable's signature, all of which are M6's
-# `Library` machinery. A bespoke node would fail parity, because Django's own
+# because it is the only `simple_tag` in `defaulttags.py` (`defaulttags.py:1286`)
+# — parsing it needs `SimpleNode` in `NODE_CLASSES`, a host handle to the Python
+# callable, and `parse_bits` driven by that callable's signature, all of which are
+# M6's `Library` machinery. A bespoke node would fail parity, because Django's own
 # tree holds a `SimpleNode` and the parity comparison is by class name.
 M5_TAGS = {
     "cycle", "filter", "firstof", "for", "if", "ifchanged", "lorem",
