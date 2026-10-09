@@ -13,7 +13,7 @@
 //!    (`defaulttags.py:993-995`) — errors here are smartif's, and they are the *only* errors a
 //!    malformed condition can produce.
 //! 2. `parser.parse(("elif", "else", "endif"))`, then `next_token()` (`defaulttags.py:996`).
-//! 3. A `while token.contents.startswith("elif")` loop (`defaulttags.py:1001-1006`) — note
+//! 3. A `while token.contents.startswith("elif")` loop (`defaulttags.py:999-1006`) — note
 //!    **`startswith`**, not `==`: `Parser.parse` stops on
 //!    `token.contents.split()[0] in parse_until`, so `{% elif foo %}` terminates
 //!    the body and its contents are `"elif foo"` (`base.py:561-564`).

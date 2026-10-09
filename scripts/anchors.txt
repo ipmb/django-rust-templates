@@ -213,7 +213,7 @@ defaulttags.py:993-995	django/template/defaulttags.py	993	995	condition = Templa
 defaulttags.py:995	django/template/defaulttags.py	995	-	conditions_nodelists = [(condition, nodelist)]	-
 defaulttags.py:995-996	django/template/defaulttags.py	995	996	-	-
 defaulttags.py:996	django/template/defaulttags.py	996	-	token = parser.next_token()	-
-defaulttags.py:1001-1006	django/template/defaulttags.py	1001	1006	-	-
+defaulttags.py:999-1006	django/template/defaulttags.py	999	1006	while token.contents.startswith("elif"):	# {% else %} (optional)
 defaulttags.py:1002-1003	django/template/defaulttags.py	1002	1003	-	-
 defaulttags.py:1009-1018	django/template/defaulttags.py	1009	1018	-	-
 defaulttags.py:1011	django/template/defaulttags.py	1011	-	-	-
