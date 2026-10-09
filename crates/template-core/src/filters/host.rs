@@ -347,6 +347,47 @@ pub trait FilterHost {
     /// **object**, not for the items it materialises — the two differ for a
     /// generator, which is truthy even when it yields nothing. See that type.
     fn as_nested_sequence(&self, value: &Value) -> Result<Option<NestedSequence>, Error>;
+    /// The comma-separated bits of a filter's argument — `pluralize`
+    /// (`defaultfilters.py:950-952`) and `yesno` (`:863`) — as one call.
+    ///
+    /// `prepend_comma` is the whole of the difference between the two callers,
+    /// and it is load-bearing in both directions rather than convenient:
+    /// `pluralize` prefixes a comma to an argument that has none (`if "," not in
+    /// arg: arg = "," + arg`) so that `pluralize(1)` has the bits `["", "s"]`,
+    /// while `yesno` splits the argument as it stands so that
+    /// `yesno(True, "yes")` has the single bit `["yes"]` and returns the
+    /// **value** rather than a word. A caller that shared one setting would get
+    /// one of those two rows wrong.
+    ///
+    /// **One method rather than `contains` plus a concatenation plus `split`,
+    /// because the three are one question whose answer depends on the argument's
+    /// type** — §D7.1's fusion test. All four measured on the pinned tree, all
+    /// reachable from template syntax:
+    ///
+    /// ```text
+    /// {{ x|yesno:5 }}      -> AttributeError: 'int' object has no attribute 'split'
+    /// {{ x|pluralize:5 }}  -> TypeError: argument of type 'int' is not a container or iterable
+    /// pluralize(1, [1])    -> TypeError: can only concatenate str (not "list") to str
+    /// pluralize(1, [","])  -> AttributeError: 'list' object has no attribute 'split'
+    /// ```
+    ///
+    /// The last two are the pair that settles it: `"," in [","]` is a
+    /// **membership** test answering `True`, so that argument skips the
+    /// concatenation and dies at the split instead. Which of the three operations
+    /// raises, and with which class, is therefore the argument's type's decision —
+    /// and `str` is not even the question, since a `str` subclass that answers
+    /// `__html__` (markupsafe's `Markup`) passes all three. Split back out,
+    /// `contains` and the concatenation would each have exactly one caller, which
+    /// is the `repr` mistake one method along that [`FilterHost::slugify`]'s doc
+    /// names.
+    ///
+    /// The filters' own logic stays in the bodies: `len(bits) > 2 -> ""` is
+    /// `pluralize`'s and `len(bits) < 2` returning the value is `yesno`'s.
+    ///
+    /// Measured but **not** reachable from the corpus's ordinary rows — the
+    /// comparison is on an answer, so a row can only pin these arms through its
+    /// `raises` key. See `tests/filter_cases.py`.
+    fn comma_bits(&self, value: &Value, prepend_comma: bool) -> Result<Vec<String>, Error>;
 
     // --- CPython string-method semantics ------------------------------------
     /// `str.lower()`. **Not a per-code-point table**, and that is the finding:
@@ -614,6 +655,10 @@ impl FilterHost for NoFilterHost {
         Err(refused("as_nested_sequence"))
     }
 
+    fn comma_bits(&self, _value: &Value, _prepend_comma: bool) -> Result<Vec<String>, Error> {
+        Err(refused("comma_bits"))
+    }
+
     fn str_lower(&self, _text: &str) -> String {
         refused_panic("str_lower")
     }
@@ -752,7 +797,7 @@ pub struct TestFilterHost {
     // Crate-visible rather than private, and the reason is a Rust rule worth
     // stating: functional-update syntax (`..TestFilterHost::default()`) requires
     // *every* field to be visible at the construction site, so two private fields
-    // here would stop a filter module's test from scripting any of the 41 answers
+    // here would stop a filter module's test from scripting any of the 42 answers
     // — the struct's whole purpose. `pub(crate)` is the narrowest visibility that
     // restores it, and it costs nothing in this struct's case, since the struct is
     // itself `#[cfg(test)]` and so unconstructible from outside the crate anyway.
@@ -788,6 +833,7 @@ pub struct TestFilterHost {
     /// `Result<Option<NestedSequence>, Error>` — and the outer layer here is the
     /// scripted/unscripted question, not a third meaning.
     pub as_nested_sequence: Option<Option<NestedSequence>>,
+    pub comma_bits: Option<Vec<String>>,
     pub str_lower: Option<String>,
     pub str_title: Option<String>,
     pub strip_tags: Option<String>,
@@ -992,6 +1038,11 @@ impl FilterHost for TestFilterHost {
         self.as_nested_sequence
             .clone()
             .ok_or_else(|| refused("as_nested_sequence"))
+    }
+
+    fn comma_bits(&self, _value: &Value, _prepend_comma: bool) -> Result<Vec<String>, Error> {
+        self.record("comma_bits")?;
+        self.comma_bits.clone().ok_or_else(|| refused("comma_bits"))
     }
 
     fn str_lower(&self, _text: &str) -> String {
@@ -1230,7 +1281,7 @@ mod tests {
     /// Every `Result` operation of `NoFilterHost` refuses, and refuses under its
     /// own name.
     ///
-    /// The whole 20 rather than a sample: a single method that accidentally
+    /// The whole 25 rather than a sample: a single method that accidentally
     /// returned `Ok` would be a filter body silently reaching a default, and the
     /// per-method name is what makes a wrong dispatch visible.
     #[test]
@@ -1269,6 +1320,7 @@ mod tests {
             host.as_nested_sequence(&v)
                 .map(|_| "as_nested_sequence")
                 .unwrap_err(),
+            host.comma_bits(&v, true).map(|_| "comma_bits").unwrap_err(),
             host.json_dumps(&v).map(|_| "json_dumps").unwrap_err(),
             host.pformat(&v).map(|_| "pformat").unwrap_err(),
             host.random_choice(&v).map(|_| "random_choice").unwrap_err(),
@@ -1285,8 +1337,8 @@ mod tests {
         ];
         assert_eq!(
             names.len(),
-            24,
-            "the Result half of the trait is 24 methods"
+            25,
+            "the Result half of the trait is 25 methods"
         );
         for error in names {
             match error.kind {

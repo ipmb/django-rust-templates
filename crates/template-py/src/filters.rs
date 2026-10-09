@@ -742,6 +742,35 @@ impl FilterHost for PyFilterHost<'_> {
         outcome.map_err(|e| self.host_error("as_nested_sequence", e))
     }
 
+    fn comma_bits(&self, value: &Value, prepend_comma: bool) -> Result<Vec<String>, Error> {
+        let py = self.py;
+        let outcome = (|| -> PyResult<Vec<String>> {
+            let mut argument = self.object(value)?.into_bound(py);
+            // `if "," not in arg: arg = "," + arg`. Both halves are Python's, and
+            // the short circuit is what keeps `yesno`'s order: an argument that
+            // is not a container must reach the `split` below untouched so that
+            // it dies there, with `AttributeError`, rather than at an `in` it
+            // never performs. Measured, `{{ x|yesno:5 }}` is that `AttributeError`
+            // while `{{ x|pluralize:5 }}` — which does perform the `in` — is a
+            // `TypeError` naming the `in` instead.
+            if prepend_comma && !argument.contains(",")? {
+                // `str.__add__`, which is why the concatenation is Python's: a
+                // list gets past the membership test above and dies here with
+                // `TypeError: can only concatenate str (not "list") to str`,
+                // where a Rust `format!` would answer a string.
+                argument = PyString::new(py, ",")
+                    .into_any()
+                    .call_method1("__add__", (&argument,))?;
+            }
+            let mut bits = Vec::new();
+            for bit in argument.call_method1("split", (",",))?.try_iter()? {
+                bits.push(bit?.extract::<String>()?);
+            }
+            Ok(bits)
+        })();
+        outcome.map_err(|e| self.host_error("comma_bits", e))
+    }
+
     fn str_lower(&self, text: &str) -> String {
         self.call_text("str_lower", text, "lower")
     }
