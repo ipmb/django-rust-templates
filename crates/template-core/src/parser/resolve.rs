@@ -325,16 +325,26 @@ pub fn resolve_lookup(lookups: &[String], mut current: Box<dyn LookupTarget>) ->
                     Err(CallFailure::Raised) => return LookupOutcome::Escaped,
                 }
             }
-            // Also M8's, and it is not a call: Django substitutes
-            // `context.template.engine.string_if_invalid`, which needs the
-            // `Context` this resolver is deliberately not given. Measured:
-            // `{{ o.run }}` with `o.run.alters_data = True` renders `''`, and
-            // with `string_if_invalid = "<<invalid>>"` renders that instead.
-            Some(CallArm::AltersData) => {
-                return LookupOutcome::Unimplemented(
-                    "the alters_data substitution is M8's".to_string(),
-                )
-            }
+            // Not a call and not a raise: Django replaces the value
+            // (`base.py:997`). The assignment is what makes the next bit
+            // resolve against the substituted value — measured, `{{ x.upper }}`
+            // with `x.alters_data = True` renders the *string's* `upper`,
+            // `'<<INVALID>>'`, not the object's.
+            //
+            // The stub here said this branch "needs the `Context` this resolver
+            // is deliberately not given". That is no longer true, and the
+            // context did not have to be passed as a `Context`: it reaches the
+            // arm through the host, as `LookupTarget::string_if_invalid`, which
+            // is §5.2's rule (Python behind a trait) rather than an exception
+            // to it.
+            Some(CallArm::AltersData) => match current.string_if_invalid() {
+                Ok(invalid) => current = invalid,
+                // The read itself raised, inside Django's outer `try`
+                // (`base.py:958`), so its `AttributeError` reaches the handler at
+                // `base.py:1014`. The host has stashed it and applies that
+                // handler.
+                Err(PendingFailure) => return LookupOutcome::Escaped,
+            },
         }
     }
 
@@ -907,25 +917,48 @@ mod tests {
     }
 
     #[test]
-    fn the_alters_data_substitution_is_m8s_and_says_so() {
+    fn the_alters_data_substitution_replaces_the_value() {
         // Measured: `{{ o.run }}` with `o.run.alters_data = True` renders
-        // `string_if_invalid` — not a call, and not a raise. Neither is M3's, so
-        // the outcome is loud and names the milestone.
+        // `string_if_invalid` — not a call, and not a raise. This replaced an
+        // assertion that the arm returned `Unimplemented("… M8's")`; M8 removed
+        // the stub, so the assertion died with it.
+        //
+        // In-crate this can only show that the substitution *took effect*: the
+        // double has no Python and so no `str.upper`. That the loop actually
+        // continues — the half Review Focus 1 is about — is the Python row's
+        // job, in `tests/test_resolve_invalid.py`.
         let alters = Fake {
             call_arm: Some(CallArm::AltersData),
+            invalid: Some(Ok(Box::new(Fake::scalar(4, "<<invalid>>")))),
             ..Fake::scalar(3, "<bound method>")
         };
         let holder = Fake {
-            attrs: vec![("run", alters)],
+            attrs: vec![("x", alters)],
             ..Fake::scalar(99, "<Obj object>")
         };
-        let outcome = resolve_lookup(&lookups(&["run"]), Box::new(holder));
-        let LookupOutcome::Unimplemented(message) = outcome else {
-            panic!("{outcome:?}")
+        assert_eq!(
+            resolve_lookup(&lookups(&["x"]), Box::new(holder)),
+            LookupOutcome::Found(NodeRef(4)),
+        );
+    }
+
+    #[test]
+    fn a_failed_invalid_read_escapes_instead_of_substituting() {
+        // The read is inside Django's outer `try` (`base.py:958`), so its
+        // failure is the handler's problem at `base.py:1014` — the same variant
+        // as an arm that raised, and not a substitution.
+        let alters = Fake {
+            call_arm: Some(CallArm::AltersData),
+            invalid: Some(Err(PendingFailure)),
+            ..Fake::scalar(3, "<bound method>")
         };
-        assert!(
-            message.contains("M8"),
-            "the message must name the milestone: {message}"
+        let holder = Fake {
+            attrs: vec![("x", alters)],
+            ..Fake::scalar(99, "<Obj object>")
+        };
+        assert_eq!(
+            resolve_lookup(&lookups(&["x"]), Box::new(holder)),
+            LookupOutcome::Escaped,
         );
     }
 }
