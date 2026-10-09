@@ -239,15 +239,24 @@ defaultfilters.py:860-891	django/template/defaultfilters.py	860	891	yesno	-
 defaultfilters.py:878	django/template/defaultfilters.py	878	-	arg = gettext("yes,no,maybe")	-
 defaultfilters.py:879	django/template/defaultfilters.py	879	-	bits = arg.split(",")	-
 defaultfilters.py:899-939	django/template/defaultfilters.py	899	939	filesizeformat	-
-defaultfilters.py:905-907	django/template/defaultfilters.py	905	907	bytes_ = int(bytes_)	-
+defaultfilters.py:899	django/template/defaultfilters.py	899	-	@register.filter(is_safe=True)	-
+defaultfilters.py:905-907	django/template/defaultfilters.py	905	907	try:	except (TypeError, ValueError, UnicodeDecodeError):
 defaultfilters.py:906	django/template/defaultfilters.py	906	-	bytes_ = int(bytes_)	-
+defaultfilters.py:907-909	django/template/defaultfilters.py	907	909	except (TypeError, ValueError, UnicodeDecodeError):	return avoid_wrapping(value)
+defaultfilters.py:907	django/template/defaultfilters.py	907	-	except (TypeError, ValueError, UnicodeDecodeError):	-
 defaultfilters.py:908	django/template/defaultfilters.py	908	-	value = ngettext("%(size)d byte", "%(size)d bytes", 0) % {"size": 0}	-
-defaultfilters.py:911-912	django/template/defaultfilters.py	911	912	formats.number_format(round(value, 1), 1)	-
+defaultfilters.py:911-912	django/template/defaultfilters.py	911	912	def filesize_number_format(value):	return formats.number_format(round(value, 1), 1)
 defaultfilters.py:912	django/template/defaultfilters.py	912	-	formats.number_format(round(value, 1), 1)	-
 defaultfilters.py:914-925	django/template/defaultfilters.py	914	925	KB = 1 << 10	value = ngettext("%(size)d byte", "%(size)d bytes", bytes_) % {"size": bytes_}
+defaultfilters.py:914-918	django/template/defaultfilters.py	914	918	KB = 1 << 10	PB = 1 << 50
+defaultfilters.py:920	django/template/defaultfilters.py	920	-	negative = bytes_ < 0	-
+defaultfilters.py:921-922	django/template/defaultfilters.py	921	922	if negative:	bytes_ = -bytes_
 defaultfilters.py:922	django/template/defaultfilters.py	922	-	bytes_ = -bytes_  # Allow formatting of negative numbers.	-
+defaultfilters.py:924-935	django/template/defaultfilters.py	924	935	if bytes_ < KB:	value = gettext("%s PB") % filesize_number_format(bytes_ / PB)
 defaultfilters.py:925	django/template/defaultfilters.py	925	-	value = ngettext("%(size)d byte", "%(size)d bytes", bytes_) % {"size": bytes_}	-
 defaultfilters.py:927-935	django/template/defaultfilters.py	927	935	gettext("%s KB")	-
+defaultfilters.py:934	django/template/defaultfilters.py	934	-	else:	-
+defaultfilters.py:937-938	django/template/defaultfilters.py	937	938	if negative:	value = "-%s" % value
 defaultfilters.py:942-981	django/template/defaultfilters.py	942	981	-	-
 defaultfilters.py:942-982	django/template/defaultfilters.py	942	982	def pluralize(value, arg="s"):	-
 defaultfilters.py:965-966	django/template/defaultfilters.py	965	966	if "," not in arg:	arg = "," + arg

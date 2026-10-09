@@ -48,14 +48,14 @@
 //! `return value.replace(" ", "\xa0")` — **every** ASCII space, not only the one
 //! between the number and the unit.
 //!
-//! **The body holds no arithmetic.** `int()` is called **once** (`:906`), and the
+//! **The body holds no arithmetic.** `int()` is called **once** (`defaultfilters.py:906`), and the
 //! quotient `bytes_ / (1 << shift)` crosses the seam whole
 //! ([`FilterHost::int_divide_by_power_of_two`]) because CPython's
 //! `int.__truediv__` is a correctly-rounded long division that does not convert
 //! its operands: a Rust `f64` division of a >308-digit decimal gives `inf` and
 //! would answer `'inf.0\xa0PB'` where the source raises, and
 //! [`FilterHost::to_float`] raises with a *different message* than the division.
-//! The `int()` is inside the `try` at `:905-907` and the division is **outside**
+//! The `int()` is inside the `try` at `defaultfilters.py:905-907` and the division is **outside**
 //! it, so the two failure modes separate — which is why the seam is two methods
 //! and not one.
 //!
@@ -67,14 +67,14 @@
 //!   '2\xa0bytes'`, both through `ngettext(...) % {"size": n}`. It is `1023 ->
 //!   '1023\xa0bytes'` and `1024 -> '1.0\xa0KB'` at the `1 << 10` boundary, and the
 //!   branch selection is *strict* `bytes_ < KB`: 1024 belongs to KB.
-//! * **`:922` negates before the branch, so every comparison is on the absolute
+//! * **`defaultfilters.py:922` negates before the branch, so every comparison is on the absolute
 //!   value** — the step that is easy to omit and agrees on small negatives.
 //!   Measured: `-500 -> '-500\xa0bytes'` but `-1024 -> '-1.0\xa0KB'`,
 //!   `-2048 -> '-2.0\xa0KB'` and `-1048576 -> '-1.0\xa0MB'`; a signed
 //!   `bytes_ < KB` would answer `'-2048\xa0bytes'`. The negation feeds the
 //!   branch, the division **and** the byte arm's `ngettext`/`%(size)d`, so
 //!   `-1 -> '-1\xa0byte'` keeps the singular. The sign is reattached last
-//!   (`:937-938`), after the unit: `-100 -> '-100\xa0bytes'`.
+//!   (`defaultfilters.py:937-938`), after the unit: `-100 -> '-100\xa0bytes'`.
 //! * **`-(2**63)` is `i64::MIN`, whose negation is one past `i64::MAX`**, so
 //!   [`negate`] promotes it to an [`IntValue::Big`] rather than overflowing
 //!   `i64` — measured `filesizeformat(-(2**63)) -> '-8192.0\xa0PB'` and
@@ -84,7 +84,7 @@
 //!   `10**9 -> '953.7\xa0MB'`, `10**12 -> '931.3\xa0GB'`, `10**15 ->
 //!   '909.5\xa0TB'`, `10**18 -> '888.2\xa0PB'` (`10**18` is past `PB = 1 << 50`,
 //!   `10**15` is not).
-//! * **`int()`'s three caught classes all answer `'0\xa0bytes'`** (`:907-909`):
+//! * **`int()`'s three caught classes all answer `'0\xa0bytes'`** (`defaultfilters.py:907-909`):
 //!   measured `filesizeformat(None)` (`TypeError`), `filesizeformat("abc")`
 //!   (`ValueError`), `filesizeformat(b"\xff")` (`UnicodeDecodeError`) and
 //!   `filesizeformat(float("nan"))` (`ValueError`) are each `'0\xa0bytes'`.
@@ -108,14 +108,14 @@ use crate::filters::value::Value;
 use crate::parser::error::{Error, ErrorKind, PyErrorKind};
 use crate::pynum::IntValue;
 
-/// `KB = 1 << 10` … `PB = 1 << 50` (`:914-918`).
+/// `KB = 1 << 10` … `PB = 1 << 50` (`defaultfilters.py:914-918`).
 const KB: u64 = 1 << 10;
 const MB: u64 = 1 << 20;
 const GB: u64 = 1 << 30;
 const TB: u64 = 1 << 40;
 const PB: u64 = 1 << 50;
 
-/// `except (TypeError, ValueError, UnicodeDecodeError)` (`:907`) — the three
+/// `except (TypeError, ValueError, UnicodeDecodeError)` (`defaultfilters.py:907`) — the three
 /// classes that answer `'0 bytes'`.
 ///
 /// `UnicodeDecodeError` is a subclass of `ValueError`, so the source's third
@@ -134,7 +134,7 @@ fn is_int_refusal(error: &Error) -> bool {
     }
 }
 
-/// `-bytes_` (`:922`) for an [`IntValue`].
+/// `-bytes_` (`defaultfilters.py:922`) for an [`IntValue`].
 ///
 /// `IntValue::Small(i64::MIN)` cannot be negated in `i64` — CPython's answer is
 /// `9223372036854775808`, one past `i64::MAX` — so it becomes a
@@ -154,12 +154,12 @@ fn negate(value: &IntValue) -> IntValue {
     }
 }
 
-/// Which of the six arms at `:924-935` the **non-negative** `bytes_` takes.
+/// Which of the six arms at `defaultfilters.py:924-935` the **non-negative** `bytes_` takes.
 ///
 /// This is the branch selection the coordinator pins corpus rows against. The
 /// cuts are strict `bytes_ < T`, measured: `1023` is [`Branch::Bytes`] and
 /// `1024` is `KB`. An [`IntValue::Big`] is past `i64::MAX` and so past every
-/// `T` — `PB` is `1 << 50` — which is why it lands on the `else` at `:934`.
+/// `T` — `PB` is `1 << 50` — which is why it lands on the `else` at `defaultfilters.py:934`.
 enum Branch {
     /// `bytes_ < KB` — the `ngettext` arm, carrying the value itself.
     Bytes(u64),
@@ -167,7 +167,7 @@ enum Branch {
     Divided { shift: u32, format: &'static str },
 }
 
-/// `:924-935`. The `u64` cast is exact because the caller has already negated,
+/// `defaultfilters.py:924-935`. The `u64` cast is exact because the caller has already negated,
 /// so a `Small` here is `>= 0` and fits.
 fn branch(value: &IntValue) -> Branch {
     match value {
@@ -213,7 +213,7 @@ fn branch(value: &IntValue) -> Branch {
 ///
 /// A pure `str` method, so Rust's — every ASCII space becomes a no-break space
 /// and nothing else moves. The answer is a **plain `str`**, not `SafeString`:
-/// `is_safe=True` on the filter (`:899`) is the registry's flag and the loop's
+/// `is_safe=True` on the filter (`defaultfilters.py:899`) is the registry's flag and the loop's
 /// job, not the body's, which is why this file never calls `mark_safe`.
 fn avoid_wrapping(text: &str) -> Value {
     Value::Str(text.replace(' ', "\u{a0}").into())
@@ -224,7 +224,7 @@ fn avoid_wrapping(text: &str) -> Value {
 ///
 /// `_arg` is unused — the filter takes none; the parser enforces the arity.
 pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
-    // `try: bytes_ = int(bytes_)` (`:905-907`). The three named classes are the
+    // `try: bytes_ = int(bytes_)` (`defaultfilters.py:905-907`). The three named classes are the
     // `'0 bytes'` arm; anything else is Python's and escapes the filter.
     let bytes = match call.host.to_int(&value) {
         Ok(int) => int,
@@ -238,20 +238,20 @@ pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<V
         Err(error) => return Err(error),
     };
 
-    // `negative = bytes_ < 0` (`:920`) — read without a host call, since
+    // `negative = bytes_ < 0` (`defaultfilters.py:920`) — read without a host call, since
     // `IntValue::Big`'s text carries the sign.
     let negative = match &bytes {
         IntValue::Small(number) => *number < 0,
         IntValue::Big(text) => text.starts_with('-'),
     };
-    // `if negative: bytes_ = -bytes_` (`:921-922`). Negated **here**, before the
+    // `if negative: bytes_ = -bytes_` (`defaultfilters.py:921-922`). Negated **here**, before the
     // branch and the division, because every arm works on the magnitude and the
-    // sign is reattached once at `:937-938`.
+    // sign is reattached once at `defaultfilters.py:937-938`.
     let magnitude = if negative { negate(&bytes) } else { bytes };
 
     let text = match branch(&magnitude) {
         // `ngettext("%(size)d byte", "%(size)d bytes", bytes_) % {"size": bytes_}`
-        // (`:925`) — both calls, in that order, with the magnitude for both.
+        // (`defaultfilters.py:925`) — both calls, in that order, with the magnitude for both.
         Branch::Bytes(size) => {
             let template = call.host.ngettext("%(size)d byte", "%(size)d bytes", size);
             let mapped = call
@@ -261,7 +261,7 @@ pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<V
         }
         // `gettext("%s U") % filesize_number_format(bytes_ / (1 << shift))`. The
         // left operand is evaluated first, so `gettext` precedes the division;
-        // the right operand's division precedes its `number_format` (`:911-912`).
+        // the right operand's division precedes its `number_format` (`defaultfilters.py:911-912`).
         Branch::Divided { shift, format } => {
             let template = call.host.gettext(format);
             let quotient = call.host.int_divide_by_power_of_two(&magnitude, shift)?;
@@ -273,7 +273,7 @@ pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<V
         }
     };
 
-    // `if negative: value = "-%s" % value` (`:937-938`). `value` is a `str` by
+    // `if negative: value = "-%s" % value` (`defaultfilters.py:937-938`). `value` is a `str` by
     // here and `%s` of a `str` is itself, so the operator is exactly the
     // concatenation — Rust's, not the seam's.
     let text = if negative { format!("-{text}") } else { text };
@@ -389,7 +389,7 @@ mod tests {
             h.calls(),
             vec!["to_int", "ngettext", "percent_mapping", "to_str"]
         );
-        // The sign is reattached after formatting (`:937-938`), on the plain text.
+        // The sign is reattached after formatting (`defaultfilters.py:937-938`), on the plain text.
         assert_eq!(result, Value::Str("-5\u{a0}bytes".into()));
     }
 
@@ -409,7 +409,7 @@ mod tests {
         );
     }
 
-    /// A `Big` magnitude is past every threshold and takes `:934`'s `else`,
+    /// A `Big` magnitude is past every threshold and takes `defaultfilters.py:934`'s `else`,
     /// through the division. The value is never converted to a Rust `f64`.
     #[test]
     fn a_big_magnitude_takes_the_petabyte_else() {
@@ -521,7 +521,7 @@ mod tests {
         assert!(run(Value::Int(5), None, &call).is_err());
     }
 
-    /// `:924-935`'s cuts, both sides of every one of them, plus the `Big` case.
+    /// `defaultfilters.py:924-935`'s cuts, both sides of every one of them, plus the `Big` case.
     /// This is the branch predicate the coordinator pins corpus rows against; it
     /// asserts **which arm**, never a rendered string.
     #[test]
