@@ -791,6 +791,7 @@ django/utils/translation/__init__.py:280	django/utils/translation/__init__.py	28
 django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	290	-	info["name_translated"] = gettext_lazy(info["name"])	-
 _impl/base.py:829	python/django_rust_templates/_impl/base.py	829	-	django_own_filters().get(func)	-
 python/django_rust_templates/_impl/base.py:1161	python/django_rust_templates/_impl/base.py	1161	-	-	-
+_impl/parser.py:181	python/django_rust_templates/_impl/parser.py	181	-	"BlockTranslateNode": BlockTranslateNode,	-
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
 _impl/parser.py:568	python/django_rust_templates/_impl/parser.py	568	-	-	-
 _impl/parser.py:669	python/django_rust_templates/_impl/parser.py	669	-	-	-
