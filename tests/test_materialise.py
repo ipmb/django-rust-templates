@@ -496,8 +496,8 @@ class MaterialiseTests(unittest.TestCase):
         not the class. Everywhere else the class *is* its own factory.
 
         The kwarg is `_varlist` because that is Django's own attribute name for
-        the tuple (`:265`); the descriptor emits that name and the factory is the
-        only place it is unpacked.
+        the tuple (`defaulttags.py:265`); the descriptor emits that name and the
+        factory is the only place it is unpacked.
         """
         desc = (
             "IfChangedNode",
@@ -1066,12 +1066,13 @@ def strip_cfg_test(source):
     """`source` with every `#[cfg(test)]` item removed.
 
     A brace-matching scan and not a split on the first marker. The markers are
-    interleaved with production code — `tags/mod.rs` puts stand-ins under
-    `#[cfg(test)]` from `:207` onward while real helper code follows at `:48-59`
-    and beyond — so a prefix cut would drop a region silently, and a silently
-    dropped region is a class name this check cannot see. That is the failure
-    direction worth engineering against; the other direction is covered by
-    `test_every_node_class_is_emitted_somewhere`.
+    interleaved with production code — `parser/tags/mod.rs` alternates them in
+    its head (`42-65`: a test-only re-export, production `use`s, two more
+    test-only ones, then the real helper `split_contents`) and its stand-ins sit
+    far below (`176-213`) — so a prefix cut would drop a region silently, and a
+    silently dropped region is a class name this check cannot see. That is the
+    failure direction worth engineering against; the other direction is covered
+    by `test_every_node_class_is_emitted_somewhere`.
     """
     lines = source.splitlines()
     kept: list[str] = []
