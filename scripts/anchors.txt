@@ -231,8 +231,7 @@ defaultfilters.py:540-575	django/template/defaultfilters.py	540	575	def _propert
 defaultfilters.py:558-570	django/template/defaultfilters.py	558	570	def resolve(value):	value = getattr(value, part)
 defaultfilters.py:578-599	django/template/defaultfilters.py	578	599	def dictsort(value, arg):	-
 defaultfilters.py:578-587	django/template/defaultfilters.py	578	587	return sorted(value, key=_property_resolver(arg))	return ""
-defaultfilters.py:590-600	django/template/defaultfilters.py	590	600	dictsortreversed	-
-defaultfilters.py:590-599	django/template/defaultfilters.py	590	599	return sorted(value, key=_property_resolver(arg), reverse=True)	return ""
+defaultfilters.py:590-599	django/template/defaultfilters.py	590	599	dictsortreversed	-
 defaultfilters.py:602-608	django/template/defaultfilters.py	602	608	return value[0]	return ""
 defaultfilters.py:611-621	django/template/defaultfilters.py	611	621	def join(value, arg, autoescape=True):	return mark_safe(data)
 defaultfilters.py:624-630	django/template/defaultfilters.py	624	630	return value[-1]	return ""
@@ -243,7 +242,7 @@ defaultfilters.py:651-666	django/template/defaultfilters.py	651	666	return value
 defaultfilters.py:669-737	django/template/defaultfilters.py	669	737	def unordered_list(value, autoescape=True):	return mark_safe(list_formatter(value))
 defaultfilters.py:708-714	django/template/defaultfilters.py	708	714	if isinstance(next_item, (list, tuple, types.GeneratorType)):	yield item, next_item
 defaultfilters.py:745-754	django/template/defaultfilters.py	745	754	-	-
-defaultfilters.py:757-776	django/template/defaultfilters.py	757	776	get_digit	-
+defaultfilters.py:757-775	django/template/defaultfilters.py	757	775	get_digit	-
 defaultfilters.py:783-794	django/template/defaultfilters.py	783	794	-	-
 defaultfilters.py:797-808	django/template/defaultfilters.py	797	808	-	-
 defaultfilters.py:811-821	django/template/defaultfilters.py	811	821	-	-
@@ -252,7 +251,7 @@ defaultfilters.py:824-832	django/template/defaultfilters.py	824	832	-	-
 defaultfilters.py:825	django/template/defaultfilters.py	825	-	def timeuntil_filter(value, arg=None):	-
 defaultfilters.py:840-843	django/template/defaultfilters.py	840	843	-	-
 defaultfilters.py:846-851	django/template/defaultfilters.py	846	851	default_if_none	-
-defaultfilters.py:854-858	django/template/defaultfilters.py	854	858	divisibleby	-
+defaultfilters.py:854-857	django/template/defaultfilters.py	854	857	divisibleby	-
 defaultfilters.py:857	django/template/defaultfilters.py	857	-	return int(value) % int(arg) == 0	-
 defaultfilters.py:860-891	django/template/defaultfilters.py	860	891	yesno	-
 defaultfilters.py:878	django/template/defaultfilters.py	878	-	arg = gettext("yes,no,maybe")	-
@@ -276,8 +275,7 @@ defaultfilters.py:925	django/template/defaultfilters.py	925	-	value = ngettext("
 defaultfilters.py:927-935	django/template/defaultfilters.py	927	935	gettext("%s KB")	-
 defaultfilters.py:934	django/template/defaultfilters.py	934	-	else:	-
 defaultfilters.py:937-938	django/template/defaultfilters.py	937	938	if negative:	value = "-%s" % value
-defaultfilters.py:942-981	django/template/defaultfilters.py	942	981	-	-
-defaultfilters.py:942-982	django/template/defaultfilters.py	942	982	def pluralize(value, arg="s"):	-
+defaultfilters.py:942-981	django/template/defaultfilters.py	942	981	def pluralize(value, arg="s"):	-
 defaultfilters.py:965-966	django/template/defaultfilters.py	965	966	if "," not in arg:	arg = "," + arg
 defaultfilters.py:984-987	django/template/defaultfilters.py	984	987	def phone2numeric_filter(value):	return phone2numeric(value)
 defaultfilters.py:990-996	django/template/defaultfilters.py	990	996	def pprint(value):	return "Error in formatting: %s: %s" % (e.__class__.__name__, e)
@@ -351,7 +349,7 @@ defaulttags.py:1065-1075	django/template/defaulttags.py	1065	1075	-	-
 defaulttags.py:1092-1098	django/template/defaulttags.py	1092	1098	raise TemplateSyntaxError(	-
 defaulttags.py:1099	django/template/defaulttags.py	1099	-	-	-
 defaulttags.py:1126-1130	django/template/defaulttags.py	1126	1130	for name in bits[1:]:	parser.add_library(lib)
-defaulttags.py:1134-1179	django/template/defaulttags.py	1134	1179	{% lorem %}	-
+defaulttags.py:1134-1178	django/template/defaulttags.py	1134	1178	{% lorem %}	-
 defaulttags.py:1204	django/template/defaulttags.py	1204	-	@register.tag(name="partialdef")	-
 defaulttags.py:1250-1251	django/template/defaulttags.py	1250	1251	-	-
 defaulttags.py:1251	django/template/defaulttags.py	1251	-	-	-
@@ -375,7 +373,7 @@ defaulttags.py:1575	django/template/defaulttags.py	1575	-	kwarg_re.match	-
 defaulttags.py:1575-1577	django/template/defaulttags.py	1575	1577	"Malformed arguments to url tag"	-
 defaulttags.py:1579	django/template/defaulttags.py	1579	-	if name:	-
 defaulttags.py:1584	django/template/defaulttags.py	1584	-	return URLNode(viewname, args, kwargs, asvar)	-
-defaulttags.py:1610-1651	django/template/defaulttags.py	1610	1651	parser.compile_filter(max_width)	-
+defaulttags.py:1610-1650	django/template/defaulttags.py	1610	1650	parser.compile_filter(max_width)	-
 defaulttags.py:1654-1690	django/template/defaulttags.py	1654	1690	"%r expected at least one variable assignment" % bits[0]	-
 defaulttags.py:1676	django/template/defaulttags.py	1676	-	support_legacy=True	-
 defaulttags.py:1682-1684	django/template/defaulttags.py	1682	1684	"%r received an invalid token: %r"	-

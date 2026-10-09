@@ -1,4 +1,4 @@
-//! `divisibleby` — `defaultfilters.py:854-858`.
+//! `divisibleby` — `defaultfilters.py:854-857`.
 //!
 //! ```python
 //! @register.filter(is_safe=False)

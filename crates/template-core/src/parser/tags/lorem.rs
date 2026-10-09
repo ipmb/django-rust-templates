@@ -1,4 +1,4 @@
-//! `{% lorem %}` — `defaulttags.lorem` (`defaulttags.py:1134-1179`).
+//! `{% lorem %}` — `defaulttags.lorem` (`defaulttags.py:1134-1178`).
 //!
 //! # Three optional bits, consumed from the back, and a default that is text
 //!

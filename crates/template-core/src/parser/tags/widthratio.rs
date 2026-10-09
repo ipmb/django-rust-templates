@@ -1,4 +1,4 @@
-//! `{% widthratio %}` — `defaulttags.widthratio` (`defaulttags.py:1610-1651`).
+//! `{% widthratio %}` — `defaulttags.widthratio` (`defaulttags.py:1610-1650`).
 //!
 //! # All three arguments are `compile_filter`ed, including the width
 //!

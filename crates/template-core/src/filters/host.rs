@@ -197,13 +197,13 @@ pub trait FilterHost {
     /// `str(v)`. `@stringfilter`'s wrapper does this once per filter
     /// (`defaultfilters.py:46`), and `unordered_list` does it again per item.
     fn to_str(&self, value: &Value) -> Result<String, Error>;
-    /// `int(v)` — `get_digit` (`defaultfilters.py:757-776`), `divisibleby`
-    /// (`defaultfilters.py:854-858`) and the three padding filters
+    /// `int(v)` — `get_digit` (`defaultfilters.py:757-775`), `divisibleby`
+    /// (`defaultfilters.py:854-857`) and the three padding filters
     /// (`defaultfilters.py:417-438`).
     /// Python's `int` accepts `" 5 "`, `"5_0"`
     /// and `"٠٥"`, and is arbitrary-precision, so this is not a parse.
     fn to_int(&self, value: &Value) -> Result<IntValue, Error>;
-    /// `float(v)` — `pluralize` (`defaultfilters.py:942-982`) and `floatformat`
+    /// `float(v)` — `pluralize` (`defaultfilters.py:942-981`) and `floatformat`
     /// (`defaultfilters.py:94-220`).
     fn to_float(&self, value: &Value) -> Result<f64, Error>;
     /// `bool(v)` — `default` (`defaultfilters.py:840-843`) and `yesno`
@@ -811,7 +811,7 @@ pub trait FilterHost {
     /// nested `def`. Folding them would merge what Python separates.
     fn int_divide_by_power_of_two(&self, value: &IntValue, shift: u32) -> Result<f64, Error>;
 
-    /// `int(a) % int(b)` — `divisibleby` (`defaultfilters.py:854-858`), which has **no**
+    /// `int(a) % int(b)` — `divisibleby` (`defaultfilters.py:854-857`), which has **no**
     /// `try`, so
     /// `b == 0` is a `ZeroDivisionError` and a non-numeric operand a `ValueError`
     /// or `TypeError`; all three escape the filter.

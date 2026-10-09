@@ -1,4 +1,4 @@
-//! `get_digit` — `defaultfilters.py:757-776`.
+//! `get_digit` — `defaultfilters.py:757-775`.
 //!
 //! ```python
 //! @register.filter(is_safe=False)

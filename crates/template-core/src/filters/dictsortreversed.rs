@@ -1,4 +1,4 @@
-//! `dictsortreversed` — `defaultfilters.py:590-600`.
+//! `dictsortreversed` — `defaultfilters.py:590-599`.
 //!
 //! ```python
 //! @register.filter(is_safe=False)
