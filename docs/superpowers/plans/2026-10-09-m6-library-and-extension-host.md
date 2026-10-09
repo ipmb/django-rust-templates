@@ -1,0 +1,1358 @@
+# M6 — `Library`, the extension host, `{% load %}` and `querystring`: Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Make Python-defined tags work through the Rust engine — the `Library` registry, a host seam that compiles a tag Rust does not own, a `ParserHandle` whose callback may re-enter the parse, `{% load %}`, and the one built-in that is registered by `simple_tag`, `{% querystring %}`.
+
+**Architecture:** M3 established that Rust owns the parse and Python owns the tree (§5.5). M6 opens the seam the parse has so far kept shut: a block tag Rust has no compile function for is compiled by the **host**, and the node it returns is an opaque Python object on the wire. The pivot is that **the host owns parser *state* (`tags`, `filters`, `libraries`, `extra_data`, arbitrary attributes) while Rust owns the token *cursor*.** A host compile function receives the two halves it needs: a `ParserHandle` for state, and the parser's remaining tokens, which it may consume; Rust re-reads the cursor when the callback returns. That is what makes `{% load %}` — and `Library.simple_block_tag`'s `parser.parse(...)` — work without Rust ever holding `&mut Parser` across a call into Python.
+
+**Tech Stack:** Rust (edition 2021, no Python in `template-core`), PyO3 0.29 in `template-py`, Python 3.14 shell, Django 6.0.9 pinned at `.django/`.
+
+**Spec:** `docs/superpowers/specs/2026-10-08-django-template-engine-in-rust-design.md` — read §5.2 (the seam, `ParserHandle`), §5.5 (the shadow tree), §6 (ownership), §9 (the three test layers), §10.3, §10.4. This plan argues from the spec; where they disagree the spec wins and this plan is wrong. **Three spec claims are corrected by this plan's recon and are recorded in `.review/m6-recon.md`** (§D of this plan names them and the tasks that edit them) — read that file before this one; it carries the measurements this plan's architecture rests on.
+
+## Global Constraints
+
+Copied verbatim from the spec and the M4/M5 plans; every task's requirements implicitly include them.
+
+- **Django 6.0.9**, pinned at `.django/`. Never modified. It is the
+  specification, not a dependency.
+- **`cargo test` does not run clippy.** `scripts/check.sh` gates on
+  `cargo clippy --workspace --all-targets -- -D warnings`. Every task runs
+  clippy explicitly before committing. Two lints have already bitten this
+  project's plan-supplied code: `clippy::module_inception` and
+  `clippy::type_complexity`. Name tuples with a `type` alias before writing
+  them; never nest a module `x/x.rs`.
+- **No indented non-Rust code in doc comments.** rustdoc compiles indented
+  blocks as doctests and `cargo test` will run them; this already broke a build
+  once. Quote code inline or fence it with ```` ```text ````.
+- **`source scripts/env.sh` before any cargo or venv command.** `cargo` is not
+  on `PATH` otherwise. (`scripts/env.sh` also sets `PIP_CONFIG_FILE=/dev/null`;
+  the global pip config is broken and is deliberately not fixed.)
+- **`maturin develop` after every Rust change** or the Python tests silently
+  exercise a stale `.so`.
+- **Python is never a dependency of `template-core`.** If the engine needs
+  something from Python it goes behind a trait implemented in `template-py`
+  (§5.2).
+- **Django's Python source is not vendored.** Error strings, positions and reprs
+  are ported verbatim; algorithms are written against Django as a spec (§6).
+- **A change is not committed until its review round returns APPROVE or all
+  blocker/major findings are resolved** (§11).
+- **Every snippet in this plan is executed against the pinned tree before the
+  plan is committed, and a plan is not reviewable until it is** (§11). Where a
+  step's evidence is a mutation, the mutation is *run* — M2 lost three plan
+  steps to predictions about what an edit produces that nobody had made.
+- **A task states its declared environment.** M2's and M3's defect rates were
+  dominated by correct knowledge of Django combined with wrong assumptions about
+  the harness. Each task below names what is constructible at that point, what
+  imports resolve, and what the shim does and does not shadow.
+- **Every guard is observed failing for its intended reason before it is kept**
+  (§11), by disabling the guard and re-running. A guard nobody has seen fail is
+  a comment.
+- **The plan publishes derivations and pointers, not snapshots of them.** Every
+  fixable plan defect in this project has been a derivable value written into
+  prose; and a copied code block propagates like a copied citation. Where a fact
+  is computed somewhere, this plan names *where* and does not restate it.
+- **The `.django/` suite is not yet the gate for our tags.** The shim interposes
+  three files (`__init__`, `exceptions`, `parser`) and `unshimmed()` is 25, so
+  the 1547 tests currently run on *stock Django's* parser. They must stay green
+  (`unshimmed()` unchanged) but they do **not** exercise anything this plan
+  writes. M6's gate is the parity corpus in `tests/`.
+
+## Review Focus
+
+The five inputs and conditions the spec implies but no single task's tests
+exercise, most likely first. Each is pinned by a test in the task that owns the
+code.
+
+1. **The nested region of a host tag's body is parsed by Django, not by Rust, and that is invisible to the corpus.** Under this plan a host tag is compiled by Django's own `compile_func` against a cursor Rust hands over (Task 3). When that function calls `parser.parse(("enddiv",))` — `Library.simple_block_tag` at `library.py:211-212`, `tag_27584.badtag` at `:8-9` — the body is parsed by *Django's* `Parser.parse`, so every tag inside it is compiled by Django. The tree still matches (`describe` compares Django nodes to Django nodes) and renders correctly, but **the parity corpus would report a pass for a body our engine never touched**, which is the vacuous-gate failure this project has now hit twice. **Owned by Task 3; pinned by a test that asserts a Rust-owned tag inside a host block tag's body still reports Rust's error text for a Rust-only failure mode** (not merely that the tree matches).
+2. **`{% load %}`'s shadowing gate is a test nobody in `.django/` wrote.** Measured across the whole checkout: no test registers a library tag under a built-in name. The behaviour is real — `Parser.add_library` is `self.tags.update(lib.tags)` (`base.py:668-670`) and libraries merge *after* `builtins` (`base.py:522-523`) — so a loaded library shadows a built-in, and the suite will not catch a regression in that. The spec names this as M6's gate and states it against two methods that do not exist (`Library.add_tag`/`add_library`; see `.review/m6-recon.md` §"The three spec errors"). **Owned by Task 3; the test is a sandwich** — a built-in use, the `{% load %}`, then a shadowed use — because a test with the shadowed use alone passes under either dispatch order.
+3. **The filter-name rebinding `Host::check_filter`'s doc has carried since M5 is now reachable.** `add_library` rebinds a filter name (`update`, not `setdefault`), and our materialisation happens after the whole parse, so a `{% load %}` *anywhere* in a template retroactively rebinds an earlier token's filter. Before M6 no tag could cause it; `{% load %}` ships here, so this is the task that must not ship the double lookup. **Owned by Task 1; the sandwich is `{{ x|upper }}{% load custom %}{{ y|upper }}` asserting the *first* rendered with the built-in.**
+4. **A host node is opaque to Rust, and its `token`/`origin` are attached by Django rather than by `extend_nodelist`.** Every existing descriptor is built by Rust and gets `token`/`origin` from `extend_nodelist` (`base.py:598`). A host tag's node is built *inside* Django's compile function and never passes through that line, so a node whose `token` is `None` would fail `render_annotated`'s debug path only for templates using user tags — a class of template the corpus did not have before M6. **Owned by Task 3; pinned by a debug-mode corpus row over a user tag, asserting `token.contents == "{% echo x %}"`.**
+5. **A `Template` must not carry `extra_data` after a failed parse.** The
+   assignment is `nodelist = parser.parse(); self.extra_data = parser.extra_data`
+   **inside `Template.__init__`'s `try`** (`base.py:198-200`), so a parse that
+   raises leaves the attribute off the template — and consumers rely on that
+   tolerance (`getattr(template, "extra_data", {})`, `engine.py:194`). Read the
+   site rather than trusting this line: the recon's first version of it named
+   `compile_nodelist` and cited `test_partials.py:171`, which actually pins the
+   *consumer* side by passing a mock template without the attribute. **The
+   producer side is pinned by no test in the checkout**, so M6 pins both.
+   **Owned by Task 4.**
+
+---
+
+## Architecture
+
+Three decisions, each argued from a measurement in `.review/m6-recon.md`. Read that file; this section states only the conclusions and the consequences a task will trip over.
+
+### A1. `{% load %}` is a host tag, not a Rust compile function
+
+`find_library` and `load_from_library` (`defaulttags.py:1065-1099`) both read `parser.libraries`, a Python dict of `Library` objects, and `load_from_library` *builds* a `Library`. `load`'s whole job is `parser.add_library(...)`. The lookup is Python's whichever side calls it; the only question is who calls `add_library`, and the answer that keeps `Library` Python-owned (§6) is Django's own `load`.
+
+**Consequences, and each is a task's business:**
+
+- `load` leaves `REGISTRY`, `tags/load.rs` is deleted, and
+  `parser/tags/mod.rs`'s `builtin_tag_stubs()` loses it. `registry.rs`'s doc
+  comment currently says M6 "must decide"; M6 decides and the comment records
+  the answer. `test_tag_inventory.py::RustRegistryTests.test_the_rust_registry_matches_the_loader_tags_subtraction`
+  subtracts `{block, extends, include}` today; by Task 6 it must subtract
+  `{block, extends, include, load, querystring}` — **the Python-owned built-ins**,
+  three by §6's rule, `load` by A1, `querystring` by A4. Its name ("the
+  loader_tags subtraction") stops being accurate; the test is about §6 now.
+- `{% load %}` therefore needs `parser.libraries` populated, which
+  `render.py::parser_for` does **not** do today (`Parser(Lexer(source).tokenize(), builtins=engine.template_builtins)`).
+  Task 3 adds `libraries=engine.template_libraries`.
+- `{% load %}` gets **no** corpus row from
+  `test_the_corpus_covers_every_implemented_tag_with_a_success_path`: that test
+  derives its demand from `builtin_tag_names() - builtin_tag_stubs()`, and
+  `load` is in neither. Its coverage is Task 3's shadowing gate plus a
+  success-path row written by hand.
+
+### A2. The host owns parser **state**; Rust owns the token **cursor**
+
+§5.2 says `call_tag` takes a `ParserHandle`, not `&mut Parser`, because a
+callback re-enters the parse. Two shapes satisfy that, and this plan takes the
+smaller:
+
+- **Chosen — the seeded cursor.** The shell keeps one real
+  `django.template.base.Parser` for the whole parse. Rust passes its remaining
+  tokens to `call_tag`; the shell sets `parser.tokens = list(reversed(tokens))`
+  and runs `parser.tags[command](parser, token)`; Rust replaces its cursor with
+  `list(reversed(parser.tokens))` afterwards. Django's `Parser.parse` already
+  leaves the end tag on the stack for `delete_first_token` to remove
+  (`base.py:600-610`), so a callback that calls `parse` then
+  `delete_first_token` works **unmodified**.
+- **Rejected — a Rust-owned `ParserHandle`.** It needs `Parser` behind
+  `Rc<RefCell<…>>` with no borrow held across a host call, which is a
+  restructuring of `Parser::parse`'s `&mut self` shape for a property this plan
+  gets for free, and it would make Rust's `parse` responsible for leaving the
+  end tag *only* on the handle path — two semantics for one method.
+
+**Consequence to carry into Task 3:** the host's registry and Rust's must be
+complementary, and the predicate is one line:
+
+```text
+has_tag(command) = command in parser.tags
+                   and (command not in RUST_OWNED
+                        or parser.tags[command] is not ENGINE_BUILTIN_TAGS[command])
+```
+
+`RUST_OWNED` is `set(_native.builtin_tag_names())` — derived from the engine,
+not listed. The identity clause is what lets a loaded library shadow a built-in
+(Review Focus 2) while a plain `{% for %}` still goes to Rust. The `builtins`
+merge at `base.py:522-523` is left untouched, so `parser.tags` stays exactly
+what Django makes it, and the nested-region parse (Review Focus 1) resolves
+every name it meets.
+
+### A3. A host node crosses as a reserved descriptor — and nothing else changes
+
+A host tag returns a Python `Node` object. §5.2 already fixes the wire shape
+("`NodeRef` is an opaque handle to a Python-owned `Node`"), so M6 adds one
+constructor: `NodeDesc::host(NodeRef)` emits `class_name = "HostNode"` with the
+single attribute `("node", AttrValue::Ref(r))`. `materialise_node` checks that
+name **before** the `NODE_CLASSES` lookup and returns the stored object with
+`token`/`origin` attached. The `#[cfg(test)]` stand-in in `tags/mod.rs:512`
+currently uses the name `HostNode`; Task 2 renames it `StandinHostNode` so the
+real sentinel is unambiguous, and `tests/test_materialise.py`'s
+`TEST_ONLY_CLASSES` follows.
+
+**The reserved name exists only on the wire, and the parity harness never sees
+it.** By the time `tests/test_parser_parity.py` looks at a tree, the host node
+*is* an ordinary Django node — `SimpleNode`, `SimpleBlockNode`, whatever the
+host built — and `describe`'s existing `Node` arm handles it generically:
+`type(value).__name__` plus a recursive `vars()`, with `nodelists` catching
+`SimpleBlockNode.nodelist` because that is a **real** `NodeList`. So no
+`describe` arm is added, and `IGNORED_ATTRIBUTES`/`token_shape` apply as they do
+to every other node. Task 5's job is instead to make the two sides hold the
+**same** `Library` objects, because `SimpleNode.func` is compared by identity and
+two separately-built libraries would compare unequal.
+
+### A4. `querystring` is host-compiled too, and `parse_bits` is not ported
+
+`querystring.rs`'s stub says parsing it needs "a host handle to the Python
+callable, and `parse_bits` driven by that callable's signature". Measured
+(`.review/m6-recon.md` §"Follow-up measurement"): the callable **is** reachable —
+`simple_tag` closes over `func`, `params`, `varargs`, `varkw`, `defaults`,
+`kwonly`, `kwonly_defaults`, `takes_context`, `function_name`
+(`library.py:120-128`), and `compile_func.__dict__["__wrapped__"] is func` via the
+`@wraps(func)` at `library.py:185`. Reachable is not the same as ours to drive.
+
+Driving `parse_bits` from Rust means re-deriving everything the three
+`simple_tag`-family decorators do *around* it, because the values live in a
+closure and not on an object: the closure's **variable names** become a contract
+with an implementation detail of a pinned file; `simple_block_tag` derives
+`tag_params` from `params` + `takes_context` and raises two
+`TemplateSyntaxError`s doing it (`:186-203`); it computes
+`end_name = end_name or f"end{function_name}"` (`:181-182`) and parses the body
+**before** `parse_bits` (`:206-212`); all three split the `as <var>` target first
+(`:174-178`). That is a reimplementation of `Library` in Rust, against §6, which
+assigns `Library` to Python — and the payoff is nil, because running Django's own
+function through the host gates `parse_bits`' five error strings at least as
+strongly (the corpus compares the raised message either way) as a port that could
+drift.
+
+**So every `Library`-registered tag is host-compiled, `querystring` included.**
+`querystring` leaves `REGISTRY` with `load`; `parse_bits` is not ported and
+`SimpleNode` needs no `NODE_CLASSES` entry. §D1's move of `querystring` from M5
+to M6 is vindicated — it does need the extension host — and the mechanism is the
+seam, not a Rust compile function. `builtin_tag_names()` drops 24 → 22 and
+`builtin_tag_stubs()` becomes `['partial', 'partialdef']`.
+
+### A5. `block`, `extends` and `include` are *excluded* from the host at M6
+
+They are in `parser.tags` and not in `RUST_OWNED`, so a naive `has_tag` would
+hand them to Django — and `{% extends %}` would then skip its ordering check.
+Measured: `ExtendsNode.must_be_first is True` (`BlockNode`/`IncludeNode` are
+`False`), and `{{ x }}{% extends "a" %}` raises `must be the first tag in the
+template.` under stock Django. That check is `Parser.extend_nodelist`
+(`base.py:598-610`) — **which our parse never runs**, because Rust returns a
+descriptor rather than a `NodeList`. `extend_nodelist` is also the line that sets
+`node.token`/`node.origin`, so A3's attachment (Review Focus 4) and M7's ordering
+check are the same Django line and belong to the same task.
+
+**M6 excludes all three**, leaving them exactly as they are today (`Invalid block
+tag`). Task 6 records that M7 removes the exclusion *and* carries
+`must_be_first` across the seam with the node.
+
+---
+
+## File Structure
+
+| path | responsibility |
+|---|---|
+| `crates/template-core/src/parser/host.rs` | **Modify.** `Host` gains `has_tag` and a `call_tag` that hands over tokens; `check_filter` returns `Option<NodeRef>`. |
+| `crates/template-core/src/parser/mod.rs` | **Modify.** `Parser::parse` dispatches a host tag by handing over the remaining tokens and re-reading the cursor; the cursor gains `remaining_tokens`/`replace_tokens`. |
+| `crates/template-core/src/parser/desc.rs` | **Modify.** `NodeDesc::host(NodeRef)` and the `HOST_NODE` constant. |
+| `crates/template-core/src/parser/registry.rs` | **Modify.** `load` and `querystring` leave the table; the doc comment records A1 and A4. |
+| `crates/template-core/src/parser/tags/load.rs` | **Delete.** Host-owned (A1). |
+| `crates/template-core/src/parser/tags/querystring.rs` | **Delete.** Host-owned (A4) — the stub's own three requirements are met by the seam, not by a port. |
+| `crates/template-py/src/lib.rs` | **Modify.** The host callables (`has_tag`, `call_tag`) on the shell's `Host` impl; token wire conversion in both directions. |
+| `python/django_rust_templates/host.py` | **Create.** `ShellHost`, the parser-state owner and the `has_tag`/`call_tag` callables. Outside `_impl` — `_impl/host.py` would create a `django.template.host` Django does not have, which the shim's rule permits but does not need. |
+| `python/django_rust_templates/render.py` | **Modify.** `parser_for` gains `libraries`; `render_string` builds a `ShellHost`. |
+| `python/django_rust_templates/_impl/parser.py` | **Modify.** `HOST_NODE` in `materialise_node`; `NODE_CLASSES` gains `SimpleNode`; `_materialise_filter_expression` takes a handle instead of re-looking-up the name. |
+| `tests/parser_corpus.py` | **Modify.** `{% load %}` and `{% querystring %}` rows. |
+| `tests/test_parser_parity.py` | **Modify.** The library-aware harness (`django_parse`/`ours_parse` gain `libraries`), and the host-node `describe` arm. |
+| `tests/test_load_shadowing.py` | **Create.** Review Focus 2's gate. |
+| `tests/test_host_tags.py` | **Create.** Review Focus 1 and 4. |
+| `docs/superpowers/specs/…-design.md` | **Modify.** §10.3's M6 row and §10.4's M6 gate text (Task 6). |
+
+---
+
+### Task 1: `check_filter` returns a handle, before `{% load %}` ships
+
+**Why first, and why it is its own task:** `host.rs`'s own doc calls this "a
+prerequisite of M6, not a bug in the committed tree" and gives the measurement.
+`{% load %}` is in Task 3. Landing the handle first means Task 3 cannot ship the
+double lookup by accident, and the sandwich that proves it is green before any
+host tag exists.
+
+**Files:**
+- Modify: `crates/template-core/src/parser/host.rs` (`Host::check_filter`)
+- Modify: `crates/template-core/src/parser/filter_expr.rs` (the sole caller)
+- Modify: `crates/template-py/src/lib.rs` (`FilterCheckHost::check_filter`)
+- Modify: `python/django_rust_templates/_impl/parser.py` (`check_filter`, `_materialise_filter_expression`)
+- Test: `tests/test_filter_rebinding.py` (create)
+
+**Interfaces:**
+- Consumes: `Host::alloc_slot`'s table (the arena already exists).
+- Produces: `FilterCheckHost::check_filter` stores `find_filter`'s result in the
+  refs table and returns its index; `FilterExprDesc`'s per-filter entry gains a
+  `NodeRef`; `_materialise_filter_expression` reads `resolve_ref(index)` instead
+  of `parser.find_filter(name)`.
+
+- [ ] **Step 1: Measure the divergence the handle closes, and write it down as the failing test**
+
+```python
+# tests/test_filter_rebinding.py
+"""`{% load %}` rebinds a filter name; the parse must bind at the token's position.
+
+`Parser.add_library` is `self.filters.update(lib.filters)` (`base.py:668-670`) —
+`update`, not `setdefault` — so a name already in the table is *rebound*, and a
+`{% load %}` anywhere in a template retroactively changes what an earlier
+`{{ x|name }}` resolves to, if the name is looked up late.
+
+Django looks the name up once, at `base.py:771`, during the token's own compile.
+Our materialisation happens after the whole parse, so the same lookup there is a
+different answer. Measured on the pinned tree, `parser.filters["upper"]` changes
+identity across `add_library`; the sandwich below is what makes the difference
+observable.
+"""
+
+import sys
+import unittest
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
+if str(DJANGO_CHECKOUT) not in sys.path:
+    sys.path.insert(0, str(DJANGO_CHECKOUT))
+
+from django.template import Context, Engine, Library  # noqa: E402
+
+
+class FilterRebindingTests(unittest.TestCase):
+    def test_a_load_does_not_rebind_an_earlier_tokens_filter(self):
+        """The sandwich: builtin use, `{% load %}`, shadowed use.
+
+        A test with only the *second* use proves nothing — that token is after
+        the load, so both designs agree about it. The first use is the one that
+        separates "looked up at the token" from "looked up at the end".
+        """
+        engine = Engine(libraries={"custom": "template_tests.templatetags.custom"})
+        template = engine.from_string(
+            "{{ x|trim:3 }}{% load custom %}{{ y|trim:3 }}"
+        )
+        # `custom.trim` shadows nothing; `upper` is the name a library can
+        # shadow. The row is written against a library fixture in Task 3, where
+        # `libraries=` reaches the parser; here it asserts the *shape*.
+        self.assertEqual(template.render(Context({"x": "abcd", "y": "abcd"})), "abcdabcd")
+```
+
+- [ ] **Step 2: Run it and confirm it passes today, then confirm it can fail**
+
+Run: `.venv/bin/python -m unittest tests.test_filter_rebinding -v`
+Expected: PASS — because `{% load %}` is a host tag that does not exist yet, this
+template raises `TemplateSyntaxError: Invalid block tag … 'load'`. **If it
+raises rather than passing, that is the correct red for this step**: record the
+exact message, and mark the row `Task 3` in a comment. This step's purpose is to
+establish that the fixture is reachable, not to be green yet.
+
+- [ ] **Step 3: Change `Host::check_filter` to return a handle**
+
+```rust
+    /// Django's two filter checks, in Django's order: `Parser.find_filter`
+    /// (`base.py:684-692`) and then `FilterExpression.args_check`
+    /// (`base.py:822-833`).
+    ///
+    /// **Returns the filter it found, by handle, and that is not optional.**
+    /// `find_filter`'s result is what renders — `filters.append((filter_func,
+    /// args))` (`base.py:773`) — and looking the *name* up again when the
+    /// `FilterExpression` is built is a different answer whenever a
+    /// `{% load %}` sits between the two moments: `add_library` is
+    /// `self.filters.update(lib.filters)` (`base.py:668-670`), which rebinds.
+    /// This seam is called at `base.py:771`, so it is where the binding is
+    /// still Django's; the shell stores the object it found in the same arena
+    /// `{% cycle %}`'s slot lives in and returns its index. The name is
+    /// therefore looked up exactly once, at Django's line.
+    ///
+    /// See `.review/m5-seams.md` and Task 1 of the M6 plan.
+    fn check_filter(&self, _name: &str, _arg_count: usize)
+        -> Result<Option<NodeRef>, Error> {
+        Ok(None)
+    }
+```
+
+`None` means "no host, accept and carry no handle" — the same permissive default
+the old `Ok(())` was, and the shape `_native.parse(source, check_filter=None)`
+already relies on. Update the two `impl Host` bodies (`NoHost`,
+`FilterCheckHost`, and `TestHost` in `tags/mod.rs`'s `#[cfg(test)]`).
+
+- [ ] **Step 4: Store the handle in `FilterCheckHost::check_filter`**
+
+```rust
+    fn check_filter(&self, name: &str, arg_count: usize) -> Result<Option<CoreNodeRef>, Error> {
+        let Some(check) = &self.check_filter else {
+            return Ok(None);
+        };
+        // The shell's callable now *returns* the function it found — it is
+        // `parser.find_filter(name)` with its result handed back rather than
+        // discarded — and the `args_check` still runs inside it, at Django's
+        // line, so the error ordering the M5 measurements pinned is unchanged.
+        match check.call1((name, arg_count)) {
+            Ok(func) => {
+                let mut refs = self.refs.borrow_mut();
+                refs.push(Some(func.unbind()));
+                Ok(Some(CoreNodeRef((refs.len() - 1) as u64)))
+            }
+            Err(error) => Err(Error::host(python_error_message(check.py(), &error))),
+        }
+    }
+```
+
+- [ ] **Step 5: Carry the handle on the wire and read it at materialisation**
+
+`AttrValue::FilterExpr`'s per-filter entry gains the handle; `_materialise_filter_expression`
+uses it:
+
+```python
+    for (name, wire_args), handle in desc.filters:
+        args = [
+            _materialise_operand(lookup, value, parser) for lookup, value in wire_args
+        ]
+        # The function Django bound at `base.py:771`, carried across, **not**
+        # looked up again — `{% load %}` rebinds the name after this token's
+        # position and our materialisation runs after the whole parse.
+        func = resolve_ref(handle.index)
+        filters.append((func, args))
+```
+
+- [ ] **Step 6: Run the full check and the two sandwiches**
+
+Run: `./scripts/check.sh --fast`
+Expected: `all checks passed`. The M5 error-ordering rows
+(`x|does_not_exist||upper`, `x||does_not_exist`, `x|nope:1:2`) must still pass —
+they are the rows that prove `args_check` still runs at Django's point.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add crates/template-core/src/parser/host.rs \
+        crates/template-core/src/parser/filter_expr.rs \
+        crates/template-py/src/lib.rs \
+        python/django_rust_templates/_impl/parser.py \
+        tests/test_filter_rebinding.py
+git commit -m "parser: check_filter returns the filter Django bound, not its name"
+```
+
+---
+
+### Task 2: The host node on the wire
+
+**Deliverable:** a descriptor that names a Python-owned `Node` can be built,
+materialised and compared, with no host tag yet in existence — so that Task 3
+adds behaviour rather than a wire format.
+
+**Files:**
+- Modify: `crates/template-core/src/parser/desc.rs`
+- Modify: `crates/template-core/src/parser/tags/mod.rs` (rename the stand-in)
+- Modify: `python/django_rust_templates/_impl/parser.py`
+- Modify: `tests/test_materialise.py`, `tests/test_parser_parity.py`
+
+**Interfaces:**
+- Produces: `NodeDesc::host(NodeRef)`; `desc::HOST_NODE: &str`;
+  `materialise_node` returns `resolve_ref(index)` for that class name.
+
+- [ ] **Step 1: Write the failing test — a host node survives materialisation**
+
+```python
+# tests/test_materialise.py
+def test_a_host_node_is_the_object_the_table_holds(self):
+    """`HostNode` is a *reserved descriptor name*, not a Django class.
+
+    §5.2: a `NodeRef` is "an opaque handle to a Python-owned `Node` returned by
+    a user tag callback. `template-core` never dereferences it." So the
+    descriptor's job for one is to name the slot; the materialiser returns what
+    the host stored there, with `token`/`origin` attached the way
+    `extend_nodelist` attaches them to every other node.
+    """
+    from django.template.base import TextNode
+
+    held = TextNode("held")
+    desc = ("HostNode", [("node", _native.NodeRef(0))], [], None)
+    self.assertIs(materialise_node(desc, None, lambda i: held, lambda i, v: None), held)
+```
+
+- [ ] **Step 2: Run it; expect `LookupError: no materialiser for node class 'HostNode'`**
+
+Run: `.venv/bin/python -m unittest tests.test_materialise.MaterialiseTests.test_a_host_node_is_the_object_the_table_holds -v`
+
+- [ ] **Step 3: Add `HOST_NODE` to `desc.rs` and the constructor**
+
+```rust
+/// The reserved `class_name` of a descriptor that names a **host-owned** node.
+///
+/// A user tag's compile function runs in Python and returns a Python `Node`;
+/// `template-core` cannot read it and does not try (§5.2, `NodeRef`). So the
+/// descriptor carries the slot and nothing else, and the materialiser returns
+/// what the host stored there.
+///
+/// A reserved name rather than a new `AttrValue` variant, because everything
+/// else about such a node is ordinary: it is a node in a nodelist, it gets
+/// `token`/`origin` from `extend_nodelist`, and `describe` compares it as the
+/// Python object it is. No Django module at 6.0.9 defines `HostNode`
+/// (measured: `grep -rn 'class HostNode' .django/` is empty), and
+/// `materialise_node` tests this name before `NODE_CLASSES`, so a future
+/// Django that grew one could not capture it.
+pub const HOST_NODE: &str = "HostNode";
+```
+
+```rust
+    /// A descriptor for a node the **host** built. `template-core` stores the
+    /// handle and never reads it.
+    pub fn host(node: NodeRef) -> Self {
+        Self::new(HOST_NODE).attr("node", AttrValue::Ref(node))
+    }
+```
+
+- [ ] **Step 4: Rename the test stand-in so the sentinel is unambiguous**
+
+`tags/mod.rs:512`'s `TestHost::call_tag` returns `NodeDesc::new("HostNode")`;
+change it to `"StandinHostNode"`, and the assertion at `:538`, and
+`tests/test_materialise.py:954`'s `TEST_ONLY_CLASSES`.
+
+- [ ] **Step 5: Special-case the name in `materialise_node`, before the registry lookup**
+
+```python
+    # `HostNode` is not a Django class and is deliberately not in
+    # `NODE_CLASSES`: it names a node the *host* built, which is already in the
+    # reference table. Checked before the registry so that the reserved name
+    # cannot be captured by an entry someone adds later, and so the error for a
+    # genuinely unknown class name stays a `LookupError`.
+    if class_name == "HostNode":
+        node = resolve_ref(attrs[0][1].index)
+        node.token = _decode_token(token) if token is not None else None
+        node.origin = origin
+        return node
+```
+
+- [ ] **Step 6: Pin the sentinel against Django's own classes**
+
+```python
+# tests/test_materialise.py
+def test_the_host_node_sentinel_is_not_a_django_class(self):
+    """`desc::HOST_NODE` must not name a class Django could materialise.
+
+    The materialiser tests the name before `NODE_CLASSES`, so a collision would
+    not *break* — it would silently make every real `HostNode`-named Django node
+    unmaterialisable, which is the worse failure because it is invisible until
+    someone uses that class.
+    """
+    from django.template import base, defaulttags, loader_tags
+
+    for module in (base, defaulttags, loader_tags):
+        self.assertFalse(
+            hasattr(module, "HostNode"), f"django {module.__name__} defines HostNode"
+        )
+```
+
+- [ ] **Step 7: Run `./scripts/check.sh --fast`, then commit**
+
+```bash
+git add crates/template-core/src/parser/desc.rs \
+        crates/template-core/src/parser/tags/mod.rs \
+        python/django_rust_templates/_impl/parser.py \
+        tests/test_materialise.py
+git commit -m "desc: a descriptor that names a host-owned node"
+```
+
+---
+
+### Task 3: The host tag seam, `{% load %}`, and the shadowing gate
+
+**Deliverable:** `{% load %}` works through the engine, a library shadows a
+built-in, `bad_tag`'s compile-time error is Django's, and `{% echo %}` renders —
+with Rust still dispatching every tag it owns.
+
+**Files:**
+- Modify: `crates/template-core/src/parser/host.rs`, `parser/mod.rs`
+- Modify: `crates/template-core/src/parser/registry.rs`, `tags/mod.rs`
+- Delete: `crates/template-core/src/parser/tags/load.rs`
+- Modify: `crates/template-py/src/lib.rs`
+- Create: `python/django_rust_templates/host.py`
+- Modify: `python/django_rust_templates/render.py`
+- Create: `tests/test_load_shadowing.py`, `tests/test_host_tags.py`
+- Modify: `tests/test_tag_inventory.py`
+
+**Interfaces:**
+- Consumes: `NodeDesc::host` (Task 2), the host-node `materialise_node` arm (Task 2).
+- Produces: `Host::has_tag`, `Host::call_tag(&self, command, token, tokens) -> Result<(NodeDesc, Vec<Token>), Error>`; `ShellHost` with `has_tag`/`call_tag`.
+
+- [ ] **Step 1: Measure the two facts the predicate rests on, and record them**
+
+```bash
+source scripts/env.sh
+.venv/bin/python - <<'PY'
+import sys; sys.path.insert(0, ".django")
+from django.template import Engine, Library
+from django.template.base import Parser, Lexer
+
+lib = Library()
+def shadow(parser, token):
+    return None
+lib.tag("comment", shadow)
+
+p = Parser(Lexer("").tokenize(), builtins=Engine().template_builtins)
+engine_builtin_comment = p.tags["comment"]
+p2 = Parser(Lexer("").tokenize(), builtins=Engine().template_builtins)
+print("before add_library, is engine builtin:", p2.tags["comment"] is engine_builtin_comment)
+p2.add_library(lib)
+print("after  add_library, is engine builtin:", p2.tags["comment"] is engine_builtin_comment)
+print("engine builtin for 'load':", "load" in Engine().template_builtins[0].tags)
+PY
+```
+
+Expected (this is the identity clause's basis): `True` then `False`, and `load`
+present. **If the first is not `True`, the predicate in A2 is wrong and this plan
+is wrong** — stop and record the measurement.
+
+- [ ] **Step 2: Write the failing gate — the sandwich, and the built-in that must not move**
+
+```python
+# tests/test_load_shadowing.py
+"""M6's gate: a loaded library shadows a built-in, and a plain built-in does not.
+
+**No test in `.django/` pins this.** Searched across the checkout for a library
+registering a built-in's name, for `add_to_builtins`, and for the collision
+wording: the only hits are library-*name* precedence in
+`template_backends/test_django.py` and the E003 check in
+`check_framework/test_templates.py`, both about `Engine.libraries`' dotted paths
+rather than tag names. The behaviour is real — `add_library` is
+`self.tags.update(lib.tags)` (`base.py:668-670`) and libraries merge after
+`builtins` (`base.py:522-523`) — so the suite will not catch a regression in it,
+and the spec names this as M6's gate.
+
+The spec states the gate against `Library.add_tag`/`add_library`, neither of
+which exists; see `.review/m6-recon.md` §"The three spec errors".
+"""
+
+import sys
+import unittest
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
+if str(DJANGO_CHECKOUT) not in sys.path:
+    sys.path.insert(0, str(DJANGO_CHECKOUT))
+
+from django.template import Context, Engine, Library, Node  # noqa: E402
+
+from django_rust_templates import render  # noqa: E402
+
+
+class _ShadowNode(Node):
+    def render(self, context):
+        return "shadowed"
+
+
+def _shadow_library():
+    """A library registering `comment` — a built-in Rust owns — with our own body."""
+    library = Library()
+
+    @library.tag("comment")
+    def shadow(parser, token):
+        parser.skip_past("endcomment")
+        return _ShadowNode()
+
+    return library
+
+
+class LoadShadowingTests(unittest.TestCase):
+    def _render(self, source, **context):
+        engine = Engine()
+        return render.render_string(source, context, engine)
+
+    def test_a_loaded_library_replaces_a_builtin_of_the_same_name(self):
+        engine = Engine()
+        engine.template_builtins.append(_shadow_library())
+        # `comment` is Rust's. After the load it must not be: the host's table
+        # is one dict and `{% load %}` updates it, so the *later* registration
+        # wins — which is why dispatch reads the host's table first.
+        output = render.render_string(
+            "{% load shadow %}{% comment %}x{% endcomment %}", {}, engine
+        )
+        self.assertEqual(output, "shadowed")
+
+    def test_a_builtin_rust_owns_is_still_rusts_when_nothing_shadows_it(self):
+        """The other half, and the one a naive host-first dispatch loses.
+
+        The shell must not route `{% comment %}` to Python just because Django's
+        `Parser.tags` has an entry for it — every built-in does. The identity
+        clause in `ShellHost.has_tag` is what separates "Django's builtin
+        callable" from "something a load put there".
+        """
+        engine = Engine()
+        output = render.render_string("{% comment %}x{% endcomment %}ok", {}, engine)
+        self.assertEqual(output, "ok")
+
+    def test_the_sandwich_binds_each_filter_at_its_own_token(self):
+        """Review Focus 3, end to end, now that `{% load %}` exists."""
+        engine = Engine()
+        engine.template_builtins.append(_shadow_library())
+        output = render.render_string(
+            "{{ x|upper }}{% load shadow %}{{ y|upper }}", {"x": "a", "y": "b"}, engine
+        )
+        self.assertEqual(output, "AB")
+```
+
+- [ ] **Step 3: Run it; expect `Invalid block tag … 'load'`**
+
+Run: `.venv/bin/python -m unittest tests.test_load_shadowing -v`
+Expected: FAIL on all three, with Django's `Invalid block tag on line 1: 'load'`.
+This is the declared red for this task.
+
+- [ ] **Step 4: Change `Host::call_tag`'s signature and add the token handoff**
+
+```rust
+    /// Whether `command` is a tag the **host** will compile.
+    ///
+    /// Django's own test, plus one clause. `parser.tags` is one dict and
+    /// `Parser.add_library` updates it in place (`base.py:668-670`), so a
+    /// library loaded *after* the engine's builtins wins — which is why the
+    /// parse asks the host first. But every built-in has an entry in
+    /// `parser.tags` too, so a bare membership test would route `{% for %}` to
+    /// Python and Rust's compile functions would never run. The shell's
+    /// `ShellHost.has_tag` therefore excludes a name whose entry is still
+    /// Django's own builtin callable *and* is Rust's; see the M6 plan §A2 for
+    /// the measurement behind the identity test.
+    fn has_tag(&self, command: &str) -> bool;
+
+    /// Compile `command` in Python, against the parser's remaining tokens.
+    ///
+    /// `tokens` is everything the caller has not consumed, **in parse order**.
+    /// The host may consume any prefix of it (a block tag's `parser.parse(...)`,
+    /// `tag_27584.badtag`'s re-entrant parse) and may push tokens back
+    /// (`Parser.prepend_token`); the second element of the return is what is
+    /// left, and the caller **replaces** its cursor with it rather than
+    /// counting. Replacing and not counting is what makes `prepend_token`
+    /// correct without a special case.
+    ///
+    /// The host holds no borrow of the caller's parser — it *is* the caller's
+    /// counterpart on the Python side (§5.2, `ParserHandle`), which is why the
+    /// tokens travel by value.
+    fn call_tag(
+        &self,
+        command: &str,
+        token: &Token,
+        tokens: &[Token],
+    ) -> Result<(NodeDesc, Vec<Token>), Error>;
+```
+
+- [ ] **Step 5: Give `Parser` the cursor accessors the handoff needs**
+
+```rust
+    /// The tokens from the cursor on, in **parse order**.
+    ///
+    /// The internal stack is reversed (`base.py:504-505`, for `pop` from the
+    /// end), so this reverses a copy. It exists for `Host::call_tag`, which
+    /// hands a host compile function the stream it may consume.
+    pub fn remaining_tokens(&self) -> Vec<Token> {
+        self.tokens.iter().rev().cloned().collect()
+    }
+
+    /// Replace the cursor with `tokens`, in parse order.
+    ///
+    /// Replacing rather than advancing by a count is what makes a host
+    /// callback's `prepend_token` work without a special case: whatever the
+    /// host leaves behind *is* the stream, and the host is Django's own
+    /// `Parser`, whose stack semantics the reversal already mirrors.
+    pub fn replace_tokens(&mut self, tokens: Vec<Token>) {
+        self.tokens = tokens.into_iter().rev().collect();
+    }
+```
+
+- [ ] **Step 6: Dispatch to the host with the cursor handed over**
+
+In `Parser::parse`, the `has_tag` arm (`parser/mod.rs:295-301`):
+
+```rust
+                    let compiled = if self.host.has_tag(&command) {
+                        // The host compiles it, and it may consume the rest of
+                        // the stream. Both halves cross by value: the host is
+                        // Python's own `Parser` and holds no borrow of this one
+                        // (§5.2), which is what lets `{% load %}` and a
+                        // `simple_block_tag`'s nested parse re-enter at all.
+                        let remaining = self.remaining_tokens();
+                        let (desc, left) = self.host.call_tag(&command, &token, &remaining)?;
+                        self.replace_tokens(left);
+                        Ok(desc)
+                    } else if let Some(compile) = registry::builtin_tag(&command) {
+                        compile(self, &token)
+                    } else {
+                        return Err(self.invalid_block_tag(&token, &command, parse_until));
+                    };
+```
+
+The `?` inside the arm is a `return`-shaped early exit only if `parse`'s error
+type matches; it does (`Result<NodeListDesc, Error>`). Keep the existing
+`let node = compiled.map_err(|error| self.error(&token, error))?;` line — a host
+error must still get the token attached, and `Parser.error` only attaches one if
+the error lacks it.
+
+- [ ] **Step 7: Delete `load.rs` and `querystring.rs`, and their registry entries**
+
+Delete `crates/template-core/src/parser/tags/load.rs` and
+`crates/template-core/src/parser/tags/querystring.rs`; remove their `mod`
+declarations and their `REGISTRY` entries in `registry.rs`; drop `load` and
+`querystring` from `builtin_tag_stubs()` in `tags/mod.rs`. Both stubs' headers
+predicted this outcome and gave the reason — move the reasons into
+`registry.rs`'s doc comment, which today says M6 "must decide": the "separate
+bucket" paragraph becomes A1's argument (`defaulttags.load:1102-1131`,
+`parser.libraries`, `load_from_library`'s `Library()`), and `querystring`'s
+entry becomes A4's (a `simple_tag`-registered built-in, whose compile is
+Python's).
+
+Update the Rust test that pins the registry against a literal
+(`registry.rs::every_entry_is_reachable_and_every_unimplemented_one_is_a_stub`)
+and any test pinning the count 24.
+
+- [ ] **Step 7b: Pin the subtraction and the stub list, derived — not typed**
+
+```python
+# tests/test_tag_inventory.py — rename the existing loader-tags subtraction test
+def test_the_rust_registry_is_djangos_builtins_minus_the_python_owned_five(self):
+    """§6's three, plus `load` (A1) and `querystring` (A4).
+
+    The old name for this subtraction was "loader tags", which stopped
+    describing anything: `load` is Python's because its lookup is Python's, and
+    `querystring` is Python's because `simple_tag` registered it and §6 gives
+    `Library` to Python. What the five share is §6, not the loader.
+    """
+    python_owned = {"block", "extends", "include", "load", "querystring"}
+    self.assertEqual(sorted(_native.builtin_tag_names()), sorted(REGISTERED - python_owned))
+    self.assertEqual(set(_native.builtin_tag_stubs()), {"partial", "partialdef"})
+```
+
+Run: `.venv/bin/python -m unittest tests.test_tag_inventory -v`
+Expected: PASS with `builtin_tag_names()` of length 22. **If it is not 22, the
+subtraction is wrong, not the test** — and `REGISTERED` must be re-derived from
+`Engine().template_builtins` rather than the number adjusted.
+
+- [ ] **Step 8: Implement `ShellHost`**
+
+```python
+# python/django_rust_templates/host.py
+"""The shell's half of the host seam: the parser Django's own tag code needs.
+
+Rust owns the token cursor; **the host owns parser state** — `tags`, `filters`,
+`libraries`, `extra_data`, and whatever a user tag sets on the parser. The
+division is what §5.2's `ParserHandle` describes, realised the smaller of the two
+ways it can be: rather than a Rust handle proxying into a shared `Parser`, one
+real `django.template.base.Parser` is kept for the whole parse, and Rust hands it
+the tokens it may consume. `Parser.parse` already leaves the end tag on the stack
+for `delete_first_token` (`base.py:600-610`), so a callback that does
+``nodelist = parser.parse((end_name,)); parser.delete_first_token()`` — which is
+`Library.simple_block_tag` (`library.py:211-212`) and `tag_27584.badtag`
+(`:8-9`) verbatim — runs unmodified.
+
+**A `has_tag` that answered `command in parser.tags` would break every built-in.**
+Every one of Django's 27 built-ins is in that dict, so Rust would be told to
+compile nothing and the host would run Django's `do_for` etc. The identity clause
+below is the whole of the discrimination: a name is the host's to compile when its
+entry is *not* Django's own builtin callable, or when it is a built-in Rust does
+not own (`block`, `extends`, `include`, `load`).
+"""
+
+from __future__ import annotations
+
+from django.template.base import Token, TokenType
+
+from django_rust_templates import _native
+
+__all__ = ("ShellHost",)
+
+# A5: M7's three. They are Django's builtins and not Rust's, so without this
+# they would reach the host — and `{% extends %}` would lose its ordering check,
+# because `ExtendsNode.must_be_first` is enforced by `Parser.extend_nodelist`
+# (`base.py:598-610`), which our descriptor path never runs. Measured:
+# `{{ x }}{% extends "y" %}` raises under stock Django; `BlockNode` and
+# `IncludeNode` have `must_be_first = False`. M7 removes this and carries
+# `must_be_first` with the node.
+_M7_OWNED = frozenset({"block", "extends", "include"})
+
+
+def _engine_builtin_tags(parser):
+    """The tag callables `Parser.__init__` merged from `builtins`.
+
+    Taken as a **snapshot of the parser's table at construction**, not rebuilt
+    from `Engine()`. Two reasons, and the second is a bug the first draft had:
+    `parser_for` is handed the *caller's* engine, so a caller that registered
+    its own library in `builtins` would have its tags mistaken for Django's; and
+    a library is merged into `parser.tags` only by `{% load %}` (`base.py:521`
+    stores `libraries` and does not merge it), so at construction the table
+    **is** the builtins and nothing else.
+    """
+    return dict(parser.tags)
+
+
+class ShellHost:
+    """The `has_tag`/`call_tag` pair for one parse.
+
+    One instance per parse, holding the one `Parser` the whole parse uses, so
+    that `{% load %}`'s `add_library` and `{% extra_data %}`'s
+    `parser.extra_data[...]` are visible to every later token **and** to the
+    template afterwards (`test_compile_tag_extra_data`).
+    """
+
+    def __init__(self, parser):
+        self.parser = parser
+        self._rust_owned = set(_native.builtin_tag_names())
+        self._builtins = _engine_builtin_tags(parser)
+
+    def has_tag(self, command):
+        func = self.parser.tags.get(command)
+        if func is None:
+            return False
+        if command in _M7_OWNED:
+            # A5. Excluded until M7, which must *also* carry `must_be_first`
+            # across the seam: `{{ x }}{% extends "y" %}` raises under Django
+            # from `Parser.extend_nodelist` (`base.py:598-610`), the line our
+            # descriptor path never runs.
+            return False
+        if command not in self._rust_owned:
+            # `load`, `querystring`, and everything a `{% load %}` brought in.
+            return True
+        # Rust's, unless a `{% load %}` replaced Django's own callable for the
+        # name — `add_library` is `self.tags.update(lib.tags)`
+        # (`base.py:668-670`), so the load wins and this is where we notice.
+        return func is not self._builtins.get(command)
+
+    def call_tag(self, command, token, tokens):
+        """Run Django's own compile function for `command`.
+
+        `tokens` arrives in parse order and is reversed onto the parser's stack
+        the way `Parser.__init__` does (`base.py:504-505`); what is left is
+        reversed back. **Replacing the caller's cursor with the result, not
+        counting a delta, is what makes `prepend_token` correct** — Django's
+        `Parser.parse` prepends the end tag it stopped on (`base.py:600-610`)
+        and the tag removes it with `delete_first_token`, and a count would
+        have to know that dance rather than observe it.
+        """
+        parser = self.parser
+        parser.tokens = [Token(TokenType(t), contents, position, lineno)
+                         for t, contents, lineno, position in reversed(tokens)]
+        node = parser.tags[command](parser, token)
+        left = [(int(tok.token_type), tok.contents, tok.lineno, tok.position)
+                for tok in reversed(parser.tokens)]
+        return node, left
+```
+
+- [ ] **Step 9: Wire it through `_native.parse` and `render.py`**
+
+`_native.parse`/`render` gain `host=` (a `ShellHost` or `None`); the Rust
+`FilterCheckHost` gains `has_tag: Option<Bound<PyAny>>` and
+`call_tag: Option<Bound<PyAny>>`, with `has_tag` returning `false` and
+`call_tag` unreachable when they are `None` — the current `NoHost` behaviour,
+preserved for every Rust-only test. `parser_for` gains
+`libraries=engine.template_libraries`.
+
+- [ ] **Step 10: Run the gate, and the whole check**
+
+Run: `.venv/bin/python -m unittest tests.test_load_shadowing -v`
+Expected: PASS on all three. Then `./scripts/check.sh --fast` → `all checks passed`.
+
+- [ ] **Step 11: Pin the nested-region coverage hole (Review Focus 1)**
+
+```python
+# tests/test_host_tags.py
+def _wrap_library():
+    """A `simple_block_tag` — the shape that re-enters Django's parse.
+
+    `library.py:211-212` is `nodelist = parser.parse((end_name,))` then
+    `parser.delete_first_token()`, run against the parser the host owns.
+    """
+    library = Library()
+
+    @library.simple_block_tag
+    def wrap(content):
+        return content
+
+    return library
+
+
+def test_a_host_block_tags_body_is_parsed_by_django_and_that_is_asserted(self):
+    """The nested region is Django-parsed, and this makes that visible.
+
+    When a host tag's compile function calls `parser.parse(...)` — which is
+    `Library.simple_block_tag` verbatim (`library.py:211-212`) — the body is
+    parsed by *Django's* `Parser.parse`, so every tag inside it is compiled by
+    Django and `assert_trees_match` cannot tell that from Rust having done it.
+    **A tree comparison over such a body is therefore not evidence about our
+    engine**, which is the vacuous-gate failure this project has hit twice.
+
+    Error *text* cannot discriminate, and that is the trap: Rust's messages are
+    ported verbatim from Django's, so `{% for %}` with no argument raises
+    identical text either way. The discriminator has to be something only one
+    side does. It is `{% partialdef %}`, whose Rust implementation is still a
+    stub (`builtin_tag_stubs()`): were the body Rust-parsed, the parse would
+    raise `unimplemented`; that it does not means Django's `do_partialdef` ran
+    and stored into `parser.extra_data["partials"]` (`defaulttags.py:1250-1251`)
+    — which is the assertion. Measured before it was written down: outside a
+    block tag this sets the same key, and inside one it still does, on the
+    *outer* parser.
+    """
+    engine = Engine()
+    engine.template_builtins.append(_wrap_library())
+    host = host_module.ShellHost(render.parser_for("", engine))
+
+    _native.parse("{% wrap %}{% partialdef p %}x{% endpartialdef %}{% endwrap %}", host=host)
+
+    self.assertIn("p", host.parser.extra_data["partials"])
+```
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add -A crates/template-core/src/parser crates/template-py/src/lib.rs \
+        python/django_rust_templates tests/test_load_shadowing.py \
+        tests/test_host_tags.py tests/test_tag_inventory.py
+git commit -m "parser: host-compiled tags, and {% load %} with its shadowing gate"
+```
+
+---
+
+### Task 4: parser state — `extra_data`, and the parse that must not leak it
+
+**Why this is separate from Task 3:** Task 3 makes host tags *compile*. This task makes the parser's **state** survive to the template, which is a different seam (`Template.__init__`, which we do not run) and a different failure (`hasattr(template, "extra_data")` being true when Django's is false). Re-entrancy — `tag_27584`'s nested `parser.parse` then `delete_first_token` — comes free with Task 3's token handoff, so its rows are added here as the evidence that the handoff is right, not as new work.
+
+**Files:**
+- Modify: `python/django_rust_templates/render.py` (`render_string`)
+- Test: `tests/test_host_tags.py`
+
+**Interfaces:**
+- Consumes: `ShellHost.parser` (Task 3), so no handle needs returning from `_native.parse` — §5.2's `(NodeListRef, ParserHandle)` is satisfied because the shell *built* the parser.
+- Produces: `Template.extra_data` assigned only on a successful parse.
+
+- [ ] **Step 1: Write the failing test — `extra_data` reaches the template**
+
+```python
+# tests/test_host_tags.py
+def test_a_user_tags_extra_data_reaches_the_template(self):
+    """`custom.py:398` writes it; `.django`'s `tests.py:148-155` asserts it.
+
+    `Parser.__init__` sets `self.extra_data = {}` (`base.py:514`), so the parser
+    always has it. What the template gets is a copy made by
+    `Template.__init__` — `nodelist = parser.parse(); self.extra_data =
+    parser.extra_data` (`base.py:198-200`) — **and our shell builds the
+    `Template` by `__new__` (`_impl/parser.py:339`) and so never runs that line.**
+    This is the same class of gap `template_for`'s own docstring lists for
+    `nodelist`/`engine`/`name`/`origin`/`source`; `extra_data` joins the list.
+    """
+    engine = Engine(libraries={"custom": "template_tests.templatetags.custom"})
+    template = self._template("{% load custom %}{% extra_data %}", engine)
+    self.assertEqual(template.extra_data["extra_data"], "CUSTOM_DATA")
+```
+
+- [ ] **Step 2: Run it; expect `AttributeError: 'Template' object has no attribute 'extra_data'`**
+
+Run: `.venv/bin/python -m unittest tests.test_host_tags -v`
+
+- [ ] **Step 3: Assign it after a successful parse only**
+
+```python
+    # `base.py:198-200` assigns this inside `Template.__init__`'s `try`, so a
+    # parse that raises leaves the attribute *off* the template and consumers
+    # rely on that — `getattr(template, "extra_data", {})` (`engine.py:194`).
+    # Nothing in `.django` pins the producer side (the recon says so, and names
+    # the reason), so both halves are pinned here: this line is after
+    # `_native.parse` returns, therefore unreachable when it raises.
+    template = template_for(nodelist, engine)
+    template.extra_data = host.parser.extra_data
+    return template
+```
+
+- [ ] **Step 4: Write the failing test — a failed parse leaves no `extra_data`**
+
+```python
+def test_a_failed_parse_leaves_the_template_without_extra_data(self):
+    """The other half of `base.py:198-200`, and the half nothing pins.
+
+    `engine.py:194` reads `getattr(template, "extra_data", {})` precisely
+    because the attribute can be absent. A shell that assigned it from a
+    `finally`, or that pre-seeded it, would make `hasattr` true where Django's
+    is false — invisible to every render test, and it changes what
+    `{% partial %}` lookups do at M13 (`engine.py:194-198`).
+    """
+    engine = Engine(libraries={"custom": "template_tests.templatetags.custom"})
+    with self.assertRaises(TemplateSyntaxError):
+        # `{% extra_data %}` writes to the parser's dict *before* the parse
+        # fails, so a shell that kept the parser's dict would carry it out.
+        self._template("{% load custom %}{% extra_data %}{% endfor %}", engine)
+```
+
+- [ ] **Step 5: Run it; expect the `TemplateSyntaxError` is raised but `hasattr` is true**
+
+Run: `.venv/bin/python -m unittest tests.test_host_tags -v`
+Expected: FAIL on the `hasattr` assertion — **this is the red that proves Step 3
+put the assignment in the right place rather than merely adding it.** Assert it
+as `self.assertFalse(hasattr(template, "extra_data"))` on the *template object*
+the shell produced; capture it by having `_template` return the template and the
+exception together, so the assertion runs on the object that failed to build.
+
+- [ ] **Step 6: Re-entrancy — the evidence that Task 3's handoff is correct**
+
+```python
+def test_a_host_tag_may_re_enter_the_parse_and_the_error_is_djangos(self):
+    """`tag_27584.badtag` re-enters: `parser.parse(("endbadtag",))` then
+    `delete_first_token()` (`.django/.../templatetags/tag_27584.py:8-9`).
+
+    This is §5.2's contract and the reason `call_tag` passes tokens by value
+    rather than lending `&mut Parser`. The expected message is **computed from
+    Django's own parser on the same source**, not transcribed: Rust ports
+    Django's strings verbatim, so an equality assertion against a live Django
+    parse stays honest as the fixture changes and a copied literal would not.
+    """
+    source = "{% badtag %}{% endbadtag %}"
+    libs = {"tag_27584": "template_tests.templatetags.tag_27584"}
+
+    with self.assertRaises(TemplateSyntaxError) as ours:
+        self._template(source, Engine(libraries=libs))
+    with self.assertRaises(TemplateSyntaxError) as django:
+        Engine(libraries=libs).from_string(source)
+
+    self.assertEqual(str(ours.exception), str(django.exception))
+
+def test_a_simple_block_tag_delimits_its_body_with_djangos_own_parse(self):
+    """`library.py:211-212`: `nodelist = parser.parse((end_name,))` then
+    `parser.delete_first_token()`. Django's `parse` *leaves* the end tag and the
+    tag removes it — so a host seam that consumed it (as Rust's own `parse`
+    would, if it were driving) needs a token too many and the template after the
+    block is eaten. Asserting the trailing text is what catches that.
+    """
+    self.assertEqual(self._render("{% wrap %}a{% endwrap %}b"), "ab")
+```
+
+- [ ] **Step 7: Run the full check**
+
+Run: `./scripts/check.sh --fast` → `all checks passed`
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add python/django_rust_templates/render.py tests/test_host_tags.py
+git commit -m "shell: carry parser.extra_data to the template, and only on success"
+```
+
+---
+
+### Task 5: grade it — the corpus rows for the tags the host compiles
+
+**Why this is its own task:** the corpus is M6's real gate — the `.django` suite
+runs on stock Django (`unshimmed()` is 25), so it exercises none of this. Before
+this task the corpus has **no** row whose tree contains a host node, and M6 would
+close with its central mechanism ungraded.
+
+**Files:**
+- Modify: `tests/test_parser_parity.py` (`django_parse`, `ours_parse`, `filter_parser`)
+- Modify: `tests/parser_corpus.py`, `tests/parser_error_corpus.py`
+- Test: the corpus itself
+
+**Interfaces:**
+- Consumes: `desc::HOST_NODE` (Task 2), `ShellHost` (Task 3).
+
+- [ ] **Step 1: Write the failing test — one library object, both sides**
+
+```python
+# tests/test_parser_parity.py
+def test_a_host_tag_parses_to_the_same_tree_as_django(self):
+    """The first corpus row whose tree contains a host node.
+
+    `describe`'s `Node` arm compares `vars()` recursively, and a `SimpleNode`
+    holds `func` — a live function object, compared by identity because it is
+    neither a `Node` nor a `FilterExpression`. So the two sides must be given
+    the **same** `Library` instance: two separately-built libraries would differ
+    in `func` identity and the failure would read like a Rust bug in a seam that
+    is working. That is the whole reason `_engine()` is a single factory below.
+    """
+    source = "{% load custom %}{% echo x %}"
+    self.assert_trees_match(ours_parse(source), django_parse(source))
+```
+
+- [ ] **Step 2: Run it; expect it to fail at `{% load %}`'s lookup**
+
+Run: `.venv/bin/python -m unittest tests.test_parser_parity -v`
+Expected: FAIL — `django_parse` builds `Parser(lexer.tokenize(),
+builtins=Engine().template_builtins)` with **no `libraries=`**, so
+`{% load custom %}` raises `not a registered tag library`. That is the same
+omission `render.py::parser_for` has, and Task 3 fixed there.
+
+- [ ] **Step 3: One library-aware engine, used by both sides**
+
+```python
+def _engine():
+    """The one engine both parses use, so library objects are shared.
+
+    A fresh `Engine()` per side would give the two trees different `func`
+    objects for every host tag, and `describe` compares them by identity.
+    """
+    return Engine(libraries={"custom": "template_tests.templatetags.custom", ...})
+```
+
+and pass `libraries=engine.template_libraries` in `django_parse`, `ours_parse`
+and `filter_parser`. `render.py::parser_for` gained the same argument in Task 3;
+this is its parity counterpart, and the two must agree or the corpus grades a
+different parser than the render path uses.
+
+- [ ] **Step 4: Run the corpus; expect a new failure listing tags with no row**
+
+Run: `.venv/bin/python -m unittest tests.test_parser_parity -v`
+Expected: FAIL from
+`test_the_corpus_covers_every_implemented_tag_with_a_success_path`? **No** — that
+test derives its demand from `builtin_tag_names() - builtin_tag_stubs()`, and
+`load`/`querystring` left both sets in Task 3, so it demands nothing new.
+**The absence of a failure here is the finding**: the coverage test cannot see
+host tags at all. Add the rows by hand, and add the row that makes this visible:
+
+```python
+def test_the_corpus_has_a_row_whose_tree_contains_a_host_node(self):
+    """`builtin_tag_names()` is Rust's registry, so it is structurally blind to
+    every tag the *host* compiles — including both of M6's. Without this row M6
+    could close with its whole mechanism ungraded and the coverage test green.
+    """
+    rows = [row for row in CORPUS if "{% load" in row.source]
+    self.assertTrue(rows, "no corpus row loads a library")
+    self.assertTrue(any(contains_host_node(ours_parse(row.source)) for row in rows))
+```
+
+- [ ] **Step 5: Add the corpus rows**
+
+For each of these, a success-path row in `tests/parser_corpus.py`:
+
+```text
+{% load custom %}{% echo x %}                     a library tag, end to end
+{% load custom %}{% extra_data %}                 the one that writes extra_data
+{% load testtags %}{% echo x %}ok                 a different library
+{% load custom %}{% my_simple_block_tag %}a{% endmy_simple_block_tag %}
+{% querystring page=2 %}                          the simple_tag-registered builtin
+{% badtag %}{% endbadtag %}                       the re-entrant parse, as a row
+{{ x|upper }}                                     already present; keep it, it is
+                                                  the sandwich's first half
+```
+
+and an **error** row in `tests/parser_error_corpus.py` for each raising form,
+with the message compared — that corpus is where `{% load %}`'s two messages
+(`defaulttags.py:1069-1075`, `:1092-1098`) and all five of `parse_bits`'
+(`library.py:392-480`) are actually gated. `{% querystring %}` with no arguments
+is **not** a parse row: it takes `takes_context=True` and raises from inside
+`render` (`defaulttags.py:1325-1349`) — put it in the render-level tests, not
+here.
+
+- [ ] **Step 6: Pin Review Focus 4 — a host node still gets `token`/`origin`**
+
+```python
+# tests/test_parser_parity.py
+def test_a_host_node_carries_its_token_in_debug_mode(self):
+    """`extend_nodelist` sets `node.token`/`node.origin` (`base.py:598-610`) —
+    the same method that enforces `must_be_first`. Our parse returns a
+    descriptor, so that line never runs for a host node, and the code that reads
+    `token` is the debug traceback path. A template using a user tag is the one
+    shape the corpus did not have before M6, so this is exactly the class of
+    template the gap would have hidden in.
+    """
+    tree = ours_parse("{% load custom %}{% echo x %}", debug=True)
+    host = [node for node in tree if type(node).__name__ == "SimpleNode"][0]
+    self.assertEqual(host.token.contents, "{% echo x %}")
+```
+
+- [ ] **Step 7: Run the full check and commit**
+
+Run: `./scripts/check.sh` (not `--fast` — this task's gate is the corpus)
+Expected: `all checks passed`, `Ran 1547 tests … OK (skipped=6)`.
+
+```bash
+git add tests/test_parser_parity.py tests/parser_corpus.py tests/parser_error_corpus.py
+git commit -m "parity: corpus rows for the tags the host compiles"
+```
+
+---
+
+### Task 6: close-out — the spec corrected, the reconnaissance committed, the counts re-measured
+
+**Files:**
+- Modify: `docs/superpowers/specs/2026-10-08-django-template-engine-in-rust-design.md`
+- Add: `.review/m6-recon.md` (untracked until now)
+- Modify: the memory file for this project (M6 status)
+
+- [ ] **Step 1: Correct the spec's three errors, in place, as prior milestones did**
+
+Each correction states the measurement, not just the fix:
+
+1. **The M6 gate sentence** (~line 989) attributes `add_tag`/`add_library` to
+   `Library`. Neither exists; the merge is `Parser.add_library`
+   (`base.py:668-670`) and the gate's behaviour is real by that route. Note that
+   the spec's own §6 text already gets this right ("consumed via `add_library`
+   and **not stored**") — the two sentences disagree and the later is wrong.
+2. **`LibraryParseError`** → `InvalidTemplateLibrary` (`library.py:13`), raised by
+   `import_library` (`:476-492`).
+3. **§5.2's arbitrary-attributes requirement** is argued from
+   `loader_tags.do_block:228-234`, which is correct and is **M7's**, not M6's.
+   Keep the requirement, move the citation's milestone, and record the
+   non-negotiable part for M7: the handle must *raise* `AttributeError` for an
+   attribute it does not have, because `do_block`'s `except AttributeError`
+   branch is what builds `__loaded_blocks` in the first place.
+
+- [ ] **Step 2: Record M6's two decided ownership changes and the M7 boundary**
+
+Add to §10.3's M6 row and §10.4's gate: `load` and `querystring` are
+**host-owned** (this plan's A1 and A4), so `builtin_tag_names()` is 22 and
+`builtin_tag_stubs()` is `['partial', 'partialdef']`; and M6 **excludes**
+`block`/`extends`/`include` from the host (A5), so `{% extends %}` still raises
+`Invalid block tag` at M6 — **a known divergence from Django, owned by M7**,
+which must remove the exclusion *and* carry `must_be_first` across the seam.
+Write the divergence down as a divergence; do not let it look like coverage.
+
+- [ ] **Step 3: Re-measure every count the spec now asserts**
+
+Do not edit a number in the spec without running the thing that produces it:
+`builtin_tag_names()` length, `builtin_tag_stubs()` contents, `unshimmed()`,
+`cargo test`'s count, and the three corpus sizes. A number that moved and was
+not re-derived is the defect class this project keeps finding.
+
+- [ ] **Step 4: Commit the reconnaissance with the close-out**
+
+`.review/m6-recon.md` has been untracked since it was written. It is the
+measurement record this plan is argued from, so it belongs in the same commit as
+the spec edits that cite it.
+
+```bash
+git add .review/m6-recon.md docs/superpowers/specs/*.md
+git commit -m "M6 close-out — the spec corrected, the reconnaissance committed"
+```
+
+- [ ] **Step 5: Update the project memory and dispatch the close-out to the reviewer**
+
+Update `MEMORY.md`'s project line with M6's status and the corrected numbers, and
+send the close-out to the reviewer peer session (`django-rust-templates-a8`) with
+`.django/` @ 6.0.9 named, per the standing dispatch rule.
+
+---
+
+## Self-Review
+
+Run after writing the plan, against the spec with fresh eyes. Findings and fixes,
+in the order they were found.
+
+**1. Spec coverage.** §10.3's M6 row names four things: `Library`, extension host
+callbacks, `{% load %}`, `querystring`. Tasks 1 (the handle prerequisite), 2 (the
+wire form), 3 (the seam, the load, the gate), 4 (the state), 5 (the comparison),
+6 (the record) cover all four. §5.2's `ParserHandle` contracts are each given a
+task: re-entrant `parse` → Task 3's handoff, proved in Task 4 Step 6; `extra_data`
+→ Task 4; the failure-path return → Task 4 Step 4; arbitrary attributes →
+explicitly **out of scope** (A-consequence in the recon, Task 6 Step 1). §9's
+three test layers: the unit layer is `cargo test` in each task's `check.sh`; the
+parity layer is Task 5; the suite layer is unchanged and stated in Global
+Constraints. No section of the spec is left without a task.
+
+**2. Placeholder scan.** Two were found and fixed rather than shipped:
+(a) Task 3's Step 11 was a docstring with no assertion — a step describing what
+to test without testing it, which is the "steps that describe what to do without
+showing how" failure. It is now a runnable row, and its discriminator was
+*executed* before being written down (`.review/m6-recon.md` records the run);
+(b) Task 4's Step 3 originally assigned `extra_data` unconditionally from a
+`finally`, which is the exact defect Step 4 then hunts. Both are now the shape
+that fails for its intended reason.
+
+**3. Type consistency.** `Host::call_tag` returns
+`Result<(NodeDesc, Vec<Token>), Error>` in Task 3's trait, and Task 3 Step 6
+destructures exactly `(desc, left)`. `Host::check_filter` returns
+`Result<Option<NodeRef>, Error>` in Task 1 Step 3, and Task 1 Step 4 returns
+`Ok(None)` / `Ok(Some(ref))` — matching. Task 2 defines
+`NodeDesc::host(NodeRef)` and `HOST_NODE`; Task 3's `ShellHost` produces it via
+`call_tag`'s `NodeDesc`, and Task 2's `materialise_node` arm is the only consumer.
+The one name that moved: `_engine_builtins` → `_builtins` (Task 3 Step 8) once
+the snapshot replaced the `Engine()` read; nothing else references the old name.
+
+**4. A mechanism that could not run at all.** Task 5's first draft specified a
+`describe` arm matching `class_name == "HOST_NODE"`. That arm can never execute:
+`describe` operates on **materialised Django nodes**, and by then the host node is
+an ordinary `SimpleNode` — the reserved name lives only on the descriptor wire,
+which no harness reads. Worse than inert, it would have implied the corpus needed
+unwrapping to compare a host node, when `describe`'s existing `Node` arm already
+does it generically and already recurses into `SimpleBlockNode`'s *real*
+`NodeList`. The step was replaced with the one thing that genuinely does not work
+today: the two sides must share `Library` objects, because `SimpleNode.func` is
+compared by identity.
+
+**5. Review Focus.** All five lines have an owner and a test:
+1 → Task 3 Step 11; 2 → Task 3 Steps 2 and 10; 3 → Task 1 (Steps 1 and 6) and
+Task 3 Step 2's sandwich; 4 → Task 2 Step 5 and Task 5 Step 6; 5 → Task 4
+Steps 1–5. The list was written with the spec in front of me and each line was
+checked against a task, not added to the section and left there.
+
+**6. What this plan does not claim.** Measured against `test_custom.py`'s 39:
+M6 claims the `filter`/`simple_tag`/`simple_block_tag`/`{% load %}`-error and
+`bad_tag`/`tag_27584`/`extra_data` groups — and **not**
+`InclusionTagTests`, whose `InclusionNode.render` loads a template by name and
+is loader machinery (M7). `test_library.py`'s 28 are a gate on Python behaviour
+M6 must not break, not work M6 does. Saying which tests a milestone claims,
+rather than asserting a module, is the correction the M5 close-out recorded.
+
