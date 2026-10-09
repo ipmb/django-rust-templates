@@ -116,17 +116,36 @@ suite is not evidence that anything is ours. M10 inherits the rule and must
 answer it the same way — with an instrument that shows the code on the seam is
 ours, not merely that the rows pass.
 
-What makes M10 *different* from M9, and easier: M9's answer had to reach three
-seams (parse, render, resolve) because `base.py` is on all of them. M10's
-modules are mostly *plumbing* — `Context` is a dict stack, `Origin` is a data
-holder, the loaders are `safe_join` + open. The honest question for M10 is
-therefore **not** "how much of the suite runs through these?" but **"is anything
-in them Rust's at all, and if not, what does interposing them buy?"** The
-subagent survey's answer — that the modules are pure Python state — suggests the
-answer is *not much for `context`*, and the plan should say so rather than
-dress a transcription up as progress.
+**An earlier draft of this section asked the wrong question, and §6 is what
+corrects it.** That draft argued that because these four modules are mostly pure
+Python state, M10 might be "dressing a transcription up as progress", and that
+the honest question was *is anything here Rust's at all*. §6's ownership split
+answers it before the plan has to:
 
-This is stated here, before the plan, so the plan has to argue with it.
+> **Python owns:** the `Library` registry and dotted-path loading; `Engine` and
+> the configured loader classes (framework-coupled: `override_settings`,
+> `INSTALLED_APPS`, `origin.loader_name`); `Context` and context processors;
+> `Origin`; `TemplateDoesNotExist` traceback hygiene; `logging` integration; …
+
+**Nothing in M10 is meant to be Rust's, and that is a design decision with a
+stated reason** — framework coupling — not an omission. So M10 is not a Rust
+milestone; it is the one that takes the last Django code out of the loop, and
+what it buys is exactly what §2's acceptance criterion asks for: `unshimmed()`
+empty. The meter *is* the deliverable here, which is why §3's row names four
+test modules and a project-side test rather than a seam, and why §7's missing
+blast-radius count matters less at M10 than it did at M9 — though it still
+matters, because "which tests are real signal now" is the premise of interposing
+at all (§10.1).
+
+The vacuity rule does not go away; it moves. The instrument that answers it is
+the same one M9 built: `scripts/check_transcriptions.py`, where each transcribed
+file declares its differing hunks and the guard asserts the diff equals the
+declaration. But §6's vendoring policy adds a duty the plan must not skip —
+Django's Python source is **not vendored**, the shell is written fresh with
+Django's implementation as the specification — so the plan has to say, per file,
+whether it is a marked transcription (`# TRANSCRIBED:`) or fresh work, because
+those are different obligations and the policy forbids treating the second as
+the first.
 
 ## 5. The §2 case-sensitivity hole — the guard is in the *test*, not the loader
 
@@ -190,8 +209,9 @@ Named so the plan does not read silence as a clean bill:
   instruments (`m9_measure_*.py`); M10 has not. Whether `test_context` and
   friends are *gated* by our modules in the M9 sense — or are, like M9's
   `test_engine` module name suggests, merely *named* for them — is unmeasured.
-  §4 argues the count may not even be the right question for this milestone, but
-  that argument is not a substitute for the number.
+  §4 now says why this number is not M10's *evidence* — the meter is, for a
+  Python-owned module — but unmeasured is still unmeasured, and §10.1's premise
+  ("its Django tests become real signal") is a claim about this number.
 - **No check of what `Engine.from_string`/`get_template` do once interposed.**
   M9 left the Python node tree as the render path; how much of the *load* path
   M10 actually moves is unmeasured.
