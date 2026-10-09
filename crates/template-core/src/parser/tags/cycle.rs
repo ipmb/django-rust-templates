@@ -25,10 +25,10 @@
 //! # Identity is the whole point, and it is why this tag needs the table
 //!
 //! `{% cycle a b as c %}` returns a `CycleNode` **and stores that same object**
-//! under the name (`:693-696`). A later `{% cycle c %}` returns it again
-//! (`:669-671`) — Django's own comment calls it out ("This returns the exact
+//! under the name (`defaulttags.py:693-696`). A later `{% cycle c %}` returns it again
+//! (`defaulttags.py:669-671`) — Django's own comment calls it out ("This returns the exact
 //! same node on each `{% cycle name %}` call"). `CycleNode.render` keys
-//! `context.render_context` by the node object (`:106-112`), so two
+//! `context.render_context` by the node object (`defaulttags.py:106-112`), so two
 //! equal-but-distinct nodes get separate `itertools.cycle` iterators and the
 //! second mention restarts the sequence instead of continuing it.
 //!
@@ -41,8 +41,8 @@
 //!
 //! # Shape 2 returns early, and that is observable
 //!
-//! `:671` is a `return` inside the `len(args) == 2` branch, so
-//! `parser._last_cycle_node = node` (`:700`) is **not** reached. Measured:
+//! `defaulttags.py:671` is a `return` inside the `len(args) == 2` branch, so
+//! `parser._last_cycle_node = node` (`defaulttags.py:700`) is **not** reached. Measured:
 //!
 //! ```text
 //! {% cycle 'a' 'b' as c %}{% cycle d e as f %}{% cycle c %}{% resetcycle %}
@@ -95,7 +95,7 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
         // A node with a slot and **no attributes**: the materialiser returns
         // what is already in the table and never reaches `cls(**kwargs)`.
         //
-        // The early return (`:671`): `last_cycle_node` is deliberately *not*
+        // The early return (`defaulttags.py:671`): `last_cycle_node` is deliberately *not*
         // updated here — see the module docs.
         return Ok(NodeDesc::new("CycleNode").slot(slot));
     }
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn a_name_reference_does_not_move_last_cycle_node() {
-        // The early return (`:671`) is observable: after the `{% cycle c %}`
+        // The early return (`defaulttags.py:671`) is observable: after the `{% cycle c %}`
         // mention, a bare `{% resetcycle %}` still targets the *f* definition.
         // A port that fell through to `last_cycle_node = node` would target the
         // last mention instead — the same object here only by luck.
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn an_anonymous_cycle_is_still_the_last_cycle_node() {
-        // Shape 5 also sets `_last_cycle_node` (`:700`), which is what makes
+        // Shape 5 also sets `_last_cycle_node` (`defaulttags.py:700`), which is what makes
         // `{% cycle 'a' 'b' %}{% resetcycle %}` legal.
         let host = CountingHost::default();
         let nodelist = parse_with("{% cycle 'a' 'b' %}{% resetcycle %}", &host);
