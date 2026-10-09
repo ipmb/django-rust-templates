@@ -108,7 +108,7 @@ the classes turn out to be three, not one:
 | reasoning | 7 | renaming `s`→`content` yields "a small wrong tree" | it is a `TypeError` at construction |
 | reasoning | 7 | renaming the nodelist kwarg yields "subtrees differs while tree may not" | also a `TypeError`; and any rename a constructor *accepts* still changes `tree`, since `describe` keys nodelists by attribute name |
 
-Two things this says that are worth more than the count.
+Three things this says that are worth more than the count.
 
 **The environment class is not carelessness.** Task 7's plan is *correct* that
 both `{% resetcycle %}` paths error at M2 — measured: `No cycles in template.`
@@ -127,8 +127,20 @@ running the step refutes it. The plan's prescribed mutations were replaced by
 substitutes that reached the stated goal, which is why the evidence table above
 is honest rather than empty.
 
-Executing snippets before committing is now a rule (§11), and it is a backstop,
-not the primary fix.
+**The two classes want different fixes, and neither is "run everything".** An
+environment assumption is a wrong belief about *static* facts, so a written-down
+contract can contradict it before the snippet runs — cheap, and it catches the
+error while writing rather than after. A mutation instruction is a *prediction
+about the effect of an edit*, and nothing contradicts a wrong prediction except
+making it and looking: no declared environment would have told the plan that
+renaming `s`→`content` produces a `TypeError` rather than a small wrong tree.
+So the answer is two targeted fixes — a declared environment per task for the
+static class, and mandatory execution for mutation steps specifically — rather
+than a general rule to execute every snippet, which spends the expensive remedy
+where it is not the only one.
+
+Executing snippets before committing is a rule either way (§11); the refinement
+is that it is the *sole* remedy for one class and overkill for the other.
 
 ## What I did not verify
 
