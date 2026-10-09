@@ -46,7 +46,9 @@ from django.template.base import (  # noqa: E402
     NodeList,
     Parser,
 )
+from django.template.base import FilterExpression, Variable  # noqa: E402
 from django.template.engine import Engine  # noqa: E402
+from django.utils.safestring import SafeData  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 from tests.parser_corpus import (  # noqa: E402
@@ -83,8 +85,27 @@ def django_parse(source, debug=False):
     return Parser(lexer.tokenize(), builtins=Engine().template_builtins).parse()
 
 
+def filter_parser():
+    """A `Parser` carrying Django's **filter** registry, for materialisation.
+
+    M3's corpus contains `{{ … }}`, and every variable materialises to a
+    `FilterExpression` — even `{{ x }}`, which has no filters — because Django's
+    `do_variable` builds one via `compile_filter`, and
+    `_materialise_filter_expression` needs `parser.find_filter` to turn each
+    wire filter *name* back into a function. Without a parser it raises
+    `LookupError` by design (`python/django_rust_templates/_impl/parser.py:285`),
+    which is what the corpus hit the moment variables were added to it.
+
+    Same construction as `tests/test_materialise.py:71`: a bare
+    `Parser(tokens)` registers nothing (`base.py:518-519`), and the libraries
+    live on an `Engine` **instance** (`engine.py:62-63`), not the class.
+    """
+    engine = Engine()
+    return Parser([], engine.template_libraries, engine.template_builtins)
+
+
 def ours_parse(source, debug=False):
-    return materialise(_native.parse(source, debug))
+    return materialise(_native.parse(source, debug), parser=filter_parser())
 
 
 def token_shape(token):
@@ -124,9 +145,63 @@ def describe(value):
             },
             "token": token_shape(getattr(value, "token", None)),
         }
+    # M3's two object types. Neither defines `__eq__`, so without these arms a
+    # bare `{{ x }}` compared two live objects by identity and could never be
+    # equal — which is what adding variables to the corpus reported.
+    if isinstance(value, FilterExpression):
+        return describe_filter_expression(value)
+    if isinstance(value, Variable):
+        return describe_variable(value)
+    if isinstance(value, SafeData):
+        # `SafeString` subclasses `str`, so a value-only comparison cannot tell
+        # a marked-safe literal from a plain one — and the mark is what decides
+        # autoescaping at render time. Django builds a constant's value with
+        # `mark_safe` (`base.py:755`, `:906`), so both sides are safe today and
+        # losing the mark should fail here rather than at M9.
+        return {"safe_str": str(value)}
     if isinstance(value, list):
         return [describe(item) for item in value]
     return value
+
+
+def describe_filter_expression(expression):
+    """A `FilterExpression` by value: `__slots__` is `("token", "filters", "var",
+    "is_var")` and none of it is comparable on its own.
+
+    `token` here is a **string**, not a `Token` — `do_variable` splits the
+    token's contents and hands the bare string to `compile_filter`
+    (`base.py:1016-1020`), so `token_shape` would raise on it. Filters are
+    described by `__name__` because the same registry object reaches both sides;
+    comparing the functions themselves would compare identity and prove nothing.
+    """
+    return {
+        "type": "FilterExpression",
+        "token": expression.token,
+        "var": describe(expression.var),
+        "is_var": expression.is_var,
+        "filters": [
+            (func.__name__, [(lookup, describe(arg)) for lookup, arg in args])
+            for func, args in expression.filters
+        ],
+    }
+
+
+def describe_variable(variable):
+    """A `Variable` by value, for the same reason.
+
+    `var` is carried *as well as* `lookups` because the two are not redundant:
+    `_("…")` rewrites `var` to the inner message (`base.py:898-902`) while
+    `lookups` is what resolution actually walks, and a divergence in which of
+    the two a side kept would otherwise be invisible.
+    """
+    return {
+        "type": "Variable",
+        "var": variable.var,
+        "literal": describe(variable.literal),
+        "lookups": variable.lookups,
+        "translate": variable.translate,
+        "message_context": variable.message_context,
+    }
 
 
 def walked_subtree(node):
@@ -229,9 +304,10 @@ class RandomisedParityTests(unittest.TestCase):
         accepts them and Rust's `char::is_whitespace()` does not — the M1
         divergence. That table is read in `smart_split`, so separators inside a
         *text node* prove nothing; they have to land in a tag argument. Measured
-        with the current seed: 400 templates, 196 containing an
-        `{% autoescape %}` tag, 307 arguments, 105 of them carrying a
-        Python-only separator, 71 a quote, 21 empty.
+        with the current seed — re-measured when M3's Task 10 widened the
+        generator, since a new arm shifts the whole RNG stream: 400 templates,
+        188 containing an `{% autoescape %}` tag, 304 arguments, 127 of them
+        carrying a Python-only separator, 90 a quote, 16 empty.
 
         There is deliberately **no** floor on the raw argument *count*. An
         earlier version asserted `len(arguments) > 100` and it was false: the
@@ -262,6 +338,32 @@ class RandomisedParityTests(unittest.TestCase):
             5,
             "no argument carried a quote, so `smart_split`'s quoting arm is idle",
         )
+
+    def test_the_generator_reaches_variables(self):
+        """A floor on variables, and one on their *shapes*.
+
+        The M2 residue was that all 400 templates were variable-free outside
+        `{% verbatim %}`/`{% comment %}` — so a green randomised pass said
+        nothing about M3's new code. Measured with the current seed: 154 of the
+        400 templates contain `{{`.
+
+        A single floor on "some template contains `{{`" would be satisfied by one
+        template, so the shapes are counted separately: a generator that produced
+        only `{{ x }}` would leave dotted lookup, indexing and filters — the whole
+        of M3 — unexercised. Re-run the measurement after changing the seed or
+        the arms; the M2 round's numbers were invalidated by exactly that, and
+        the lesson is recorded in the test above too.
+        """
+        rng = random.Random(RANDOM_SEED)
+        sources = [random_template(rng) for _ in range(RANDOM_CASES)]
+        joined = "\n".join(sources)
+        self.assertGreater(
+            sum("{{" in source for source in sources),
+            RANDOM_CASES // 4,
+            "the generator barely reached variables",
+        )
+        for shape in ("{{ x }}", "{{ a.b.c }}", "{{ a.0 }}", "|upper", "|default:"):
+            self.assertIn(shape, joined, f"no randomised template reached {shape}")
 
 
 class ShapeTests(unittest.TestCase):
@@ -314,6 +416,57 @@ class ShapeTests(unittest.TestCase):
             )
         self.assertTrue(ours[0].nodelist.contains_nontext)
         self.assertFalse(ours[1].nodelist.contains_nontext)
+
+    def test_a_variable_sets_contains_nontext_where_text_does_not(self):
+        """§10.4's ordering gate, in the half M3 can hold.
+
+        Measured on the pinned tree: `contains_nontext` is set only for a
+        non-``TextNode`` (`base.py:611`), so `text{% extends "a" %}` parses and
+        `{{ x }}{% extends "a" %}` raises the must-be-first error. Text-versus-tag
+        therefore never reached the rule at all — it only showed that the rule
+        does not fire — and a variable is the input that does.
+
+        The ``expected`` column is what makes this non-vacuous: comparing our
+        tree to Django's would pass even if neither side ever set the flag, which
+        is exactly the state M2 left this in. Every source is a *top-level*
+        nodelist so the flag read is the one the rule tests.
+        """
+        for source, expected in [
+            ("hello", False),
+            ("", False),
+            ("{{ x }}", True),
+            ("a{{ x }}", True),
+            ("{{ x }}{% csrf_token %}", True),
+            ("{{ x }}{% csrf_token %}y", True),
+            ("{% csrf_token %}", True),
+            ("{% spaceless %}{{ x }}{% endspaceless %}", True),
+        ]:
+            with self.subTest(source=source):
+                ours = ours_parse(source)
+                theirs = django_parse(source)
+                self.assertEqual(
+                    ours.contains_nontext,
+                    theirs.contains_nontext,
+                    f"contains_nontext differs for {source!r}",
+                )
+                self.assertEqual(ours.contains_nontext, expected, f"for {source!r}")
+
+        # And per nodelist, so a body's flag is not read off the top level's:
+        # the first autoescape body holds a variable, the second holds text.
+        source = (
+            "{% autoescape on %}{{ x }}{% endautoescape %}"
+            "{% autoescape on %}b{% endautoescape %}"
+        )
+        ours = ours_parse(source)
+        theirs = django_parse(source)
+        self.assertEqual(
+            [node.nodelist.contains_nontext for node in ours],
+            [node.nodelist.contains_nontext for node in theirs],
+        )
+        self.assertEqual(
+            [node.nodelist.contains_nontext for node in ours],
+            [True, False],
+        )
 
     def test_a_variable_now_parses_where_it_used_to_be_reported(self):
         """M2's `test_a_variable_is_reported_rather_than_dropped`, inverted.

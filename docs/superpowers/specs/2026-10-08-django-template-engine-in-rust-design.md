@@ -840,13 +840,64 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   `nodelists`, which resolves because the materialiser already builds children
   before parents — giving `List[Tuple[Ref|None, NodeListRef(i)]]`.
 
-- **M3 gate: a variable ahead of `{% extends %}`.** Every source in the M2
-  corpus and all 400 randomised templates are variable-free outside
-  `{% verbatim %}` and `{% comment %}`, because `{{ … }}` needs M3's
-  `FilterExpression`. So `contains_nontext` and `must_be_first` — the ordering
-  rule the whole `extend_nodelist` contract exists for (§6) — are exercised
-  only on text-versus-tag, never on variable-versus-`{% extends %}`. M3 adds
-  that case to the corpus explicitly.
+- **M3 gate: a variable ahead of `{% extends %}` — corrected at M3, and the
+  `{% extends %}` half moved to M7.** The gate read *"M3 adds that case to the
+  corpus explicitly."* This entry keeps its original reading below and then
+  records what measuring it changed, because a gate narrowed silently is worse
+  than one narrowed with its evidence attached.
+
+  The original reading: **at M2**, every source in the corpus and all 400
+  randomised templates were variable-free outside `{% verbatim %}` and
+  `{% comment %}`, because `{{ … }}` needs M3's `FilterExpression`. So
+  `contains_nontext` and `must_be_first` — the ordering rule the whole
+  `extend_nodelist` contract exists for (§6) — looked exercised only on
+  text-versus-tag. M3 adds that case to the corpus explicitly.
+
+  Measured against the pinned tree at **6.0.9**, with `Origin("t.html",
+  "t.html", None)` supplied to the parser:
+
+  | source | outcome |
+  | --- | --- |
+  | `{{ x }}{% extends "a" %}` | `TemplateSyntaxError: {% extends "a" %} must be the first tag in 't.html'.` |
+  | `{% csrf_token %}{% extends "a" %}` | the same error |
+  | `text{% extends "a" %}` | OK — `['TextNode', 'ExtendsNode']` |
+  | `{% extends "a" %}{{ x }}` | OK — `['ExtendsNode']` |
+  | `{{ x }}{% include "a" %}` | OK — `['VariableNode', 'IncludeNode']` |
+
+  Three things follow. The rule's input is **any non-`TextNode`**, not a
+  variable specifically: `contains_nontext` is set only when the node is not a
+  `TextNode` (`base.py:611`), so `text{% extends %}` parses, and
+  `{% csrf_token %}{% extends %}` fires. The M2 corpus's text-versus-tag
+  coverage was therefore never testing the ordering rule *at all* — it was
+  testing that the rule does not fire. And what M2 actually lacked was not a
+  variable but a `must_be_first` **tag**, of which the template package has
+  exactly one (`loader_tags.py:87`): `{% extends %}`, which §10.3 puts in M7.
+
+  **Rust cannot produce the ordering error for `{{ x }}{% extends %}` at M3,
+  and both ways to make it would be worse than the gap.** Django compiles the
+  tag *first* and checks the ordering *after* (`base.py:600-610`), so
+  `{{ x }}{% extends %}` — no argument — raises `'extends' takes one argument`
+  rather than the ordering error, and an ordering check placed ahead of dispatch
+  would be wrong for that input, which any user can write. The other route,
+  implementing `{% extends %}`'s compile function early, puts a loader tag in
+  Rust, which §6 assigns to M7.
+
+  Two further measurements, because the plan text this correction came from had
+  neither: the argument message is `'extends' takes one argument` (**not** "at
+  least one"), and **every** `{% extends %}` that compiles needs an origin — a
+  bare `Parser(...).parse()` raises `AttributeError: 'NoneType' object has no
+  attribute 'template_name'` from `ExtendsNode.__init__`, not only on the
+  ordering path. A corpus entry for this therefore needs the harness to pass an
+  `Origin`, and `origin.template_name`'s repr has to agree with Rust's
+  `origin_template_repr` for the comparison to mean anything.
+
+  So M3 delivers the half it can hold — **variable-versus-text and
+  variable-versus-tag `contains_nontext`**, the part that was unexercised — and
+  the `{% extends %}`-specific case moves to M7. The rule's *machinery* is
+  already Rust's and already tested: `extend_nodelist`'s
+  `must_be_first && contains_nontext` check (`parser/mod.rs:336`) is exercised
+  against a stand-in `must_be_first` node (`parser/tags/mod.rs:195`). M7
+  supplies a tag, not a rule.
 
 - **M6 gate: a library that redefines a built-in tag name.** Host-first
   dispatch order is argued from `Library.add_tag`/`add_library`

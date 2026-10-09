@@ -5920,6 +5920,43 @@ git commit -m "M3 task 9: token_kwargs and kwarg_re for the M5 tag helpers"
 
 **Declared environment.** Nothing here is new machinery — it is the corpus, the gate and the measurement that says one gate cannot be met as written.
 
+**Corrections, measured when this task was implemented.** Five, and the first two
+are wrong statements in the section below rather than missing ones:
+
+1. **The argument message is `'extends' takes one argument`**, not "takes at
+   least one argument" — measured on `{% extends %}` at 6.0.9. Point 3 below
+   quotes it correctly in one place and incorrectly in another.
+2. **The missing-origin `AttributeError` is not specific to the ordering case.**
+   Every `{% extends %}` *that compiles* raises it without an origin; only
+   `{% extends %}` with no argument gets as far as the argument error first,
+   because compilation fails before `ExtendsNode.__init__` is reached. Point 2
+   below states it as though `{{ x }}{% extends "a" %}` were the special input.
+   A fifth measurement belongs in the table: `{% csrf_token %}{% extends "a" %}`
+   raises the same ordering error, which is what makes the rule's input "any
+   non-`TextNode`" rather than "a variable".
+3. **The harness needed more than the corpus edit Step 1 describes.** Every
+   variable materialises to a `FilterExpression` — even `{{ x }}`, which has no
+   filters — and `_materialise_filter_expression` raises `LookupError` without a
+   `Parser` to resolve filter names against. `ours_parse` therefore gained a
+   `filter_parser()`, built the way `tests/test_materialise.py:71` builds one.
+   `_native.parse` was already correct; nothing in the corpus had reached that
+   path before.
+4. **`describe` had no arm for `FilterExpression` or `Variable`.** Neither
+   defines `__eq__`, so a bare `{{ x }}` compared two live objects by identity
+   and could never be equal — 205 of the randomised subtests failed on that and
+   nothing else until the arms existed. The `SafeData` arm is part of the same
+   fix: `SafeString` subclasses `str`, so a value-only comparison cannot tell a
+   marked-safe literal from a plain one.
+5. **Step 1's `test_a_variable_sets_contains_nontext_where_text_does_not` is
+   defective three ways** and was rewritten: `index = 0 if "autoescape" not in
+   source else 0` is a no-op expression; `ours[0].nodelist` on
+   `"{{ x }}{% csrf_token %}"` raises `AttributeError`, because that node is a
+   `VariableNode` and has no `nodelist`; and the expected `False` for the
+   autoescape source is wrong at top level, where two `AutoEscapeControlNode`s
+   make it `True`. The implemented test asserts the top-level flag per source
+   and the per-body flags for the autoescape pair, each against Django **and**
+   against a literal.
+
 #### Before anything else, because it decides the rest: what the gate can actually hold
 
 §10.4's M3 gate reads *"a variable ahead of `{% extends %}` … M3 adds that case to the corpus explicitly."* Measured against `.django/` at **6.0.9**, before adding anything:
