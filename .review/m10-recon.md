@@ -112,15 +112,44 @@ obligations — and `context_processors` appears **nowhere in the spec at all**
 about `from . import autoreload` registering signal receivers, not about who
 interposes it.
 
-Since M14 is "`unshimmed()` empty", those three are M14's by default, which
-makes M14 carry three unplanned interpositions — including `context_processors`,
-the module that reads the *project's* settings for CSRF and request processors,
-which is framework-coupled in §6's sense and is the kind of thing a milestone
-table exists to schedule. This is the `origin` defect generalized: not one wrong
-name, but **the rows and the meter being two different sets with nobody
-asserting they are equal**. The fix is the same shape in both cases — make the
-mapping explicit and checkable — and it is the same artifact the reviewer
-proposed for the `_impl` naming rule (§6).
+**They are undecided, not "M14's by default"** — that reading was this recon's
+first draft, and the reviewer is right that its premise is unjustified. The
+premise is that `unshimmed()` reaching zero is the right end state; measured,
+two of the three argue against it:
+
+- `autoreload.py:4-5` is `from django.template import engines` and
+  `from django.template.backends.django import DjangoTemplates` — it **consumes**
+  objects that become ours and defines no template machinery of its own. It is
+  two signal receivers and a directory walk. Interposing it would be copying
+  glue, with no behaviour of ours to get right, which is what §6's vendoring
+  policy exists to refuse.
+- `context_processors` is reached by **import string** from
+  `_builtin_context_processors` (`context.py:5`), not by a module-level import,
+  so interposing `context` does not pull it in and nothing in the engine depends
+  on its identity. Unlike `autoreload` it does have behaviour of its own
+  (`csrf`, `debug`, `request`, `auth`), so it is a real candidate rather than a
+  leaf — but nothing here decides it.
+- `loader` is the third, and §2 above settles it: M13's.
+
+So the defect is not a wrong name in a row. **It is that "empty" is stated as
+the target and no row can reach it without work §6 forbids.** The sentence is in
+two places — §10.3's M14 row (*"`unshimmed()` empty under strict mode"*) and,
+worse, §10.1 (line 753): *"The acceptance gate is §2, reached when
+`unshimmed()` is empty and strict mode is clean."* — and the second is the one a
+planner reads, because it is the sentence that says what the meter is *for*.
+
+The repair is to state the target as a **set with a reason per name** rather
+than as zero: `unshimmed() == {autoreload, context_processors}` (or whatever the
+answer turns out to be, per name) is checkable, falsifiable, and honest about
+the two modules where "ours" would mean copying glue. That also turns this
+section's partition from a finding into a durable artifact: the rows and the
+meter become two sets **with an assertion between them**, which is the thing
+that was missing in the first place — the same shape as the `SHADOWING` table
+(§6) and the same shape the reviewer proposed there.
+
+This is a **goal** question, not a milestone task, so M10 records it and hands it
+forward rather than answering it in a commit: see §7. Changing what §2's
+acceptance means is the user's call, not the plan's.
 
 `utils` here is `django/template/utils.py` — the `EngineHandler` module — **not
 `django.utils.*`**. §3 of the spec already carries this warning explicitly
@@ -185,8 +214,34 @@ is precisely M9's finding 3 — and attributes each call to the running test.
 M9's `NodeList.render` (a seam that is nearly the whole suite rather than a
 feature's worth of tests).
 
-Two things about the table are traps, and both are scope statements rather than
-corrections:
+**But it is one of two populations M10 has, and naming which one it is, is the
+whole of the correction** (the reviewer's, and it changes what the plan budgets
+against):
+
+- **Behaviour risk** is the tests that execute a *declared hunk* — a line where
+  our code differs from Django's, and so where our code can be wrong. If M10's
+  files are interpositions with no behavioural hunks, this number is **zero**,
+  and the milestone cannot break a test by changing what the code does. That is
+  not the same as M9's, where `compile_nodelist` and the resolver delegated and
+  the number was non-empty.
+- **Identity exposure** is the tests that execute code whose **class objects
+  change** — 1232, 79.6% — and it is real rather than theoretical: it is exactly
+  what produced the 537 failures at M9's Task 0 and the `defaulttags`/`i18n`
+  captures at its Task 4, both from `_impl/__init__.py`'s module-level bindings
+  across a shadow boundary. **M10 adds nine more shadowed names and binds
+  `Engine` from `.engine` the same way**, so this is the number M10 actually
+  carries.
+
+Read as "79.6% of the suite could break", the number is wrong and would size the
+plan wrongly. Read as "79.6% of the suite holds a reference whose identity this
+milestone changes", it is right, and it points at the failure mode rather than
+at the count. The two scope traps below say the same thing from the other side:
+`loaders.base`'s 1053 counts *inherited* methods and `locmem` is on 974 tests
+against `filesystem`'s 85 — *reach is not behaviour*, and sizing by the file
+loader would have sized a loader the suite barely uses.
+
+Two further things about the table are traps, and both are scope statements
+rather than corrections:
 
 1. **`loaders.base`'s 1053 counts *inherited* methods, so it is not "1053 tests
    use the base loader".** The label is the module where the function is
@@ -377,3 +432,21 @@ Named so the plan does not read silence as a clean bill:
   tests would notice a wrong loader, which is the direct-entry gap §3b point 3
   names and the plan has to close.
 - **The survey's line ranges and importer lists are unverified** (§3).
+
+## 8. The one thing M10 records and does not fix
+
+§2's finding — that `unshimmed()`'s target is written as *zero* in two places
+(§10.3's M14 row and §10.1 line 753) and that no row can reach zero without
+copying glue §6 forbids — is **a goal question and belongs to the user**, not to
+a milestone. It is recorded here rather than edited into the spec, for the same
+reason §1's `origin` correction waits for the commit that closes M10: an edit
+made silently by the milestone that noticed the problem is an edit nobody
+reviewed.
+
+What M10 *can* do without touching the goal is make the mapping checkable: the
+partition in §2 becomes a table from each remaining `django.template` module to
+the milestone that owns it, asserted against `unshimmed()` in both directions,
+so the rows and the meter cannot drift apart again. The three undecided names
+enter that table marked undecided, with the evidence beside them, rather than
+being silently assigned to M14. That is the `SHADOWING` pattern (§6) applied to
+the other half of the same problem, and it is the plan's first task.
