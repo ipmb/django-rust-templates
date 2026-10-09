@@ -373,10 +373,10 @@ class DescriptorCountingTests(unittest.TestCase):
         nobody showed to be positive is how both of this instrument's last two
         wrong readings happened.
 
-        This row is about the *walk* only. The span is a second question with a
-        second answer, and it is refused — see the row below, which turns this
-        same fixture into the case the first version of the span guard could not
-        see.
+        This row is about the *walk* only — which object the ownership question
+        is asked of. The span is a second question about the same object, and
+        the row below measures it: the walk stopping correctly is worth nothing
+        if the read then leaves again.
         """
         from tests.compared_path import _defining_file, _innermost, _is_ours
 
@@ -413,14 +413,15 @@ class DescriptorCountingTests(unittest.TestCase):
 
         ``COMPARED_PATH`` is a list of line ranges and clause (4) compares them
         to declared regions as integers, so a span read out of a foreign file is
-        indistinguishable from one of ours — this row and the next execute the
-        two ways that happens, because a guard nobody has seen fire is a guard
-        nobody knows works.
+        indistinguishable from one of ours, and a guard nobody has seen fire is
+        a guard nobody knows works.
 
-        This is the plain arm: the member's ``def`` *is* in another file. It
-        needs ``_is_ours`` true and the span foreign at once, which is the
-        hand-written-descriptor arm — a local ``staticmethod`` subclass is this
-        module's, and the ``def`` it wraps is not.
+        This is the arm that still refuses, after the reviewer's second finding:
+        **neither** the def the walk landed on **nor** the def behind it is this
+        module's — the descriptor instance is ours by its class, and the function
+        it hands back was written in the file this row's fixture came from. The
+        row below is the arm that must *not* fire, which is why fixing the read
+        could not simply mean reporting every foreign file it passes.
         """
         from tests.compared_path import ForeignSpan, definitions
 
@@ -445,44 +446,45 @@ class DescriptorCountingTests(unittest.TestCase):
         self.assertIn("member", str(caught.exception))
         self.assertIn("span_owner.py", str(caught.exception))
 
-    def test_a_wrapper_whose_span_unwraps_out_of_the_file_is_refused(self):
-        """The arm the first version of the guard could not see, on the same fixture.
+    def test_a_wrapper_we_wrote_around_a_foreign_function_is_measured_here(self):
+        """The same fixture, and the span lands on the def that runs.
 
-        ``getsourcelines`` unwraps ``__wrapped__`` before it reads, so the span
-        of a wrapper *we* wrote around a foreign function comes out of that
-        function's file while the wrapper's own ``co_filename`` is ours. The
-        guard's first version compared the wrapper's file, agreed with itself,
-        and recorded 72-92 of ``<frozen posixpath>`` as this file's ``def
-        inner`` — measured, and the assertion that caught it quoted the *test
-        file's* lines 72-92, which is the hazard in one sentence: two files can
-        share a line number and the span is only two integers.
+        The reviewer's finding on the first version of the guard's fix: the walk
+        stopped at the right function and the *read* then walked past it, so the
+        member recovered by the row above could only ever become a
+        :class:`ForeignSpan` — the recovery had no reachable success case.
+        ``getsourcefile`` reads ``__code__.co_filename`` and ``getsourcelines``
+        unwraps ``__wrapped__``, so ``span_of`` has to *choose* its subject:
+        read the def whose own file is ours, unwrap only when it is not.
 
-        The fix asks about the object ``getsourcelines`` actually read —
-        ``inspect.unwrap`` of the member, the same expression :func:`span_of`
-        uses — so the refusal lands exactly where the read does.
+        Measured before the change: ``span_of`` gave 72-92 of ``<frozen
+        posixpath>`` — a real span, of the wrong function, which is why the
+        assertion that caught it quoted this test file's own lines 72-92 (two
+        files can share a line number and a span is two integers). Measured now:
+        this file's ``def inner``, and the lines read back as text are the
+        wrapper — decorator included, exactly as any plain ``def`` of ours is
+        recorded, because ``co_firstlineno`` of a decorated function is its
+        first decorator.
         """
-        from tests.compared_path import ForeignSpan, _defining_file, definitions
+        from tests.compared_path import definitions
 
-        own = os.path.realpath(__file__)
-        self.assertEqual(
-            _defining_file(wrapped_foreign),
-            own,
-            "the premise: the wrapper's own file is this one",
-        )
-        self.assertNotEqual(
-            _defining_file(inspect.unwrap(wrapped_foreign)),
-            own,
-            "the premise: and the file the span is read from is not",
-        )
-
-        subject = types.ModuleType("unwrapped_span_owner")
+        subject = types.ModuleType("wrapper_owner")
         subject.__file__ = __file__
         subject.wrapped_foreign = wrapped_foreign
 
-        with self.assertRaises(ForeignSpan) as caught:
-            definitions(subject)
-        self.assertIn("wrapped_foreign", str(caught.exception))
-        self.assertIn("posixpath", str(caught.exception))
+        span = definitions(subject)["wrapped_foreign"]
+        lines = pathlib.Path(__file__).read_text().splitlines()
+        written = "\n".join(lines[span[0] - 1 : span[1]])
+        self.assertIn(
+            "def inner",
+            written,
+            "the span must be the def that executes, and it is written here",
+        )
+        self.assertIn(
+            "@functools.wraps",
+            written,
+            "decorators count, as they do for any other member",
+        )
 
     def test_the_residue_check_is_silent_on_the_transcriptions(self):
         """The control for the row above, and the reason it is not vacuous.

@@ -404,35 +404,51 @@ def residue(module):
     )
 
 
-def span_of(func):
+def span_of(func, own_file):
     """The span ``func`` occupies, and the file those lines were read out of.
 
     ``((first, last), path)`` — 1-based lines, and ``os.path.realpath`` of the
     file they came from — or ``(None, None)`` when ``inspect`` can find no
-    source for ``func`` at all.
+    source for the subject at all.
 
-    **The file is returned because ``inspect.getsourcelines`` unwraps
-    ``__wrapped__`` before it looks**, and the two shapes that matters for here
-    do *not* land in the same place:
+    **The subject is chosen, because the two ``inspect`` functions disagree
+    about ``__wrapped__``**: ``getsourcefile`` reads ``__code__.co_filename``
+    and does not unwrap, ``getsourcelines`` unwraps before it looks. Reading
+    whatever ``getsourcelines`` happens to unwrap to is what the reviewer's
+    second finding was: for a ``functools.wraps`` wrapper we wrote around a
+    foreign function, ``_innermost`` correctly stops at our wrapper and the
+    read then walks *past* it and returns lines out of ``<frozen posixpath>`` —
+    so the member the ownership walk had just recovered could only ever become a
+    :class:`ForeignSpan`, never an entry. Recovering something in order to
+    refuse it one function later is not a recovery.
+
+    So: **if the def's own file is ours, read the def; only otherwise unwrap.**
+    The two shapes that matters for:
 
     * a ``@contextlib.contextmanager`` member — the wrapper in the class dict
-      was created in ``contextlib.py`` and the ``def`` behind it is ours, so
-      unwrapping is exactly what makes the span ``context.py``'s. Correct, and
-      the reason the ownership walk exists at all.
-    * a wrapper **we** wrote around a foreign function (``functools.wraps`` over
-      ``os.path.join``) — the wrapper's own ``co_filename`` is ours and the
-      ``def`` behind it is somebody else's, so unwrapping makes the span
-      *theirs*. Measured: ``span_of`` there is 72-92 of ``<frozen posixpath>``
-      while ``getsourcefile`` of the wrapper names the caller's file. A bare
-      pair of integers from another file is what :class:`ForeignSpan` exists to
-      refuse, and nothing downstream can tell the difference — so the file
-      travels with the lines and :func:`definitions` checks it.
+      was created in ``contextlib.py``, so its own file is *not* ours and
+      unwrapping is exactly right: the ``def`` behind it is, and the span is
+      ``context.py``'s. This is the reason the ownership walk exists at all.
+    * a wrapper we wrote around a foreign function — the wrapper's own file is
+      ours, so it is the subject, and the span is ours. Measured: ``subjI.py``'s
+      ``deco(os.path.join)`` spans 6-8 of ``subjI.py``, where the read used to
+      give 72-92 of ``<frozen posixpath>``.
+
+    The read goes through ``__code__`` rather than the function so that
+    ``getsourcelines`` *cannot* unwrap a second time — for a function with no
+    ``__wrapped__`` the two spellings are the same call (``findsource`` does
+    ``object = object.__code__`` itself), so this changes nothing except the one
+    shape above. A span read from another file is a bare pair of integers that
+    nothing downstream can distinguish from one of ours, which is what
+    :class:`ForeignSpan` exists to refuse — so the file travels with the lines.
     """
+    subject = func if _defining_file(func) == own_file else inspect.unwrap(func)
+    target = subject.__code__ if inspect.isfunction(subject) else subject
     try:
-        lines, first = inspect.getsourcelines(func)
+        lines, first = inspect.getsourcelines(target)
     except (OSError, TypeError):
         return None, None
-    return (first, first + len(lines) - 1), _defining_file(inspect.unwrap(func))
+    return (first, first + len(lines) - 1), _defining_file(subject)
 
 
 def _one_level(value):
@@ -501,23 +517,23 @@ def definitions(module):
     and clause (4), which compare integers. A span read from another file is
     numerically indistinguishable from one of ours.
 
-    The check has to ask about the file :func:`span_of` read from, and that is
-    the file of the **unwrapped** function, not of ``written``: the first
-    version of this guard compared ``_defining_file(written)`` and was blind to
-    exactly the shape it was written for — a ``functools.wraps`` wrapper we
-    wrote around a foreign function has *our* ``co_filename`` and a *foreign*
-    ``__wrapped__``, so it passed the check while its lines came out of
-    ``<frozen posixpath>``. The mirror of the ``_innermost`` defect, one
-    function later: the walk and the read have to agree about which object they
-    are talking about, and ``getsourcelines`` unwraps while ``getsourcefile``
-    does not. ``read_from`` is that agreement, taken from the same expression
-    ``getsourcelines`` uses.
+    The check has to ask about the file :func:`span_of` actually read from, and
+    the first version of this guard asked the wrong question twice over. It
+    compared ``_defining_file(written)`` — the file of the def the walk stopped
+    on — while the span itself came from ``inspect.unwrap(written)``, so a
+    ``functools.wraps`` wrapper we wrote around a foreign function passed the
+    check while its lines came out of ``<frozen posixpath>``. Fixing *that* by
+    reporting the read file then made the recovered member unmeasurable: the
+    walk stopped correctly at our wrapper and the read walked past it again, so
+    the arm could only ever raise. Both halves are one question — *which object
+    is this span about* — and :func:`span_of` now answers it before it reads,
+    so ``read_from`` is the file of the def the span describes.
 
-    Measured on the closed tree with the unwrapping comparison: no span of any
-    of the twelve comes from a foreign file, so the class remains *absent* in
-    the corpus — and the two rows in ``test_compared_path_instrument`` execute
-    both arms of the raise, because a guard nobody has seen fire is a guard
-    nobody knows works.
+    Measured on the closed tree: no span of any of the twelve comes from a
+    foreign file, so the class remains *absent* in the corpus — and the rows in
+    ``test_compared_path_instrument`` execute the raise, both with a span that
+    unwraps out of the file and with one that never was in it, because a guard
+    nobody has seen fire is a guard nobody knows works.
     """
     own = os.path.realpath(module.__file__)
     out = {}
@@ -525,7 +541,7 @@ def definitions(module):
         if _invoked(value) is None or not _is_ours(value, module):
             continue
         written = _innermost(value, own)
-        span, read_from = span_of(written)
+        span, read_from = span_of(written, own)
         if span is not None and read_from != own:
             raise ForeignSpan(
                 f"{name}: span {span} was read from {read_from}, not {own}"
