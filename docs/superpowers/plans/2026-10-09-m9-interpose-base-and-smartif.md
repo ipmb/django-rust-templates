@@ -1584,3 +1584,85 @@ the transcription guard, all of it measured before it was written down:
   clause sat after a `continue` in the snippet logic, so the most serious
   failure available was masked by a lesser one. The teeth script is the
   evidence; the baseline is green and all six scenarios refuse.
+
+Task 2 is done and committed at `fdb4eb0`. Delegating `Template.compile_nodelist`
+to the Rust parse met its gate on the first full run — `Ran 1547 tests in …s` /
+`OK (skipped=6)`, unit tests `OK`, `scripts/check.sh` → `all checks passed` — but
+the run between the plan and that gate exposed six things the plan did not have:
+five omissions in its own Step 4 code, and one defect in a **test** rather than
+in this milestone's code. Each was measured, and each is recorded here because
+the plan's Step 4 assumed work that did not exist while its Step 6 expectation
+was right.
+
+**(1) The plan has no exception-conversion step anywhere.** Rust raises one
+class for everything a parse rejects; Python owns the exception *object* (design
+decision 2). Until M9 the suite's parses went through Django's `Parser`, which
+raises `TemplateSyntaxError` itself, so nothing ever had to convert. M9 makes
+`compile_nodelist` the suite's only parse path and, without a conversion, the
+first run dies three ways at once, all measured: upstream's `except` arm hands
+`e.token` to `get_exception_info`, which reads `token.position` off the wire
+tuple — `AttributeError: 'tuple' object has no attribute 'position'`;
+`assertRaises(TemplateSyntaxError)` sees a class it does not know; and Django's
+parallel runner cannot pickle the result — `Can't pickle <class
+'_native.UnimplementedTag'>: No module named '_native'`. The conversion is
+`render.django_exception`, it lives in `render.parse_template` (the shell's only
+source-to-`Template` path) and **not** in `compile_nodelist`, because putting it
+there would have meant editing upstream's method rather than transcribing it —
+the one thing M9 must not do. `lib.rs:952` had said "the shell's conversion is
+M9's" since M6 and the plan never picked the obligation up.
+
+**(2) The Rust lexer's debug flag was hardcoded.** `compile_template` called
+`parse_source(py, source, false, …)`. Upstream reads `self.engine.debug` and
+chooses `DebugLexer` over `Lexer` (`base.py:183-186`); the positions it turns on
+are what every downstream debug path needs and none of them can recover them.
+Measured with the flag false: `Engine(debug=True).from_string("{% badtag %}")`
+reaches `Template.get_exception_info`, which does `start, end = token.position`,
+and dies with `TypeError: cannot unpack non-iterable NoneType object`.
+
+**(3) `ShellHost.has_tag` read the registry's *keys* as its implementations.**
+`_rust_owned` was `set(_native.builtin_tag_names())`, which includes the two
+stub names (`partial`, `partialdef`) whose bodies raise `Unimplemented`; the
+identity clause then declined them on the host's behalf. Measured: **245 of the
+1547**, every one `'partial' is a built-in tag this engine does not implement
+yet (M13)` where `syntax_tests.test_partials` expected a render or Django's own
+syntax error. The subtraction `names() - stubs()` is not a new rule — it is what
+`tests/test_parser_parity.py:532` and `tests/test_tag_inventory.py:296` already
+did, and the host was the one place reading the keys as the registry.
+
+**(4) A host exception has to be re-raised by identity.** After (1)–(3), five
+rows still failed — `test_include_fail1`, `test_include_error07`,
+`test_include_error09` and `test_compile_tag_error` twice. A tag whose own code
+raised had its object replaced by a class-only rebuild, losing `__traceback__`
+and `_culprit_node`. `ShellHost.last_error` now keeps the object and
+`django_exception` re-raises it when `error.class_name` matches — which is what
+Django does (`base.py:583-585`).
+
+**(5) `RenderParityTests`' "stock Django" oracle became Rust, and nothing could
+see it.** `engine.from_string(source).render(...)` was stock Django until this
+task interposed `base`; afterwards it builds *our* `Template`, whose
+`compile_nodelist` calls `render.parse_template` — the same function
+`render_string` calls — so every row in that class compared Rust against Rust
+while the module docstring still claimed the comparison was evidence about the
+Rust parse. Measured rather than reasoned
+(`.review/m9-measurements/m9_measure_render_parity_oracle.py`): both sides enter
+`render.parse_template` exactly once. The repair is `tests/test_render_parity.py`'s
+`django_render`, which builds its tree from Django's own `Parser` — the claim
+`tests/parity_target.py` already states for the other harnesses — and a row,
+`test_the_python_side_is_not_the_rust_parse`, that pins the call counts so
+"someone simplifies it back" is a change a test can see. This is Review Focus 2
+arriving through a door the plan did not list: the delegation is not removed,
+the *comparison* is.
+
+**(6) The transcription guard had to be re-measured, not just re-run.** Adding
+twelve lines to `compile_nodelist` moved all 28 `COMPARED_PATH` spans, so
+`tests/test_interposition.py::test_the_compared_path_is_the_measured_one` was
+restated to re-measure per module from the installed module rather than compare
+a pinned file, `scripts/check_transcriptions.py` gained `module_of()` (the
+dotted path derived from the declared upstream path, so the two cannot
+disagree), and the guard gained a clause the teeth script had made obvious: the
+`COMPARED_PATH` key set must **equal** `DECLARED`'s, because a transcribed module
+with no entry has its declared regions checked by nothing. Two further defects
+surfaced in the guard itself, both measured: `executable_lines` took a compound
+statement's whole span, so a 15-line region reported all 15 lines executable
+because one `import` sat inside a `FunctionDef`; and the snippet comparison
+matched unstripped lines, so an indentation difference read as a missing line.
