@@ -4968,7 +4968,7 @@ ERROR_CASES: list[dict] = [
         "raises": "TypeError",
         "message": "urlize() got multiple values for argument 'autoescape'",
     },
-    # --- striptags (`strip_tags`, `html.py:210-232`) -------------------------
+    # --- striptags (`strip_tags`, `html.py:210-229`) -------------------------
     {
         # **The one row in this list whose exception class is not a builtin.**
         # `strip_tags` counts iterations and raises bare — `raise

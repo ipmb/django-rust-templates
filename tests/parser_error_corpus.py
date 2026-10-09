@@ -350,20 +350,20 @@ ERRORS = [
     ),
     # A second name in the same tag, reaching the same raise site: `do_load`
     # treats every bit after the command as a library name when there is no
-    # `from` (`defaulttags.py:1099-1105`), so `custom` resolves and `no_params`
+    # `from` (`defaulttags.py:1126-1130`), so `custom` resolves and `no_params`
     # does not.
     (
         "{% load custom no_params %}",
         "'no_params' is not a registered tag library. Must be one of:\n" + LIBRARY_LIST,
     ),
     # The *other* raise site, which the `from` form is the only way to reach
-    # (`load_from_library`, `defaulttags.py:1086-1095`) — and it is a different
+    # (`load_from_library`, `defaulttags.py:1092-1098`) — and it is a different
     # sentence, which is why both rows exist.
     (
         "{% load nope from custom %}",
         "'nope' is not a valid tag or filter in tag library 'custom'",
     ),
-    # `parse_bits` (`library.py:392-480`) is where a `simple_tag`'s arguments are
+    # `parse_bits` (`library.py:388-473`) is where a `simple_tag`'s arguments are
     # bound, and all of its messages are built from the *function's* signature
     # and the caller's tokens. Four spellings, four messages, one of which names
     # the parameter the caller omitted. The plan counted five branches; four

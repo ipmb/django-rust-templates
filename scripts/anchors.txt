@@ -348,9 +348,9 @@ defaulttags.py:1055	django/template/defaulttags.py	1055	-	token = parser.next_to
 defaulttags.py:1060	django/template/defaulttags.py	1060	-	nodelist_false = NodeList()	-
 defaulttags.py:1061	django/template/defaulttags.py	1061	-	values = [parser.compile_filter(bit) for bit in bits[1:]]	-
 defaulttags.py:1065-1075	django/template/defaulttags.py	1065	1075	-	-
-defaulttags.py:1086-1095	django/template/defaulttags.py	1086	1095	-	-
+defaulttags.py:1092-1098	django/template/defaulttags.py	1092	1098	raise TemplateSyntaxError(	-
 defaulttags.py:1099	django/template/defaulttags.py	1099	-	-	-
-defaulttags.py:1099-1105	django/template/defaulttags.py	1099	1105	-	-
+defaulttags.py:1126-1130	django/template/defaulttags.py	1126	1130	for name in bits[1:]:	parser.add_library(lib)
 defaulttags.py:1134-1179	django/template/defaulttags.py	1134	1179	{% lorem %}	-
 defaulttags.py:1204	django/template/defaulttags.py	1204	-	@register.tag(name="partialdef")	-
 defaulttags.py:1250-1251	django/template/defaulttags.py	1250	1251	-	-
@@ -385,7 +385,7 @@ engine.py:62-63	django/template/engine.py	62	63	-	-
 engine.py:63	django/template/engine.py	63	-	self.template_builtins = self.get_template_builtins(self.builtins)	-
 engine.py:194	django/template/engine.py	194	-	-	-
 library.py:211-212	django/template/library.py	211	212	delete_first_token	-
-library.py:392-480	django/template/library.py	392	480	-	-
+library.py:388-473	django/template/library.py	388	473	def parse_bits(	return args, kwargs
 library.py:421	django/template/library.py	421	-	-	-
 library.py:454	django/template/library.py	454	-	parser.compile_filter	-
 loader_tags.py:87	django/template/loader_tags.py	87	-	-	-
@@ -439,7 +439,6 @@ html.py:140	django/utils/html.py	140	-	-	-
 html.py:169-178	django/utils/html.py	169	178	-	-
 html.py:181-197	django/utils/html.py	181	197	convert_charrefs=False	-
 html.py:210-229	django/utils/html.py	210	229	-	-
-html.py:210-232	django/utils/html.py	210	232	-	-
 html.py:211-229	django/utils/html.py	211	229	-	-
 html.py:214	django/utils/html.py	214	-	for long_open_tag in long_open_tag_without_closing_re.finditer(value):	-
 html.py:221-222	django/utils/html.py	221	222	if strip_tags_depth >= MAX_STRIP_TAGS_DEPTH:	raise SuspiciousOperation
