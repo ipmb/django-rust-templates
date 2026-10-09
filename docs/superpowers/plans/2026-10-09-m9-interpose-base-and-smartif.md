@@ -1841,3 +1841,89 @@ but it is a later step of `check.sh` than the unit suite, so a bare
 reviewer's remark that `builtin_tag_names()` / `builtin_tag_stubs()` confusion
 has now happened three times is right and is not fixed here; subtraction at the
 call site is the workaround, and Task 7 owns the rename.
+
+### Task 4's four predictions, all four of them measured and three of them false
+
+Task 4 is `render_value_in_context`, which §5.2 leaves as an open obligation
+because it is a *helper* rather than a class: interposing `base` puts it on the
+render path whether or not anything is written about it. The task's deliverable
+is `tests/test_base_parity.py`, and the body it pins turned out to be the least
+interesting part of it.
+
+**(1) Step 1 quotes a docstring that is not in the pinned tree.** The step
+prints "This means wrapping them in a SafeString if necessary…" as the source of
+truth. 6.0.9's actual docstring, transcribed verbatim at
+`python/django_rust_templates/_impl/base.py:1129-1134`, reads "This means
+escaping, if required, and conversion to a string. If value is a string, it's
+expected to already be translated." The **body** the step prints is right, which
+is what would have made the mistake expensive: a row written from the quoted
+docstring asserts nothing about the code that runs.
+
+**(2) Step 2's `test_it_is_our_function` asserts on `__module__`, which this
+repository already documented as the wrong instrument.**
+`tests/test_interposition.py::test_the_node_classes_are_defined_by_our_file`
+records the measurement: the shim loads our file *under Django's name*, so
+`render_value_in_context.__module__` is `django.template.base` and is *supposed*
+to be. The row uses `inspect.getfile` and says why.
+
+**(3) Step 2's row is false as written.** The step supplies a placeholder type
+name and instructs the implementer to replace it with `SafeString` and assert
+`type(rendered) is str` — on a `mark_safe`d input. Measured:
+`type(rendered)` is `SafeString`, because `SafeString.__str__` returns `self`
+(it has to, so that `str()` and f-strings cannot launder safety). The row raises
+`AssertionError: <class 'SafeString'> is not <class 'str'>` on the first input
+anyone would reach for.
+
+What replaced it is the contrast the arm actually makes, on an input the
+escaping is visible on: autoescape off returns `str`, on returns `SafeString`,
+same input; and the marked value is kept in the row as the *falsifier* of the
+naive claim rather than as the claim.
+
+**(4) Step 4's prediction is false, in both of its clauses.** The step says that
+replacing `issubclass(type(value), str)` with `isinstance(value, str)` "should
+still pass", and Step 2's docstring draft says the two "agree on every `str`
+*instance* and disagree on nothing else either". Measured, both are wrong: an
+object whose `__class__` *property* returns `str` while its type does not — which
+is exactly what `django.utils.functional.lazy` produces, so this is not a
+contrived class — is `isinstance` of `str` and not a subclass of it. Give it an
+`__html__` and the two forms produce **different output**, not merely a different
+intermediate: upstream escapes `str(value)`
+(`'&lt;…Pretender object at 0x…&gt;'`), the `isinstance` form passes the object
+straight to `conditional_escape`'s `__html__` arm (`'<raw>'`).
+
+So the row the plan did not anticipate is
+`test_the_conversion_test_is_issubclass_of_type_not_isinstance`, with both
+literals, and `test_the_rows_can_fail` runs the mutation *inside the suite* so
+the divergence is an executable fact rather than a paragraph. Teeth confirmed the
+project's way, on a `/tmp` copy of `_impl/base.py` with the expression replaced:
+three rows red, the two literals among them.
+
+**(5) The plan treats it as one function with one call site; it has four, and two
+of them are copies.** `render_value_in_context` is called 6505 times across the
+accepted `template_tests` run, from 542 distinct tests, and the callers are split
+6071 from frames named `render` (`VariableNode.render` at
+`python/django_rust_templates/_impl/base.py:1161`, `CycleNode.render` at
+`django/template/defaulttags.py:114`, `TranslateNode.render` at `django/templatetags/i18n.py:91`) and 434 from a
+nested `render_value` inside `{% blocktranslate %}` (`django/templatetags/i18n.py:185`).
+`.review/m9-measurements/m9_measure_render_value_blast_radius.py` is the
+measurement, and it names its metric before printing: **calls**, not lines; the
+whole run, not one module; attributed by calling frame, because a single total
+would hide which path does the work.
+
+The two out-of-module callers bind it with `from django.template.base import
+render_value_in_context` **at module scope** — a copy taken when *they* were
+imported, which nothing done to `django.template.base` afterwards can change.
+Measured in both orders: with `install()` first (the order `check.sh` establishes
+for every unit-test process, via the `sitecustomize` on `shimpath`) both
+bindings are ours; import `Engine` and `defaulttags` *before* `install()` and
+they stay Django's while `django.template.base` resolves to `_impl/base.py`, with
+`is` between the two `False`. `{% cycle %}`, `{% firstof %}` and `{% translate %}`
+would then render through Django's copy while every `VariableNode` went through
+ours — the interposition silently partial, one module out, and nothing raised.
+
+`tests/test_base_parity.py::test_the_modules_that_copied_it_hold_ours` pins the
+shipped order, and Task 7 owns the general form: **any module-level binding of a
+Django class is a capture of the current universe**, and it is correct only while
+no install or uninstall follows. It is mechanically searchable
+(`from django.template… import <CapitalisedName>` at module level in `python/`
+and `tests/`), and its symptom has been a silent wrong answer every time.

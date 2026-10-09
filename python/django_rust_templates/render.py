@@ -194,9 +194,35 @@ def django_exception(error, host=None):
       `?`, so no `call_tag` failure is caught and survived, and the failing call
       is necessarily the last one to have touched either field.
 
+    **The fourth fact is measured, not structural, and saying so is the
+    correction** — the reviewer asked, and they were right to. The first three
+    are properties of this repository's own code. The fourth is a claim about
+    control flow *above* Rust that Rust cannot enforce: a host tag's compile
+    function runs in Python, calls `parser.parse(...)` itself, and could wrap
+    that call in `try/except`, in which case the `call_tag` failure would be
+    survived, the parse would continue, and ``last_error`` would be stale for a
+    later, unrelated match. Nothing in Rust's loop prevents it, because the
+    swallowing would happen above Rust.
+
+    Measured at 6.0.9 rather than argued (``.review/m9-measurements/
+    m9_measure_host_error_terminality.py``, which names its metric: a
+    *function* in the pinned tree whose parse call sits inside a try block).
+    Exactly one function in Django's tree does that, and it is
+    compile_nodelist's own try (`django/template/base.py:198`), whose except arm
+    re-raises after optionally annotating. No compile function swallows a nested
+    parse, and there is no contextlib.suppress site. **That script must be
+    re-run at M11**, where the population stops being the pinned tree: a
+    third-party ``{% load %}``ed library catching its own body's errors is
+    ordinary, and it would invalidate the identity restore without any file in
+    this repository changing.
+
     ``host.last_error`` is therefore not cleared on read — clearing it would
-    suggest a staleness this cannot have, and would hide a *real* future
-    regression in which the parse learned to survive a host error.
+    suggest a staleness that cannot arise today and would hide a *real* future
+    regression in which the parse learned to survive a host error. If the
+    measurement above ever comes back non-empty, the guard is an assertion that
+    the stash is consumed exactly once per `Err` — not a clear-on-read, which
+    would turn "the right exception" into ``None``, a different wrong answer
+    rather than no answer.
 
     The host is per parse as well — `parse_template` builds a fresh
     `ShellHost` — so nothing survives between parses either. A second `call_tag`
