@@ -1,0 +1,12 @@
+tree:    /Users/pete/projects/lincolnloop/django-rust-templates/python/django_rust_templates/_impl/base.py
+django:  6.0.9
+side:    rust-shim
+rows:    50
+
+var.name                 102.295 us/call      2.046 us/unit
+var.nested               253.640 us/call      5.073 us/unit
+filter.upper             195.141 us/call      3.903 us/unit
+filter.floatformat       638.161 us/call     12.763 us/unit
+tag.translate            254.648 us/call      5.093 us/unit
+tag.blocktranslate       683.194 us/call     13.664 us/unit
+loop.empty                12.812 us/call      0.256 us/unit

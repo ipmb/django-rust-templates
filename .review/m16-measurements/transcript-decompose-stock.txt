@@ -1,0 +1,12 @@
+tree:    /Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/base.py
+django:  6.0.9
+side:    stock
+rows:    50
+
+var.name                  72.539 us/call      1.451 us/unit
+var.nested               206.944 us/call      4.139 us/unit
+filter.upper              90.159 us/call      1.803 us/unit
+filter.floatformat       370.339 us/call      7.407 us/unit
+tag.translate            255.934 us/call      5.119 us/unit
+tag.blocktranslate       641.414 us/call     12.828 us/unit
+loop.empty                12.585 us/call      0.252 us/unit
