@@ -31,6 +31,7 @@ crates/template-core/src/parser/resolve.rs:156	crates/template-core/src/parser/r
 crates/template-core/src/parser/resolve.rs:253	crates/template-core/src/parser/resolve.rs	253	-	pub enum LookupOutcome {	-
 crates/template-core/src/parser/tags/extends.rs:71	crates/template-core/src/parser/tags/extends.rs	71	-	if !nodelist.get_nodes_by_type("ExtendsNode").is_empty() {	-
 crates/template-core/src/parser/tags/mod.rs:216	crates/template-core/src/parser/tags/mod.rs	216	-	-	-
+crates/template-core/src/parser/tags/mod.rs:219	crates/template-core/src/parser/tags/mod.rs	219	-	NodeDesc::with_nodelist(	-
 crates/template-core/src/parser/tags/mod.rs:231	crates/template-core/src/parser/tags/mod.rs	231	-	-	-
 crates/template-core/src/parser/tags/url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
 crates/template-core/src/parser/tags/with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
