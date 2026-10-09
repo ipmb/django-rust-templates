@@ -95,13 +95,15 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         other twenty-four modules, so a later change that handed any of them
         *back* would have gone on passing. The count is the claim each milestone
         is accepted on, so the count is what is asserted; it moves by one in the
-        same commit as each interposition (25 at M8, 24 with `base`).
+        same commit as each interposition (25 at M8, 24 with `base`, 23 with
+        `smartif` — the milestone's number).
         """
         _shim.install()
 
         remaining = _shim.unshimmed()
-        self.assertEqual(len(remaining), 24, sorted(remaining))
+        self.assertEqual(len(remaining), 23, sorted(remaining))
         self.assertNotIn("django.template.base", remaining)
+        self.assertNotIn("django.template.smartif", remaining)
         # Ours is not in the list, because ours is the package itself.
         self.assertNotIn("django.template", remaining)
 

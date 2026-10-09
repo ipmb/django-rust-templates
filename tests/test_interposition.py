@@ -114,6 +114,86 @@ class InterpositionTests(unittest.TestCase):
         self.assertTrue(hasattr(caught.exception, "template_debug"))
         self.assertEqual(caught.exception.template_debug["during"], "{% badtag %}")
 
+    def test_smartif_resolves_to_our_file(self):
+        """`defaulttags`'s ``IfParser``/``Literal`` come from our module.
+
+        The plan's Step 5 row, unchanged: the shim loads our file under Django's
+        name, so this is the ``__file__`` a reader can check by hand.
+        """
+        import django.template.smartif as smartif
+
+        self.assertIn("_impl", smartif.__file__, smartif.__file__)
+
+    def test_the_if_condition_tree_comes_from_rust_not_the_python_grammar(self):
+        """Why ``smartif`` is interposed, pinned as a conjunction.
+
+        **The plan's Step 6 premise is false, and this row is the measurement.**
+        It asked for a row showing the interposed ``IfParser`` reaches
+        ``_native.parse_filter_expression``. Measured: it reaches nothing,
+        because it is never entered. ``Engine().from_string("{% if a and b %}")``
+        calls ``_native.parse_filter_expression`` **zero** times and
+        ``smartif.IfParser.parse`` **zero** times — M5 moved the whole
+        ``{% if %}`` grammar into ``crates/template-core/src/parser/smartif.rs``,
+        which the parse seam drives inside ``compile_template``, and the shell
+        then materialises the resulting ``IfCondition`` tree into real
+        ``smartif`` objects (``template-py/src/lib.rs:667``). A row
+        named after the plan's premise would have asserted something untrue
+        about a call that does not happen, so it is renamed and rewritten here;
+        the substitution is recorded in the plan's Task 3 corrections.
+
+        What is worth pinning is therefore the pair, which is the shape the
+        render-parity repair took: the tree is **built by Rust** and **not built
+        by the Python grammar**. Our ``IfParser`` is a faithful transcription,
+        so a regression that routed ``{% if %}`` back through Python would keep
+        every count green, every render correct, and Rust blind to the
+        expression — the same Rust-against-Rust hazard one level down.
+
+        The classes are asserted as well, because that is what interposition
+        actually buys here: ``IfNode.render`` evaluates objects defined by our
+        file, and ``TemplateLiteral`` — Django's own leaf, in the *unshimmed*
+        ``defaulttags`` — subclasses our ``Literal``, which is the sharpest form
+        of the claim and the one that would break first if the shim's ordering
+        changed.
+        """
+        import inspect
+
+        import django.template.smartif as smartif
+        from django.template import Engine
+        from django.template.defaulttags import TemplateLiteral
+
+        from django_rust_templates import _native
+
+        compiled = []
+        original_compile = _native.compile_template
+
+        def counting_compile(*args, **kwargs):
+            compiled.append(args[0])
+            return original_compile(*args, **kwargs)
+
+        parsed = []
+        original_parse = smartif.IfParser.parse
+
+        def counting_parse(self, *args, **kwargs):
+            parsed.append(self)
+            return original_parse(self, *args, **kwargs)
+
+        _native.compile_template = counting_compile
+        smartif.IfParser.parse = counting_parse
+        try:
+            template = Engine().from_string("{% if a and b %}x{% endif %}")
+        finally:
+            _native.compile_template = original_compile
+            smartif.IfParser.parse = original_parse
+
+        self.assertEqual(len(compiled), 1, "the parse seam did not run")
+        self.assertEqual(parsed, [], "the Python grammar parsed the condition")
+
+        condition = template.nodelist[0].conditions_nodelists[0][0]
+        self.assertIs(type(condition), smartif.OPERATORS["and"])
+        self.assertIn("_impl", inspect.getfile(type(condition)))
+        self.assertIs(TemplateLiteral.__mro__[1], smartif.Literal)
+        self.assertIn("_impl", inspect.getfile(TemplateLiteral.__mro__[1]))
+
     def test_compile_nodelist_keeps_upstreams_error_message_rewriting(self):
         """The obligation this milestone's own plan omitted, so it gets a row.
 

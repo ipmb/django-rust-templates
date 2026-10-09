@@ -120,6 +120,34 @@ COMPARED_PATH = {
         (1147, 1148, "VariableNode.__init__"),
         (1168, 1212, "token_kwargs"),
     ],
+    # 6 functions, spans 138-214 — the same instrument and the same pin
+    # relation as `base.py`, re-measured by
+    # `tests/test_interposition.py::test_the_compared_path_is_the_measured_one`.
+    #
+    # **A blind spot, measured rather than assumed.** `measure` can only wrap
+    # names reachable from the module namespace and its classes; `smartif`
+    # builds its operator classes inside `infix()`/`prefix()` and binds them
+    # into the `OPERATORS` dict (lines 98-113), so the methods that actually
+    # evaluate `and`, `or`, `not` and every comparison are objects nothing here
+    # wrapped. Probed: four sources — `{% if a and b %}`, `{% if not a %}`,
+    # `{% if a == 1 %}`, `{% if a > 1 and b < 2 or c %}` — all reach the same
+    # six functions and none reaches `TokenBase.led` or `op.led`. (`op` is not
+    # an operator at all: it is the loop variable `for key, op in
+    # OPERATORS.items()` at line 115, left in the namespace, so the only class
+    # the instrument can see is `"<="`'s.) A declared region placed on those
+    # methods would not be caught by clause 4 — Task 7 closes that.
+    #
+    # `IfParser.error`, `IfParser.create_var`, `Literal.__init__` and the
+    # `TokenBase` display/`__repr__` helpers are defined and simply not entered
+    # by these corpora, which is the ordinary meaning of "compared path".
+    "smartif.py": [
+        (138, 139, "Literal.nud"),
+        (161, 179, "IfParser.__init__"),
+        (181, 187, "IfParser.translate_token"),
+        (189, 195, "IfParser.next_token"),
+        (197, 204, "IfParser.parse"),
+        (206, 214, "IfParser.expression"),
+    ],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])
@@ -211,6 +239,29 @@ DECLARED = {
                 "self.extra_data = parsed.extra_data\n"
                 "return parsed.nodelist",
             ),
+        ],
+    ),
+    "smartif.py": (
+        "django/template/smartif.py",
+        [
+            # The `# TRANSCRIBED:` marker and its blank separator, ours only —
+            # a pure insertion, hence `None` on the upstream side, and no
+            # executable line, hence no snippet. **This is the entire file**:
+            # measured with `difflib`, ours is 217 lines and upstream 215, the
+            # diff is one `delete` opcode at ours 2-3 against upstream 2-1, and
+            # the other 215 lines are equal in place.
+            #
+            # So `smartif` is a verbatim transcription plus a header, and it
+            # differs from `base.py` in the way that matters for review: there
+            # is no delegation here, so there is nothing to read past the
+            # marker. It is interposed because `defaulttags` takes `IfParser`
+            # from this module (`defaulttags.py:43`) and the *grammar* it
+            # drives is Rust's (`_native.parse_filter_expression`, wired at M5)
+            # — the Python file has to exist under Django's name for that
+            # import to resolve to us rather than to the checkout, and once it
+            # exists the claim it makes is that it is upstream's, which is what
+            # this declaration states and what the diff above measures.
+            ((2, 3), None, None),
         ],
     ),
 }
@@ -345,6 +396,30 @@ def overlaps(span, first: int, last: int) -> bool:
     return not (last < span[0] or first > span[1])
 
 
+def _marked(path: pathlib.Path) -> bool:
+    """Does ``path`` carry a ``# TRANSCRIBED:`` marker in its opening lines?
+
+    Deliberately the *inverse* question to ``_check_marker``: that one asks
+    whether a declared file's marker is correct, this one asks whether an
+    undeclared file has a marker at all. Only the first ``MARKER_WINDOW`` lines
+    are read, the same window ``_check_marker`` uses, so the two cannot disagree
+    about which files are transcriptions. A file that somehow fails to decode is
+    not a transcription as far as this guard is concerned — it is not one of
+    ours to read, and reporting it as marked would point the reader at the wrong
+    problem.
+    """
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for index, line in enumerate(handle):
+                if index >= MARKER_WINDOW:
+                    return False
+                if MARKER.match(line.rstrip("\n")):
+                    return True
+    except (OSError, UnicodeDecodeError):
+        return False
+    return False
+
+
 def _check_marker(name, upstream, ours) -> list:
     """Failures about the ``# TRANSCRIBED:`` line of ``name``."""
     failures = []
@@ -402,6 +477,38 @@ def check() -> list:
         failures.append(
             f"COMPARED_PATH has a stale entry for {stale}, which is no longer "
             "a declared transcription"
+        )
+    # Every file carrying the marker must be declared, and vice versa. Without
+    # this the guard is defeated by the exact change it exists to review: the
+    # loop below iterates `DECLARED`, so a transcription nobody declared is
+    # never opened, never diffed and never has its regions checked — it is
+    # invisible, and every other clause stays green. Measured, on the commit
+    # that added the second transcription: `python -I
+    # scripts/check_transcriptions.py` returned **exit 0** with
+    # `_impl/smartif.py` on disk and absent from `DECLARED`, because the only
+    # files it can name are the ones it was told about.
+    #
+    # Equality rather than containment for the same reason the `COMPARED_PATH`
+    # clause is: a declared name with no file is a claim about nothing (caught
+    # below as "declared but not present"), and a marked file with no
+    # declaration is a transcription that has not been read.
+    marked = sorted(path.name for path in IMPL.glob("*.py") if _marked(path))
+    undeclared = sorted(set(marked) - set(DECLARED))
+    if undeclared:
+        failures.append(
+            f"{undeclared} carr(ies) a `# TRANSCRIBED:` marker but is not in "
+            "DECLARED, so nothing reads its diff — every clause of this guard "
+            "skips a file it was not told about"
+        )
+    unmarked = sorted(set(DECLARED) - set(marked))
+    # `_impl/__init__.py` is declared and *is* marked; a declared file that is
+    # merely missing is reported by the per-module loop below, so only report
+    # here the ones that exist and are somehow unmarked.
+    unmarked = [name for name in unmarked if (IMPL / name).is_file()]
+    if unmarked:
+        failures.append(
+            f"{unmarked} is declared as a transcription but carries no "
+            "`# TRANSCRIBED:` marker"
         )
     for name, (upstream, regions) in sorted(DECLARED.items()):
         ours_path = IMPL / name
