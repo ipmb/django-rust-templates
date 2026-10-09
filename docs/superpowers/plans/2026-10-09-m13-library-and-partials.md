@@ -82,7 +82,11 @@ The engine's last module. `unshimmed()` is one name today — `['django.template
 - Consumes: nothing from earlier tasks; this is the plan's first.
 - Produces: `django.template.library` resolving to `_impl/library.py` for the five importers measured in the recon §7 (`_impl/__init__.py:54`, `defaulttags.py:44`, `defaultfilters.py:30`, `loader_tags.py:9`, `engine.py:12`), and `unshimmed(TARGET) == []`.
 
-**Why a transcription and not Rust.** `library.py`'s engine-facing work is `parse_bits` — argument binding and six `TemplateSyntaxError` messages — and its callers are, by construction, Python closures: `Library.simple_tag` builds `compile_func` as a closure over the user's Python function. Measured reach (§6): 250 calls to `parse_bits` from 6 test files, all arriving from a `compile_func` of that shape. So Rust owning `parse_bits` buys **no engine behaviour**, and it would put a public signature behind the seam: `.django/django/contrib/admin/templatetags/base.py:3` imports `parse_bits` and `InclusionNode` from this module, and `contrib` is outside the acceptance labels, so a wrong arity would never redden a run. Verbatim is the claim that keeps that consumer correct.
+**Why a transcription and not Rust.** The structural reason first: **Rust has no dispatch path to `parse_bits`.** A tag library is Python by definition — `Library.simple_tag` (`library.py:104`), `simple_block_tag` (`:159`) and `inclusion_tag` (`:243`) each build `compile_func` as a closure over the user's Python function, and all three of the calls into `parse_bits` (`:133`, `:214`, `:269`) sit inside such a closure. Rust reaches a tag by name only through `Host::has_tag` then `Host::call_tag`, and the shell's half of that runs Django's *own* registered compile function — `host.py:567` is `parser.tags[command](parser, token)` — which **is** the closure. So the only edge into `parse_bits` is Rust → host → Python → closure, and the closure is Python's; a Rust `parse_bits` would be a second implementation of a function nothing on the Rust side can call.
+
+The project has already decided this question once, one level up, and the reasoning is recorded in `crates/template-core/src/parser/registry.rs:94-102`: `querystring` is registered by `simple_tag` in Django's own tree, so its compile function is *generated*, and the decision written there is that Rust "has no version of that and should not grow one", because a bespoke Rust node of the same name "would fail the parity comparison (which is by class name) while rendering the same output — the worst shape a divergence can take". `library.py` **is** the decorator that generates it. Transcribing the module is that same decision one level down; the alternative is the shape that file already names as the worst.
+
+The measurement then confirms reach rather than carrying the argument: 250 calls to `parse_bits` from 6 test files, every one arriving from a `compile_func` of that shape (§6). One more clause, about consumers the labels cannot see: `.django/django/contrib/admin/templatetags/base.py:3` imports `parse_bits` and `InclusionNode` from this module, and `contrib` is outside the acceptance labels, so a wrong arity would never redden a run. Verbatim is the claim that keeps that consumer correct. The transcription is not an island either: `parse_bits` reads `token_kwargs` (`library.py:9`) and calls `parser.compile_filter` and `parser.error`, and `django.template.base` is already interposed by M9 — so the module rides on what the tree already serves.
 
 - [ ] **Step 1: Measure what the parity harness reaches inside `library.py`**
 
@@ -1210,9 +1214,26 @@ The instrument is committed at `.review/m13-measurements/m13_measure_cycle_acros
 DJANGO_RUST_TEMPLATES=0 .venv/bin/python -I .review/m13-measurements/m13_measure_cycle_across_partials.py
 ```
 
+**And the behavioural row is not available either — also measured.** The obvious replacement for an identity assertion is a row a user could see: put a *stateful* tag in the body and count the renders. This project's established instrument for "was this node built once" is `custom.py`'s `CounterNode`, which M10 finding 6 used (`test_include.py:372-397` asserts `"012345678"` through `{% include %}`), so
+
+```
+{% load custom %}{% partialdef p %}{% counter %}{% endpartialdef %}
+{% partial p %}{% partial p %}{% partial p %}
+```
+
+gives `'012'` on the pinned tree (measured; `'000'` is what three *independent* mentions give, and what a per-render rebuild would give) — instrument `.review/m13-measurements/m13_measure_counter_across_partials.py`. It is a good row and Step 1 keeps it. It is **not** evidence about the table, because the node it counts is in the table before any materialiser runs:
+
+| table entry | filled by | our code | lost by a snapshot? |
+| --- | --- | --- | --- |
+| `NodeRef` | the **host**, during the parse | `call_tag` pushes the node and returns the handle (`lib.rs:1404-1406`) | no — non-`None` in every list built later |
+| `NodeSlot` | the **materialiser**, as it builds | `alloc_slot` reserves `None` (`lib.rs:1468`), `materialise_node` fills it on the way out (`_impl/parser.py:404-407`) | yes — `None` until something builds it |
+
+`_impl/parser.py:726-731` states that split in as many words ("a `NodeRef` entry is filled by the host during the parse, a `NodeSlot` entry by the materialiser as it builds"). And the second row is *one tag wide*: `alloc_slot` has a single caller in the whole workspace, `crates/template-core/src/parser/tags/cycle.rs:128` (`resetcycle.rs` only reads the slot a cycle reserved). So the population a snapshot can lose is the cycle's slot alone — and the cycle's behaviour is precisely what `push_state` masks. A behavioural row therefore **cannot** see this defect, and the identity assertion is not a taste for instrumentation over behaviour; it is the defect's only observable.
+
 **Files:**
-- Modify: `crates/template-py/src/lib.rs` — **only if Step 1 fails** (`refs` field `:1227`, `ref_list` `:1257`, `alloc_slot` `:1468`, the three construction sites `:1539`, `:1663`, `:2566`)
+- Modify: `crates/template-py/src/lib.rs` — **only if the identity row fails** (`refs` field `:1227`, `ref_list` `:1257`, `alloc_slot` `:1468`, the three construction sites `:1539`, `:1663`, `:2566` — **re-derive every one of these with `grep -n` before editing**: Tasks 1-4 land first, Task 1 transcribes a module and Task 2 adds two methods to this very file, so these are pre-M13 numbers)
 - Test: `tests/test_partials_rust.py`
+- Instruments (already committed): `.review/m13-measurements/m13_measure_cycle_across_partials.py`, `m13_measure_counter_across_partials.py`, `m13_measure_ref_fill_sides.py`
 
 **Interfaces:**
 - Consumes: `Host::alloc_slot`'s "reserved-before-use" contract; `_native.parse`'s **three-tuple** return, `(nodes, contains_nontext, refs)` (`tests/test_ref_table.py:163` is the idiom — the nodes are *descriptors*, so identity has to be observed after `render.materialiser()` runs them).
@@ -1220,7 +1241,9 @@ DJANGO_RUST_TEMPLATES=0 .venv/bin/python -I .review/m13-measurements/m13_measure
 
 - [ ] **Step 1: Write the rows, and let them decide the task**
 
-Two rows: the measured output (a regression guard, whatever it turns out to be) and the **identity** assertion, which is the property that actually distinguishes a live table from a snapshot and is the only one Django's output cannot hide.
+Three rows. The **identity** row is the decision. The second is the measured output — a regression guard whatever it turns out to be. The third is the behavioural row from the table above: kept because it pins a guarantee a user would notice and because it guards a *different* real defect (a body re-parsed or re-materialised per render), and named here as **not** the decision, with the fill-sides measurement as the reason rather than a preference.
+
+Note the shape of the materialise call: `render.materialiser()` returns the **module** (`python/django_rust_templates/render.py:95`), not a function, and `materialise` takes the whole three-tuple as its first argument with `parser=` required for a body containing any filter expression. The idiom is `tests/test_ref_table.py:150-155`'s.
 
 ```python
     def test_a_partial_body_and_the_outer_template_share_one_cycle_node(self):
@@ -1238,11 +1261,19 @@ Two rows: the measured output (a regression guard, whatever it turns out to be) 
         `PartialTemplate.render` pushes a render-context state (`base.py:341-346`),
         so a named cycle restarts inside every partial render either way. The
         measurement that settled it is
-        `.review/m13-measurements/m13_measure_cycle_across_partials.py`.
+        `.review/m13-measurements/m13_measure_cycle_across_partials.py`, and the
+        reason no *behavioural* row can replace this one is
+        `.review/m13-measurements/m13_measure_ref_fill_sides.py` — the body's
+        `{% cycle %}` is the only kind of table entry a snapshot can lose.
         """
         host = _host()
-        nodes, _contains_nontext, refs = _native.parse(_CYCLE_ACROSS_PARTIAL, host=host)
-        tree = render.materialiser()(nodes, None, refs.__getitem__, refs.__setitem__, None)
+        nodes, contains_nontext, refs = _native.parse(_CYCLE_ACROSS_PARTIAL, host=host)
+        tree = render.materialiser().materialise(
+            (nodes, contains_nontext, refs),
+            resolve_ref=refs.__getitem__,
+            register_ref=refs.__setitem__,
+            parser=host.parser,
+        )
 
         outer_cycle = [n for n in tree if type(n).__name__ == "CycleNode"]
         body = host.parser.extra_data["partials"]["p"].nodelist
@@ -1265,6 +1296,25 @@ Two rows: the measured output (a regression guard, whatever it turns out to be) 
         self.assertEqual(render.render_string(_CYCLE_ACROSS_PARTIAL, {}), "aaa")
 ```
 
+```python
+    def test_a_stateful_library_tag_in_a_body_is_built_once(self):
+        """The behavioural guard, and explicitly *not* this task's trigger.
+
+        `'012'`: `{% counter %}` is a library tag, so `do_counter` builds its
+        node once while Rust parses the body, and the three `{% partial p %}`
+        renders advance it. A body re-parsed or re-materialised per render gives
+        `'000'` — which is also what three independent mentions give, measured.
+        That is a real defect and a user-visible one, which is why the row is
+        here; it says nothing about the reference table, because the counter's
+        entry is filled by the **host** before any materialiser runs. The rows
+        above carry the decision.
+        """
+        self.assertEqual(
+            render.render_string(_COUNTER_ACROSS_PARTIAL, {}, _counter_engine()),
+            "012",
+        )
+```
+
 with, at module level:
 
 ```python
@@ -1273,14 +1323,42 @@ _CYCLE_ACROSS_PARTIAL = (
     "{% partialdef p %}{% cycle c %}{% endpartialdef %}"
     "{% partial p %}{% partial p %}"
 )
+
+_COUNTER_ACROSS_PARTIAL = (
+    "{% load custom %}{% partialdef p %}{% counter %}{% endpartialdef %}"
+    "{% partial p %}{% partial p %}{% partial p %}"
+)
+
+
+def _counter_engine():
+    """An engine that can `{% load custom %}`.
+
+    `.django/tests` is on `sys.path` because `find_library` resolves
+    `template_tests.templatetags.custom` through it — the fixture `custom.py:381-393`
+    defines `CounterNode` in, and the same one `test_include.py:372-397` uses for
+    this question.
+    """
+    ensure_settings()
+    return Engine(libraries={"custom": "template_tests.templatetags.custom"})
+```
+
+and at the top of the module, beside the other imports:
+
+```python
+import sys
+from pathlib import Path
+
+_DJANGO_TESTS = Path(__file__).resolve().parent.parent / ".django" / "tests"
+if str(_DJANGO_TESTS) not in sys.path:
+    sys.path.insert(0, str(_DJANGO_TESTS))
 ```
 
 Run: `scripts/run_unit_tests.sh tests.test_partials_rust -v`
 
-Expected: the output row **PASSES** (it is Django's measured value, and if it does not pass, our render is wrong for a reason unrelated to the table — find that first). The identity row is the decision:
+Expected: the output row and the counter row **PASS** (both are Django's measured values, and if either does not pass, our render is wrong for a reason unrelated to the table — find that first). The identity row is the decision:
 
 - **If the identity row FAILS** — the hypothesis is confirmed, and Steps 2-4 below are the fix.
-- **If the identity row PASSES** — the hazard is not reachable through this shape. **Stop.** Delete the `lib.rs` change from this task, keep both rows, and write a comment on `ref_list` recording that a mid-parse materialisation over the snapshot was *measured* not to produce a second node, naming the instrument. That comment is the deliverable; do not "harden" the table on an unconfirmed premise.
+- **If the identity row PASSES** — the hazard is not reachable through this shape. **Stop.** Delete the `lib.rs` change from this task, keep all three rows, and write a comment on `ref_list` recording that a mid-parse materialisation over the snapshot was *measured* not to produce a second node, naming the instrument. That comment is the deliverable; do not "harden" the table on an unconfirmed premise.
 
 - [ ] **Step 2: Make the table the parse's live list — only if Step 1 failed**
 
@@ -1586,6 +1664,8 @@ Both meter scopes to zero, the tag counts (`25` including stubs → the registry
 - [ ] **Step 4: Write `.review/m13-record.md`**
 
 M9–M12's shape: the headline, what the meter could see and what it could not, the decisions with their measurements, the instruments and their invocation traps, and the numbers at close.
+
+One entry in the decisions section is a **defect category this project has not named before**, and it belongs in the record because the next milestone's stub-shrinking should look for it: `crates/template-core/src/parser/registry.rs:477`'s pin began life as a *redundancy* check and, the moment Task 4 lands, silently becomes `unimplemented(...)`'s **only** caller while its text stays true and its row stays green — *a row whose role changes under it*. Nothing reddens when that happens; the row has to be read to notice. The record names it, and Task 6's rewrite is where the row is re-keyed to its new role.
 
 - [ ] **Step 5: Commit and send the plan's closing note to the reviewer**
 

@@ -254,3 +254,41 @@ rather than about this tree, so they were measured under the pinned interpreter
   section's "silent there by construction" is measured rather than argued, and
   the boundary is exactly where it says it is.
 
+
+### Landing note — C4's prediction is now a measurement, 2026-10-09
+
+C4 closes by naming its own falsifier "a **prediction** about a row that does not
+exist yet, and it should be confirmed when the row is written rather than quoted
+after". The row now exists — `tests/test_compared_path_instrument.py:597`,
+`test_the_path_that_runs_is_the_path_that_was_measured`, one `subTest` per pinned
+module — so the prediction is confirmed here by pulling the lever rather than
+quoted.
+
+**Falsified by disabling the registry rebinding** in `instrumented()`'s wrap loop
+(`tests/compared_path.py:746`, `rebind_registries(invoked, replacement)`, restored
+at `:761`), so the `Library` copies keep the originals. Measured with
+`scripts/run_unit_tests.sh tests.test_compared_path_instrument.ComparedPathAgreementTests`:
+**three** modules redden, not the one this document first named. Every residue is
+`extra` — executed with no credited label, the unsafe direction clause (4) exists
+to refuse — and none is `missing`:
+
+| module | `extra`, verbatim | size |
+| --- | --- | --- |
+| `defaulttags.py` | `autoescape`, `comment`, `csrf_token`, `cycle`, `debug`, `do_filter`, `do_for`, `do_if`, `do_with`, `firstof`, `ifchanged`, `load`, `lorem`, `now`, `regroup`, `resetcycle`, `spaceless`, `templatetag`, `url`, `verbatim`, `widthratio` | 21 |
+| `loader_tags.py` | `do_block`, `do_extends`, `do_include` | 3 |
+| `templatetags/i18n.py` | `do_block_translate` | 1 |
+
+Three of the twenty pinned modules. `registries()` covers every `Library`
+dispatch table, so the lever reaches every module whose functions are dispatched
+through a copy; `loader_tags` was named alone because it is where the defect was
+found, which is writing the falsifier from the instance rather than from the
+mechanism. `loader_tags`'s three names are exactly the three the document named,
+so the original prediction was right about *that module* and only about it.
+
+The count grows with each ported module that **holds** a `Library` and whose tags
+the corpus reaches. M13's Task 1 ports `library.py`, which defines the class and
+holds no instance of it (`grep -n "^register" .django/django/template/library.py`
+is empty; the instances are `defaulttags.py:47`, `loader_tags.py:11`,
+`templatetags/i18n.py:12`, `defaultfilters.py:32`) — so M13 adds no fourth row to
+the table above, and the next module that does is the next module that defines a
+`register`.
