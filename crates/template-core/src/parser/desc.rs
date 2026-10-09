@@ -139,10 +139,10 @@ pub enum AttrValue {
     /// `{% if %}` is the only producer: `IfNode.conditions_nodelists` is a list
     /// of `(condition, nodelist)` **tuples** (`defaulttags.py:995`), `do_if`
     /// builds them with tuple literals, and `IfNode.render` unpacks them
-    /// (`:323`). A list would render identically and be a different node — the
-    /// same argument `IfChangedNode._varlist` is pinned by — and the parity
-    /// suite can tell the two apart, because `describe`'s tuple arm carries a
-    /// `"tuple"` marker the list arm deliberately does not have.
+    /// (`defaulttags.py:323`). A list would render identically and be a
+    /// different node — the same argument `IfChangedNode._varlist` is pinned by
+    /// — and the parity suite can tell the two apart, because `describe`'s tuple
+    /// arm carries a `"tuple"` marker the list arm deliberately does not have.
     ///
     /// It exists rather than a node-specific "branch" type because the pair is
     /// exactly a two-element tuple and nothing else: the condition half is
@@ -204,12 +204,12 @@ pub enum AttrValue {
     /// returned.
     ///
     /// **The tree, and not a handle to one, because `template-core` is what
-    /// builds it.** `{% if %}`'s condition is the one attribute whose value is
-    /// a parse *tree*: `do_if` runs `TemplateIfParser(parser, bits).parse()`
+    /// builds it.** `{% if %}`'s condition is the one attribute whose value is a
+    /// parse *tree*: `do_if` runs `TemplateIfParser(parser, bits).parse()`
     /// (`defaulttags.py:993`) and `IfNode.render` then calls
-    /// `condition.eval(context)` on the result (`:326`). Python therefore needs
-    /// real `smartif` nodes at render time, and the descriptor is how the shape
-    /// gets there.
+    /// `condition.eval(context)` on the result (`defaulttags.py:326`). Python
+    /// therefore needs real `smartif` nodes at render time, and the descriptor
+    /// is how the shape gets there.
     ///
     /// The operators are named rather than rebuilt from Python's table by index:
     /// `smartif.OPERATORS[key]` is the class and `translate_token` instantiates
@@ -241,10 +241,10 @@ pub enum AttrValue {
 pub enum IfConditionDesc {
     /// An `infix`/`prefix` `Operator` instance, with its two operands.
     ///
-    /// `second` is `None` for a prefix operator: `nud` sets
-    /// `self.second = None` (`smartif.py:83`) where `led` sets both
-    /// (`:55-56`). Emitted rather than omitted so the materialiser assigns it,
-    /// which is what Django does.
+    /// `second` is `None` for a prefix operator: `nud` sets `self.second = None`
+    /// (`smartif.py:83`) where `led` sets both (`smartif.py:55-56`). Emitted
+    /// rather than omitted so the materialiser assigns it, which is what Django
+    /// does.
     Operator {
         /// One of `smartif.OPERATORS`' thirteen keys — `and`, `not in`, `==`, …
         key: String,
@@ -414,9 +414,10 @@ pub struct NodeDesc {
     /// - `{% cycle a b as c %}` — the definition. The materialiser builds a real
     ///   `CycleNode` and stores it at this index.
     /// - `{% cycle c %}` — a later mention. Django's `do_cycle` returns the
-    ///   identical object (`defaulttags.py:693-696` and `:669-671`), so this
-    ///   descriptor has no constructor arguments at all and exists only to name
-    ///   the slot the already-built node is.
+    ///   identical object (`defaulttags.py:693-696` and
+    ///   `defaulttags.py:669-671`), so this descriptor has no constructor
+    ///   arguments at all and exists only to name the slot the already-built
+    ///   node is.
     ///
     /// The materialiser's rule is therefore one sentence: **if the table already
     /// holds this slot, hand back what is there; otherwise build the node and

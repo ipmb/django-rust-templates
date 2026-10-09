@@ -394,6 +394,7 @@ smartif.py:22-26	django/template/smartif.py	22	26	-	-
 smartif.py:40-42	django/template/smartif.py	40	42	def __repr__(self):	return "(" + " ".join(out) + ")"
 smartif.py:51	django/template/smartif.py	51	-	class Operator(TokenBase):	-
 smartif.py:54-56	django/template/smartif.py	54	56	self.first = left	self.second = parser.expression(bp)
+smartif.py:55-56	django/template/smartif.py	55	56	self.first = left	self.second = parser.expression(bp)
 smartif.py:81-83	django/template/smartif.py	81	83	self.first = parser.expression(bp)	self.second = None
 smartif.py:83	django/template/smartif.py	83	-	self.second = None	-
 smartif.py:115-116	django/template/smartif.py	115	116	-	-
