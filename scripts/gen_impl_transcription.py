@@ -78,6 +78,15 @@ MODULES = {
     # behaviour in it to transcribe.
     "templatetags/cache.py": "django/templatetags/cache.py",
     "templatetags/static.py": "django/templatetags/static.py",
+    # M12 Task 4's, the third of the five. Pin-plus-marker like the two above,
+    # and for their reason: its three tag bodies (`localtime_tag`,
+    # `timezone_tag`, `get_current_timezone_tag`) are unreachable through the
+    # host once Rust compiles the names, and its three filters
+    # (`localtime`, `timezone`, `utc`) are Task 7's Rust bodies — so nothing
+    # here delegates to Rust and the generator can write the whole file.
+    # `do_timezone`, the helper registered as the `timezone` filter, stays
+    # Python-side too; the commit says why.
+    "templatetags/tz.py": "django/templatetags/tz.py",
     # M11's first, and the only one this table names yet. Unlike M10's loader
     # files it is a module the tag and filter corpus renders through, so a
     # verbatim transcription here moves the *registry's* owner and the node

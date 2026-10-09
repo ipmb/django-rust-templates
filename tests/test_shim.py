@@ -313,7 +313,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
 
         The cache-drop below is not incidental. The row writes a module and
         expects the finder to see it, but ``install()`` returns early when the
-        shim is already installed (``_shim.py:546``), and a session-start install
+        shim is already installed (``_shim.py:550``), and a session-start install
         (which ``check.sh`` now does, so every test module binds the same
         classes) means the shim *is* already installed by the time this row
         runs. A ``django.template.backends`` cached earlier in the session then
@@ -571,6 +571,13 @@ class NamespaceTests(unittest.TestCase):
         counted one of them twice (``cache`` is the library task's headline and
         ``static`` the one it rides with) and the arithmetic is only visible
         here, where the set is written out.
+
+        It is **2** in M12 Task 4, which interposes ``tz`` — the third library,
+        one module, so the delta is one and the set below is the arithmetic
+        again. The plan's Step 7 says this commit's line is
+        ``the second count is 1``; that assumed Task 3 left the count at 2 and
+        Task 3 measured 3, so the plan is off by one and the measured line is
+        ``the second count is 2``. See the commit message.
         """
         _shim.install()
         self.assertEqual(_shim.unshimmed(), _shim.unshimmed(scope="django.template"))
@@ -580,7 +587,6 @@ class NamespaceTests(unittest.TestCase):
             [
                 "django.templatetags.i18n",
                 "django.templatetags.l10n",
-                "django.templatetags.tz",
             ],
         )
 

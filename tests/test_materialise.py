@@ -327,6 +327,45 @@ class MaterialiseTests(unittest.TestCase):
             materialiser.materialise_node(("NoSuchNode", (), (), None))
         self.assertIn("NoSuchNode", str(caught.exception))
 
+    def test_the_tz_node_classes_are_registered_and_are_ours(self):
+        """M12 Task 4: the three classes ``tz.rs`` emits are materialisable.
+
+        ``StaticEmitterRegistryTests`` below already reads the class names out of
+        the Rust source and checks them against this registry, so that generic
+        row covers the *membership*. This one is the direct-entry half the plan's
+        Step 1 asks for: the three names by hand, and each resolving to a class
+        defined in our own module — so a registry that carried the names pointing
+        at Django's classes would fail the ``_impl`` assertion while the generic
+        row stayed green.
+        """
+        import inspect
+
+        for name in ("LocalTimeNode", "TimezoneNode", "GetCurrentTimezoneNode"):
+            with self.subTest(name=name):
+                cls = materialiser.NODE_CLASSES.get(name)
+                self.assertIsNotNone(cls, f"{name} is not in NODE_CLASSES")
+                self.assertIn("_impl", inspect.getfile(cls))
+
+    def test_the_refusal_is_live_for_block_translate_node_until_task_6(self):
+        """Review Focus 4, pinned while it is still observable.
+
+        ``NODE_CLASSES`` is an explicit registry rather than a ``getattr`` sweep
+        so that a descriptor naming a class Rust *thinks* it can build fails
+        loudly instead of silently building a different node. ``BlockTranslateNode``
+        is the name that makes the row worth writing and the reason it is
+        temporary: ``django.templatetags.i18n`` defines it, the milestone
+        transcribes that module, and **Task 6 is the task that registers it** — so
+        at *this* commit the refusal must still fire for it, and Task 6 deletes
+        this row in the commit that adds the entry. That commit is the only one
+        where both halves can be checked against the tree.
+        """
+        self.assertNotIn("BlockTranslateNode", materialiser.NODE_CLASSES)
+        with self.assertRaises(LookupError) as caught:
+            materialiser.materialise_node(("BlockTranslateNode", (), (), None))
+        message = str(caught.exception)
+        self.assertIn("BlockTranslateNode", message)
+        self.assertIn("NODE_CLASSES", message)
+
     def test_an_unknown_value_type_is_loud(self):
         desc = ("TextNode", (("s", object()),), (), None)
         with self.assertRaises(LookupError):
@@ -1047,7 +1086,7 @@ _CFG_TEST = "#[cfg(test)]"
 _TAG_MODULES = PROJECT_ROOT / "crates" / "template-core" / "src" / "parser" / "tags"
 
 # `NodeDesc::new("X")` / `NodeDesc::with_nodelist("X", ...)`. `\s*` spans the
-# newline in `tags/mod.rs:189`, where the class name starts on the following line.
+# newline in `tags/mod.rs:190`, where the class name starts on the following line.
 _CLASS = re.compile(r'NodeDesc::(?:new|with_nodelist)\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)"')
 _TEXT = re.compile(r"NodeDesc::text\s*\(")
 

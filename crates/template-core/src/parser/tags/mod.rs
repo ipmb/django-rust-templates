@@ -43,6 +43,7 @@ pub mod spaceless;
 #[path = "static.rs"]
 pub mod static_tag;
 pub mod templatetag;
+pub mod tz;
 pub mod url;
 pub mod verbatim;
 pub mod widthratio;
@@ -397,8 +398,8 @@ pub(crate) mod support {
         fn has_tag(&self, _command: &str) -> bool {
             // The library tags Rust compiles are *not* host tags — that is what
             // `ShellHost.has_tag`'s identity clause decides for the real host,
-            // and it is why these four names needed a second registry table
-            // rather than a host body.
+            // and it is why these names needed a second registry table rather
+            // than a host body.
             false
         }
 

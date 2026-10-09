@@ -144,10 +144,13 @@ SHADOWING = {
     "loaders/filesystem.py": "transcribed",
     "loaders/locmem.py": "transcribed",
     "smartif.py": "transcribed",
-    # M12's two, and the first keys under the second namespace — the
-    # `templatetags/` directory `NAMESPACE_ROOTS` serves. Both transcribed: the
-    # two modules are the pin plus a marker, because the four tags Rust compiles
-    # out of them never reach these bodies.
+    # M12's three, and the first keys under the second namespace — the
+    # `templatetags/` directory `NAMESPACE_ROOTS` serves. All transcribed: the
+    # three modules are the pin plus a marker, because the seven tags Rust
+    # compiles out of them never reach these bodies. `tz` joined in Task 4; its
+    # three *filters* (`localtime`, `timezone`, `utc`) are Task 7's Rust bodies
+    # and are transcribed-verbatim for now, which the file's marker and
+    # `check_transcriptions.py`'s declared region record rather than hide.
     #
     # **No `templatetags/__init__.py` row, and that is measured rather than an
     # omission.** The plan called for one. `_is_foreign_package` declines
@@ -161,6 +164,7 @@ SHADOWING = {
     # in it to transcribe and nothing is lost by leaving the package Django's.
     "templatetags/cache.py": "transcribed",
     "templatetags/static.py": "transcribed",
+    "templatetags/tz.py": "transcribed",
     "utils.py": "transcribed",
 }
 

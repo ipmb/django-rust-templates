@@ -381,8 +381,7 @@ class ShellHost:
         # The names Rust has a real compile function for, which as of M12 is the
         # registry in *two* tables: `builtin_tag_names_including_stubs()` minus
         # `builtin_tag_stub_names()` — the built-ins — unioned with
-        # `library_tag_names()`, the four `django.templatetags` tags Rust
-        # compiles. The first alone is the built-in registry's *keys*,
+        # `library_tag_names()`, the `django.templatetags` tags Rust compiles. The first alone is the built-in registry's *keys*,
         # and a stub is a key with a body that raises `Unimplemented`, so taking
         # it whole claims `partial` and `partialdef` for Rust and the identity
         # clause below then declines them on the host's behalf — measured, that
@@ -397,9 +396,10 @@ class ShellHost:
         # set(builtin_tag_stub_names())`, and
         # `tests/test_tag_inventory.py` pins the stub set to those two names. The
         # host was the one place that read the keys as the registry.
-        # M12 widens this with the four `django.templatetags` names Rust has a
-        # real body for — `cache`, `static` and the two prefix tags. **The four,
-        # not the 18 the five libraries register**, and the difference is a
+        # M12 widens this with the `django.templatetags` names Rust has a real
+        # body for — `cache`, `static` and the two prefix tags, plus `tz`'s three
+        # tag names as of Task 4. **Those, not the 18 the five libraries
+        # register**, and the difference is a
         # correctness boundary rather than bookkeeping: `library_tag_loaded`
         # below is `command in parser.tags`, which is true for *every* name a
         # loaded library contributes, and the Rust arm it feeds refuses a name

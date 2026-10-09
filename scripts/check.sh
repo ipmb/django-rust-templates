@@ -55,11 +55,16 @@ step "python anchor manifest"
 # an edit being written, which is what a gate is for. The unquoted rows are
 # *not* failed on: an unquoted row records no claim to falsify, and the ones left
 # are cited only from files that never held a shorthand, so no naming pass will
-# come back for them. They stood at 104 when `--frozen` was earned and are **145**
-# after M12 Task 3, whose 23 `cache.py`/`static.py` anchors seed unquoted by
-# design: `_seed_snippet` requires the quoted span to occur on exactly *one* line
-# of the file, and the spans our two new modules quote beside their anchors
-# (`tokens[-1]`, `split_contents`) recur throughout theirs. The number in this
+# come back for them. They stood at 104 when `--frozen` was earned and are **155**
+# after M12 Tasks 3 and 4: Task 3's 23 `cache.py`/`static.py` anchors seed unquoted
+# by design, and Task 4's eighteen `tz.py` anchors mostly do too —
+# `_seed_snippet` requires the quoted span to occur on exactly *one* line of the
+# file, and the spans our three new modules quote beside their anchors
+# (`tokens[-1]`, `split_contents`, `use_tz = True`) recur throughout theirs. Two
+# of Task 4's seeded rows were *wrong* rather than merely unquoted and were
+# repaired by hand, which is the seed step behaving as its doc predicts: it
+# drafted `tz.py:146-147` with a snippet that lives on 149 and `tz.py:193-194`
+# with one that lives on 195. The number in this
 # comment is a measurement and moves with the tree; the property that matters is
 # that `--check` counts them out loud rather than passing them as verified.
 "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_python_anchors.py" --check --frozen

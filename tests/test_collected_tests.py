@@ -129,7 +129,16 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # the other namespace's files too. The row stages the tree, so it fails on the
 # unfixed function today rather than only after Task 5 creates
 # `_impl/templatetags/`. `git diff tests/` is `+1` row, one file, no removals.
-PINNED = 404
+#
+# 404 → 408 is M12 Task 4, **four** rows across two files: two in
+# `test_interposition.py::TzInterpositionTests` (the module resolves to `_impl`,
+# and each of the three tags compiles to our node class — one row, three
+# subtests) and two in `test_materialise.py` (the three tz node classes are
+# registered and are ours; the `BlockTranslateNode` refusal is live until Task
+# 6). `git diff tests/` since the previous commit is `+4` rows in two files and
+# no removals, so 404 + 4 = 408 — measured by discovery, and the failure text
+# before the pin moved read `discovery found 408 tests, the pin says 404`.
+PINNED = 408
 
 
 def collected() -> unittest.TestSuite:

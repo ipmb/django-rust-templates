@@ -389,6 +389,20 @@ COMPARED_PATH = {
     # added it.
     "templatetags/cache.py": [],
     "templatetags/static.py": [],
+    # M12 Task 4's, measured rather than copied: `m9_measure_parse_path.py
+    # templatetags/tz.py` reports **0 of 12** functions over both corpora, and
+    # the 12 is `definitions()`' counting unit — six module-level defs (the
+    # three tag bodies, the three filter bodies) plus two methods each on
+    # `LocalTimeNode`, `TimezoneNode` and `GetCurrentTimezoneNode`. The reason
+    # for the zero is the corpora's: `tests/parser_corpus.py`'s `{% load %}`
+    # rows reach the `template_tests.*` libraries and never
+    # `django.templatetags.tz`, so every one of the 12 is defined and simply not
+    # entered — `cache.py`'s and `static.py`'s zero, one library over. The
+    # re-measurement row keeps it
+    # honest: a corpus that grew a `{% load tz %}` row would move this entry and
+    # `test_the_compared_path_is_the_measured_one` would fail in the commit that
+    # added it.
+    "templatetags/tz.py": [],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])
@@ -893,6 +907,29 @@ DECLARED = {
                 (1, 2),
                 None,
                 "# TRANSCRIBED: django/templatetags/static.py (Django 6.0.9)",
+            ),
+        ],
+    ),
+    # M12 Task 4's, the third of the five and the same shape as the two above:
+    # the pin plus a two-line marker, `None` on the upstream side, and nothing
+    # else. The module opens with imports, so the marker is a comment on line 1
+    # and the region is `(1, 2)`.
+    #
+    # Verbatim is right for the three tag bodies although Rust compiles all three
+    # names: `has_tag` answers False for a Rust-owned name the template loaded,
+    # so `localtime_tag`, `timezone_tag` and `get_current_timezone_tag` are
+    # bodies nothing calls — the same case `defaulttags.py` is kept verbatim for.
+    # The three *filters* (`localtime`, `timezone`, `utc`, the last of which is
+    # `do_timezone` under a registered alias) are Task 7's Rust bodies and are
+    # transcribed-verbatim here for the same reason: the unit of transcription is
+    # the file, and a per-file table cannot express a half-transcribed module.
+    "templatetags/tz.py": (
+        "django/templatetags/tz.py",
+        [
+            (
+                (1, 2),
+                None,
+                "# TRANSCRIBED: django/templatetags/tz.py (Django 6.0.9)",
             ),
         ],
     ),

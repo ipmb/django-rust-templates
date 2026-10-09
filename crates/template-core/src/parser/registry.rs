@@ -218,10 +218,10 @@ pub fn builtin_tag(command: &str) -> Option<CompileFn> {
 /// A second table rather than rows in [`REGISTRY`], and the reason is the
 /// counting trap this module's doc opens with: `builtin_tag_names_including_stubs`
 /// is cross-checked against Django's real *built-in* registry by
-/// `tests/test_tag_inventory.py`, and none of these four names is in it. They
-/// belong to `django/templatetags/cache.py` and `static.py`, they are reachable
-/// only after a `{% load %}`, and folding them in would make the engine claim to
-/// own four built-ins Django does not have.
+/// `tests/test_tag_inventory.py`, and none of these names is in it. They belong
+/// to `django/templatetags/cache.py`, `static.py` and `tz.py`, they are
+/// reachable only after a `{% load %}`, and folding them in would make the
+/// engine claim to own built-ins Django does not have.
 ///
 /// **Reachability is the other half, and the host owns it.** A loaded library tag
 /// is not in [`REGISTRY`]'s sense of "ours" until the template loaded the
@@ -235,9 +235,12 @@ pub fn builtin_tag(command: &str) -> Option<CompileFn> {
 /// [`Host::library_tag_loaded`]: crate::parser::host::Host::library_tag_loaded
 const LIBRARY_REGISTRY: &[Entry] = &[
     ("cache", tags::cache::compile),
+    ("get_current_timezone", tags::tz::get_current_timezone),
     ("get_media_prefix", tags::static_tag::compile),
     ("get_static_prefix", tags::static_tag::compile),
+    ("localtime", tags::tz::localtime),
     ("static", tags::static_tag::compile),
+    ("timezone", tags::tz::timezone),
 ];
 
 /// The compile function Rust has for the **library** tag `command`, if it has
@@ -261,7 +264,7 @@ pub fn library_tag(command: &str) -> Option<CompileFn> {
 /// M12's `245 failures of the 1547` measurement is about). So the list of
 /// library tags Rust actually compiles has to come from Rust.
 ///
-/// Three of the four entries share [`tags::static_tag::compile`], which is
+/// Three of the entries share [`tags::static_tag::compile`], which is
 /// Django's own shape rather than a shortcut here — `do_static`,
 /// `get_static_prefix` and `get_media_prefix` are one class-method call with
 /// different arguments (`static.py:74`, `static.py:92`, `static.py:171`), and that function
@@ -563,16 +566,29 @@ mod tests {
     }
 
     #[test]
-    fn the_library_registry_holds_the_four_names_m12_task_three_lands() {
+    fn the_library_registry_holds_the_seven_names_m12_has_landed_so_far() {
         // The literal, because the *set* is a claim about Django's libraries and
         // not a consequence of anything in this file. `tests/test_tag_inventory.py`
         // cross-checks `REGISTRY` against Django's built-in registry; the library
         // table has no such cross-check yet, because the modules it names are
-        // interposed one task at a time — so this row is what notices a fifth
-        // entry arriving without a task agreeing to it.
+        // interposed one task at a time — so this row is what notices an entry
+        // arriving without a task agreeing to it.
+        //
+        // Four at Task 3 (`cache`, `static`, and the two `static.py` prefix
+        // readers), three more at Task 4 (`tz`'s three tags). Task 7 adds `tz`'s
+        // three *filters* and moves none of these names: filters are not tags and
+        // never enter this table.
         assert_eq!(
             library_tag_names(),
-            ["cache", "get_media_prefix", "get_static_prefix", "static"],
+            [
+                "cache",
+                "get_current_timezone",
+                "get_media_prefix",
+                "get_static_prefix",
+                "localtime",
+                "static",
+                "timezone",
+            ],
         );
     }
 

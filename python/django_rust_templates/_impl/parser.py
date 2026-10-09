@@ -56,6 +56,11 @@ from django.template.defaulttags import (
 from django.template.loader_tags import BlockNode, ExtendsNode, IncludeNode
 from django.templatetags.cache import CacheNode
 from django.templatetags.static import PrefixNode, StaticNode
+from django.templatetags.tz import (
+    GetCurrentTimezoneNode,
+    LocalTimeNode,
+    TimezoneNode,
+)
 from django.utils.safestring import mark_safe
 
 from django_rust_templates import _native
@@ -139,9 +144,16 @@ NODE_CLASSES = {
     "FilterNode": FilterNode,
     "FirstOfNode": FirstOfNode,
     "ForNode": ForNode,
+    # M12 Task 4's three, `django.templatetags.tz`'s. Ordinary keyword
+    # constructors like the trio above — `LocalTimeNode.__init__(self, nodelist,
+    # use_tz)` (`tz.py:95`), `TimezoneNode.__init__(self, nodelist, tz)`
+    # (`tz.py:112`) and `GetCurrentTimezoneNode.__init__(self, variable)`
+    # (`tz.py:127`) — so the bare class is the factory.
+    "GetCurrentTimezoneNode": GetCurrentTimezoneNode,
     "IfChangedNode": _ifchanged_factory,
     "IfNode": IfNode,
     "IncludeNode": IncludeNode,
+    "LocalTimeNode": LocalTimeNode,
     "LoremNode": LoremNode,
     "NowNode": NowNode,
     "PrefixNode": PrefixNode,
@@ -150,6 +162,7 @@ NODE_CLASSES = {
     "SpacelessNode": SpacelessNode,
     "StaticNode": StaticNode,
     "TemplateTagNode": TemplateTagNode,
+    "TimezoneNode": TimezoneNode,
     "URLNode": URLNode,
     "VerbatimNode": VerbatimNode,
     "VariableNode": VariableNode,

@@ -1305,7 +1305,7 @@ class FilterRoutingTests(unittest.TestCase):
         """The premise, on its own, so a green counter cannot be the whole story.
 
         `Parser.find_filter(name)` is the handle the parse keeps
-        (`_impl/parser.py:515`) and the object the routing compares against, so
+        (`_impl/parser.py:528`) and the object the routing compares against, so
         this asserts the *identity* the routing will test — ours, from our file —
         rather than a name. Two claims, because interposing the file is not the
         same as the registry being the one the parser reads: `register` could be
@@ -2086,6 +2086,86 @@ class LibraryTagPredicateTests(unittest.TestCase):
             "the unstaged control did not answer True for both, so the staging "
             "above is not what makes the two answers differ",
         )
+
+
+class TzInterpositionTests(unittest.TestCase):
+    """M12 Task 4: ``tz`` is our module — three tags, three node classes, no filter body.
+
+    ``django.templatetags.tz`` is the third of the milestone's five libraries, and
+    its three tags are the ones whose compile functions read a **body** and, for
+    two of them, something other than a filter expression: ``{% localtime %}``
+    takes ``on``/``off``/nothing and stores a *boolean*, ``{% get_current_timezone %}``
+    takes only ``as name`` and reads no body at all, and ``{% timezone %}`` takes
+    one filter expression and opens a block.
+
+    **The three filters the same file registers — ``localtime``, ``timezone``,
+    ``utc`` — are Task 7's and are deliberately not asserted here.** This task
+    transcribes their Python bodies (the file is the unit of transcription) and
+    writes no Rust filter body, only the three compile functions. So a row
+    demanding ``_native``'s filter registry carry these names belongs to Task 7,
+    and the filter claim lives in ``FilterRoutingTests``; their absence here is a
+    division of labour rather than an omission. ``timezone`` is the interesting
+    one: it is ``do_timezone`` under a registered alias, and it is the shared
+    helper behind the ``localtime``/``utc`` filters — *not*, measured, behind the
+    two tags that name it (see the commit).
+
+    The routing claim is measured with the instrument the recon committed —
+    ``.review/m12-measurements/m12_measure_tag_routing.py`` — whose verdict for
+    these three flips ``theirs/theirs`` to ``ours/ours`` in this commit. That
+    instrument answers "which *file* defines the compile function and the node
+    class", which interposition alone moves; the row below is the direct-entry
+    version of the claim, so a green instrument is not the whole story.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _shim.install()
+
+    def test_tz_resolves_to_our_file(self):
+        import importlib
+
+        module = importlib.import_module("django.templatetags.tz")
+        self.assertIn("_impl", module.__file__, module.__file__)
+
+    def test_each_tz_tag_compiles_to_our_node_class(self):
+        """The routing claim, end to end, for all three names.
+
+        A real ``Engine`` with the library spelled as a dotted path, because that
+        is the route ``{% load tz %}`` takes and the route the suite takes: a bare
+        ``Engine()`` cannot see ``django.templatetags.tz`` at all (measured — it
+        reports ``'tz' is not a registered tag library``), so a row written
+        against one would measure the probe rather than the routing. The node
+        class is compared *by identity* to the one our transcribed module
+        defines, which is the object ``get_nodes_by_type`` and every downstream
+        ``isinstance`` will see.
+        """
+        import importlib
+        import inspect
+
+        tz = importlib.import_module("django.templatetags.tz")
+
+        engine = Engine(libraries={"tz": "django.templatetags.tz"})
+        for source, class_name in [
+            ("{% load tz %}{% localtime on %}x{% endlocaltime %}", "LocalTimeNode"),
+            ('{% load tz %}{% timezone "UTC" %}x{% endtimezone %}', "TimezoneNode"),
+            (
+                "{% load tz %}{% get_current_timezone as tzname %}",
+                "GetCurrentTimezoneNode",
+            ),
+        ]:
+            with self.subTest(source=source):
+                template = engine.from_string(source)
+                # `{% load %}` is itself a node in the nodelist — Django's
+                # `do_load` returns one (`defaulttags.py:1131`) — so it is
+                # skipped alongside the text node.
+                nodes = [
+                    node
+                    for node in template.nodelist
+                    if type(node).__name__ not in ("TextNode", "LoadNode")
+                ]
+                self.assertEqual([type(node).__name__ for node in nodes], [class_name])
+                self.assertIs(type(nodes[0]), getattr(tz, class_name))
+                self.assertIn("_impl", inspect.getfile(type(nodes[0])))
 
 
 class DefaultTagsInterpositionTests(unittest.TestCase):
