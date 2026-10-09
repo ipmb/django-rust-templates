@@ -681,7 +681,7 @@ string. That is not a defect in the metric — "shorthand anchor(s) naming no fi
 is a *true* description of all three kinds — but it means the count is a
 triage queue, not a to-do list, and the read is what divides it.
 
-## Three notes from the review that outlive their findings
+## Five notes from the review that outlive their findings
 
 - **A withdrawn finding, and its cause.** The reviewer briefly reported
   `defaulttags.py:1060-1063` and withdrew it once measured: the anchor is
@@ -690,7 +690,12 @@ triage queue, not a to-do list, and the read is what divides it.
   `defaulttags.py`. So the miscitation came from the sender, and it is the exact
   class this sweep exists to remove: two files under one filename. Worth the
   paragraph in the write-up, because it is the sweep's own failure mode
-  occurring in the conversation *about* the sweep.
+  occurring in the conversation *about* the sweep. The rule it yields is
+  narrower and more useful than "name the file": **never write a bare `:N`
+  next to a different file's anchor.** The reviewer's `:410` was
+  `defaultfilters.py:410` written immediately after a `smartif.py` anchor, so
+  it inherited smartif as its file — and `smartif.py` has no line 410. Two
+  instances now, one in each direction, both in prose *about* the sweep.
 - **An internal disagreement between two citations of one line is itself a
   signature, but its rate cannot be measured against the manifest.** It has two
   instances, both found by reading rather than by any tool: the `timesince` pair
@@ -720,6 +725,21 @@ triage queue, not a to-do list, and the read is what divides it.
   fact when the 28 is the row count that entered the stranded list and the 12
   is the number of those whose spans were wrong. A ratio without its base is
   the same mistake as a count without its metric.
+- **Where a ratio is available, publish the ratio too — it survives the unit
+  being wrong.** The fifth disputed count was the first with a ratio on both
+  sides, and the counts differed by 20% (434 vs 519, 222 vs 275) while the
+  ratios differed by 2 points (54.6 vs 56.6, 27.9 vs 30.0). The absolute
+  numbers did not survive the choice of unit; the ratios did. That is weaker
+  than naming the population first — it cannot tell you *which* unit is
+  meant — but it is cheaper to say and it degrades gracefully when somebody
+  forgets, which is the failure mode every count in this series has had.
+- **Close-out verification runs by citation count descending, not by file.**
+  The migration stays per-file, because the prose has to be read in context to
+  know whether the citation is right; but *verifying* an anchor does not depend
+  on which file cites it, and an anchor with fourteen citers is wrong in
+  fourteen places at once. Ordering by citation count puts `base.py:816` (14
+  files) and `base.py:813` (7) first, where one correction pays the most, and
+  it is why the agreement census was worth building at all.
 
 ## One paragraph, four wrong lines, and where the wrong ones landed
 
@@ -855,6 +875,22 @@ was verified against the pinned tree and is correct on both (`self.first = left`
 a prior that says *the number was copied, not independently read*, which lowers
 rather than raises the cost of checking it.
 
+**The census has two right readings, one per unit.** Measured on this tree: 524
+distinct anchors are cited, by 917 occurrences (`file`, `line`) forming 795
+relations (`anchor`, citing file). Counted by *relations*, 434 anchors are cited
+from two or more files and 222 from three or more; counted by *occurrences*, the
+same anchors cover 519 and 275. The reviewer reported the first pair, I the
+second — the fifth count in this series to be two right answers to two
+questions, and the first with a ratio on both sides to show the two agree about
+the shape: 163 anchors (31.1%) cover 56.6% of occurrences or 54.6% of relations,
+and the 57 anchors cited from three or more (10.9%) cover 30.0% or 27.9%. Two
+properties make this census usable where the ones before it were not. It is
+**invariant under naming** — it canonicalises a shorthand and a full path to the
+same key, so a figure taken before a migration pass still holds after it, which
+is why the same 163 and 434 reproduce now that five files have been named. And
+it is a **prior, not a detector**: it says where a wrong number is expensive, not
+where one is.
+
 This belongs beside the detector list because it is the one statement here that
 says what *not* to trust. It inverts the disagreement detector correctly:
 disagreement between two citations of one construct is a reason to look, and
@@ -890,15 +926,52 @@ The third, `lorem.rs:6`'s `:1160-1175`, is a **false positive**: the prose quote
 the docstring's usage syntax (`{% lorem [count] [method] [random] %}`, 1141)
 while citing the implementation, so "the quotation is on the cited line" is the
 wrong question to have asked. Whether that span is the right *unit* is a separate
-question, settled in that file's own pass.
+question, and the reviewer measured it when that file's pass reached it:
 
-And the detector **missed a defect it should have caught**: `widthratio.rs:9`'s
+```
+1160  tagname = bits[0]                      <- opens two lines before the first pop
+1161  # Random bit
+1164      bits.pop()
+1167      method = bits.pop()
+1172      count = bits.pop()
+1173  else:                                   <- closes three lines after the last
+1174      count = "1"
+1175  count = parser.compile_filter(count)
+```
+
+The three pops are 1164, 1167 and 1172, so the span is loose **at both ends** —
+not one line at the front. An earlier note here said "one line wide", which
+would have let a later reader tighten the front, leave the tail, and call the
+span fixed; the reviewer's message gives the tail as one line, but 1175 alone is
+one only if 1173 (`else:`) and 1174 (`count = "1"`) are inside the subject, and
+the same reasoning that puts 1160 outside at the front puts them outside at the
+back. The span stays where it is regardless, because "parsed by popping" can
+reasonably name the parse *region* rather than the three `pop()` calls — and
+**the boundary rule only decides when the subject is unambiguous**. That
+precondition belongs beside the rule: without it, "narrow the span to its
+subject" reads as licence to narrow every span, and somebody will.
+
+And the detector **missed defects it should have caught**. `widthratio.rs:9`'s
 `:543-545` does not contain the raise at 548 — but the quoted message wraps
 across two source lines, so the line-based `QUOTE` regex never sees a closed
-span and the shorthand is skipped as "no quotation precedes it". Its two blind
-spots, then, are nameable exactly: **quotations that wrap a line** (also causing
-the skip) and **quotations that name something other than the cited code** —
+span and the shorthand is skipped as "no quotation precedes it". And
+`widthratio.rs:35`'s `:1647-1648` is a span cited for unpacks that contains
+neither unpack — but the quotation before it is `` `tag` ``, which occurs all
+over `defaulttags.py`, so the shorthand was skipped as "probe not unique"
+rather than flagged; that one was found by reading the prose's own words
+("unpacks it into an unused `tag` **both times**") against the pinned tree. Its
+three blind spots, then, are nameable exactly, one mechanical and two domain:
+**quotations that wrap a line**; **a probe word that is not unique in the
+target**; and **quotations that name something other than the cited code** —
 usage strings, docstrings, error messages. Its two true positives did front-load
-corrections that reading would have found one file at a time, so it earns a place
-in `--triage` as three printed lines per shorthand (cited line, probe line, gap)
-and **not** as a gate.
+corrections that reading would have found one file at a time, so it earns a
+place in `--triage` as three printed lines per shorthand (cited line, probe
+line, gap) and **not** as a gate.
+
+**And the series needs its clean-file count beside its defect total.** Of the
+five files migrated so far, two carried no defect at all: `parser/error.rs` and
+`parser/tags/with.rs`, five shorthands each, every one right against the pinned
+tree. "28 rows, 12 wrong" and "2 files with nothing wrong" are different facts
+about the same sweep, and the second is the one that says the tree is not
+uniformly bad — which is what decides whether the remaining passes need the
+detectors at all, or only care.
