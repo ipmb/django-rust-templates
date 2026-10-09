@@ -321,8 +321,8 @@ mod tests {
     /// The body needs the seam, so it cannot be reimplemented in Rust and pass a
     /// bare-shell test by luck. Under [`NoFilterHost`] the refusal is a **panic**
     /// rather than an `Err`, because `is_tuple` is one of the 17 non-`Result`
-    /// operations (`host.rs:519-526`), so this observes it the way
-    /// `host.rs`'s own tests observe those.
+    /// operations (`filters/host.rs:519-526`), so this observes it the way
+    /// `filters/host.rs`'s own tests observe those.
     #[test]
     fn it_needs_a_host() {
         let call = FilterCall {

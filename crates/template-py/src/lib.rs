@@ -1600,7 +1600,7 @@ fn swallowed(py: Python<'_>, error: &PyErr, arm: Arm) -> bool {
 /// `current = found` in `resolve_lookup` a borrow error — the new `current`
 /// would outlive the old one it borrows from. So each method re-acquires the
 /// token itself with `Python::attach` — the pinned PyO3's spelling
-/// (`pyo3-0.29.3/src/marker.rs:414`; that crate has no `Python::with_gil`), and
+/// (`pyo3-0.29.3/src/marker.rs`; that crate has no `Python::with_gil`), and
 /// acquisition is reentrant, so being called under `_native.resolve`'s own token
 /// is fine).
 struct PyTarget {

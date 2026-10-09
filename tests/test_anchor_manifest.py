@@ -9,6 +9,7 @@ because `scripts/` is not a package and is not on `sys.path`.
 """
 
 import importlib.util
+import re
 import unittest
 from pathlib import Path
 
@@ -260,6 +261,31 @@ class AnchorManifestTests(unittest.TestCase):
             "a basename in OUR_OWN now exists under .django/, so bare anchors "
             "naming it will resolve to ours: give it an explicit path in the "
             "manifest and drop it from OUR_OWN",
+        )
+
+    def test_a_cited_dependency_version_is_the_one_the_lockfile_pins(self):
+        """The one citation that named a file **not in this tree**, replaced by
+        the claim that can be checked.
+
+        `pyo3-0.29.3/src/marker.rs:414` pointed into the vendored PyO3 source,
+        which is under the cargo registry and not in the repo: no base resolves
+        it, so no manifest row could have made it pass and `--check` would fail
+        on it the moment `.rs` became an anchor — and if it were exempted, the
+        number would drift with the dependency with nothing watching.
+
+        The durable claim is the *version*, which `Cargo.lock` pins, so the
+        prose keeps `pyo3-0.29.3/src/marker.rs` and drops the line, and this
+        asserts the two spellings agree. A citation to an out-of-tree line is
+        not a claim this tool can verify; a citation to a pinned version is.
+        """
+        lock = (PROJECT_ROOT / "Cargo.lock").read_text()
+        match = re.search(r'name = "pyo3"\nversion = "([^"]+)"', lock)
+        self.assertIsNotNone(match, "pyo3 is no longer named in Cargo.lock")
+        prose = (PROJECT_ROOT / "crates/template-py/src/lib.rs").read_text()
+        self.assertIn(
+            f"pyo3-{match.group(1)}",
+            prose,
+            "the prose cites a pyo3 version that Cargo.lock does not pin",
         )
 
     def test_no_manifest_row_lacks_a_citation_in_the_tree(self):
