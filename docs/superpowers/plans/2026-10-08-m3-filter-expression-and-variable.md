@@ -1523,8 +1523,14 @@ so nobody "fixes" the safe ones.
 - Modify: `crates/template-core/src/parser/mod.rs` (`pub mod variable;`)
 - Modify: `crates/template-core/src/parser/desc.rs` (`AttrValue::Float`, `AttrValue::BigInt`, `VariableDesc`)
 - Modify: `crates/template-py/src/lib.rs` (`AttrValue` arms, `decimal_digit_codepoints`, the `Variable` pyclass, `variable_desc_to_py`, `_native.parse_variable`)
-- Modify: `crates/template-core/src/parser/mod.rs` (replace the `{{ x }}` gap test)
-- Test: `tests/test_variable_parity.py` (**new**), `tests/test_pyunicode.py` or wherever the whitespace table guard lives (extend by analogy)
+- Modify: `python/django_rust_templates/_impl/parser.py` (`_decode_value` gains the `float` arm)
+- Test: `tests/test_variable_parity.py` (**new**; it holds the `Nd` guard too — see Step 7's correction)
+
+**Corrections applied during execution (read these before Step 5 or 6):**
+
+- **The `_impl/parser.py` edit is not optional.** `_decode_value` handled `bool`, `int`, `str`, `NodeRef` and `SafeStr`, and the parity test decodes `Variable.literal` through it, so a `Float` on the wire reached the final `LookupError`. The arm added is `if value is None or isinstance(value, (int, float, str)): return value` — `float` rides with `int` because it is already the Python object the descriptor meant, so there is nothing to convert.
+- **`Step 6` moves to Task 5 Step 4.** Both of its replacement tests need `Parser`'s `TokenType::Var` arm rewritten, which is Task 5 Step 4 and needs `AttrValue::FilterExpr` (Task 5) and Task 4's containers. At Task 3 that arm still returns `Unimplemented`, so M2's `a_variable_reports_the_m3_gap_rather_than_dropping_it` is *still true* and must stay. `tests/test_parser_parity.py::test_a_variable_is_reported_rather_than_dropped` moves with it. Task 3's character-rule claim is already pinned at the right level, in `variable.rs`, by `the_character_rule_reports_plus_before_minus`.
+- **Step 5 needs a Rust test step the plan did not write.** `variable.rs` was written `todo!()`-first and observed red (3 passed, 14 failed, each panic naming its test) before implementation. The 14 tests are listed in the module; the measured table below is the corpus.
 
 **Interfaces:**
 - Consumes: `crate::pyunicode::is_space`, `crate::parser::error::{Error, ErrorKind}`.
@@ -1594,6 +1600,21 @@ Measured grammar facts for the port, all against the pinned interpreter:
 | `unicodedata.unidata_version` | `16.0.0` |
 | `Nd` code points | `760` |
 | `Nd` contiguous ranges | `71` |
+
+**Rows the table above does not have, measured during execution.** Each is a
+behaviour the port had to choose, so leaving them out would have made them
+guesses:
+
+| input | `literal` | `lookups` | `translate` | why it matters |
+|---|---|---|---|---|
+| `""` and `"_()"` | — | — | — | **`IndexError`**, not `TemplateSyntaxError`. Django falls through to `var[0]` on an empty string. Unreachable from a template — `filter_re`'s `var` group is `[\w\.\+-]+`, which cannot match `_()` whole (measured: `FilterExpression("_()")` hands `Variable` the token `_`, and the underscore error follows) — so we return an `Internal` `ParseError` and pin the divergence by name. |
+| `"` (a lone quote) | `SafeString('')` | `None` | `False` | `s[0] in "\"'"` and `s[-1] == s[0]` are both true of a one-character token, so `unescape_string_literal` returns the empty string. |
+| `3.e5` | `300000.0` | `None` | `False` | The float branch is chosen by `"." in var or "e" in var.lower()`, and `float("3.e5")` is valid — so this is a number, not the `2.` case. |
+| `5.` | `5.0` | `('5', '')` | `False` | The `2.` row generalised: any trailing dot. |
+| `_.` | — | — | — | The **underscore** error, not `Invalid character ('.')`: the underscore test is `s[0] == "_" or s.startswith("._")`, and it runs before the character loop. Ordering is the whole claim. |
+| `_('x')` | `SafeString('x')` | `None` | `True` | The marker is stripped by `s[2:-1]` **before** the quote test, so both quote characters unescape. |
+| `'2.'` | `2.0` | `('2', '')` | `False` | Only the two code points `e` and `E` satisfy `"e" in chr(cp).lower()`; the branch test is over *characters*, not bytes. |
+| `FilterExpression("")` | — | — | — | `var=None, is_var=False, filters=[]` — Task 5's, recorded here because it is the shape an empty `{{ }}` takes once the Var arm exists. |
 
 - [ ] **Step 1: Write the failing test for the Nd table**
 
@@ -2118,7 +2139,18 @@ and in `crates/template-py/src/lib.rs`'s `attr_value_to_py`:
 
 Do **not** use `py.eval` on a formatted string — it is an injection point and `clippy` will not catch it. Use `py.get_type::<PyInt>()`… which does not exist either; the correct call is `PyLong` from the builtins, or `py.import("builtins")?.getattr("int")?.call1((text,))`. Use the `builtins` form, and say in a comment that the text is a validated decimal produced by `python_int`, so the only input it can receive is `[+-]?[0-9]+`.
 
-- [ ] **Step 6: Replace M2's `{{ x }}` gap test rather than deleting it**
+- [ ] **Step 6: Replace M2's `{{ x }}` gap test rather than deleting it — MOVED to Task 5 Step 4**
+
+> **Do not run this step in Task 3.** Both tests below assert on `{{ x }}` and
+> `{{ a+b }}` reaching `Parser.parse`'s `TokenType::Var` arm, and that arm is
+> only rewritten in Task 5 Step 4 (it needs `AttrValue::FilterExpr` from Task 5
+> and Task 4's containers). At Task 3 the arm still returns `Unimplemented`, so
+> M2's test is still true and stays. Nothing here is lost: the character-rule
+> claim is pinned at the right level by `variable.rs`'s
+> `the_character_rule_reports_plus_before_minus`, which asserts exactly
+> `Invalid character ('+') in variable name: 'a+b'`, and
+> `tests/test_parser_parity.py::test_a_variable_is_reported_rather_than_dropped`
+> moves to Task 5 Step 4 with it. The text below is kept so Task 5 has it.
 
 `crates/template-core/src/parser/mod.rs` currently has:
 
@@ -2200,13 +2232,39 @@ CASES = [
 
 and, for each, compare `(var, literal, lookups, translate)` from Django's `Variable` against ours materialised through a callback-free path. The two rows that carry the task's real risk are `"2."` (the assign-then-raise order) and `"99999999999999999999"` (the `BigInt` arm); the test must name them in a comment so a future reader deleting a row knows which ones were the point.
 
+**As executed, three assertions were added to what the plan asked for, each
+because an equality check cannot see the thing that matters:**
+
+- `assertIs(type(got), type(expected))` on every literal, because `5.0 == 5` is
+  `True`, so the single most likely port error — an `int` converted to a float —
+  passes `assertEqual`.
+- `assertIsInstance(..., SafeString)` on the quoted rows, because `SafeString`
+  *is* a `str`, so every equality above passes for a plain `str`; the difference
+  is user-visible output (`{{ "<b>" }}` renders `<b>`, not `&lt;b&gt;`).
+- `assertNotIsInstance(caught.exception, _native.UnimplementedTag)` — a
+  subclass, so `assertNotEqual` on the classes alone would pass while leaving the
+  harness unable to tell "we have not built this" from "Django rejects this".
+
 - [ ] **Step 9: Run everything**
 
 Run: `source scripts/env.sh && cargo test -p template-core; echo "exit=$?"`
 Expected: exit 0.
 
-Run: `source scripts/env.sh && maturin develop && python -m unittest tests.test_variable_parity tests.test_unicode_tables -v`
-Expected: PASS. (Adjust the module name to wherever the whitespace guard actually lives; read `tests/` rather than guessing.)
+Run: `source scripts/env.sh && maturin develop && python -m unittest tests.test_variable_parity -v`
+Expected: PASS. (**Corrected:** the plan guessed `tests.test_unicode_tables`; reading `tests/` shows the whitespace guard lives in `tests/test_lexer_parity.py` and the `Nd` guard now lives in `tests/test_variable_parity.py` itself, so the module name is the one file.)
+
+**The `Nd` value rows, also measured during execution.** `test_the_digits_our_table_names_are_the_ones_python_names` originally used three chunks of code
+points that turned out not to be decimal digits at all (`ᵼ`, `ᵽ`, `ᵿ` are `Ll`;
+`ᅭ` is `Lo`) — `unicodedata.decimal` raised `ValueError` and the test failed on
+its own oracle. The fix is the corpus, and it is worth stating why it is two
+rows and not one: of the 71 `Nd` ranges, only **two** hold more than one digit
+cycle — `U+116D0..U+116E3` (20 code points) and `U+1D7CE..U+1D7FF` (50) — and
+they are the *only* inputs that can falsify `(code - first) % 10`, because every
+single-cycle range gives the same answer under both readings. The test pins
+those two explicitly, plus a guard (`test_the_corpus_actually_exercises_the
+_modulo`) that the multi-cycle rows are still present, and an `assertTrue` that
+every chunk is all-`Nd` so a chunk drifting onto a non-digit fails loudly
+instead of silently leaving the corpus.
 
 Run: `source scripts/env.sh && cargo clippy --workspace --all-targets -- -D warnings; echo "exit=$?"`
 Expected: exit 0.
@@ -2532,6 +2590,20 @@ Two implementation notes that are the task's real difficulty, both stated so the
 ```
 
 The parameter name `filter_expression` is `VariableNode.__init__`'s own (`base.py:1139`) and the materialiser constructs by keyword, so it is contract rather than style.
+
+**This step also inherits Task 3 Step 6**, which could not run there because this
+arm was still `Unimplemented`. Two tests come with it:
+
+* replace M2's `a_variable_reports_the_m3_gap_rather_than_dropping_it` in
+  `parser/mod.rs` with `a_variable_now_parses_and_the_m3_gap_is_closed`
+  (`parse_ok("{{ x }}").nodes[0].class_name == "VariableNode"`) and
+  `a_variable_that_django_rejects_is_rejected_here_too` (`failure("{{ a+b }}")`)
+  — both bodies are written out in Task 3 Step 6 above;
+* move `tests/test_parser_parity.py::test_a_variable_is_reported_rather_than_dropped`
+  to the same place, inverting its assertion.
+
+`parse_ok` is a one-line sibling of the existing `failure` helper; add it next
+to `failure` if it is not already there.
 
 - [ ] **Step 5: The parity test**
 
