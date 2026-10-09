@@ -676,7 +676,7 @@ the highest-risk milestone, and §5.5 is where the answer to it lives.
 | M0 | Bootstrap, substitution mechanism, harness | ✅ 1547 run / 6 structural skips; full suite green with `exceptions` interposed |
 | M1 | Rust lexer, `Token` + `Token.split_contents`, `smart_split`, `TokenType`, `DebugLexer`, `_native.lex` | ✅ token-stream parity with Django's real `Lexer`/`DebugLexer` over `tests/lexer_corpus.py` (51 sources × both lexers), debug character positions included, plus `split_contents` parity and the 3000-source randomised pass; progress meter unchanged from M0 at 25 |
 | M2 | Rust parser, node AST and descriptor format — `Parser`, `NodeList`, `extend_nodelist`, the error protocol, tag dispatch, `_native.parse`, and the materialisation of descriptors into real Django nodes. Compile functions for the **nine** built-in tags that need no `FilterExpression`; syntax-error parity with Django's parser. The other eighteen built-in tags are scheduled with their dependencies (M3, M6, M7, M13) — see the M2 plan's scope note for the mapping. | Awaiting review: parity with Django's real `Parser` over a 59-source corpus and 400 seeded random templates in both lexer modes, compared node for node after materialisation; syntax-error parity over a 32-case corpus; `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; progress meter unchanged at 25 |
-| M3 | `FilterExpression`, `Variable`, `smartif`, primitive resolver | Awaiting review: `{{ … }}` parses and materialises into Django's own `Variable`/`FilterExpression` over a 72-source corpus and 400 seeded random templates in both lexer modes; `_native.resolve` and the first `_native.render`; `token_kwargs`/`kwarg_re` for M5–M7; `smartif` ported with one bounded divergence on nesting depth. `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; progress meter unchanged at 25. **One deliberate deviation from §10.4's gate** — see that entry |
+| M3 | `FilterExpression`, `Variable`, `smartif`, primitive resolver | ✅ `{{ … }}` parses and materialises into Django's own `Variable`/`FilterExpression` over a 72-source corpus and 400 seeded random templates in both lexer modes; `_native.resolve` and the first `_native.render`; `token_kwargs`/`kwarg_re` for M5–M7; `smartif` ported with one bounded divergence on nesting depth. `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; progress meter unchanged at 25. **One deliberate deviation from §10.4's gate**, corrected and approved at the M3 round: what moves to M7 is Django's `{% extends %}` message and the one real `must_be_first` tag, **not** the refusal rule, which ships and is exercised against a stand-in — see that entry |
 | M4 | All 57 built-in filters | Filter corpus parity, incl. `FilterFlags` round-tripping |
 | M5 | Remaining built-in tags (`for`, `if`, `with`, `cycle`, …) | Syntax corpus parity |
 | M6 | `Library`, extension host callbacks | Python-defined tags/filters work through the engine, incl. re-entrant `ParserHandle.parse` |
@@ -899,11 +899,37 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   against a stand-in `must_be_first` node (`parser/tags/mod.rs:195`). M7
   supplies a tag, not a rule.
 
+  **What M7 owes, stated exactly, because the loose version invites a reader at
+  M7 to think the rule arrives untested:** Django's `{% extends %}` compile
+  function, its message text `"{% %s %} must be the first tag in %s."` with the
+  origin's repr in the second slot, and the corpus entry that reaches it — which
+  additionally needs the harness to pass an `Origin` whose `template_name` repr
+  agrees with Rust's `origin_template_repr`. It does **not** owe the refusal
+  path: `extend_nodelist`'s check ships at M3 and is exercised, by a stand-in,
+  on both the refusing and the permitting branch.
+
 - **M6 gate: a library that redefines a built-in tag name.** Host-first
   dispatch order is argued from `Library.add_tag`/`add_library`
   last-registration-wins semantics rather than measured. M6 pins it with a
   template that loads a library registering a name already in Django's
   builtins, and asserts the user's definition is the one that runs.
+
+- **`MAX_NESTING_DEPTH` diverges in the direction that matters, and only the
+  differential corpus can pin it.** Django's bound is not a value to match: it
+  is `sys.getrecursionlimit()` times about two frames per prefix operator times
+  the enclosing call depth. Measured against the pinned tree — 200, 400 and 498
+  `not`s parse, 600 raises `RecursionError`, limit 1000 — so a reader who moves
+  the limit moves Django and not this engine. Rust must guard *something*
+  (disabling the guard aborts the process with a native stack overflow at 4000
+  `not`s, observed), and 1000 sits a factor of two to four clear of that in a
+  debug build. The consequence to carry: **this engine accepts 600–1000 nested
+  `not`s that stock Django rejects**, which is the wrong direction for a
+  drop-in — a template authored here can fail on Django. No suite test reaches
+  either side. The half that *could* agree is the exception type (`RecursionError`
+  against `IfError`'s class); it is unchanged at M3 deliberately, because a type
+  change nothing pins would trade a documented divergence for an undocumented
+  one. §9's differential corpus owns both the type and the band. M4's filter
+  work does not touch this.
 
 - **§5.5's render path** — `NodeList.render`/`Node.render_annotated` kept
   verbatim, shadow nodes renderable; M9 gate.

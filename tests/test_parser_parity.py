@@ -171,8 +171,7 @@ def describe_filter_expression(expression):
     `token` here is a **string**, not a `Token` — `do_variable` splits the
     token's contents and hands the bare string to `compile_filter`
     (`base.py:1016-1020`), so `token_shape` would raise on it. Filters are
-    described by `__name__` because the same registry object reaches both sides;
-    comparing the functions themselves would compare identity and prove nothing.
+    described by [`filter_identity`] — see it for why `__name__` was not enough.
     """
     return {
         "type": "FilterExpression",
@@ -180,10 +179,35 @@ def describe_filter_expression(expression):
         "var": describe(expression.var),
         "is_var": expression.is_var,
         "filters": [
-            (func.__name__, [(lookup, describe(arg)) for lookup, arg in args])
+            (filter_identity(func), [(lookup, describe(arg)) for lookup, arg in args])
             for func, args in expression.filters
         ],
     }
+
+
+def filter_identity(func):
+    """The filter function the pipeline actually selected, exactly.
+
+    This described `func.__name__` until M3's review, on the reasoning that the
+    same registry object reaches both sides so identity "would prove nothing".
+    **That is backwards**, and it is backwards in the direction that matters: the
+    property under test is *both parsers selected the same function*, and
+    `__name__` cannot see a difference the moment two libraries register
+    different functions under one name — which is not hypothetical. Django's
+    `Parser.add_library` is `self.filters.update(lib.filters)` (`base.py:668`),
+    so `{% load %}` shadowing a built-in *replaces* the entry, and the
+    registered `escape` is already a different object from the module-level
+    `defaultfilters.escape` (measured: `defaultfilters.escape.__module__` is
+    `django.utils.html` while `register.filters["escape"].__name__` is
+    `escape_filter`). Two such pipelines would have compared equal.
+
+    So the identity is carried, and the names are carried *with* it: `id` is the
+    exact property, and a bare `id` in a diff says nothing about what diverged.
+    The ids are safe to compare because both sides are live at the same moment —
+    `describe` runs inside one `assertEqual` and both `FilterExpression`s are
+    alive throughout — so no id can be reused out from under the comparison.
+    """
+    return (func.__module__, func.__qualname__, id(func))
 
 
 def describe_variable(variable):

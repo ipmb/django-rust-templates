@@ -236,6 +236,33 @@ and all five would have been caught by executing. So the refinement is narrower
 than M2 drew it: **a declared environment tells you what exists; it does not tell
 you the snippet is syntactically and structurally sound, and only running does.**
 
+### The five, classified against the review's hypothesis
+
+The M3 round proposed a mechanism for *why* the plan's snippets were wrong —
+"written before its own corpus existed" — and a test that distinguishes it from
+M2's class: that mechanism predicts **forward references**, snippets naming
+artifacts the plan itself only produces later, as opposed to M2's wrong beliefs
+about artifacts that existed and behaved differently. Run against the five, the
+hypothesis holds for two and not the other three. **Mixed, so the fix is the one
+already in place, not a new ordering rule.**
+
+| # | The correction | Class | Why |
+|---|---|---|---|
+| 3 | the harness needed a `filter_parser()` | **forward reference** | Task 10's snippet materialised a `FilterExpression` before any task had established that `_materialise_filter_expression` requires a `Parser`; the corpus that would have said so is the one Task 10 was building |
+| 4 | `describe` needed `FilterExpression`/`Variable`/`SafeData` arms | **forward reference** | same shape: the snippets call `describe` on types no earlier task's corpus could produce, so `describe` never had to grow the arms until Task 10 — and then 205 subtests compared two live objects by identity |
+| 1 | `'extends' takes one argument` | wrong belief about Django | the message was readable at `loader_tags.py` before the plan was written |
+| 2 | the missing-origin `AttributeError` is general, plus the `{% csrf_token %}` row | wrong belief about Django | the rows are one `Template(...)` call each |
+| 5 | Step 1's test snippet is defective three ways | broken snippet | the three fail on their own first line; two are wrong beliefs about existing types (`AttrValue::FilterExpr` was already defined, and needs a `Box`), one is a no-op expression |
+
+So the prediction is right about a real subclass and wrong as a complete
+explanation. The remedy it implies — write a task's snippets after the artifacts
+they consume exist — applies to #3 and #4 and nothing else, and #5 is better
+handled by the rule that already exists (run it). What is *not* yet explained is
+why three snippets failed to compile or raise immediately in a plan whose author
+had every tool needed to run them; that is an execution-discipline failure, not
+a knowledge failure, and it is the one this milestone cannot fix by measuring
+harder.
+
 ## What I did not verify
 
 - **`{% if %}` semantics.** `eval`, the boolean evaluation, is M5. `smartif`'s
@@ -259,10 +286,15 @@ you the snippet is syntactically and structurally sound, and only running does.*
   Unobservable until M6, which must return a handle before `{% load %}` ships;
   `Host::check_filter` carries the measurement and the fix.
 - **`MAX_NESTING_DEPTH = 1000` is a chosen margin, not a bound.** Django refuses
-  at ~498 (`RecursionError`); this engine parses to 1000. That is the only place
-  this port deliberately diverges from Django's *observable* behaviour, and the
-  direction is the safe one — a too-permissive engine renders a template Django's
-  interpreter could not, rather than rejecting a valid one. No timing was done.
+  between 498 and 600 `not`s (`RecursionError`) — one interpreter at one
+  `sys.getrecursionlimit()`, which moves Django and not this engine, so the
+  bound is not matchable in principle. **The direction is the wrong one for a
+  drop-in and an earlier revision of this summary said the opposite:** this
+  engine accepts 600–1000 nested `not`s that stock Django rejects, so a template
+  authored here can fail on Django. The mitigation is that no realistic template
+  approaches either bound. The exception *type* is the half that could agree and
+  is deliberately unchanged (documented in `smartif.rs`, carried in §10.4, owned
+  by §9's differential corpus). No timing was done.
 - **The randomised corpus still samples no category-C code points.** "Non-ASCII"
   means one Latin-1 letter and one astral emoji. `py_repr_str`'s divergence had
   to be found by sweep; the corpus cannot find that class.

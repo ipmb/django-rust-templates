@@ -36,30 +36,49 @@ pub const END: NodeId = 0;
 
 /// The depth `expression` may nest before it refuses.
 ///
-/// Django has **no** explicit bound. Measured against the pinned tree: 497
-/// `not`s parse and 498 raises `RecursionError` (CPython's default recursion
-/// limit is 1000, about two frames per prefix operator), while 100 000 `and`s
-/// parse because infix parsing is a loop. Rust has no interpreter recursion
-/// limit, so without a guard a hostile template overflows the native stack —
-/// which aborts the process rather than raising, and so cannot be caught. This
-/// makes the guard, not the stack, the thing that fires.
+/// Django has **no** explicit bound, and — this is the part that took a review
+/// round to state properly — Django's bound is not a constant that could be
+/// matched even in principle. Measured against the pinned tree, with a guard
+/// whose whole purpose is to fire before the native stack does:
 ///
-/// That abort was **observed**, not assumed, by disabling the guard below and
-/// running the deep-nesting test: in a debug `cargo test` build 1010 and 2000
-/// `not`s parse and 4000 aborts with `fatal runtime error: stack overflow` /
-/// SIGABRT before the test can report anything. So the native limit for this
-/// recursion sits between 2000 and 4000 frames *in that build*, and a value of
-/// 1000 leaves the guard a factor of two to four clear of it. It is the only
-/// place this port deliberately diverges from Django's observable behaviour:
-/// Django refuses at ~498 and this engine parses to 1000. The direction is the
-/// safe one — a too-permissive engine renders a template Django's interpreter
-/// could not, rather than rejecting a valid one — and the value and the message
-/// are deliberately not Django's, because Django's behaviour here is an
-/// interpreter artifact, not a specification (see the review questions).
+/// ```text
+///   200 nots  parsed        400 nots  parsed        498 nots  parsed
+///   600 nots  RecursionError            sys.getrecursionlimit() == 1000
+/// ```
 ///
-/// The frame cost is not a constant: it moves with the build (a release build's
-/// frames are smaller), the thread's stack size and the enclosing call depth,
-/// so 1000 is a chosen margin rather than a derived bound.
+/// So "Django refuses at ~498" is one interpreter, at one recursion limit, at
+/// one enclosing call depth, and `sys.setrecursionlimit(10000)` moves it while
+/// nothing here moves. 1000 `and`s parse on both sides because infix parsing is
+/// a loop; only *prefix* nesting recurses (about two CPython frames per `not`).
+///
+/// Rust has no interpreter recursion limit, so without a guard a hostile
+/// template overflows the native stack — which aborts the process rather than
+/// raising, and so cannot be caught. That abort was **observed**, not assumed,
+/// by disabling the guard: in a debug `cargo test` build 1010 and 2000 `not`s
+/// parse and 4000 aborts with `fatal runtime error: stack overflow` / SIGABRT
+/// before the test can report anything, so the native limit in that build sits
+/// between 2000 and 4000 frames and 1000 leaves a factor of two to four clear.
+/// The frame cost is not a constant either — it moves with the build, the
+/// thread's stack size and the enclosing call depth — so 1000 is a chosen
+/// margin, not a derived bound.
+///
+/// **The direction is the wrong one for a drop-in replacement, and saying
+/// otherwise would be a comfort rather than a fact.** This engine accepts
+/// 600–1000 nested `not`s that stock Django rejects, so a template authored
+/// against this engine can fail on Django — the opposite of the failure a
+/// drop-in should produce. An earlier revision of this comment called that "the
+/// safe direction" on the grounds that a permissive engine renders what Django
+/// could not; that is true of the engine and false of the *template*, which is
+/// what a user carries between the two. The honest mitigation is that no
+/// realistic template comes near either bound, not that the behaviour matches.
+///
+/// The value and the message are deliberately not Django's. The one half that
+/// *could* agree is the exception **type** — Django surfaces a `RecursionError`
+/// where this raises `IfError`'s class — and it is left alone here rather than
+/// changed at close-out: no suite test and no corpus reaches either side of the
+/// boundary, so an unpinned type change would trade a documented divergence for
+/// an undocumented one. It is carried in §10.4 for the milestone that builds the
+/// differential corpus (§9), where it can be pinned rather than asserted.
 pub const MAX_NESTING_DEPTH: usize = 1000;
 
 /// Which Python exception a `smartif` parse failure becomes.
@@ -379,6 +398,13 @@ impl IfParser {
     /// now reads the field directly and pins it. Keeping the body a separate
     /// method rather than an inner closure is what makes "no `?` in this
     /// function" checkable by eye.
+    ///
+    /// **Do not merge the two back into one function.** The split is not a
+    /// stylistic preference: the invariant lives in the *shape* — one method
+    /// that increments, one unconditional decrement, and fallible work only in a
+    /// callee — while the test only pins today's behaviour. Folding the body
+    /// back in lets the next `?` added there leak the counter again, and it
+    /// would do so without touching a single test, so no red build would say so.
     fn expression(&mut self, rbp: u8) -> Result<NodeId, IfError> {
         self.depth += 1;
         let result = if self.depth > MAX_NESTING_DEPTH {
