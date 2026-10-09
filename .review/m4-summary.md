@@ -392,12 +392,15 @@ table (§"Tasks 4–10", the artifact a reader uses to check the fan-out) sums t
 by counting each filter under its *theme*; the task headings sum to 55 by
 counting what each task *dispatched*. Both numbers are right and neither says
 which question it is answering, so the table lists `lower` under Task 4's
-delegated filters when Task 3 landed it. This is the same defect as #12 one
-layer up — and it is the reason I re-measured every count in this summary rather
-than transcribing the plan's: **a document that reviews a count-error record has
-to expect one in itself.** The plan is left as-is and the reconciliation is
-written here, because a plan edited during its own milestone review makes the
-review target move.
+delegated filters when Task 3 landed it. **Swept every task heading against its
+own filter listing before writing this: all seven match** (6+8+9+10+12+6+4 =
+55), so #15 is the only place the two granularities disagree — which is what
+makes it a reconciliation and not a wrong count. This is the same defect as #12
+one layer up — and it is the reason I re-measured every count in this summary
+rather than transcribing the plan's: **a document that reviews a count-error
+record has to expect one in itself.** The plan is left as-is and the
+reconciliation is written here, because a plan edited during its own milestone
+review makes the review target move.
 
 **#12 is the eleventh count dispute in this project and the shape is now
 boring, which is the point**: a number derived from a structure nobody asked the
