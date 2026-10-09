@@ -12,6 +12,7 @@
 //! the single `tags.rs` unchanged.
 
 pub mod autoescape;
+pub mod block;
 pub mod comment;
 pub mod csrf_token;
 pub mod cycle;

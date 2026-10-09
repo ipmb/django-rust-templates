@@ -75,6 +75,23 @@ pub struct Parser<'a> {
     /// real ones rather than a hard-coded "no cycles".
     last_cycle_node: Option<usize>,
     named_cycle_nodes: HashMap<String, usize>,
+    /// `parser.__loaded_blocks` — the names of every `{% block %}` compiled in
+    /// this template, in order.
+    ///
+    /// Django reaches it with `try/except AttributeError` so that the first
+    /// `do_block` initialises it (`loader_tags.py:233-234`); an empty `Vec` is
+    /// that collapse. Its only reader and only writer are `do_block`, which is
+    /// why it is Rust's under Design B — and it is the field that moved `block`
+    /// out of `registry.rs`'s subtracted list, because the rule there subtracts
+    /// tags whose compile touches parse-lifetime state, and this is that state
+    /// living somewhere a compile function can reach.
+    ///
+    /// A `{% block %}` compiled by a **host** tag's nested `parser.parse`
+    /// accumulates in Django's own attribute instead; with the pinned suite that
+    /// is one template (`syntax_tests/i18n/test_blocktranslate.py`'s
+    /// `test_with_block`, where `{% blocktranslate %}` refuses the nested block
+    /// anyway). See A5: recorded, not fixed.
+    loaded_blocks: Vec<String>,
 }
 
 impl<'a> Parser<'a> {
@@ -100,6 +117,7 @@ impl<'a> Parser<'a> {
             origin_template_repr: None,
             last_cycle_node: None,
             named_cycle_nodes: HashMap::new(),
+            loaded_blocks: Vec::new(),
         }
     }
 
@@ -109,6 +127,24 @@ impl<'a> Parser<'a> {
     pub fn with_origin_template_repr(mut self, repr: String) -> Self {
         self.origin_template_repr = Some(repr);
         self
+    }
+
+    /// The `{% block %}` names seen so far, in the order `do_block` recorded them.
+    ///
+    /// A method rather than a public field for `alloc_slot`'s reason: the field
+    /// belongs to the parse, and a tag that could assign to it directly could
+    /// also reset it mid-parse.
+    pub fn loaded_blocks(&self) -> &[String] {
+        &self.loaded_blocks
+    }
+
+    /// `parser.__loaded_blocks.append(block_name)` (`loader_tags.py:232`).
+    ///
+    /// The write half. `do_block` calls it **after** the duplicate check, which
+    /// is Django's ordering and is observable: the occurrence that raises is
+    /// never recorded, so the list holds only names whose block compiled.
+    pub fn register_block_name(&mut self, name: String) {
+        self.loaded_blocks.push(name);
     }
 
     /// Reserve a reference-table slot for the node being compiled.

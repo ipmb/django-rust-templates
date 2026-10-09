@@ -404,7 +404,7 @@ ERRORS = [
     #       and with debug, position (26, 39) — the `now` block, not `div`'s
     #
     # Rust has the matching guard (`Error::error`'s `token.or_else`,
-    # `parser/mod.rs:369-373`) and is inert without this: the token never
+    # `parser/mod.rs:406-410`) and is inert without this: the token never
     # crosses the seam, so the guard sees `None` and attaches the **outer**
     # token — `(2, 'div', 1, None)`. Both assertions of
     # `test_every_case_carries_the_same_token*` fail without the transport, and
@@ -457,5 +457,33 @@ ERRORS = [
     (
         "{% for in y reversed %}x{% endfor %}",
         "'for' tag received an invalid argument: for in y reversed",
+    ),
+    # --- M7: `{% block %}`'s four failure modes -----------------------------
+    # All four are `do_block`'s own (`loader_tags.py:221-241`), and each one is
+    # a different producer: the arity check, the duplicate-name check against
+    # `loaded_blocks`, the end-tag check through `invalid_block_tag`, and the
+    # *parser*'s unclosed-block report rather than anything in the tag.
+    #
+    # The arity row is the `len(bits) != 2` arm; `bits` here is `["block"]`, so
+    # the message names the command and nothing else.
+    ("{% block %}x{% endblock %}", "'block' tag takes only one argument"),
+    (
+        "{% block a %}{% endblock %}{% block a %}{% endblock %}",
+        "'block' tag with name 'a' appears more than once",
+    ),
+    # `endblock <name>` is acceptable, so this is the *mismatch*: `b` is not
+    # `a`. The expected list is `get_text_list`'s " or " join of the two
+    # spellings (`loader_tags.py:239-241`).
+    (
+        "{% block a %}x{% endblock b %}",
+        "Invalid block tag on line 1: 'endblock', expected 'endblock' or "
+        "'endblock a'. Did you forget to register or load this tag?",
+    ),
+    # Unclosed: the report comes from `unclosed_block_tag` and names the tag
+    # that was left open, with the end-tag list joined by ", " rather than
+    # `get_text_list`'s " or ".
+    (
+        "{% block a %}x",
+        "Unclosed tag on line 1: 'block'. Looking for one of: endblock.",
     ),
 ]

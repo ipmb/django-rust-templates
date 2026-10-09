@@ -149,6 +149,32 @@ def token_shape(token):
 
 
 class ErrorParityTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # `Engine()` reads settings, and so does Django's own message formatting
+        # for one row of the corpus. Configured here rather than at import time
+        # because a module-level `settings.configure` changes what every test
+        # module discovered after this one sees.
+        #
+        # The row that needs it is `{% block a %}x{% endblock b %}`, whose
+        # Django message is built by `Parser.invalid_block_tag` ->
+        # `get_text_list(["'%s'" % p for p in parse_until], "or")`
+        # (`base.py:632-648`, the `get_text_list` call inside it is at line 641).
+        # `get_text_list` defaults `last_word` to `gettext_lazy("or")`
+        # (`utils/text.py:282`) and joins with `_(", ")`, so *formatting*
+        # the lazy string is what reaches the translation layer and asks for
+        # `USE_I18N`. Every earlier corpus row passed a one-element list, which
+        # returns at the top of the function before any of that runs
+        # (`utils/text.py:297-303`) — so this is the first row that needs
+        # settings, and without this line the module only passed because some
+        # *other* discovered module had configured them first (an order
+        # dependency, which is why the failure appears standalone but not under
+        # `unittest discover`).
+        from django.conf import settings
+
+        if not settings.configured:
+            settings.configure(USE_I18N=False)
+
     def test_the_corpus_matches_django(self):
         """The corpus's expectations are Django's, not the author's."""
         for source, expected in ERRORS:

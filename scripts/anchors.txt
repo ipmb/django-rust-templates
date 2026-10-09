@@ -10,13 +10,13 @@ wordwrap.rs:73	crates/template-core/src/filters/wordwrap.rs	73	-	unwrap_or(Value
 desc.rs:407	crates/template-core/src/parser/desc.rs	407	-	pub must_be_first: bool,	-
 desc.rs:445	crates/template-core/src/parser/desc.rs	445	-	must_be_first: false,	-
 error.rs:292-293	crates/template-core/src/parser/error.rs	292	293	str.replace	-
-parser/mod.rs:267	crates/template-core/src/parser/mod.rs	267	-	NodeDesc::new("VariableNode")	-
-crates/template-core/src/parser/mod.rs:341	crates/template-core/src/parser/mod.rs	341	-	self.extend_nodelist(&mut nodelist, node, &token)?;	-
-parser/mod.rs:369-373	crates/template-core/src/parser/mod.rs	369	373	token.or_else	-
-crates/template-core/src/parser/mod.rs:429	crates/template-core/src/parser/mod.rs	429	-	pub fn extend_nodelist(	-
-parser/mod.rs:435	crates/template-core/src/parser/mod.rs	435	-	if node.must_be_first && nodelist.contains_nontext {	-
-tags/mod.rs:180	crates/template-core/src/parser/tags/mod.rs	180	-	Ok(NodeDesc::with_nodelist(	-
-parser/tags/mod.rs:195	crates/template-core/src/parser/tags/mod.rs	195	-	fn standin_first	-
+parser/mod.rs:303	crates/template-core/src/parser/mod.rs	303	-	NodeDesc::new("VariableNode")	-
+crates/template-core/src/parser/mod.rs:377	crates/template-core/src/parser/mod.rs	377	-	self.extend_nodelist(&mut nodelist, node, &token)?;	-
+parser/mod.rs:406-410	crates/template-core/src/parser/mod.rs	406	410	token.or_else	-
+crates/template-core/src/parser/mod.rs:465	crates/template-core/src/parser/mod.rs	465	-	pub fn extend_nodelist(	-
+parser/mod.rs:471	crates/template-core/src/parser/mod.rs	471	-	if node.must_be_first && nodelist.contains_nontext {	-
+tags/mod.rs:181	crates/template-core/src/parser/tags/mod.rs	181	-	Ok(NodeDesc::with_nodelist(	-
+parser/tags/mod.rs:196	crates/template-core/src/parser/tags/mod.rs	196	-	fn standin_first	-
 url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
 with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
 filters.rs:69-71	crates/template-py/src/filters.rs	69	71	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
@@ -46,6 +46,7 @@ base.py:522-523	django/template/base.py	522	523	for builtin in builtins:	self.ad
 base.py:523	django/template/base.py	523	-	self.add_library(builtin)	-
 base.py:529-591	django/template/base.py	529	591	token.contents.split()[0]	-
 base.py:549-551	django/template/base.py	549	551	-	-
+base.py:560-563	django/template/base.py	560	563	command = token.contents.split()[0]	raise self.error(token, "Empty block tag on line %d" % token.lineno)
 base.py:561-564	django/template/base.py	561	564	command = token.contents.split()[0]	if command in parse_until:
 base.py:564-569	django/template/base.py	564	569	-	-
 base.py:568	django/template/base.py	568	-	self.prepend_token(token)	-
@@ -449,8 +450,16 @@ library.py:421	django/template/library.py	421	-	-	-
 library.py:454	django/template/library.py	454	-	parser.compile_filter	-
 loader_tags.py:63	django/template/loader_tags.py	63	-	block = type(self)(block.name, block.nodelist)	-
 loader_tags.py:87	django/template/loader_tags.py	87	-	-	-
+loader_tags.py:215	django/template/loader_tags.py	215	-	def do_block(parser, token):	-
+loader_tags.py:219-220	django/template/loader_tags.py	219	220	# token.split_contents() isn't useful here because this tag doesn't accept	# variable as arguments.
+loader_tags.py:221-241	django/template/loader_tags.py	221	241	bits = token.contents.split()	parser.invalid_block_tag(endblock, "endblock", acceptable_endblocks)
+loader_tags.py:222-223	django/template/loader_tags.py	222	223	if len(bits) != 2:	raise TemplateSyntaxError("'%s' tag takes only one argument" % bits[0])
 loader_tags.py:227-232	django/template/loader_tags.py	227	232	-	-
+loader_tags.py:227-234	django/template/loader_tags.py	227	234	if block_name in parser.__loaded_blocks:	parser.__loaded_blocks = [block_name]
+loader_tags.py:232	django/template/loader_tags.py	232	-	parser.__loaded_blocks.append(block_name)	-
 loader_tags.py:233-234	django/template/loader_tags.py	233	234	parser.__loaded_blocks = [block_name]	-
+loader_tags.py:239	django/template/loader_tags.py	239	-	acceptable_endblocks = ("endblock", "endblock %s" % block_name)	-
+loader_tags.py:239-241	django/template/loader_tags.py	239	241	if endblock.contents not in acceptable_endblocks:	parser.invalid_block_tag(endblock, "endblock", acceptable_endblocks)
 loader_tags.py:305	django/template/loader_tags.py	305	-	bits[1] = construct_relative_path(parser.origin.template_name, bits[1])	-
 loader_tags.py:308	django/template/loader_tags.py	308	-	if nodelist.get_nodes_by_type(ExtendsNode):	-
 loader_tags.py:347	django/template/loader_tags.py	347	-	-	-
@@ -531,6 +540,8 @@ text.py:205	django/utils/text.py	205	-	text = unicodedata.normalize("NFC", self.
 text.py:220	django/utils/text.py	220	-	if unicodedata.combining(char):	-
 text.py:236	django/utils/text.py	236	-	-	-
 django/utils/text.py:282	django/utils/text.py	282	-	-	-
+utils/text.py:282	django/utils/text.py	282	-	def get_text_list(list_, last_word=gettext_lazy("or")):	-
+utils/text.py:297-303	django/utils/text.py	297	303	if len(list_) == 1:	str(list_[-1])
 text.py:308-310	django/utils/text.py	308	310	def normalize_newlines(text):	return re_newlines.sub("\n", str(text))
 text.py:313-344	django/utils/text.py	313	344	-	-
 text.py:313	django/utils/text.py	313	-	@keep_lazy_text	-

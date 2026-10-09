@@ -8,13 +8,13 @@
 //! and a tag that is not implemented yet is a stub in its own file rather than a
 //! missing entry.
 //!
-//! **Five built-in names are deliberately absent**, and a test asserts their
-//! absence. `block`, `extends` and `include` are §6's — Python's, supplied
-//! through the host seam, M7's. `load` and `querystring` are §6's too, and M6
-//! took them out of the table; the paragraphs below record which of the rule's
-//! clauses each one falls under. An entry here would be a promise this project
-//! has already decided not to keep. The mechanical reason — the one to reach for
-//! when the next built-in's side has to be decided — is the rule below.
+//! **Four built-in names are deliberately absent**, and a test asserts their
+//! absence. `extends` and `include` are §6's — Python's, supplied through the
+//! host seam, M7's. `load` and `querystring` are §6's too, and M6 took them out
+//! of the table; the paragraphs below record which of the rule's clauses each one
+//! falls under. An entry here would be a promise this project has already decided
+//! not to keep. The mechanical reason — the one to reach for when the next
+//! built-in's side has to be decided — is the rule below.
 //!
 //! **The rule behind that subtraction, stated rather than listed**, because
 //! "which built-ins does Rust own" has now been asked four times and each time a
@@ -26,12 +26,19 @@
 //! `NodeDesc` is one node's worth of data and cannot carry a value that
 //! accumulates across siblings, which is what all three of these are.
 //!
-//! - `block` writes `parser.__loaded_blocks` (`loader_tags.py:227-232`), a Python
-//!   attribute the duplicate-name check is built on, and the check *raises*, so
-//!   the accumulated value changes the parse. Note the discrimination is not the
-//!   field's type — a `Vec<String>` would hold those names — it is that no
-//!   per-node value can carry state that the *second* `{% block %}` needs to see.
-//!   `do_block` also recurses through `parser.parse(("endblock",))`.
+//! - `block` **was the rule's third case, and M7 removed it** — the one entry
+//!   here that left the subtracted list, so the reasoning is worth keeping.
+//!   `do_block` writes `parser.__loaded_blocks` (`loader_tags.py:227-232`), a
+//!   value that accumulates across siblings, and a `NodeDesc` cannot carry it —
+//!   which is why the rule subtracted `block` for as long as that state lived
+//!   only in Django's parser. M7 added the field to **Rust's** `Parser`
+//!   (`mod.rs`, `loaded_blocks`), so the state now lives where the compile
+//!   function reads and writes it and the rule's test is *satisfied* rather than
+//!   excepted. The discriminator was never the field's type — a `Vec<String>`
+//!   holds those names — it was whose parser held it, and that is what the
+//!   subtraction was measuring all along. `do_block` also recurses through
+//!   `parser.parse(("endblock",))`, which is structural and was never the
+//!   obstacle.
 //! - `extends` reads `parser.origin.template_name` (`loader_tags.py:305`) and
 //!   inspects the just-parsed nodelist through `get_nodes_by_type`
 //!   (`loader_tags.py:308`) — a query over *materialised* nodes, which do not
@@ -91,7 +98,7 @@
 //! under this rule, which acts at compile time, where both are the same case.
 //! What is recorded here is the measurement, not a verdict.
 //!
-//! The count is 22 = 27 built-ins minus those five, and the metric matters:
+//! The count is 23 = 27 built-ins minus those four, and the metric matters:
 //! `Engine().template_builtins[0].tags` is 24 (`defaulttags` alone), while the
 //! union across all three builtin libraries is 27 (`defaulttags` 24 +
 //! `loader_tags` 3). Both are right answers to different questions, and this
@@ -124,6 +131,7 @@ type Entry = (&'static str, CompileFn);
 
 const REGISTRY: &[Entry] = &[
     ("autoescape", tags::autoescape::compile),
+    ("block", tags::block::compile),
     ("comment", tags::comment::compile),
     ("csrf_token", tags::csrf_token::compile),
     ("cycle", tags::cycle::compile),
@@ -269,19 +277,20 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_has_the_twenty_two_names_rust_owns() {
-        // 27 built-in names minus `block`, `extends`, `include`, `load` and
-        // `querystring`. See the module doc for why those five are absent and
+    fn the_registry_has_the_twenty_three_names_rust_owns() {
+        // 27 built-in names minus `extends`, `include`, `load` and
+        // `querystring`. See the module doc for why those four are absent and
         // for the counting trap.
-        assert_eq!(builtin_tag_names().len(), 22);
+        assert_eq!(builtin_tag_names().len(), 23);
     }
 
     #[test]
-    fn the_five_python_owned_builtins_are_not_rust_compile_functions() {
-        // Three for M7 (§6's loader tags) and two M6 removed: `load` is host
-        // state, `querystring` is a `simple_tag`. The reasons are separate and
-        // the module doc carries both.
-        for absent in ["block", "extends", "include", "load", "querystring"] {
+    fn the_four_python_owned_builtins_are_not_rust_compile_functions() {
+        // Two for M7 (§6's remaining loader tags) and two M6 removed: `load` is
+        // host state, `querystring` is a `simple_tag`. The reasons are separate
+        // and the module doc carries all of them. `block` left this list in M7,
+        // which is why the name counts down rather than the list growing.
+        for absent in ["extends", "include", "load", "querystring"] {
             assert!(
                 builtin_tag(absent).is_none(),
                 "{absent} must not be a Rust compile function (§6: Python-owned)",
@@ -362,9 +371,13 @@ mod tests {
         // move in opposite directions. The nine are M2's, the eleven after them
         // landed across M5's tasks, and M6 removed two names from the table
         // rather than implementing them — so this list is 20 and `stubs` is 2,
-        // summing to the registry's 22.
+        // summing to the registry's 22. **M7's `block` is the first name to move
+        // between the halves rather than in or out of the table**: it was never
+        // a stub, and it arrives from the `absent` list, so this is 21, `stubs`
+        // is still 2, and the sum is 23.
         let mut expected: Vec<&str> = [
             "autoescape",
+            "block",
             "comment",
             "csrf_token",
             "cycle",

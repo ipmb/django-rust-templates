@@ -620,7 +620,10 @@ this plan revision and is recorded here so it is not rediscovered at M8.
 ```rust
 #[cfg(test)]
 mod tests {
+    use crate::lexer::Lexer;
+    use crate::parser::host::NoHost;
     use crate::parser::tags::support::{compile, failure};
+    use crate::parser::Parser;
 
     #[test]
     fn a_block_compiles_to_a_block_node_carrying_its_body() {
@@ -639,6 +642,21 @@ mod tests {
             "'block' tag with name 'a' appears more than once"
         );
     }
+
+    #[test]
+    fn the_rejected_occurrence_is_not_recorded() {
+        // The observable form of "raise before append" (`loader_tags.py:227-234`).
+        // The message cannot carry it — `"'%s' tag with name '%s' appears more
+        // than once"` names no position, and the parse ends at the offending
+        // tag, so there is no later `{% block %}` for a wrong ordering to
+        // misattribute. `loaded_blocks` is where the ordering shows.
+        let mut parser = Parser::new(
+            Lexer::new("{% block a %}{% endblock %}{% block a %}{% endblock %}").tokenize(),
+            &NoHost,
+        );
+        parser.parse(&[]).expect_err("the second {% block a %} raises");
+        assert_eq!(parser.loaded_blocks(), ["a"]);
+    }
 }
 ```
 
@@ -653,7 +671,7 @@ Expected: FAIL to compile — `tags/block.rs` does not exist, and `mod.rs` has n
 //! `{% block %}` — `django.template.loader_tags.do_block` (`loader_tags.py:215`).
 //!
 //! `token.contents.split()`, **not** `split_contents()`: Django's own comment
-//! (`loader_tags.py:218-219`) says the tag "doesn't accept variable as
+//! (`loader_tags.py:219-220`) says the tag "doesn't accept variable as
 //! arguments", and the two differ on U+001C–U+001F. `crate::pyunicode::split` is
 //! Python's `str.split`, so the arity check sees the same `bits` Django sees.
 
@@ -828,14 +846,43 @@ translation layer):
 
 - [ ] **Step 9: Run the guards, then the gates**
 
-Run: `source scripts/env.sh && cargo test -p template-core && cargo clippy --workspace --all-targets -- -D warnings && maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m pytest tests/ -x -q`
+Run: `source scripts/env.sh && cargo test -p template-core && cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --all --check && maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m unittest discover -s tests -t . -p 'test_*.py'`
 Expected: all pass; `tests/test_tag_inventory.py` reports 23 names; the corpus
 counts rise by 4 success rows and 4 error rows.
 
-Observe each new guard failing for its intended reason before keeping it: delete
-the `bits.len() != 2` arm and confirm `{% block %}x{% endblock %}` reports the
-*wrong* thing; move the `register_block_name` call above the duplicate check and
-confirm the third-`{% block %}` case changes its message.
+Observe each new guard failing for its intended reason before keeping it.
+
+*Mutation A — delete the `bits.len() != 2` arm.* Measured: three tests go red, and
+the wrong thing is a **panic**, not a wrong message —
+`index out of bounds: the len is 1 but the index is 1` at `bits[1]`, because
+`{% block %}` splits to one bit. The failing three are
+`a_block_needs_exactly_one_argument` plus the registry's two reachability tests,
+which compile each entry against its own bare `{% name %}` token. A panic is what
+the arm exists to prevent, so the arm is load-bearing and its message is the
+observable.
+
+*Mutation B — the ordering.* The plan's first phrasing of this ("move the
+`register_block_name` call above the duplicate check") is **too coarse to
+demonstrate the claim**, and the measurement is worth keeping for that reason:
+with the call moved above the whole `if`, the first occurrence sees its own
+registration and *six* of the eight block tests go red for the same unrelated
+reason — while `the_rejected_occurrence_is_not_recorded` still **passes**, since
+`loaded_blocks` is `["a"]` either way (the parse dies at the first block).
+The mutation that actually isolates the ordering registers inside the branch,
+immediately before the raise:
+
+```rust
+    if parser.loaded_blocks().contains(&block_name) {
+        parser.register_block_name(block_name.clone());   // <- Django appends after
+        return Err(Error::syntax(format!(
+```
+
+Measured: exactly one test red — `the_rejected_occurrence_is_not_recorded` —
+with `left: ["a", "a"]`, `right: ["a"]`. So the ordering is pinned by that test
+and by nothing else, **and the corpus cannot see it**: the duplicate's message
+names no position, and the parse ends at the offending tag, so no later
+`{% block %}` exists for a wrong ordering to misattribute. That is why it is a
+unit test on the field rather than an error-corpus row.
 
 - [ ] **Step 10: Commit**
 
@@ -845,7 +892,9 @@ git add crates/template-core/src/parser/tags/block.rs \
         crates/template-core/src/parser/registry.rs \
         crates/template-core/src/parser/mod.rs \
         python/django_rust_templates/_impl/parser.py \
-        tests/test_tag_inventory.py tests/parser_corpus.py tests/parser_error_corpus.py
+        tests/test_tag_inventory.py tests/parser_corpus.py \
+        tests/parser_error_corpus.py tests/test_parser_errors.py \
+        docs/superpowers/plans/2026-10-09-m7-inheritance.md
 git commit -m "M7 Task 1: {% block %} — the compile function, and Rust's loaded_blocks"
 ```
 

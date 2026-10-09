@@ -292,6 +292,21 @@ TEMPLATES = [
     # The host-owned builtin: `querystring` is Django's `simple_tag`
     # (`defaulttags.py:1286-1287`) and not in Rust's registry at all.
     "{% querystring page=2 %}",
+    # --- M7: `{% block %}`, which is Rust's again ---------------------------
+    # The first entry in `REGISTRY` that arrived from the *absent* list rather
+    # than from a stub, so these rows are the parse that has to look the same
+    # on both sides now that Rust compiles it. `block`'s own state
+    # (`parser.__loaded_blocks`) is Rust's `Parser::loaded_blocks`; the
+    # duplicate-name and end-tag checks are the error corpus's four rows.
+    "{% block a %}x{% endblock %}",
+    # `endblock <name>` is in `acceptable_endblocks` (`loader_tags.py:239`), so
+    # this is the backwards-compatibility row, not an error.
+    "{% block a %}x{% endblock a %}",
+    # Text on both sides, so the block node is neither first nor last.
+    "A{% block a %}x{% endblock %}B",
+    # A block nested in a block: the inner one is a child of the outer's
+    # nodelist, and both names are recorded in the order they compiled.
+    "{% block a %}{% block b %}x{% endblock %}{% endblock %}",
 ]
 
 

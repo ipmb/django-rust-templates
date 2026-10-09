@@ -53,6 +53,7 @@ from django.template.defaulttags import (
     WidthRatioNode,
     WithNode,
 )
+from django.template.loader_tags import BlockNode
 from django.utils.safestring import mark_safe
 
 from django_rust_templates import _native
@@ -100,8 +101,9 @@ def _ifchanged_factory(nodelist_true, nodelist_false, _varlist=()):
 # An explicit registry rather than `getattr(base, class_name)`: a
 # `getattr`-based lookup would resolve anything that happens to be in Django's
 # modules, turning a Rust typo into a wrong node class instead of a loud
-# failure, and it would silently pick up a class M7 must *not* materialise from
-# Rust (block/extends/include are Python-owned).
+# failure. After M7 the three loader-tag classes arrive here too — `BlockNode`
+# is below, and M7's other two land with their own tasks — so the registry's
+# remaining job is the loud refusal, not a list of what Rust may not name.
 #
 # A value is the **callable that builds the node from its kwarg set**, which is
 # the class itself in every case but one: a class is callable taking keywords, so
@@ -116,6 +118,7 @@ def _ifchanged_factory(nodelist_true, nodelist_false, _varlist=()):
 NODE_CLASSES = {
     "TextNode": TextNode,
     "AutoEscapeControlNode": AutoEscapeControlNode,
+    "BlockNode": BlockNode,
     "CommentNode": CommentNode,
     "CsrfTokenNode": CsrfTokenNode,
     "CycleNode": CycleNode,
