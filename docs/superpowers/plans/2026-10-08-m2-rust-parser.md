@@ -4087,8 +4087,23 @@ directly (which catches a wrong attribute *name*), and one through
 `get_nodes_by_type` (which walks `child_nodelists` — the same path Django's
 rendering and `ExtendsNode.__init__` use, and the one that catches children
 attached under a name nothing walks).
+
+Two things here are not the obvious spelling and both were measured against the
+pinned tree rather than assumed:
+
+* the materialiser is loaded **from its file**, not imported as
+  `django_rust_templates._impl.parser`. See the note below.
+* Django's parser is given `builtins=Engine().template_builtins`. A bare
+  `Parser(tokens)` registers *nothing* (`base.py:518-519`: `builtins=None`
+  becomes `[]`), so it raises `Invalid block tag` on `{% csrf_token %}` and
+  every other built-in — which would have made the whole corpus compare
+  `ours=ok` against `theirs=error`. `Engine.template_builtins` is an *instance*
+  attribute (`engine.py:63`), not a class attribute, and
+  `get_template_builtins` is an instance method; `Engine().template_builtins`
+  is the form that resolves. This is the same trap Task 6 hit.
 """
 
+import importlib.util
 import inspect
 import random
 import sys
@@ -4108,15 +4123,31 @@ from django.template.base import (  # noqa: E402
     NodeList,
     Parser,
 )
+from django.template.engine import Engine  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
-from django_rust_templates._impl.parser import materialise  # noqa: E402
 from tests.parser_corpus import (  # noqa: E402
     RANDOM_CASES,
     RANDOM_SEED,
     TEMPLATES,
     random_template,
 )
+
+# Loaded from its file rather than imported, for the reason spelled out in
+# `tests/test_materialise.py`: `_impl/__init__.py` is the shim's
+# `django.template` and imports its own siblings (`from .engine import Engine`
+# …), so importing the `_impl` *package* by its ordinary name executes that file
+# and fails for want of `engine`. Loading the module directly is how this test
+# reaches the materialiser without installing the shim, which is what keeps the
+# node classes Django's own.
+_MATERIALISER_SPEC = importlib.util.spec_from_file_location(
+    "django_rust_templates._impl.parser",
+    PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "parser.py",
+)
+materialise_module = importlib.util.module_from_spec(_MATERIALISER_SPEC)
+sys.modules[_MATERIALISER_SPEC.name] = materialise_module
+_MATERIALISER_SPEC.loader.exec_module(materialise_module)
+materialise = materialise_module.materialise
 
 # Kept for symmetry with Task 6's module, where the same tuple describes a wire
 # token from either side.
@@ -4125,7 +4156,8 @@ IGNORED_ATTRIBUTES = ("token", "origin")
 
 def django_parse(source, debug=False):
     lexer = DebugLexer(source) if debug else Lexer(source)
-    return Parser(lexer.tokenize()).parse()
+    # `builtins` is not optional: a bare `Parser` knows no tags at all.
+    return Parser(lexer.tokenize(), builtins=Engine().template_builtins).parse()
 
 
 def ours_parse(source, debug=False):
@@ -4349,8 +4381,10 @@ source scripts/env.sh
 echo "exit=${PIPESTATUS[0]}"
 ```
 
-Expected: all pass. `test_corpus_matches_*` runs 60-odd subTests each; a diff
-prints both trees, which is the point of `describe` returning sorted dicts.
+Expected: all pass. The corpus is 59 sources (13 text/not-a-tag, 5
+csrf_token/debug, 9 templatetag, 8 now, 6 autoescape, 4 comment, 4 spaceless, 6
+verbatim, 4 combinations), so `test_corpus_matches_*` runs 59 subTests each; a
+diff prints both trees, which is the point of `describe` returning sorted dicts.
 
 - [ ] **Step 4: Confirm the acceptance test can fail**
 
@@ -4372,7 +4406,7 @@ git add -A tests/parser_corpus.py tests/test_parser_parity.py
 git commit -m "M2 Task 7: descriptor parity over a corpus
 
 M2's acceptance test. Compares the materialised tree node for node, by vars()
-and by a second traversal through get_nodes_by_type, over a 60-source corpus and
+and by a second traversal through get_nodes_by_type, over a 59-source corpus and
 400 seeded random templates, in both lexer modes. Failures are compared as
 failures, so the generator may produce illegal templates."
 ```

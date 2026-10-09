@@ -418,7 +418,12 @@ def extend_nodelist(self, nodelist, node, token):
 ```
 
 The shadow tree must run the equivalent for **every node `render_annotated` can
-reach** — not for every node unconditionally. Django draws that line itself:
+reach** — not for every node unconditionally. The operationally checkable form
+of that phrase is **every node appended to a `NodeList`**, which is decidable at
+parse time; "reachable by `render_annotated`" is the property that matters but
+it is stated in terms of a render-time call graph. The two agree wherever it
+counts: `extend_nodelist` is the sole appender, and the `BlockNode` copy below
+is exempt under either reading. Django draws that line itself:
 `BlockNode.render` (`loader_tags.py:63`) builds a node at *render* time with
 `type(self)(block.name, block.nodelist)`, which never passes through
 `extend_nodelist` and so carries neither attribute. That is safe only because
@@ -708,10 +713,20 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   one tag or filter, behind a registry written **once, up front, in full** so
   that no fan-out agent ever edits a shared file.
   The fan-out contract, because build state is shared too: an agent owns one
-  module and writes no other file, and does not run `maturin develop` or commit.
-  There is one `.so`, one `target/`, and one git index, and concurrent writers
-  race on all three — so the extension is rebuilt and the commit made centrally,
-  after the agents' files land.
+  module and writes no other file, runs `cargo test -p template-core` and
+  **never** `maturin develop`, and never commits. There is one `.so`, one
+  `target/`, and one git index, and concurrent writers race on all three — so
+  the extension is rebuilt and the commit made centrally, after the agents'
+  files land.
+  The contract is not "an agent cannot build": `template-core` has exactly one
+  dependency (`regex`) and **no PyO3**, so `cargo test -p template-core` builds
+  and runs in a bare shell — no `.so`, no `maturin develop`, no venv, no
+  `.django`. That is what keeps the project's standing discipline intact under
+  fan-out: a test is not known to work until it has been seen to fail, and an
+  agent that can run `cargo test` can see its own test fail. The crate must be
+  named with `-p template-core` and never `--workspace`, which pulls in
+  `template-py` and with it PyO3. Cargo's `target/` file lock then serialises
+  concurrent invocations for free, so no build lock is needed.
 
 - **§5.5's render path** — `NodeList.render`/`Node.render_annotated` kept
   verbatim, shadow nodes renderable; M9 gate.
