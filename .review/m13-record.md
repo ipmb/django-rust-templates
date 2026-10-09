@@ -58,6 +58,22 @@ methods, each returning a `NodeRef`:
 | `Host::partial_node` | the live `DeferredSubDict(extra_data, "partials")` | a live view over a dict the parser owns; a `NodeDesc` is a frozen value |
 | `Host::register_partial_def` | the `PartialTemplate`, the body's `source_start`/`source_end`, and the duplicate-name check | `partials[name] = PartialTemplate(nodelist, …)` and `return PartialDefNode(…, nodelist)` are the **same** nodelist object (`defaulttags.py:1257-1265`), so the body has to come back out of the host instead of being built twice |
 
+**The seam is not a new species of thing, and that is what makes it allowed.**
+`Host::compile_filter` (`crates/template-core/src/parser/host.rs:256`) is a
+**required** `Host` method returning `NodeRef` — the wire cannot carry a compiled
+node in a `NodeDesc`, and `NodeRef` is what the tree already does about that — and
+it has been called at compile time since M5 (both the method and its caller
+landed in `e34a301`, M5's last tag). Its tag-level caller is
+`Parser::compile_condition_filter` (`crates/template-core/src/parser/mod.rs:226`),
+"a thin forward to `[`Host::compile_filter`]`", reached from
+`crates/template-core/src/parser/tags/if.rs:145`. So the two M13 methods are that
+same move applied to two more values, not a new escape hatch: the wire cannot
+carry a live `DeferredSubDict`, and `NodeRef` is what the tree already does about
+that. (The `cache.rs`/`cycle.rs` compile-time host calls are a round trip of the
+same *shape* but not this precedent: they go through `Parser::compile_filter`
+(`crates/template-core/src/parser/mod.rs:212`) and return an `AttrValue`, not a
+`NodeRef`.)
+
 The seam is committed at `e592fc3`; the two tags' Rust compile functions at
 `13f9b08` and `24bed0f`.
 
@@ -72,33 +88,70 @@ because `assert_trees_match` over such a body compares Django's work with
 Django's work. Closing it is the one outcome here that is measurable: a partial
 body is now Rust-parsed.
 
-### A row whose role changed under it — a defect category this project had not named
+### A row can go stale without any of its text becoming false
 
-**`crates/template-core/src/parser/registry.rs`'s
+The shared observation, and the one this project had not written down: a test
+row can stop being about what it was written to be about while every sentence in
+it stays true and every assertion stays green. Nothing reddens. The row has to be
+*read* to notice. M13 produced two instances, and they are worth recording as a
+pair because they fail *differently* — one in its **value**, one in its
+**subject** — and the two failures want opposite repairs.
+
+**Instance one: the row's `value` changed.** `crates/template-core/src/parser/registry.rs`'s
 `a_stub_names_its_milestone_and_says_it_is_the_engine_not_the_template` began
-life as a *redundancy* check.** The two stub bodies in `tags/partial.rs` and
+life as a *redundancy* check. The two stub bodies in `tags/partial.rs` and
 `tags/partialdef.rs` were `registry::unimplemented`'s production callers, and
-`builtin_tag_stub_names()` reached the function *through* them. The moment Task 4
-landed, both bodies became real, no stub calls `unimplemented` any more — and
-that row silently became `unimplemented`'s **only** caller while its text stayed
-true and its assertion stayed green.
+`builtin_tag_stub_names()` reached the function *through* them, so the row was
+one of several things exercising it. The moment Task 4 landed, both bodies became
+real, no stub calls `unimplemented` any more — and that row silently became
+`unimplemented`'s **only** caller while its text stayed true and its assertion
+stayed green. The risk here is **deletion by original reason**: a maintainer who
+deletes it because "the stubs are gone now, this row is about stubs" removes the
+only thing exercising `unimplemented` at all. The repair is to **re-key the row
+to its new role** — commit `cea06d9` did — and to add a second instrument so the
+derivation is exercised with something *in* the set rather than asserted against
+an empty one: `stub_names_in(table)` at `registry.rs:400`, tested with a
+*fabricated* stub by `the_stub_derivation_is_not_a_copy_of_the_table` at
+`registry.rs:644`.
 
-Nothing reddens when a row's role changes under it. The row has to be *read* to
-notice. This is a category, not an incident: it belongs in the record because
-the next milestone's stub-shrinking will meet it again. Commit `cea06d9`
-re-keyed the row to its new role, and a second instrument — `stub_names_in(table)`
-at `registry.rs:400`, tested with a *fabricated* stub at `:673` — was added so
-the derivation is exercised with something in the set rather than asserted
-against an empty one.
+**Instance two: the row's `subject` changed.** `tests/test_host_tags.py`'s
+discriminator was, until M13, a *tag* only one side implemented: `{% partialdef %}`
+was a Rust stub, so a Rust-parsed body raised `UnimplementedTag` while a
+Django-parsed one ran `do_partialdef`. Task 4 gave both tags Rust bodies, so the
+discriminator had to become the **route**: the claim is now that
+`ShellHost.register_partial_def` — the seam every Rust-compiled `{% partialdef %}`
+crosses — is *not* reached from a body Django parses. Same class, same tag, one
+difference in the source. The risk here is different: left alone, the row would
+have kept passing (the seam is indeed not reached) while *reading* as an answer to
+the old question — "is `{% partialdef %}` implemented on the Rust side" — which is
+now the wrong question. Its module docstring was rewritten to say so.
 
-**And `tests/test_host_tags.py`'s discriminator changed mechanism the same way.**
-Until M13 it was a *tag* only one side implemented: `{% partialdef %}` was a Rust
-stub, so a Rust-parsed body raised `UnimplementedTag` while a Django-parsed one
-ran `do_partialdef`. Task 4 gave both tags Rust bodies, so the discriminator had
-to become the **route**: the claim is now that `ShellHost.register_partial_def` —
-the seam every Rust-compiled `{% partialdef %}` crosses — is *not* reached from a
-body Django parses. Same class, same tag, one difference in the source. Its
-module docstring was rewritten to say so.
+Both instances are the argument for keeping the derivation honest, and both are
+why the milestone's instruments live in this record rather than only in a comment
+beside the code.
+
+**And they are the argument for one more thing, which this section is the right
+place to say.** `.review/` is **outside the anchor tool's scan roots**
+(`scripts/check_python_anchors.py` scans `python/`, `tests/`, `crates/` and
+`docs/superpowers/specs/`, not `.review/`), so a line number here is the one place
+it can go wrong unwatched — and it is the citation a later reader trusts *most*,
+because a record reads as the settled account. M13 caught wrong citations in
+these records by hand: a whole-contents check cited as `defaulttags.py:1243` (it
+is `:1244`), a render span cited as `base.py:341-346` (it is `:340-346`, the
+statement one line earlier), and — in the paragraph above, while this section was
+being written — a definition cited as `parser/mod.rs:222` (it is `:226`). That
+last one is the clean instance: it exists only in this file, no tool here reads
+`.review/`, and nothing but a person re-measuring the definition line could have
+caught it. Widening `TREE_ROOTS` to cover `.review/` was deliberately not taken,
+and the tool already records the real reason at
+`scripts/check_python_anchors.py:290-300`: a reviewer reporting a wrong anchor
+quotes our wrong anchor *verbatim*, so scanning this directory would fail the
+build on an accurate quotation of our own defect — and the only way to make it
+green would be to falsify the finding. That reason is sound and is not the one a
+naive reader would guess. The asymmetry it leaves is still worth naming, though:
+by the tool's own count at `:265-267` — `.review/` **550 occurrences / 384
+distinct** — the least-guarded citations in the tree are in the files written to
+be re-read.
 
 ---
 
