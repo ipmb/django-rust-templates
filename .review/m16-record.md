@@ -103,7 +103,7 @@ only what moves the number. Two candidate changes were measured to the end; one 
 Skipped because §6's decomposition attributes ~96% of the render gap to filter
 application and variable resolution, not parsing. Recorded so it is not re-derived.
 
-### 3.2 Caching the routing decision — measured, **not kept**
+### 3.2 Caching the routing decision — costed, **not built**
 
 `FilterExpression.resolve` decides "is this a built-in Rust ports?" by calling
 `django_own_filters()` on every filter application. It costs **1.061 µs**, the largest
@@ -334,7 +334,7 @@ the `sys.modules` hit at 0.046), plus the six-way identity check.
 The upper filter's own Rust body is 0.216 µs and is not the problem — the Python
 decision that *reaches* it is 6.5× the crossing.
 
-### 6.3 The two levers, and why the verdict does not move
+### 6.3 The three levers, and why the verdict does not move
 
 | lever | cost | share of `realistic/render` | basis |
 |---|---|---|---|
