@@ -4015,9 +4015,9 @@ CASES: list[dict] = [
     },
     {
         # **`ensure_ascii` is `json.dumps`' own default and is neither set nor
-        # needed**: `é` becomes the `é` escape. (The brief's table for this
-        # row shows the character itself; measured on the pinned tree, the
-        # encoder escapes it. See the module doc.)
+        # needed**: `é` leaves as the six-character escape `é`. (The brief's
+        # table for this row shows the character itself; measured on the pinned
+        # tree, the encoder escapes it. See the module doc.)
         "name": "json_script/non-ascii-is-escaped",
         "filter": "json_script",
         "value": {"k": "é"},
