@@ -26,10 +26,10 @@
 //! 2. `call.host.to_str(&value)` — the `@stringfilter` coercion
 //!    (`defaultfilters.py:44-48`), done once by the FFI loop (§D3), so this is a
 //!    pure accessor on an already coerced value. The call site reads it exactly as
-//!    `slugify.rs:99` does.
+//!    `crates/template-core/src/filters/slugify.rs:99` does.
 //! 3. **The `autoescape` handed to the helper is
 //!    `call.autoescape && !call.host.is_safe(&value)`**, the `linebreaks` pattern
-//!    (`linebreaks.rs:130`) and the same expression Django's own `linebreaks`
+//!    (`crates/template-core/src/filters/linebreaks.rs:130`) and the same expression Django's own `linebreaks`
 //!    `def` writes at its level (`defaultfilters.py:493`). The helper's escaping
 //!    is governed by `autoescape and not safe_input`, where
 //!    `safe_input = isinstance(text, SafeData)` (`html.py:319`, `html.py:387-389`)
@@ -141,7 +141,7 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
         return Err(autoescape_collision());
     }
     // `autoescape and not isinstance(value, SafeData)` — the same collapse
-    // `linebreaks` makes (`linebreaks.rs:130`), and Rust's `&&` short-circuits
+    // `linebreaks` makes (`crates/template-core/src/filters/linebreaks.rs:130`), and Rust's `&&` short-circuits
     // as Python's does, so `is_safe` is not asked when `call.autoescape` is
     // false. See the module doc's "The `safe_input` collapse".
     let autoescape = call.autoescape && !call.host.is_safe(&value);

@@ -1128,12 +1128,12 @@ _CFG_TEST = "#[cfg(test)]"
 _TAG_MODULES = PROJECT_ROOT / "crates" / "template-core" / "src" / "parser" / "tags"
 
 # `NodeDesc::new("X")` / `NodeDesc::with_nodelist("X", ...)`. `\s*` spans the
-# newline in `tags/mod.rs:216`, where the class name starts on the following line.
+# newline in `crates/template-core/src/parser/tags/mod.rs:216`, where the class name starts on the following line.
 _CLASS = re.compile(r'NodeDesc::(?:new|with_nodelist)\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)"')
 _TEXT = re.compile(r"NodeDesc::text\s*\(")
 
 # Emitted by the parse core rather than by a tag module: `TextNode` by
-# `desc.rs::NodeDesc::text` and `VariableNode` by `parser/mod.rs:347`.
+# `desc.rs::NodeDesc::text` and `VariableNode` by `crates/template-core/src/parser/mod.rs:347`.
 CORE_EMITTED_CLASSES = {"TextNode", "VariableNode"}
 
 # Names that exist **only** under `#[cfg(test)]`. The stripper below is asserted

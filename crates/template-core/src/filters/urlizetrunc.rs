@@ -17,7 +17,7 @@
 //!
 //! 1. `call.host.to_int(&arg.unwrap_or(Value::None))` — `defaultfilters.py:399`'s
 //!    `int(limit)`, **first and with no `try`** (the `wordwrap` pattern,
-//!    `wordwrap.rs:73`), so its `ValueError` for a non-numeric argument and its
+//!    `crates/template-core/src/filters/wordwrap.rs:73`), so its `ValueError` for a non-numeric argument and its
 //!    `TypeError` for `None` escape before the text is read.
 //!    `unwrap_or(Value::None)` rather than an early return, because
 //!    `implemented_filters()` in `tests/test_filter_parity.py` calls *every*

@@ -153,7 +153,7 @@
 //!   "")` raises `IndexError: string index out of range` — so a body guarding
 //!   with `is_empty()` would answer where Django raises. The dispatch is Rust's
 //!   because it is a function of the argument, exactly as `str(value)[-arg]` is
-//!   Rust's in `get_digit.rs:108`, and [`index_out_of_range`] synthesises the
+//!   Rust's in `crates/template-core/src/filters/get_digit.rs:108`, and [`index_out_of_range`] synthesises the
 //!   error for the same reason `get_digit`'s `invalid_literal` synthesises
 //!   `int("-")`: no seam method is asked. **A correction to the plan:** the
 //!   claim that 199 zeros "formats to a `SafeString` 203 chars long" is
@@ -227,8 +227,8 @@ fn is_value_error(error: &Error) -> bool {
 ///
 /// Synthesised here because no [`FilterHost`] method is asked for it: the
 /// dispatch is a function of the argument, so it stays Rust — the same line
-/// `get_digit.rs:108` draws for `str(value)[-arg]`, and the same reason
-/// `get_digit.rs:153` synthesises `int("-")`. `operation` names the CPython
+/// `crates/template-core/src/filters/get_digit.rs:108` draws for `str(value)[-arg]`, and the same reason
+/// `crates/template-core/src/filters/get_digit.rs:153` synthesises `int("-")`. `operation` names the CPython
 /// operation this stands in for, not a method that ran.
 ///
 /// [`FilterHost`]: crate::filters::host::FilterHost
@@ -448,7 +448,7 @@ fn formatted(
 /// **missing** argument: `{{ x|floatformat:None }}` is `int(None)`'s `TypeError`,
 /// measured. **The FFI tells the two apart** — a missing argument is `None` and
 /// the literal `None` is `Some(Value::None)`, whose length is the distinction
-/// (`template-py/src/filters.rs:1675-1683`) — so the literal reaches
+/// (`crates/template-py/src/filters.rs:1675-1683`) — so the literal reaches
 /// `to_int(Value::None)` and escapes as that `TypeError`, where the absent
 /// argument answers the default.
 pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {

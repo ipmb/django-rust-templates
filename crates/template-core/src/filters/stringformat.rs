@@ -70,7 +70,7 @@ fn is_caught(error: &Error) -> bool {
 /// `is_tuple` first (its `str(value)` outside the `try`, via `?`), then
 /// `str(arg)` and the `%` inside the `try` — both caught as `""` — and the
 /// result returned as a plain `Value::Str`/host answer. `arg.unwrap_or(None)`
-/// is the established shape for a missing argument (`center.rs:86`).
+/// is the established shape for a missing argument (`crates/template-core/src/filters/center.rs:86`).
 pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
     // `if isinstance(value, tuple): value = str(value)` — outside the `try`, so
     // a refusal here escapes rather than becoming `""`.
@@ -321,7 +321,7 @@ mod tests {
     /// The body needs the seam, so it cannot be reimplemented in Rust and pass a
     /// bare-shell test by luck. Under [`NoFilterHost`] the refusal is a **panic**
     /// rather than an `Err`, because `is_tuple` is one of the 14 non-`Result`
-    /// operations (`filters/host.rs:519-526`), so this observes it the way
+    /// operations (`crates/template-core/src/filters/host.rs:519-526`), so this observes it the way
     /// `filters/host.rs`'s own tests observe those.
     #[test]
     fn it_needs_a_host() {

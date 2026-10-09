@@ -26,7 +26,7 @@
 //! returns whichever `Value` it was handed; the safety mark travels with it.
 //!
 //! `arg.unwrap_or(Value::None)` is the established shape for a missing argument
-//! (`center.rs:86`); the filter's arity is enforced above this body, so the
+//! (`crates/template-core/src/filters/center.rs:86`); the filter's arity is enforced above this body, so the
 //! substitution is a shape rather than a value Django can observe.
 
 use crate::filters::host::FilterCall;

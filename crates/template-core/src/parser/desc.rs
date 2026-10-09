@@ -628,7 +628,7 @@ impl NodeListDesc {
     /// this still would not, and if host bodies were ever materialised into
     /// descriptors this would start descending while Django still would not.
     /// The agreement is not observable today, because this function's only
-    /// production caller is `{% extends %}`'s duplicate scan (`extends.rs:71`)
+    /// production caller is `{% extends %}`'s duplicate scan (`crates/template-core/src/parser/tags/extends.rs:71`)
     /// and `ExtendsNode.blocks` is Django's own walk over *materialised* nodes.
     /// A future caller inherits the accident rather than the equivalence.
     ///

@@ -53,7 +53,7 @@
 //! every positive `Big` argument, which is past any string's length
 //! (`(1, 10**30) -> 0`). An [`IntValue::Big`] is never zero and its text carries
 //! the sign, so `arg < 1` for a `Big` is exactly `text.starts_with('-')` — the
-//! same test `center.rs:90` uses.
+//! same test `crates/template-core/src/filters/center.rs:90` uses.
 //!
 //! `str(value)` is [`IntValue`]'s canonical text (`Small(n) -> n.to_string()`,
 //! `Big(t) -> t.clone()`), which is always ASCII digits with at most one leading
@@ -147,7 +147,7 @@ fn to_value(int: IntValue) -> Value {
 /// `int("-")` — a `ValueError` the body raises for the one non-digit character
 /// `str(value)` can contain. The operation is named `"int"` because no
 /// [`FilterHost`] method performs it here (the same shape as `cut` naming
-/// `str.replace` in `error.rs:292-293`).
+/// `str.replace` in `crates/template-core/src/parser/error.rs:292-293`).
 ///
 /// [`FilterHost`]: crate::filters::host::FilterHost
 fn invalid_literal(c: char) -> Error {

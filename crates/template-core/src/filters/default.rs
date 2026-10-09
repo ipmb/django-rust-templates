@@ -29,7 +29,7 @@
 //! least one of those wrong. `True` is truthy and comes back unchanged.
 //!
 //! `arg.unwrap_or(Value::None)` is the established shape for a missing argument
-//! (`center.rs:86`); the filter's arity is enforced above this body.
+//! (`crates/template-core/src/filters/center.rs:86`); the filter's arity is enforced above this body.
 
 use crate::filters::host::FilterCall;
 use crate::filters::value::Value;

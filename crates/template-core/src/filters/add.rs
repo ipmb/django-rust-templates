@@ -56,7 +56,7 @@ use crate::parser::error::Error;
 /// Both operands go to [`FilterHost::add_values`] **unconverted** — the int
 /// arm's `int()` is inside the host's own `try`, alongside the `value + arg`
 /// retry — and the host's answer is returned as-is. `arg.unwrap_or(Value::None)`
-/// is the established shape for a missing argument (`center.rs:86`): Django's
+/// is the established shape for a missing argument (`crates/template-core/src/filters/center.rs:86`): Django's
 /// body sees `None` for `{{ x|add:None }}`, and this makes the substituted case
 /// reach the same seam.
 pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {

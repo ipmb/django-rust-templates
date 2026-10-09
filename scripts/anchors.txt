@@ -1,42 +1,42 @@
-center.rs:86	crates/template-core/src/filters/center.rs	86	-	arg.unwrap_or(Value::None)	-
-center.rs:90	crates/template-core/src/filters/center.rs	90	-	text.starts_with('-')	-
-get_digit.rs:108	crates/template-core/src/filters/get_digit.rs	108	-	text.chars().rev().nth(index)	-
-get_digit.rs:153	crates/template-core/src/filters/get_digit.rs	153	-	fn invalid_literal(c: char) -> Error {	-
+crates/template-core/src/filters/center.rs:86	crates/template-core/src/filters/center.rs	86	-	arg.unwrap_or(Value::None)	-
+crates/template-core/src/filters/center.rs:90	crates/template-core/src/filters/center.rs	90	-	text.starts_with('-')	-
+crates/template-core/src/filters/get_digit.rs:108	crates/template-core/src/filters/get_digit.rs	108	-	text.chars().rev().nth(index)	-
+crates/template-core/src/filters/get_digit.rs:153	crates/template-core/src/filters/get_digit.rs	153	-	fn invalid_literal(c: char) -> Error {	-
 crates/template-core/src/filters/host.rs:44-46	crates/template-core/src/filters/host.rs	44	46	The `autoescape` in force, which the seven `needs_autoescape` filters	-
-filters/host.rs:195	crates/template-core/src/filters/host.rs	195	-	-	-
-filters/host.rs:519-526	crates/template-core/src/filters/host.rs	519	526	-	-
-filters/host.rs:576-739	crates/template-core/src/filters/host.rs	576	739	-	-
-linebreaks.rs:130	crates/template-core/src/filters/linebreaks.rs	130	-	call.autoescape && !call.host.is_safe(&value)	-
-filters/mod.rs:127	crates/template-core/src/filters/mod.rs	127	-	pub struct FilterFlags {	-
-slugify.rs:99	crates/template-core/src/filters/slugify.rs	99	-	pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {	-
-wordwrap.rs:73	crates/template-core/src/filters/wordwrap.rs	73	-	unwrap_or(Value::None)	-
-desc.rs:49	crates/template-core/src/parser/desc.rs	49	-	-	-
-desc.rs:181	crates/template-core/src/parser/desc.rs	181	-	-	-
-desc.rs:436	crates/template-core/src/parser/desc.rs	436	-	pub must_be_first: bool,	-
-desc.rs:474	crates/template-core/src/parser/desc.rs	474	-	must_be_first: false,	-
-error.rs:292-293	crates/template-core/src/parser/error.rs	292	293	str.replace	-
-parser/host.rs:22	crates/template-core/src/parser/host.rs	22	-	-	-
-parser/mod.rs:347	crates/template-core/src/parser/mod.rs	347	-	NodeDesc::new("VariableNode")	-
+crates/template-core/src/filters/host.rs:195	crates/template-core/src/filters/host.rs	195	-	-	-
+crates/template-core/src/filters/host.rs:519-526	crates/template-core/src/filters/host.rs	519	526	-	-
+crates/template-core/src/filters/host.rs:576-739	crates/template-core/src/filters/host.rs	576	739	-	-
+crates/template-core/src/filters/linebreaks.rs:130	crates/template-core/src/filters/linebreaks.rs	130	-	call.autoescape && !call.host.is_safe(&value)	-
+crates/template-core/src/filters/mod.rs:127	crates/template-core/src/filters/mod.rs	127	-	pub struct FilterFlags {	-
+crates/template-core/src/filters/slugify.rs:99	crates/template-core/src/filters/slugify.rs	99	-	pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {	-
+crates/template-core/src/filters/wordwrap.rs:73	crates/template-core/src/filters/wordwrap.rs	73	-	unwrap_or(Value::None)	-
+crates/template-core/src/parser/desc.rs:49	crates/template-core/src/parser/desc.rs	49	-	-	-
+crates/template-core/src/parser/desc.rs:181	crates/template-core/src/parser/desc.rs	181	-	-	-
+crates/template-core/src/parser/desc.rs:436	crates/template-core/src/parser/desc.rs	436	-	pub must_be_first: bool,	-
+crates/template-core/src/parser/desc.rs:474	crates/template-core/src/parser/desc.rs	474	-	must_be_first: false,	-
+crates/template-core/src/parser/error.rs:292-293	crates/template-core/src/parser/error.rs	292	293	str.replace	-
+crates/template-core/src/parser/host.rs:22	crates/template-core/src/parser/host.rs	22	-	-	-
+crates/template-core/src/parser/mod.rs:347	crates/template-core/src/parser/mod.rs	347	-	NodeDesc::new("VariableNode")	-
 crates/template-core/src/parser/mod.rs:418	crates/template-core/src/parser/mod.rs	418	-	-	-
-parser/mod.rs:420-429	crates/template-core/src/parser/mod.rs	420	429	Err(error) => Err(error)	-
-parser/mod.rs:473-478	crates/template-core/src/parser/mod.rs	473	478	token.or_else	-
+crates/template-core/src/parser/mod.rs:420-429	crates/template-core/src/parser/mod.rs	420	429	Err(error) => Err(error)	-
+crates/template-core/src/parser/mod.rs:473-478	crates/template-core/src/parser/mod.rs	473	478	token.or_else	-
 crates/template-core/src/parser/mod.rs:532	crates/template-core/src/parser/mod.rs	532	-	pub fn extend_nodelist(	-
-parser/mod.rs:538	crates/template-core/src/parser/mod.rs	538	-	if node.must_be_first && nodelist.contains_nontext {	-
-resolve.rs:28	crates/template-core/src/parser/resolve.rs	28	-	pub enum Step {	-
-parser/resolve.rs:156	crates/template-core/src/parser/resolve.rs	156	-	pub trait LookupTarget {	-
-resolve.rs:253	crates/template-core/src/parser/resolve.rs	253	-	pub enum LookupOutcome {	-
-extends.rs:71	crates/template-core/src/parser/tags/extends.rs	71	-	if !nodelist.get_nodes_by_type("ExtendsNode").is_empty() {	-
-tags/mod.rs:216	crates/template-core/src/parser/tags/mod.rs	216	-	-	-
-parser/tags/mod.rs:231	crates/template-core/src/parser/tags/mod.rs	231	-	-	-
-url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
-with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
-filters.rs:69-71	crates/template-py/src/filters.rs	69	71	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
+crates/template-core/src/parser/mod.rs:538	crates/template-core/src/parser/mod.rs	538	-	if node.must_be_first && nodelist.contains_nontext {	-
+crates/template-core/src/parser/resolve.rs:28	crates/template-core/src/parser/resolve.rs	28	-	pub enum Step {	-
+crates/template-core/src/parser/resolve.rs:156	crates/template-core/src/parser/resolve.rs	156	-	pub trait LookupTarget {	-
+crates/template-core/src/parser/resolve.rs:253	crates/template-core/src/parser/resolve.rs	253	-	pub enum LookupOutcome {	-
+crates/template-core/src/parser/tags/extends.rs:71	crates/template-core/src/parser/tags/extends.rs	71	-	if !nodelist.get_nodes_by_type("ExtendsNode").is_empty() {	-
+crates/template-core/src/parser/tags/mod.rs:216	crates/template-core/src/parser/tags/mod.rs	216	-	-	-
+crates/template-core/src/parser/tags/mod.rs:231	crates/template-core/src/parser/tags/mod.rs	231	-	-	-
+crates/template-core/src/parser/tags/url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
+crates/template-core/src/parser/tags/with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
+crates/template-py/src/filters.rs:69-71	crates/template-py/src/filters.rs	69	71	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
 crates/template-py/src/filters.rs:248-257	crates/template-py/src/filters.rs	248	257	*self.raised.borrow_mut() = Some(err)	-
 crates/template-py/src/filters.rs:871	crates/template-py/src/filters.rs	871	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
-template-py/src/filters.rs:1675-1683	crates/template-py/src/filters.rs	1675	1683	match args.len()	-
+crates/template-py/src/filters.rs:1675-1683	crates/template-py/src/filters.rs	1675	1683	match args.len()	-
 crates/template-py/src/filters.rs:1731-1734	crates/template-py/src/filters.rs	1731	1734	host.take_raised()	-
-template-py/src/lib.rs:146	crates/template-py/src/lib.rs	146	-	fn filter_flags	-
-template-py/src/lib.rs:740	crates/template-py/src/lib.rs	740	-	fn if_condition_to_py	-
+crates/template-py/src/lib.rs:146	crates/template-py/src/lib.rs	146	-	fn filter_flags	-
+crates/template-py/src/lib.rs:740	crates/template-py/src/lib.rs	740	-	fn if_condition_to_py	-
 crates/template-py/src/lib.rs:1104	crates/template-py/src/lib.rs	1104	-	-	-
 crates/template-py/src/lib.rs:1251	crates/template-py/src/lib.rs	1251	-	-	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
@@ -56,8 +56,8 @@ base.py:151-152	django/template/base.py	151	152	if origin is None:	origin = Orig
 base.py:151-154	django/template/base.py	151	154	Origin(UNKNOWN_SOURCE)	-
 base.py:154	django/template/base.py	154	-	self.origin = origin	-
 base.py:183-186	django/template/base.py	183	186	lexer = DebugLexer(self.source)	-
-base.py:198-200	django/template/base.py	198	200	parser.parse()	-
 django/template/base.py:198	django/template/base.py	198	-	-	-
+base.py:198-200	django/template/base.py	198	200	parser.parse()	-
 base.py:204-212	django/template/base.py	204	212	e.raw_error_message = raw_message	-
 base.py:314-322	django/template/base.py	314	322	-	-
 base.py:358-403	django/template/base.py	358	403	class Token:	-
@@ -80,9 +80,9 @@ base.py:583-585	django/template/base.py	583	585	except Exception as e:	raise sel
 base.py:585	django/template/base.py	585	-	-	-
 base.py:587-588	django/template/base.py	587	588	self.command_stack.pop()	-
 base.py:600-617	django/template/base.py	600	617	def extend_nodelist(self, nodelist, node, token):	-
+base.py:602	django/template/base.py	602	-	if node.must_be_first and nodelist.contains_nontext:	-
 base.py:602-606	django/template/base.py	602	606	if node.must_be_first and nodelist.contains_nontext:	origin = "the template"
 base.py:602-612	django/template/base.py	602	612	-	-
-base.py:602	django/template/base.py	602	-	if node.must_be_first and nodelist.contains_nontext:	-
 base.py:603	django/template/base.py	603	-	if self.origin.template_name:	-
 base.py:611	django/template/base.py	611	-	-	-
 base.py:611-612	django/template/base.py	611	612	nodelist.contains_nontext = True	-
@@ -92,8 +92,8 @@ base.py:619-630	django/template/base.py	619	630	def error(self, token, e):	retur
 base.py:632-648	django/template/base.py	632	648	def invalid_block_tag(self, token, command, parse_until=None):	-
 base.py:651	django/template/base.py	651	-	-	-
 base.py:668-670	django/template/base.py	668	670	def add_library(self, lib):	self.filters.update(lib.filters)
-base.py:669-670	django/template/base.py	669	670	self.filters.update(lib.filters)	-
 base.py:669	django/template/base.py	669	-	self.tags.update	-
+base.py:669-670	django/template/base.py	669	670	self.filters.update(lib.filters)	-
 base.py:670	django/template/base.py	670	-	self.filters.update(lib.filters)	-
 base.py:676	django/template/base.py	676	-	return FilterExpression(token, self)	-
 base.py:678-682	django/template/base.py	678	682	def find_filter(self, filter_name):	raise TemplateSyntaxError("Invalid filter: '%s'" % filter_name)
@@ -102,18 +102,18 @@ base.py:688-699	django/template/base.py	688	699	constant_string = r"""	constant_
 base.py:690-698	django/template/base.py	690	698	re.escape(")")	-
 base.py:695	django/template/base.py	695	-	-	-
 base.py:696	django/template/base.py	696	-	-	-
-base.py:701-775	django/template/base.py	701	775	-	-
 base.py:701-719	django/template/base.py	701	719	-	-
+base.py:701-775	django/template/base.py	701	775	-	-
 base.py:703-719	django/template/base.py	703	719	filter_re = _lazy_re_compile	-
 base.py:705	django/template/base.py	705	-	(?P<filter_name>\w+)	-
 django/template/base.py:705	django/template/base.py	705	-	(?P<filter_name>\w+)	-
 base.py:706-711	django/template/base.py	706	711	(?:%(arg_sep)s	)?
 base.py:714	django/template/base.py	714	-	"var_chars": r"\w\.\+-",	-
 base.py:722-783	django/template/base.py	722	783	class FilterExpression:	self.is_var = isinstance(var_obj, Variable)
+base.py:747	django/template/base.py	747	-	if upto != start:	-
 base.py:747-749	django/template/base.py	747	749	-	-
 base.py:747-750	django/template/base.py	747	750	if upto != start:	"%s|%s|%s" % (token[:upto], token[upto:start], token[start:])
 base.py:747-772	django/template/base.py	747	772	if upto != start:	self.args_check(filter_name, filter_func, args)
-base.py:747	django/template/base.py	747	-	if upto != start:	-
 base.py:752	django/template/base.py	752	-	if var_obj is None:	-
 base.py:755	django/template/base.py	755	-	var_obj = Variable(constant).resolve({})	-
 base.py:763	django/template/base.py	763	-	var_obj = Variable(var)	-
@@ -155,27 +155,27 @@ base.py:924-940	django/template/base.py	924	940	def resolve(self, context):	-
 base.py:926-928	django/template/base.py	926	928	if self.lookups is not None	-
 base.py:932-939	django/template/base.py	932	939	gettext_lazy(msgid)	-
 base.py:958	django/template/base.py	958	-	catch-all for silent variable failures	-
-base.py:959-1028	django/template/base.py	959	1028	for bit in self.lookups:	return current
 base.py:959	django/template/base.py	959	-	for bit in self.lookups:	-
 base.py:959-992	django/template/base.py	959	992	# dictionary lookup	missing attribute
+base.py:959-1028	django/template/base.py	959	1028	for bit in self.lookups:	return current
 base.py:960-992	django/template/base.py	960	992	try:  # dictionary lookup	)  # missing attribute
 base.py:963	django/template/base.py	963	-	hasattr(type(current), "__getitem__")	-
 base.py:968	django/template/base.py	968	-	except (TypeError, AttributeError, KeyError, ValueError, IndexError):	-
 base.py:969-992	django/template/base.py	969	992	try:  # attribute lookup	)  # missing attribute
-base.py:972-976	django/template/base.py	972	976	if isinstance(current, BaseContext) and getattr(	current = getattr(current, bit)
 base.py:972	django/template/base.py	972	-	if isinstance(current, BaseContext) and getattr(	-
+base.py:972-976	django/template/base.py	972	976	if isinstance(current, BaseContext) and getattr(	current = getattr(current, bit)
 base.py:977	django/template/base.py	977	-	except (TypeError, AttributeError):	-
-base.py:979-980	django/template/base.py	979	980	if not isinstance(current, BaseContext) and bit in dir(current):	raise
 base.py:979	django/template/base.py	979	-	if not isinstance(current, BaseContext) and bit in dir(current):	-
+base.py:979-980	django/template/base.py	979	980	if not isinstance(current, BaseContext) and bit in dir(current):	raise
 base.py:983-988	django/template/base.py	983	988	IndexError,  # list index out of range	):  # unsubscriptable object
 base.py:989	django/template/base.py	989	-	raise VariableDoesNotExist(	-
-base.py:993-996	django/template/base.py	993	996	if callable(current):	elif getattr(current, "alters_data", False):
 base.py:993	django/template/base.py	993	-	if callable(current):	-
+base.py:993-996	django/template/base.py	993	996	if callable(current):	elif getattr(current, "alters_data", False):
 base.py:993-1013	django/template/base.py	993	1013	if callable(current):	raise
 base.py:994-995	django/template/base.py	994	995	if getattr(current, "do_not_call_in_templates", False):	pass
 base.py:997	django/template/base.py	997	-	current = context.template.engine.string_if_invalid	-
-base.py:1000-1013	django/template/base.py	1000	1013	bind()	-
 base.py:1000	django/template/base.py	1000	-	current()	-
+base.py:1000-1013	django/template/base.py	1000	1013	bind()	-
 base.py:1002-1013	django/template/base.py	1002	1013	-	-
 base.py:1004	django/template/base.py	1004	-	No signature found.	-
 base.py:1005	django/template/base.py	1005	-	current = context.template.engine.string_if_invalid	-
@@ -183,12 +183,12 @@ base.py:1009	django/template/base.py	1009	-	Arguments *were* required.	-
 base.py:1011	django/template/base.py	1011	-	current = context.template.engine.string_if_invalid	-
 base.py:1013	django/template/base.py	1013	-	raise	-
 base.py:1014	django/template/base.py	1014	-	except Exception as e:	-
-base.py:1014-1026	django/template/base.py	1014	1026	silent_variable_failure	-
 base.py:1014-1020	django/template/base.py	1014	1020	"Exception while resolving variable '%s' in template '%s'."	exc_info=True
-base.py:1015-1020	django/template/base.py	1015	1020	template_name = getattr(context, "template_name", None) or "unknown"	exc_info=True,
+base.py:1014-1026	django/template/base.py	1014	1026	silent_variable_failure	-
 base.py:1015	django/template/base.py	1015	-	getattr(context, "template_name", None) or "unknown"	-
-base.py:1016-1021	django/template/base.py	1016	1021	logger.debug	-
+base.py:1015-1020	django/template/base.py	1015	1020	template_name = getattr(context, "template_name", None) or "unknown"	exc_info=True,
 base.py:1016-1020	django/template/base.py	1016	1020	-	-
+base.py:1016-1021	django/template/base.py	1016	1021	logger.debug	-
 base.py:1023	django/template/base.py	1023	-	getattr(e, "silent_variable_failure", False)	-
 base.py:1023-1024	django/template/base.py	1023	1024	if getattr(e, "silent_variable_failure", False):	current = context.template.engine.string_if_invalid
 base.py:1024	django/template/base.py	1024	-	current = context.template.engine.string_if_invalid	-
@@ -198,11 +198,11 @@ base.py:1036	django/template/base.py	1036	-	-	-
 base.py:1044-1068	django/template/base.py	1044	1068	def render_annotated(self, context):	raise
 base.py:1054	django/template/base.py	1054	-	if context.template.engine.debug:	-
 base.py:1058-1062	django/template/base.py	1058	1062	if (	e.template_debug = (
-base.py:1060-1063	django/template/base.py	1060	1063	and context.render_context.template.origin == e._culprit_node.origin	context.render_context.template.get_exception_info(
 base.py:1060	django/template/base.py	1060	-	context.render_context.template.origin == e._culprit_node.origin	-
+base.py:1060-1063	django/template/base.py	1060	1063	and context.render_context.template.origin == e._culprit_node.origin	context.render_context.template.get_exception_info(
 base.py:1070-1082	django/template/base.py	1070	1082	nodes.extend(nodelist.get_nodes_by_type(nodetype))	-
-base.py:1079-1080	django/template/base.py	1079	1080	getattr(self, attr, None)	-
 base.py:1079	django/template/base.py	1079	-	getattr(self, attr, None)	-
+base.py:1079-1080	django/template/base.py	1079	1080	getattr(self, attr, None)	-
 base.py:1088	django/template/base.py	1088	-	contains_nontext = False	-
 base.py:1091	django/template/base.py	1091	-	SafeString("".join(	-
 base.py:1093-1098	django/template/base.py	1093	1098	"Return a list of all nodes of the given type"	-
@@ -211,8 +211,8 @@ base.py:1113-1120	django/template/base.py	1113	1120	return self.s	-
 base.py:1123-1136	django/template/base.py	1123	1136	issubclass(type(value), str)	-
 base.py:1139	django/template/base.py	1139	-	-	-
 base.py:1160	django/template/base.py	1160	-	kwarg_re = _lazy_re_compile(r"(?:(\w+)=)?(.+)")	-
-base.py:1163-1207	django/template/base.py	1163	1207	token_kwargs	-
 base.py:1163	django/template/base.py	1163	-	token_kwargs(bits, parser, support_legacy=False)	-
+base.py:1163-1207	django/template/base.py	1163	1207	token_kwargs	-
 base.py:1194	django/template/base.py	1194	-	-	-
 base.py:1200	django/template/base.py	1200	-	-	-
 base.py:1202	django/template/base.py	1202	-	kwargs[key] = parser.compile_filter(value)	-
@@ -243,15 +243,15 @@ defaultfilters.py:148	django/template/defaultfilters.py	148	-	arg = arg[:-1] or 
 defaultfilters.py:149-151	django/template/defaultfilters.py	149	151	elif last_char == "u":	arg = arg[:-1] or -1
 defaultfilters.py:150	django/template/defaultfilters.py	150	-	use_l10n = False	-
 defaultfilters.py:151	django/template/defaultfilters.py	151	-	arg = arg[:-1] or -1	-
-defaultfilters.py:152-159	django/template/defaultfilters.py	152	159	input_val = str(text)	return ""
 defaultfilters.py:152-155	django/template/defaultfilters.py	152	155	try:	except InvalidOperation:
-defaultfilters.py:153-154	django/template/defaultfilters.py	153	154	str(text)	-
+defaultfilters.py:152-159	django/template/defaultfilters.py	152	159	input_val = str(text)	return ""
 defaultfilters.py:153	django/template/defaultfilters.py	153	-	input_val = str(text)	-
-defaultfilters.py:155-159	django/template/defaultfilters.py	155	159	except InvalidOperation:	return ""
+defaultfilters.py:153-154	django/template/defaultfilters.py	153	154	str(text)	-
 defaultfilters.py:155	django/template/defaultfilters.py	155	-	except InvalidOperation:	-
+defaultfilters.py:155-159	django/template/defaultfilters.py	155	159	except InvalidOperation:	return ""
 defaultfilters.py:157-159	django/template/defaultfilters.py	157	159	d = Decimal(str(float(text)))	return ""
-defaultfilters.py:158-159	django/template/defaultfilters.py	158	159	except (ValueError, InvalidOperation, TypeError):	-
 defaultfilters.py:158	django/template/defaultfilters.py	158	-	except (ValueError, InvalidOperation, TypeError):	-
+defaultfilters.py:158-159	django/template/defaultfilters.py	158	159	except (ValueError, InvalidOperation, TypeError):	-
 defaultfilters.py:159	django/template/defaultfilters.py	159	-	return ""	-
 defaultfilters.py:161	django/template/defaultfilters.py	161	-	p = int(arg)	-
 defaultfilters.py:162	django/template/defaultfilters.py	162	-	except ValueError:	-
@@ -264,14 +264,14 @@ defaultfilters.py:180	django/template/defaultfilters.py	180	-	m = int(d) - d	-
 defaultfilters.py:180-182	django/template/defaultfilters.py	180	182	m = int(d) - d	return input_val
 defaultfilters.py:181	django/template/defaultfilters.py	181	-	except (ValueError, OverflowError, InvalidOperation):	-
 defaultfilters.py:182	django/template/defaultfilters.py	182	-	return input_val	-
-defaultfilters.py:184-192	django/template/defaultfilters.py	184	192	if not m and p <= 0:	-
 defaultfilters.py:184	django/template/defaultfilters.py	184	-	if not m and p <= 0:	-
+defaultfilters.py:184-192	django/template/defaultfilters.py	184	192	if not m and p <= 0:	-
 defaultfilters.py:185	django/template/defaultfilters.py	185	-	return mark_safe(	-
 defaultfilters.py:186	django/template/defaultfilters.py	186	-	formats.number_format(	-
 defaultfilters.py:187	django/template/defaultfilters.py	187	-	"%d" % (int(d)),	-
-defaultfilters.py:194-205	django/template/defaultfilters.py	194	205	exp = Decimal(1).scaleb(-abs(p))	-
 defaultfilters.py:194	django/template/defaultfilters.py	194	-	exp = Decimal(1).scaleb(-abs(p))	-
 defaultfilters.py:194-204	django/template/defaultfilters.py	194	204	exp = Decimal(1).scaleb(-abs(p))	rounded_d = d.quantize(exp, ROUND_HALF_UP, Context(prec=prec))
+defaultfilters.py:194-205	django/template/defaultfilters.py	194	205	exp = Decimal(1).scaleb(-abs(p))	-
 defaultfilters.py:196-198	django/template/defaultfilters.py	196	198	tupl = d.as_tuple()	units += -tupl[2] if m else tupl[2]
 defaultfilters.py:197	django/template/defaultfilters.py	197	-	len(tupl[1])	-
 defaultfilters.py:199-200	django/template/defaultfilters.py	199	200	prec = abs(p) + units + 1	prec = max(getcontext().prec, prec)
@@ -310,19 +310,19 @@ defaultfilters.py:403-407	django/template/defaultfilters.py	403	407	wordcount	-
 defaultfilters.py:404	django/template/defaultfilters.py	404	-	@stringfilter	-
 defaultfilters.py:410-414	django/template/defaultfilters.py	410	414	def wordwrap(value, arg):	return wrap(value, int(arg))
 defaultfilters.py:417-421	django/template/defaultfilters.py	417	421	-	-
-defaultfilters.py:417-438	django/template/defaultfilters.py	417	438	def ljust(value, arg):	return f"{value:^{width}}"
 defaultfilters.py:417-428	django/template/defaultfilters.py	417	428	return value.ljust(int(arg))	return value.rjust(int(arg))
+defaultfilters.py:417-438	django/template/defaultfilters.py	417	438	def ljust(value, arg):	return f"{value:^{width}}"
 defaultfilters.py:424-428	django/template/defaultfilters.py	424	428	-	-
 defaultfilters.py:431-438	django/template/defaultfilters.py	431	438	def center(value, arg):	return f"{value:^{width}}"
 defaultfilters.py:435-437	django/template/defaultfilters.py	435	437	if width <= 0:	return value
 defaultfilters.py:441-449	django/template/defaultfilters.py	441	449	-	-
 defaultfilters.py:445	django/template/defaultfilters.py	445	-	safe = isinstance(value, SafeData)	-
 defaultfilters.py:447-448	django/template/defaultfilters.py	447	448	if safe and arg != ";":	return mark_safe(value)
-defaultfilters.py:457-461	django/template/defaultfilters.py	457	461	-	-
 defaultfilters.py:457-459	django/template/defaultfilters.py	457	459	@register.filter("escape", is_safe=True)	def escape_filter(value):
+defaultfilters.py:457-461	django/template/defaultfilters.py	457	461	-	-
 defaultfilters.py:464-471	django/template/defaultfilters.py	464	471	escapeseq	-
-defaultfilters.py:474-482	django/template/defaultfilters.py	474	482	force_escape	-
 defaultfilters.py:474-476	django/template/defaultfilters.py	474	476	def force_escape(value):	-
+defaultfilters.py:474-482	django/template/defaultfilters.py	474	482	force_escape	-
 defaultfilters.py:485-494	django/template/defaultfilters.py	485	494	def linebreaks_filter(value, autoescape=True):	return mark_safe(linebreaks(value, autoescape))
 defaultfilters.py:486	django/template/defaultfilters.py	486	-	-	-
 defaultfilters.py:493	django/template/defaultfilters.py	493	-	-	-
@@ -332,8 +332,8 @@ defaultfilters.py:518-525	django/template/defaultfilters.py	518	525	safeseq	-
 defaultfilters.py:528-532	django/template/defaultfilters.py	528	532	def striptags(value):	return strip_tags(value)
 defaultfilters.py:540-575	django/template/defaultfilters.py	540	575	def _property_resolver(arg):	-
 defaultfilters.py:558-570	django/template/defaultfilters.py	558	570	def resolve(value):	value = getattr(value, part)
-defaultfilters.py:578-599	django/template/defaultfilters.py	578	599	def dictsort(value, arg):	-
 defaultfilters.py:578-587	django/template/defaultfilters.py	578	587	return sorted(value, key=_property_resolver(arg))	return ""
+defaultfilters.py:578-599	django/template/defaultfilters.py	578	599	def dictsort(value, arg):	-
 defaultfilters.py:590-599	django/template/defaultfilters.py	590	599	dictsortreversed	-
 defaultfilters.py:602-608	django/template/defaultfilters.py	602	608	return value[0]	return ""
 defaultfilters.py:611-621	django/template/defaultfilters.py	611	621	def join(value, arg, autoescape=True):	return mark_safe(data)
@@ -359,17 +359,17 @@ defaultfilters.py:857	django/template/defaultfilters.py	857	-	return int(value) 
 defaultfilters.py:860-891	django/template/defaultfilters.py	860	891	yesno	-
 defaultfilters.py:878	django/template/defaultfilters.py	878	-	arg = gettext("yes,no,maybe")	-
 defaultfilters.py:879	django/template/defaultfilters.py	879	-	bits = arg.split(",")	-
-defaultfilters.py:899-939	django/template/defaultfilters.py	899	939	filesizeformat	-
 defaultfilters.py:899	django/template/defaultfilters.py	899	-	@register.filter(is_safe=True)	-
+defaultfilters.py:899-939	django/template/defaultfilters.py	899	939	filesizeformat	-
 defaultfilters.py:905-907	django/template/defaultfilters.py	905	907	try:	except (TypeError, ValueError, UnicodeDecodeError):
 defaultfilters.py:906	django/template/defaultfilters.py	906	-	bytes_ = int(bytes_)	-
-defaultfilters.py:907-909	django/template/defaultfilters.py	907	909	except (TypeError, ValueError, UnicodeDecodeError):	return avoid_wrapping(value)
 defaultfilters.py:907	django/template/defaultfilters.py	907	-	except (TypeError, ValueError, UnicodeDecodeError):	-
+defaultfilters.py:907-909	django/template/defaultfilters.py	907	909	except (TypeError, ValueError, UnicodeDecodeError):	return avoid_wrapping(value)
 defaultfilters.py:908	django/template/defaultfilters.py	908	-	value = ngettext("%(size)d byte", "%(size)d bytes", 0) % {"size": 0}	-
 defaultfilters.py:911-912	django/template/defaultfilters.py	911	912	def filesize_number_format(value):	return formats.number_format(round(value, 1), 1)
 defaultfilters.py:912	django/template/defaultfilters.py	912	-	formats.number_format(round(value, 1), 1)	-
-defaultfilters.py:914-925	django/template/defaultfilters.py	914	925	KB = 1 << 10	value = ngettext("%(size)d byte", "%(size)d bytes", bytes_) % {"size": bytes_}
 defaultfilters.py:914-918	django/template/defaultfilters.py	914	918	KB = 1 << 10	PB = 1 << 50
+defaultfilters.py:914-925	django/template/defaultfilters.py	914	925	KB = 1 << 10	value = ngettext("%(size)d byte", "%(size)d bytes", bytes_) % {"size": bytes_}
 defaultfilters.py:920	django/template/defaultfilters.py	920	-	negative = bytes_ < 0	-
 defaultfilters.py:921-922	django/template/defaultfilters.py	921	922	if negative:	bytes_ = -bytes_
 defaultfilters.py:922	django/template/defaultfilters.py	922	-	bytes_ = -bytes_  # Allow formatting of negative numbers.	-
@@ -438,8 +438,8 @@ defaulttags.py:885	django/template/defaulttags.py	885	-	invalid_chars = frozense
 defaulttags.py:886	django/template/defaulttags.py	886	-	loopvars = re.split(r" *, *", " ".join(bits[1:in_index]))	-
 defaulttags.py:888	django/template/defaulttags.py	888	-	if not var or not invalid_chars.isdisjoint(var):	-
 defaulttags.py:906	django/template/defaulttags.py	906	-	return ForNode(loopvars, sequence, is_reversed, nodelist_loop, nodelist_empty)	-
-defaulttags.py:909-918	django/template/defaulttags.py	909	918	class TemplateLiteral(Literal):	return self.value.resolve(context, ignore_failures=True)
 defaulttags.py:909-911	django/template/defaulttags.py	909	911	-	-
+defaulttags.py:909-918	django/template/defaulttags.py	909	918	class TemplateLiteral(Literal):	return self.value.resolve(context, ignore_failures=True)
 defaulttags.py:914-915	django/template/defaulttags.py	914	915	-	-
 defaulttags.py:917-918	django/template/defaulttags.py	917	918	value.resolve(context, ignore_failures=True)	-
 defaulttags.py:921	django/template/defaulttags.py	921	-	class TemplateIfParser(IfParser):	-
@@ -480,15 +480,15 @@ defaulttags.py:1251	django/template/defaulttags.py	1251	-	-	-
 defaulttags.py:1258	django/template/defaulttags.py	1258	-	-	-
 defaulttags.py:1265	django/template/defaulttags.py	1265	-	-	-
 defaulttags.py:1268	django/template/defaulttags.py	1268	-	@register.tag(name="partial")	-
-defaulttags.py:1279	django/template/defaulttags.py	1279	-	extra_data = parser.extra_data	-
 defaulttags.py:1277-1281	django/template/defaulttags.py	1277	1281	case "partial", partial_name:	-
+defaulttags.py:1279	django/template/defaulttags.py	1279	-	extra_data = parser.extra_data	-
 defaulttags.py:1286	django/template/defaulttags.py	1286	-	simple_tag	-
 defaulttags.py:1286-1287	django/template/defaulttags.py	1286	1287	@register.simple_tag(name="querystring", takes_context=True)	def querystring(context, *args, **kwargs):
 defaulttags.py:1352-1417	django/template/defaulttags.py	1352	1417	@register.tag	return RegroupNode(target, expression, var_name)
 defaulttags.py:1400-1401	django/template/defaulttags.py	1400	1401	if len(bits) != 6:	raise TemplateSyntaxError("'regroup' tag takes five arguments")
 defaulttags.py:1402	django/template/defaulttags.py	1402	-	target = parser.compile_filter(bits[1])	-
-defaulttags.py:1403-1404	django/template/defaulttags.py	1403	1404	if bits[2] != "by":	raise TemplateSyntaxError("second argument to 'regroup' tag must be 'by'")
 defaulttags.py:1403	django/template/defaulttags.py	1403	-	if bits[2] != "by":	-
+defaulttags.py:1403-1404	django/template/defaulttags.py	1403	1404	if bits[2] != "by":	raise TemplateSyntaxError("second argument to 'regroup' tag must be 'by'")
 defaulttags.py:1405-1406	django/template/defaulttags.py	1405	1406	if bits[4] != "as":	raise TemplateSyntaxError("next-to-last argument to 'regroup' tag must be 'as'")
 defaulttags.py:1414-1416	django/template/defaulttags.py	1414	1416	expression = parser.compile_filter(	-
 defaulttags.py:1437	django/template/defaulttags.py	1437	-	return ResetCycleNode(parser._named_cycle_nodes[name])	-
@@ -579,14 +579,14 @@ smartif.py:153	django/template/smartif.py	153	-	EndToken = EndToken()	-
 smartif.py:157	django/template/smartif.py	157	-	ValueError	-
 smartif.py:159-173	django/template/smartif.py	159	173	-	-
 smartif.py:164-173	django/template/smartif.py	164	173	while i < num_tokens:	i += 1
-smartif.py:179-185	django/template/smartif.py	179	185	-	-
 smartif.py:179-183	django/template/smartif.py	179	183	OPERATORS[token]	-
+smartif.py:179-185	django/template/smartif.py	179	185	-	-
 smartif.py:198-200	django/template/smartif.py	198	200	-	-
 smartif.py:200	django/template/smartif.py	200	-	display()	-
 smartif.py:214-215	django/template/smartif.py	214	215	def create_var(self, value):	return Literal(value)
 cache.py:9	django/templatetags/cache.py	9	-	-	-
-cache.py:84-85	django/templatetags/cache.py	84	85	-	-
 cache.py:84	django/templatetags/cache.py	84	-	-	-
+cache.py:84-85	django/templatetags/cache.py	84	85	-	-
 cache.py:86-88	django/templatetags/cache.py	86	88	-	-
 cache.py:88	django/templatetags/cache.py	88	-	-	-
 cache.py:89	django/templatetags/cache.py	89	-	-	-
@@ -617,8 +617,8 @@ i18n.py:232-234	django/templatetags/i18n.py	232	234	-	-
 i18n.py:243-262	django/templatetags/i18n.py	243	262	-	-
 i18n.py:266-289	django/templatetags/i18n.py	266	289	do_get_language_info_list	-
 i18n.py:290-310	django/templatetags/i18n.py	290	310	-	-
-i18n.py:292-310	django/templatetags/i18n.py	292	310	["bidi"]	-
 i18n.py:292-294	django/templatetags/i18n.py	292	294	-	-
+i18n.py:292-310	django/templatetags/i18n.py	292	310	["bidi"]	-
 i18n.py:294	django/templatetags/i18n.py	294	-	return translation.get_language_info(lang_code)["name"]	-
 i18n.py:297-300	django/templatetags/i18n.py	297	300	language_name_translated	-
 i18n.py:298-300	django/templatetags/i18n.py	298	300	-	-
@@ -638,8 +638,8 @@ i18n.py:414-417	django/templatetags/i18n.py	414	417	The '%s' option was specifie
 i18n.py:415-417	django/templatetags/i18n.py	415	417	-	-
 i18n.py:434-441	django/templatetags/i18n.py	434	441	-	-
 i18n.py:441	django/templatetags/i18n.py	441	-	-	-
-i18n.py:456-596	django/templatetags/i18n.py	456	596	do_block_translate	-
 i18n.py:456-457	django/templatetags/i18n.py	456	457	-	-
+i18n.py:456-596	django/templatetags/i18n.py	456	596	do_block_translate	-
 i18n.py:458-596	django/templatetags/i18n.py	458	596	do_block_translate	-
 i18n.py:506-509	django/templatetags/i18n.py	506	509	-	-
 i18n.py:511	django/templatetags/i18n.py	511	-	-	-
@@ -648,14 +648,14 @@ i18n.py:531-532	django/templatetags/i18n.py	531	532	-	-
 i18n.py:560-578	django/templatetags/i18n.py	560	578	-	-
 i18n.py:562-567	django/templatetags/i18n.py	562	567	token = parser.next_token()	-
 i18n.py:568	django/templatetags/i18n.py	568	-	-	-
-i18n.py:569-572	django/templatetags/i18n.py	569	572	token.contents.strip() != "plural"	-
 i18n.py:569	django/templatetags/i18n.py	569	-	token.contents.strip() != "plural"	-
+i18n.py:569-572	django/templatetags/i18n.py	569	572	token.contents.strip() != "plural"	-
 i18n.py:580-584	django/templatetags/i18n.py	580	584	if token.contents.strip() != end_tag_name:	-
 i18n.py:600-616	django/templatetags/i18n.py	600	616	-	-
 i18n.py:613-614	django/templatetags/i18n.py	613	614	-	-
-l10n.py:7-21	django/templatetags/l10n.py	7	21	unlocalize	-
 l10n.py:7	django/templatetags/l10n.py	7	-	-	-
 l10n.py:7-12	django/templatetags/l10n.py	7	12	-	-
+l10n.py:7-21	django/templatetags/l10n.py	7	21	unlocalize	-
 l10n.py:15-21	django/templatetags/l10n.py	15	21	unlocalize	-
 l10n.py:24	django/templatetags/l10n.py	24	-	-	-
 l10n.py:31-36	django/templatetags/l10n.py	31	36	-	-
@@ -685,8 +685,8 @@ tz.py:26	django/templatetags/tz.py	26	-	timezone.get_current_timezone()	-
 tz.py:29-34	django/templatetags/tz.py	29	34	-	-
 tz.py:34	django/templatetags/tz.py	34	-	do_timezone(value, UTC)	-
 tz.py:37-38	django/templatetags/tz.py	37	38	@register.filter("timezone")	-
-tz.py:38-84	django/templatetags/tz.py	38	84	do_timezone(value, arg)	-
 tz.py:38	django/templatetags/tz.py	38	-	def do_timezone(value, arg):	-
+tz.py:38-84	django/templatetags/tz.py	38	84	do_timezone(value, arg)	-
 tz.py:46-47	django/templatetags/tz.py	46	47	-	-
 tz.py:48-86	django/templatetags/tz.py	48	86	except Exception	-
 tz.py:54-56	django/templatetags/tz.py	54	56	-	-
@@ -697,8 +697,8 @@ tz.py:112	django/templatetags/tz.py	112	-	-	-
 tz.py:117	django/templatetags/tz.py	117	-	-	-
 tz.py:127	django/templatetags/tz.py	127	-	-	-
 tz.py:136-154	django/templatetags/tz.py	136	154	use_tz = True	-
-tz.py:145-152	django/templatetags/tz.py	145	152	parser.parse(("endlocaltime",))	-
 tz.py:145-149	django/templatetags/tz.py	145	149	-	-
+tz.py:145-152	django/templatetags/tz.py	145	152	parser.parse(("endlocaltime",))	-
 tz.py:146-147	django/templatetags/tz.py	146	147	if len(bits) == 1:	-
 tz.py:148-149	django/templatetags/tz.py	148	149	"%r argument should be 'on' or 'off'" % bits[0]	-
 tz.py:151	django/templatetags/tz.py	151	-	use_tz = bits[1] == "on"	-
@@ -729,16 +729,16 @@ html.py:44	django/utils/html.py	44	-	MAX_STRIP_TAGS_DEPTH = 50	-
 html.py:47	django/utils/html.py	47	-	long_open_tag_without_closing_re = _lazy_re_compile(r"<[a-zA-Z][^>]{1000,}")	-
 html.py:50-60	django/utils/html.py	50	60	@keep_lazy(SafeString)	return SafeString(html.escape(str(text)))
 html.py:51-60	django/utils/html.py	51	60	SafeString(html.escape(str(text)))	-
-html.py:63-85	django/utils/html.py	63	85	-	-
 html.py:63-75	django/utils/html.py	63	75	_js_escapes = {	ord("\u2029"): "\\u2029",
+html.py:63-85	django/utils/html.py	63	85	-	-
 html.py:88-92	django/utils/html.py	88	92	-	-
 html.py:95-112	django/utils/html.py	95	112	json.dumps	-
 html.py:103	django/utils/html.py	103	-	json.dumps	-
 html.py:103-105	django/utils/html.py	103	105	json.dumps(value, cls=encoder or DjangoJSONEncoder)	-
 html.py:106-110	django/utils/html.py	106	110	-	-
+utils/html.py:115-125	django/utils/html.py	115	125	if hasattr(text, "__html__"):	-
 django/utils/html.py:115-127	django/utils/html.py	115	127	isinstance(text, Promise)	-
 html.py:115-127	django/utils/html.py	115	127	def conditional_escape(text):	return escape(text)
-utils/html.py:115-125	django/utils/html.py	115	125	if hasattr(text, "__html__"):	-
 html.py:124-125	django/utils/html.py	124	125	if hasattr(text, "__html__"):	return text.__html__()
 html.py:130-140	django/utils/html.py	130	140	-	-
 html.py:140	django/utils/html.py	140	-	-	-
@@ -774,8 +774,8 @@ django/utils/text.py:282	django/utils/text.py	282	-	-	-
 utils/text.py:282	django/utils/text.py	282	-	def get_text_list(list_, last_word=gettext_lazy("or")):	-
 utils/text.py:297-303	django/utils/text.py	297	303	if len(list_) == 1:	str(list_[-1])
 text.py:308-310	django/utils/text.py	308	310	def normalize_newlines(text):	return re_newlines.sub("\n", str(text))
-text.py:313-344	django/utils/text.py	313	344	-	-
 text.py:313	django/utils/text.py	313	-	@keep_lazy_text	-
+text.py:313-344	django/utils/text.py	313	344	-	-
 .django/django/utils/text.py:313-344	django/utils/text.py	313	344	return "".join(char2number.get(c, c) for c in phone.lower())	-
 text.py:344	django/utils/text.py	344	-	phone.lower()	-
 django/utils/text.py:423	django/utils/text.py	423	-	def smart_split(text):	-
@@ -796,14 +796,14 @@ django/utils/translation/__init__.py:275	django/utils/translation/__init__.py	27
 django/utils/translation/__init__.py:279	django/utils/translation/__init__.py	279	-	if "-" not in lang_code:	-
 django/utils/translation/__init__.py:280	django/utils/translation/__init__.py	280	-	raise KeyError("Unknown language code %s." % lang_code)	-
 django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	290	-	info["name_translated"] = gettext_lazy(info["name"])	-
-_impl/base.py:829	python/django_rust_templates/_impl/base.py	829	-	django_own_filters().get(func)	-
+python/django_rust_templates/_impl/base.py:829	python/django_rust_templates/_impl/base.py	829	-	django_own_filters().get(func)	-
 python/django_rust_templates/_impl/base.py:1161	python/django_rust_templates/_impl/base.py	1161	-	-	-
-_impl/parser.py:181	python/django_rust_templates/_impl/parser.py	181	-	"BlockTranslateNode": BlockTranslateNode,	-
+python/django_rust_templates/_impl/parser.py:181	python/django_rust_templates/_impl/parser.py	181	-	"BlockTranslateNode": BlockTranslateNode,	-
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
-_impl/parser.py:568	python/django_rust_templates/_impl/parser.py	568	-	-	-
-_impl/parser.py:669	python/django_rust_templates/_impl/parser.py	669	-	-	-
-_shim.py:75	python/django_rust_templates/_shim.py	75	-	TARGET = "django.template"	-
-_shim.py:556	python/django_rust_templates/_shim.py	556	-	-	-
+python/django_rust_templates/_impl/parser.py:568	python/django_rust_templates/_impl/parser.py	568	-	-	-
+python/django_rust_templates/_impl/parser.py:669	python/django_rust_templates/_impl/parser.py	669	-	-	-
+python/django_rust_templates/_shim.py:75	python/django_rust_templates/_shim.py	75	-	TARGET = "django.template"	-
+python/django_rust_templates/_shim.py:556	python/django_rust_templates/_shim.py	556	-	-	-
 python/django_rust_templates/host.py:35	python/django_rust_templates/host.py	35	-	-	-
 python/django_rust_templates/host.py:422	python/django_rust_templates/host.py	422	-	-	-
 python/django_rust_templates/host.py:555	python/django_rust_templates/host.py	555	-	-	-

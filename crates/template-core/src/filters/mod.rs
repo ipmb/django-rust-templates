@@ -207,7 +207,7 @@ pub struct FilterEntry {
 /// a library *tag* is not ours until `{% load %}`ed — `has_tag` compares a name
 /// against Django's callable. Filters have no such question: the Python seam is
 /// `django_own_filters().get(func)` keyed on the **function object**
-/// (`_impl/base.py:829`), so a library filter's handle is in the map only once
+/// (`python/django_rust_templates/_impl/base.py:829`), so a library filter's handle is in the map only once
 /// `{% load %}` registered it — "loaded" is implied by the key being present at
 /// all. A second Rust filter table would be a routing distinction the seam does
 /// not make, and `django_own_filters()` would have to guess which table to search.

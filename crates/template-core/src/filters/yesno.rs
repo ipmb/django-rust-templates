@@ -515,7 +515,7 @@ mod tests {
 
     /// The body's **first** host call for a missing argument is `gettext`, one of
     /// the 14 non-`Result` operations that [`NoFilterHost`] refuses by
-    /// **panicking** rather than returning `Err` (`filters/host.rs:576-739`), so
+    /// **panicking** rather than returning `Err` (`crates/template-core/src/filters/host.rs:576-739`), so
     /// the bare-shell test observes the panic the way `stringformat.rs`'s does.
     #[test]
     fn it_needs_a_host() {
