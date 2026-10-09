@@ -2708,7 +2708,11 @@ have failed a real acceptance test.**
 **Two measurements this task added to the pattern's specification.** The
 `filter_name` position of `\w` is only observable when a token puts a divergent
 code point *in the name*, and no real filter is named `u²` — so a corpus of real
-filter names cannot see a wrong spelling there. `tests/test_filter_expr_parity.py`
+filter names cannot see a wrong spelling there. That generalises, and the general
+form is worth carrying forward: **a corpus drawn from valid inputs cannot reach a
+rule that only governs which inputs are valid.** It is a reusable test for
+whether a corpus can see a given guard at all, and the same question should be
+asked of every generated corpus in later tasks. `tests/test_filter_expr_parity.py`
 carries `x|u²`, `x|ú`, `x|²` and `x|́` for that reason, and each was
 observed failing when `filter_name` was spelled with a bare `\w` (giving
 `Invalid filter: 'u'` where Django gives `Invalid filter: 'u²'`). Likewise
@@ -2880,6 +2884,92 @@ Run: `source scripts/env.sh && scripts/check.sh; echo "exit=$?"` → exit 0, 154
 git add python tests
 git commit -m "M3 task 6: materialise Variable and FilterExpression as Django's own objects"
 ```
+
+---
+
+**Task 6 as implemented — four corrections, and one of them is a defect in the
+committed tree that M6 must not inherit.**
+
+- **The reason `__new__` is used is `__init__`, not `__slots__`.** The plan says
+  "both classes use `__slots__`, so `cls(**kwargs)` cannot work", and that is
+  false: measured, `Variable(**{"var": "a.b"})` constructs fine and gives
+  `lookups == ("a", "b")`. `__slots__` restricts which *attributes* exist, not
+  how they are set. The conclusion is still right, for a stronger reason: both
+  `__init__`s take the **source string** and re-parse it. `Variable.__init__`
+  re-runs the character rules and every branch; `FilterExpression.__init__`
+  re-runs the whole match loop with `find_filter` and `args_check` in it. So
+  constructing through the class would have Python redo the parse Rust just
+  finished, and for a `FilterExpression` it would also fire the host checks a
+  second time at a point no longer tied to the parse. `tests/test_materialise.py`
+  asserts it rather than describing it: a subclass of Django's own `Variable`
+  records `__new__` and raises if the constructor is called, and the assertion
+  was observed failing (with that message) when `_materialise_variable` was
+  changed to `Variable(desc.var)`. Writing the spy as an *instance* proves
+  nothing — `spy.__new__(spy)` resolves to `object.__new__`, measured.
+- **Task 4's `_native.Variable` decode arm was never added, and is now.** Task 4
+  Step 4 specified it and Task 6 owns `_materialise_variable`, so neither landed
+  it: `_decode_value` had no arm for a bare `VariableDesc` and would have fallen
+  through to the `LookupError`. Nothing in the current emitter reaches it —
+  `AttrValue::Variable` is only produced *inside* a `FilterExprDesc` — so it is
+  pinned by calling `_decode_value` directly, which is the only way it can be
+  observed at all, and it sits beside the `FilterExpr` arm for the reason that
+  arm's comment gives.
+- **`_materialise_operand` returns Django's `(lookup, value)` pair, not the
+  value.** Django's `args` is a list of pairs (`base.py:773`), `resolve` unpacks
+  it (`:804-810`) and `args_check` counts it (`:822-826`); returning the value
+  alone gives `args == ['d']` and an `IndexError` the first time anything renders.
+  The constant branch calls `resolve({})` — the materialiser doing what the wire
+  deliberately defers — and the result is **three** distinct Python types, which
+  is the strongest argument for the wire shape and was measured:
+  `Variable('_("Yes")').resolve({})` → `__proxy__`,
+  `Variable('"x"').resolve({})` → `SafeString`, `Variable('5').resolve({})` →
+  `int`. `AttrValue::SafeStr("x")` would have been wrong for the last one, which
+  is not a string at all. All three are now asserted, and the assertion was
+  observed failing when the constant branch stopped resolving.
+- **`check_filter(parser)` lives in `_impl/parser.py`.** It is the *same* two
+  lines `_materialise_filter_expression` needs, and it is what
+  `_native.parse_filter_expression`'s host argument takes — so a parse-time check
+  and a materialisation-time check cannot drift apart. See the prerequisite
+  below for where it gets wired.
+
+**A prerequisite this task creates for Task 7, and the defect it must not
+inherit.** The plan never wires `check_filter` into `_native.parse`, which still
+passes `NoHost`; Task 7 owns the shell entry that supplies the `Parser` (D5), so
+that wiring belongs there. **Whichever caller supplies a `Parser` to
+`_native.parse` must supply `check_filter` with it**, or filter errors defer to
+materialisation and lose the parse-time ordering the seam exists for — measured:
+`x|nope:1:2` reports `Could not parse the remainder: ':2'` without a host and
+`Invalid filter: 'nope'` with one, and Django reports the latter. Both halves of
+that measurement are now a test.
+
+**And a defect in the committed tree that M6 inherits unless it is fixed.**
+Task 5's `Host::check_filter` returned `()` and the materialiser looked the filter
+name up a second time, on the claim that "nothing mutates `parser.filters`
+between a token's compile and its materialisation". That claim is true about the
+wrong interval: the interval that matters is compile → **materialisation**, which
+spans the whole parse, and `Parser.add_library` is
+`self.filters.update(lib.filters)` (`base.py:668-670`) — `update`, so a later
+`{% load %}` **rebinds** an existing name. Measured on the pinned tree: the
+registry's `upper` is the builtin before a load and the loaded function after it,
+`rebound = True`. So
+
+```
+{{ x|upper }}{% load custom %}{{ y|upper }}
+```
+
+binds token 1 to custom's `upper` here, where Django bound it to the builtin at
+`:771`. Unobservable today only because `{% load %}` is M6's, so no committed
+behaviour is wrong — but the doc comment's safety sentence has been **replaced
+now** rather than at M6, because that sentence is exactly what a reader at M6
+would trust. The fix is the design the milestone originally offered and then
+talked itself out of: `check_filter` returns a **handle** — the function the host
+looked up, kept in the same arena that already holds `{% resetcycle %}`'s `Ref`
+and put on the wire as `AttrValue::Ref` — so the name is looked up exactly once,
+at `:771`, and the descriptor carries the function Django would have carried. The
+M6 test is a **sandwich**: a builtin use, a `{% load %}` that shadows that name,
+then a shadowed use, asserting the **first** rendered with the builtin. A test
+with the shadowed use alone passes under either design, because its token is
+after the load. `{% load %}` must not ship before the handle does.
 
 ---
 

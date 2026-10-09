@@ -16,6 +16,7 @@ keeps the node classes Django's own.
 import importlib.util
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -25,17 +26,24 @@ if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
 from django.template.base import (  # noqa: E402
+    FilterExpression,
+    Lexer,
     Node,
     NodeList,
+    Parser,
     TextNode,
     Token,
     TokenType,
+    Variable,
+    VariableNode,
 )
 from django.template.defaulttags import (  # noqa: E402
     AutoEscapeControlNode,
     SpacelessNode,
     VerbatimNode,
 )
+from django.template.engine import Engine  # noqa: E402
+from django.utils.functional import Promise  # noqa: E402
 from django.utils.safestring import SafeString  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
@@ -49,6 +57,21 @@ sys.modules[_MATERIALISER_SPEC.name] = materialiser
 _MATERIALISER_SPEC.loader.exec_module(materialiser)
 
 TEXT = ("TextNode", (("s", "hi"),), (), (0, "hi", 1, (0, 2)))
+
+
+def parser():
+    """A `Parser` with Django's real filter and tag registries.
+
+    A bare `Parser(tokens)` registers **nothing** — `builtins=None` becomes `[]`
+    (`base.py:518-519`) — so it knows neither `upper` nor `spaceless`, and
+    `find_filter` raises `Invalid filter` for every name. This is the same trap
+    `tests/test_parser_errors.py` records: the libraries have to come from an
+    `Engine` instance, because `template_builtins` is set in `Engine.__init__`
+    (`engine.py:62-63`) rather than on the class. This is the path
+    `Engine.compile_template` itself takes.
+    """
+    engine = Engine()
+    return Parser([], engine.template_libraries, engine.template_builtins)
 
 
 def text_desc(contents, token=None):
@@ -478,6 +501,392 @@ class ParseToMaterialiseTests(unittest.TestCase):
         for source in self.EMITTING_TEMPLATES.values():
             with self.subTest(source=source):
                 materialiser.materialise(_native.parse(source))
+
+
+class ExpressionMaterialisationTests(unittest.TestCase):
+    """`_materialise_variable` / `_materialise_filter_expression`.
+
+    `Variable` and `FilterExpression` are both built with `__new__` plus slot
+    assignment rather than through the class, and the reason is `__init__` — not
+    `__slots__`. Measured: `Variable(**{"var": "a.b"})` constructs fine and gives
+    `lookups == ("a", "b")`, because `__slots__` restricts which *attributes*
+    exist, not how they are set. The constructors are unusable because both take
+    the **source string** and re-parse it: `Variable.__init__` re-runs the
+    character rules and every branch, and `FilterExpression.__init__` re-runs the
+    whole match loop with `find_filter` and `args_check` in it. Calling either
+    would have Python redo the parse Rust just finished — discarding Rust's error
+    messages and the tokens they carry (§6), and for a `FilterExpression` firing
+    the host checks a second time in an order no longer tied to the parse.
+
+    Every assertion below is against Django's *own* construction of the same
+    token, so a divergence is a divergence from Django rather than from a
+    description of Django.
+    """
+
+    TOKENS = ["a.b.c", "x", "5", "1.5", '"quoted"', "'q'", "_(\"x\")", " 5 ", "12_"]
+
+    def test_a_materialised_variable_matches_djangos_own(self):
+        for raw in self.TOKENS:
+            with self.subTest(raw=raw):
+                ours = materialiser._materialise_variable(
+                    _native.parse_variable(raw), parser()
+                )
+                theirs = Variable(raw)
+                for slot in (
+                    "var",
+                    "literal",
+                    "lookups",
+                    "translate",
+                    "message_context",
+                ):
+                    self.assertEqual(
+                        getattr(ours, slot),
+                        getattr(theirs, slot),
+                        f"{slot} differs for {raw!r}",
+                    )
+                # `isinstance` is what `FilterExpression.is_var` reads, so it is
+                # asserted rather than inferred from the slot values.
+                self.assertIsInstance(ours, Variable)
+
+    def test_a_quoted_literal_is_a_safe_string_on_both_sides(self):
+        # `SafeString` *is* a `str`, so every equality above passes for a plain
+        # `str`; only `isinstance` sees it, and it is user-visible output.
+        for raw in ['"<b>"', "'<b>'", '_("<b>")']:
+            with self.subTest(raw=raw):
+                ours = materialiser._materialise_variable(
+                    _native.parse_variable(raw), parser()
+                )
+                self.assertIsInstance(ours.literal, SafeString)
+                self.assertIsInstance(Variable(raw).literal, SafeString)
+
+    def test_the_materialiser_builds_by_new_and_never_by_calling_the_constructor(
+        self,
+    ):
+        """The `__new__` decision, asserted rather than described.
+
+        A subclass of Django's own `Variable` stands in for it: it records
+        `__new__` and raises if the constructor is ever *called*. Calling it is
+        the mistake this test exists to prevent, and it is invisible to every
+        other assertion here — a re-parsed variable has the same slots.
+
+        The spy must be a **class**, not an instance with a `__new__`: an
+        instance's `__new__` is only reached through construction, so
+        `spy.__new__(spy)` silently resolves to `object.__new__` and the patch
+        would prove nothing. Measured, which is why the class is written this
+        way.
+        """
+        real = materialiser.Variable
+        made = []
+
+        class Spy(real):
+            __slots__ = ()
+
+            def __new__(cls, *args, **kwargs):
+                # `Variable.__new__(Variable)`: the materialiser reaches `__new__`
+                # through the attribute and passes the class explicitly — which
+                # lands in `cls`, because `__new__` is implicitly a staticmethod.
+                # So a constructed `Spy(token)` and the materialiser's call are
+                # distinguishable: only the first puts `token` in `args`.
+                made.append((cls, args, kwargs))
+                return object.__new__(cls)
+
+            def __init__(self, *args, **kwargs):
+                raise AssertionError(
+                    "the constructor was called, so the token was parsed a "
+                    "second time in Python and Rust's parse was discarded"
+                )
+
+        with unittest.mock.patch.object(materialiser, "Variable", Spy):
+            variable = materialiser._materialise_variable(
+                _native.parse_variable("a.b.c"), parser()
+            )
+
+        self.assertEqual(made, [(Spy, (), {})], "`__new__` must get the class")
+        self.assertIsInstance(variable, real)
+        self.assertEqual(variable.lookups, ("a", "b", "c"))
+        self.assertEqual(variable.var, "a.b.c")
+
+    def test_a_variable_descriptor_decodes_to_a_real_variable(self):
+        """`_decode_value`'s `_native.Variable` arm.
+
+        Task 4's plan put this arm in Step 4; it could not be added then because
+        `_materialise_variable` is this task's. Nothing in the current emitter
+        reaches it — `AttrValue::Variable` is only produced inside a
+        `FilterExpression` — so the arm is pinned by calling `_decode_value`
+        directly, which is the only way it can be observed at all.
+        """
+        decoded = materialiser._decode_value(
+            _native.parse_variable("a.b"), None, parser()
+        )
+        self.assertIsInstance(decoded, Variable)
+        self.assertEqual((decoded.var, decoded.lookups), ("a.b", ("a", "b")))
+
+    def test_a_materialised_filter_expression_holds_real_filter_functions(self):
+        ours = materialiser._materialise_filter_expression(
+            _native.parse_filter_expression("x|upper"), parser()
+        )
+        theirs = FilterExpression("x|upper", parser())
+        self.assertEqual(len(ours.filters), 1)
+        self.assertIs(
+            ours.filters[0][0],
+            theirs.filters[0][0],
+            "the filter must be Django's function, by identity",
+        )
+        self.assertTrue(ours.is_var)
+        self.assertEqual(ours.token, "x|upper")
+        self.assertEqual(ours.var.var, theirs.var.var)
+
+    def test_the_arguments_are_djangos_pairs_with_the_lookup_flag(self):
+        raw = 'x|default:"d"|join:y'
+        ours = materialiser._materialise_filter_expression(
+            _native.parse_filter_expression(raw), parser()
+        )
+        theirs = FilterExpression(raw, parser())
+
+        (our_func, our_args), (their_func, their_args) = ours.filters[0], theirs.filters[0]
+        self.assertEqual(our_func.__name__, their_func.__name__)
+        self.assertEqual(
+            [lookup for lookup, _value in our_args],
+            [lookup for lookup, _value in their_args],
+            "the lookup flags must be Django's",
+        )
+        # A constant argument is the *value*, and a safe one.
+        self.assertEqual(our_args[0][1], their_args[0][1])
+        self.assertIsInstance(our_args[0][1], SafeString)
+        self.assertNotIsInstance(our_args[0][1], Variable)
+
+        # A lookup argument keeps a real `Variable`, which is what lets
+        # `resolve` call `arg.resolve(context)` on it. `args` is a *list* of
+        # pairs — `filters.append((filter_func, args))` (`base.py:773`) — so the
+        # pair is reached through `[0]`.
+        self.assertEqual(our_args[0][0], False)
+        _func, second_args = ours.filters[1]
+        lookup, variable = second_args[0]
+        self.assertEqual(lookup, True)
+        self.assertIsInstance(variable, Variable)
+        self.assertEqual(variable.var, "y")
+
+    def test_a_constant_operand_is_resolved_and_a_translated_one_is_a_proxy(self):
+        """The wire's `lookup` flag, and why Rust cannot carry the value.
+
+        Django resolves a constant operand at parse time —
+        `Variable(constant).resolve({})` — and for the `_("…")` marker that value
+        is `gettext_lazy(msgid)`, a lazy `__proxy__`. Rust cannot construct one,
+        so it sends the `Variable` plus the flag and the materialiser resolves.
+        Asserted on `_args` because `repr` on a proxy calls `gettext`, which
+        needs Django settings configured — and this suite deliberately runs
+        without them.
+        """
+        ours = materialiser._materialise_filter_expression(
+            _native.parse_filter_expression('_("Yes")'), parser()
+        )
+        self.assertIsInstance(ours.var, Promise, "a translated constant is a lazy proxy")
+        self.assertNotIsInstance(ours.var, Variable)
+        self.assertEqual(ours.var._args, ("Yes",))
+        self.assertFalse(ours.is_var)
+        self.assertEqual(ours.var._args, FilterExpression('_("Yes")', parser()).var._args)
+
+        plain = materialiser._materialise_filter_expression(
+            _native.parse_filter_expression('"x"'), parser()
+        )
+        self.assertEqual(plain.var, "x")
+        self.assertIsInstance(plain.var, SafeString)
+        self.assertFalse(plain.is_var)
+
+    def test_args_check_runs_where_the_function_is(self):
+        """Review Focus item 2: a Rust-side check cannot reproduce
+        `inspect.getfullargspec` plus decorator unwrapping, so the *shell*
+        raises, through the real `args_check`.
+
+        Every message is Django's own, from `FilterExpression` on the same token,
+        rather than transcribed — the counts are not the obvious ones.
+        `args_check` does `plen = len(provided) + 1` (`base.py:822-826`), so
+        "provided" **includes the value being filtered**: `x|cut` has one
+        provided and needs two, and `x|upper:5` has two and needs one. It is also
+        called *inside* the match loop, so the arity error beats the remainder
+        error for `x|upper:1:2` — the last row below, where `:2` is left over and
+        never reached.
+        """
+        for token in ("x|cut", "x|cut:'a'", "x|upper:5", 'x|default:"d"'):
+            with self.subTest(token=token):
+                self.assertEqual(
+                    self._error(token),
+                    self._django_error(token),
+                    "materialisation-time check differs from Django's",
+                )
+        # Two rows where the arity error must **beat** the remainder error, and
+        # `:2` is genuinely left over, so that is only possible with the host
+        # inside the parse loop.
+        check = materialiser.check_filter(parser())
+        for token in ("x|upper:1:2", 'x|upper:1:"s"'):
+            with self.subTest(token=token, where="parse"):
+                self.assertEqual(self._error(token, check), self._django_error(token))
+
+    def test_an_unknown_filter_is_djangos_own_error(self):
+        with self.assertRaises(Exception) as caught:
+            materialiser._materialise_filter_expression(
+                _native.parse_filter_expression("x|nope"), parser()
+            )
+        self.assertEqual(str(caught.exception), "Invalid filter: 'nope'")
+
+    def test_the_two_checks_happen_in_djangos_order(self):
+        """`find_filter` before `args_check` (`base.py:771-772`).
+
+        Both orders are wrong for at least one row here, so the messages name
+        which ran first: `x|nope:1:2` would be an arity error under the wrong
+        order, and it is the *more* plausible one, since `:2` is genuinely left
+        over — while Django reports the filter name.
+
+        The last row shows the other side of the boundary: `_bad` raises while
+        the argument's `Variable` is built (`base.py:768`), which is before
+        `find_filter`, so for that row the underscore message wins. Both are
+        compared against Django on the same token.
+        """
+        check = materialiser.check_filter(parser())
+        for token in ("x|nope:1:2", "x|nope", "x|nope:_bad", "x|nope:-5", "x|upper:1:2"):
+            with self.subTest(token=token):
+                self.assertEqual(self._error(token, check), self._django_error(token))
+
+    def test_the_host_is_what_makes_djangos_ordering_possible(self):
+        """The same token, with and without the seam — the seam's whole point.
+
+        `x|nope:1:2` has *two* things wrong with it: the filter does not exist,
+        and `:2` is left over. Django reports the filter, because `find_filter`
+        runs inside the loop and the remainder check runs after it. Without a
+        host the parse runs to the end of the loop and reports the remainder
+        instead — a different message for the same token, which is why the host
+        could not be a batched shell-side pass over the finished parse.
+        """
+        with self.assertRaises(Exception) as without:
+            _native.parse_filter_expression("x|nope:1:2")
+        self.assertIn("remainder", str(without.exception))
+
+        with self.assertRaises(Exception) as with_host:
+            _native.parse_filter_expression(
+                "x|nope:1:2", materialiser.check_filter(parser())
+            )
+        self.assertEqual(str(with_host.exception), "Invalid filter: 'nope'")
+
+        self.assertEqual(str(with_host.exception), self._django_error("x|nope:1:2"))
+
+    def _error(self, token, check=None):
+        """The message for `token`, or `None` if it is accepted.
+
+        `_native.parse_filter_expression` is called with whatever `check` is
+        given, so a caller can decide *where* the two filter checks run — at
+        parse time (the host) or at materialisation.
+        """
+        try:
+            materialiser._materialise_filter_expression(
+                _native.parse_filter_expression(token, check), parser()
+            )
+        except Exception as error:  # noqa: BLE001 - the message is the comparison
+            return str(error)
+        return None
+
+    def _django_error(self, token):
+        try:
+            FilterExpression(token, parser())
+        except Exception as error:  # noqa: BLE001
+            return str(error)
+        return None
+
+    def test_materialising_a_filter_expression_without_a_parser_is_loud(self):
+        # A `FilterExpression` holds a Python function, so there is nothing to
+        # build without the registry that owns one. Loud rather than a node that
+        # renders as the empty string.
+        with self.assertRaises(LookupError):
+            materialiser._materialise_filter_expression(
+                _native.parse_filter_expression("x|upper")
+            )
+
+    def test_the_check_filter_callable_raises_djangos_two_errors(self):
+        """`check_filter` is what `_native.parse` needs, and it is the *same*
+        two calls — so a parse-time check and a materialisation-time check
+        cannot drift apart."""
+        check = materialiser.check_filter(parser())
+        # `upper(value)`: one provided, and that is what it takes.
+        check("upper", 0)
+        with self.assertRaises(Exception) as caught:
+            check("nope", 0)
+        self.assertEqual(str(caught.exception), "Invalid filter: 'nope'")
+        # `cut(value, arg)`: one provided, one short. The count in the message
+        # includes the value, so this is "1 provided" and not "0".
+        with self.assertRaises(Exception) as caught:
+            check("cut", 0)
+        self.assertEqual(str(caught.exception), "cut requires 2 arguments, 1 provided")
+        # And the other direction, for a filter that takes none.
+        with self.assertRaises(Exception) as caught:
+            check("upper", 1)
+        self.assertEqual(str(caught.exception), "upper requires 1 arguments, 2 provided")
+
+    def test_materialising_a_filter_expression_does_not_reparse_either(self):
+        raw = "x|upper|lower"
+        ours = materialiser._materialise_filter_expression(
+            _native.parse_filter_expression(raw), parser()
+        )
+        self.assertEqual(ours.token, raw)
+        self.assertEqual(
+            [func.__name__ for func, _args in ours.filters], ["upper", "lower"]
+        )
+
+
+class VariableNodeTests(unittest.TestCase):
+    """`{{ … }}` end to end: `_native.parse` → registry → real `FilterExpression`."""
+
+    def test_a_variable_node_carries_a_real_filter_expression(self):
+        nodelist = materialiser.materialise(
+            _native.parse("a{{ x|upper }}b"), None, None, parser()
+        )
+        self.assertEqual(len(nodelist), 3)
+        node = nodelist[1]
+        self.assertIsInstance(node, VariableNode)
+        self.assertIsInstance(node.filter_expression, FilterExpression)
+        self.assertTrue(node.filter_expression.is_var)
+        self.assertEqual(node.filter_expression.token, "x|upper")
+        # And the filter is Django's own function, so the node can render.
+        func, args = node.filter_expression.filters[0]
+        self.assertEqual(func.__name__, "upper")
+        self.assertEqual(args, [])
+        self.assertEqual(node.token.contents, "x|upper")
+
+    def test_a_variable_node_matches_djangos_own_construction(self):
+        source = 'a{{ "x"|default:"d" }}b'
+        ours = materialiser.materialise(
+            _native.parse(source), None, None, parser()
+        )[1]
+
+        engine = Engine()
+        django_parser = Parser(
+            Lexer(source).tokenize(),
+            engine.template_libraries,
+            engine.template_builtins,
+        )
+        theirs = next(
+            node for node in django_parser.parse() if isinstance(node, VariableNode)
+        )
+
+        self.assertEqual(ours.filter_expression.token, theirs.filter_expression.token)
+        self.assertEqual(ours.filter_expression.is_var, theirs.filter_expression.is_var)
+        self.assertEqual(ours.filter_expression.var, theirs.filter_expression.var)
+        self.assertEqual(
+            [func.__name__ for func, _args in ours.filter_expression.filters],
+            [func.__name__ for func, _args in theirs.filter_expression.filters],
+        )
+        self.assertEqual(ours.filter_expression.filters[0][1][0][1], "d")
+
+    def test_a_filter_expression_attribute_is_materialised_not_passed_through(self):
+        """The `_native.FilterExpr` arm must precede the sequence arms.
+
+        A descriptor that reached `isinstance(value, list)` first — or that had no
+        arm at all — would hand the node a wire object, and nothing would report
+        it: the object has the same three attribute *names*.
+        """
+        decoded = materialiser._decode_value(
+            _native.parse_filter_expression("x|upper"), None, parser()
+        )
+        self.assertIsInstance(decoded, FilterExpression)
+        self.assertNotIsInstance(decoded, _native.FilterExpr)
 
 
 if __name__ == "__main__":

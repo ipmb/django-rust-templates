@@ -49,12 +49,45 @@ pub trait Host {
     /// a `{{ x|bad }}` on an earlier line would lose to a later line's unmatched
     /// tag.
     ///
-    /// **Validate-only: the return value is `()` and Django's is not.**
+    /// **Validate-only: the return value is `()` and Django's is not, and that
+    /// is known to be wrong for `{% load %}`.** Stated as a defect rather than a
+    /// trade-off, because the sentence that used to stand here — "nothing mutates
+    /// `parser.filters` between a token's compile and its materialisation" — was
+    /// true about the wrong interval and would have been believed at M6.
+    ///
     /// `find_filter`'s result is retained — `filters.append((filter_func, args))`
     /// (`base.py:773`) is what renders — so the shell looks the name up a second
-    /// time when it materialises the `FilterExpression`. That is safe: the lookup
-    /// is a dict read, and nothing mutates `parser.filters` between a token's
-    /// compile and its materialisation.
+    /// time when it materialises the `FilterExpression`. That lookup is a dict
+    /// read, but not a *stable* one: `Parser.add_library` is
+    /// `self.filters.update(lib.filters)` (`base.py:668-670`), and `update`
+    /// **rebinds** a name that is already there. Measured on the pinned tree:
+    ///
+    /// ```text
+    /// parser.filters["upper"] before load: the builtin
+    ///                         after  load: 'SHADOWED'   rebound = True
+    /// ```
+    ///
+    /// The interval that matters is compile → materialisation, and our
+    /// materialisation happens after the entire parse. So
+    ///
+    /// ```text
+    /// {{ x|upper }}{% load custom %}{{ y|upper }}
+    /// ```
+    ///
+    /// binds token 1 to custom's `upper` here, where Django bound it to the
+    /// builtin at `:771`. Unobservable today only because `{% load %}` is M6's —
+    /// so this is a prerequisite of M6, not a bug in the committed tree: **the
+    /// return type becomes a handle before `{% load %}` ships.**
+    ///
+    /// The handle is cheap because the table already exists. The shell keeps the
+    /// function it looked up in the same arena that holds `{% resetcycle %}`'s
+    /// `Ref` and puts its index on the wire as `AttrValue::Ref`, so the
+    /// descriptor carries the *function* Django would have carried and the name
+    /// is looked up exactly once, at `:771`. The M6 test is a sandwich — a
+    /// builtin use, a `{% load %}` that shadows the name, then a shadowed use,
+    /// asserting the **first** rendered with the builtin. A test with the
+    /// shadowed use alone passes under either design, because its token is after
+    /// the load.
     ///
     /// `arg_count` rather than the arguments themselves, because it is all
     /// `args_check` reads: it does `provided = list(provided)`, then
