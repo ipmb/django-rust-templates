@@ -1074,7 +1074,7 @@ impl FilterHost for PyFilterHost<'_> {
         self.formats_text("time_format", value, format)
     }
 
-    fn timesince(&self, d: &Value, now: Option<&Value>, reversed: bool) -> String {
+    fn timesince(&self, d: &Value, now: Option<&Value>, reversed: bool) -> Result<String, Error> {
         let py = self.py;
         let outcome = (|| {
             let now_object = match now {
@@ -1087,7 +1087,18 @@ impl FilterHost for PyFilterHost<'_> {
                 .call1((self.object(d)?, now_object, reversed))?;
             elapsed.extract::<String>()
         })();
-        outcome.unwrap_or_else(|e| self.infallible_failure("timesince", e))
+        // Python's message is carried through so `assert_raises_same` can compare
+        // it: the filter catches `(ValueError, TypeError)` and lets the
+        // `AttributeError` escape, so the text of the escaping class is a row.
+        outcome.map_err(|e| self.host_error("timesince", e))
+    }
+
+    fn dateformat_format(&self, value: &Value, format: &Value) -> Result<String, Error> {
+        self.dateformat_text("format", "dateformat.format", value, format)
+    }
+
+    fn dateformat_time_format(&self, value: &Value, format: &Value) -> Result<String, Error> {
+        self.dateformat_text("time_format", "dateformat.time_format", value, format)
     }
 
     fn number_format(&self, args: NumberFormatArgs<'_>) -> String {
@@ -1447,6 +1458,35 @@ impl PyFilterHost<'_> {
         outcome.map_err(|e| self.host_error(operation, e))
     }
 
+    /// `django.utils.dateformat`'s two convenience functions — the second branch
+    /// of `date` and of `time`.
+    ///
+    /// The module's `format` shadows the builtin's name, so the operation string
+    /// is qualified (`dateformat.format`): that is what names which of the pair
+    /// was asked for, in an error and in a test's `raise_on`, where a bare
+    /// `format` would be ambiguous.
+    fn dateformat_text(
+        &self,
+        function: &'static str,
+        operation: &'static str,
+        value: &Value,
+        format: &Value,
+    ) -> Result<String, Error> {
+        let py = self.py;
+        let outcome = (|| {
+            // `format` crosses as a `&Value` and is `str()`d by Python *inside*
+            // the callee, so an absent argument is the text `"None"` — four live
+            // format characters — rather than an empty string. See `FilterHost`'s
+            // doc for the measurement.
+            let formatted = py
+                .import("django.utils.dateformat")?
+                .getattr(function)?
+                .call1((self.object(value)?, self.object(format)?))?;
+            formatted.extract::<String>()
+        })();
+        outcome.map_err(|e| self.host_error(operation, e))
+    }
+
     /// What an **infallible** operation does when Python nevertheless raises.
     ///
     /// The trait declares a block of operations as returning a bare value, which
@@ -1456,11 +1496,13 @@ impl PyFilterHost<'_> {
     /// whose host call failed says so rather than producing a plausible wrong
     /// string.
     ///
-    /// **The set was then audited against inputs a template can carry, and one
-    /// operation left it**: `strip_tags` raises Django's `SuspiciousOperation`
-    /// from `HTMLParser`'s depth limit on plain ASCII, and is now
-    /// `Result<String, Error>`. The audit is also what says the rest stay — each
-    /// entry is a probe, not an argument:
+    /// **The set was then audited against inputs a template can carry, and two
+    /// operations have left it**: `strip_tags` raises Django's `SuspiciousOperation`
+    /// from `HTMLParser`'s depth limit on plain ASCII, and `timesince` raises
+    /// `AttributeError` on a value with no date protocol (`'str' object has no
+    /// attribute 'year'`) in a filter that catches only `(ValueError, TypeError)`.
+    /// Both are now `Result<String, Error>`. The audit is also what says the rest
+    /// stay — each entry is a probe, not an argument:
     ///
     /// | operation | the input that raises | why a body cannot reach it |
     /// |---|---|---|
@@ -1471,13 +1513,12 @@ impl PyFilterHost<'_> {
     /// | `number_format` | none found — the landed callers (`floatformat`, `filesizeformat`) answer on `nan`, `inf` and `10**400` exactly as Django does | |
     /// | `filesize_number_format` | none found — same three inputs, matching Django's own `OverflowError`s, which arrive through `to_int` instead | |
     /// | `gettext`, `ngettext` | none found | |
-    /// | `timesince` | not yet reachable — Task 10 lands its only caller | |
     ///
     /// "None found" is a measurement over the inputs probed, not a proof that
     /// none exists, and the difference is the whole point of writing it down: an
     /// operation whose raising input is later found **leaves this list by gaining
-    /// a `Result`**, exactly as `strip_tags` did, and the row that found it is
-    /// what forces the signature change.
+    /// a `Result`**, exactly as `strip_tags` and `timesince` did, and the row that
+    /// found it is what forces the signature change.
     fn infallible_failure(&self, operation: &'static str, err: PyErr) -> String {
         let message = match err.value(self.py).str() {
             Ok(text) => text.to_string(),

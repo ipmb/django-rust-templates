@@ -616,6 +616,38 @@ pub trait FilterHost {
     /// `django.utils.formats.time_format`, the same shape and the same reason:
     /// its body is `get_format(format or "TIME_FORMAT", use_l10n)`.
     fn time_format(&self, value: &Value, format: Option<&str>) -> Result<String, Error>;
+    /// `django.utils.dateformat.format` (`dateformat.py:326-329`) — the **second**
+    /// branch of `date`, where the argument is used literally rather than resolved
+    /// as a format setting.
+    ///
+    /// **`format` is a `&Value` where [`Self::date_format`]'s is an `Option<&str>`,
+    /// and that is the wrapped signature rather than an inconsistency.**
+    /// `formats.date_format` hands its argument to `get_format(arg or
+    /// "DATE_FORMAT")`, where it is a **lookup key** and `None` is the sentinel
+    /// selecting the default key. `dateformat.format` instead `str()`s any object
+    /// and splits the text (`dateformat.py:42`), so an absent argument is the text
+    /// `"None"` — four live format characters, not an empty string. Measured on
+    /// `datetime(2026, 10, 8, 14, 30, 45)`:
+    ///
+    /// ```text
+    /// dateformat.format(dt, None)  = 'Oct.202610'
+    /// dateformat.format(dt, True)  = 'UTCThu, 08 Oct 2026 14:30:45 +0000000000'
+    /// dateformat.format(dt, 5)     = '5'
+    /// ```
+    ///
+    /// So a `&str` seam would make the Rust body compute `str(None)` itself, which
+    /// is the pattern this trait exists to avoid. The two branches of `date` call
+    /// two different functions; this is the second one's own signature.
+    fn dateformat_format(&self, value: &Value, format: &Value) -> Result<String, Error>;
+    /// `django.utils.dateformat.time_format` (`dateformat.py:332-335`) — the second
+    /// branch of `time`, the same shape and the same reason as
+    /// [`Self::dateformat_format`].
+    ///
+    /// It differs from the `date` twin on the absent argument, which is worth
+    /// knowing because it is a second reason the return is a `Result`: `TimeFormat`
+    /// has no `N`, so `dateformat.time_format(t, None)` raises where the `date` twin
+    /// answers — `AttributeError: 'TimeFormat' object has no attribute 'N'`.
+    fn dateformat_time_format(&self, value: &Value, format: &Value) -> Result<String, Error>;
     /// `django.utils.timesince.timesince`, **with Django's own signature**.
     ///
     /// `timeuntil` is not `timesince` with the arguments swapped: Django's
@@ -633,7 +665,17 @@ pub trait FilterHost {
     ///
     /// `reversed` is therefore a parameter here rather than a property of the
     /// call site, because it is only expressible on Python's side of the seam.
-    fn timesince(&self, d: &Value, now: Option<&Value>, reversed: bool) -> String;
+    ///
+    /// **It returns a `Result`, for the same reason `strip_tags` does.** The
+    /// helper raises `AttributeError` on a value with no date protocol —
+    /// `timesince("x")` is `'str' object has no attribute 'year'` — and
+    /// `timesince_filter` does **not** catch it: its `except (ValueError,
+    /// TypeError)` lets that class through while catching the mixed-awareness
+    /// `TypeError` and answering `''`. The two classes leave the *same* filter in
+    /// opposite directions, so a bare `String` could express neither. This is the
+    /// audit row in the Python host's `infallible_failure` table leaving the list,
+    /// by the route that table's own closing paragraph describes.
+    fn timesince(&self, d: &Value, now: Option<&Value>, reversed: bool) -> Result<String, Error>;
     /// `django.utils.formats.number_format`, in the three shapes the two callers
     /// use. The struct is [`NumberFormatArgs`].
     fn number_format(&self, args: NumberFormatArgs<'_>) -> String;
@@ -749,7 +791,7 @@ pub trait FilterHost {
     ///
     /// `timeuntil` is the caller the previous doc named, and following it is
     /// wrong: `timeuntil_filter` is `timesince(d, now, reversed=True)` with `now`
-    /// filled **inside** `timesince` (`timesince.py:66`) from `d.tzinfo`. A
+    /// filled **inside** `timesince` (`timesince.py:67-68`) from `d.tzinfo`. A
     /// caller supplying this value instead takes the `elif is_aware(now) and
     /// is_aware(d)` branch and raises, and the filter catches `(ValueError,
     /// TypeError)` and answers `""` — so the documented caller turns a real
@@ -958,8 +1000,21 @@ impl FilterHost for NoFilterHost {
         Err(refused("time_format"))
     }
 
-    fn timesince(&self, _d: &Value, _now: Option<&Value>, _reversed: bool) -> String {
-        refused_panic("timesince")
+    fn dateformat_format(&self, _value: &Value, _format: &Value) -> Result<String, Error> {
+        Err(refused("dateformat_format"))
+    }
+
+    fn dateformat_time_format(&self, _value: &Value, _format: &Value) -> Result<String, Error> {
+        Err(refused("dateformat_time_format"))
+    }
+
+    fn timesince(
+        &self,
+        _d: &Value,
+        _now: Option<&Value>,
+        _reversed: bool,
+    ) -> Result<String, Error> {
+        Err(refused("timesince"))
     }
 
     fn number_format(&self, _args: NumberFormatArgs<'_>) -> String {
@@ -1088,6 +1143,8 @@ pub struct TestFilterHost {
     pub localtime: Option<Value>,
     pub date_format: Option<String>,
     pub time_format: Option<String>,
+    pub dateformat_format: Option<String>,
+    pub dateformat_time_format: Option<String>,
     pub timesince: Option<String>,
     pub number_format: Option<String>,
     pub gettext: Option<String>,
@@ -1392,11 +1449,28 @@ impl FilterHost for TestFilterHost {
             .ok_or_else(|| refused("time_format"))
     }
 
-    fn timesince(&self, _d: &Value, _now: Option<&Value>, _reversed: bool) -> String {
-        self.record_plain("timesince");
-        self.timesince
+    fn dateformat_format(&self, _value: &Value, _format: &Value) -> Result<String, Error> {
+        self.record("dateformat_format")?;
+        self.dateformat_format
             .clone()
-            .unwrap_or_else(|| refused_panic("timesince"))
+            .ok_or_else(|| refused("dateformat_format"))
+    }
+
+    fn dateformat_time_format(&self, _value: &Value, _format: &Value) -> Result<String, Error> {
+        self.record("dateformat_time_format")?;
+        self.dateformat_time_format
+            .clone()
+            .ok_or_else(|| refused("dateformat_time_format"))
+    }
+
+    fn timesince(
+        &self,
+        _d: &Value,
+        _now: Option<&Value>,
+        _reversed: bool,
+    ) -> Result<String, Error> {
+        self.record("timesince")?;
+        self.timesince.clone().ok_or_else(|| refused("timesince"))
     }
 
     fn number_format(&self, _args: NumberFormatArgs<'_>) -> String {
