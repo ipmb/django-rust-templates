@@ -248,7 +248,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # assertions are the correction's, only the claim in the name moved. Measured by
 # discovery: `git diff tests/` since `1d05fb1` is `+2/-1` rows, in `test_shim.py`
 # alone, so 442 + 2 - 1 = 443.
-PINNED = 443
+#
+# 443 → 444 is the M13 Task 1 review's strict-mode finding, **one** row in
+# `test_shim.py`: `test_strict_mode_refuses_under_the_production_ordering`. The
+# two rows the task added are each other's control but both `uninstall()` first,
+# so neither has the shim installed when the strict call happens — and that is
+# the state `scripts/shimpath/sitecustomize.py:33` guarantees in a real run,
+# where the check used to sit behind `install`'s early return and could not fire
+# at all. The row stages a module, installs non-strict, and asserts the refusal
+# twice; the fix is `_refuse_if_incomplete()`, called from both paths. `git diff
+# tests/` since `547bfb9` is `+1` row, in one file, no removals, so 443 + 1 =
+# 444 — and the same diff is why the count moving by one here is the whole
+# story: the fix in `_shim.py` is a function and two call sites, not rows.
+PINNED = 444
 
 
 def collected() -> unittest.TestSuite:

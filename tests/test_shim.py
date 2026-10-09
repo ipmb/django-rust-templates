@@ -585,20 +585,87 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
                     "the message is not the meter's",
                 )
             finally:
-                # The install that refused left the finder installed and holding
-                # the widened paths, so it is dropped and rebuilt against the
-                # tree as it is. **The ``__path__`` removal happens after that
-                # ``uninstall()`` on purpose, and the reason is measured rather
-                # than assumed:** this row's first draft argued that the refused
-                # install had replaced ``django.template`` with ours, so the list
-                # appended to above was not the one to clean. It is the same
-                # object — the shim caches Django's module in ``_django_modules``
-                # and hands it back on ``uninstall`` (the property
-                # ``test_a_reinstall_does_not_re_execute_a_module`` pins), so
-                # uninstalling first is what makes ``sys.modules`` carry the very
-                # list the staging wrote to. The membership guard stays as
-                # insurance, not as the mechanism: if a later change does swap
-                # the object, this removes nothing rather than raising.
+                # Two moments, because they disagree, and the first draft of this
+                # comment named only the second. **Immediately after the refusal
+                # the live `django.template` is ours, not Django's** — the
+                # installing path takes the name over and then raises, so the
+                # list this row appended to is no longer in `sys.modules` and a
+                # check made *there* finds it clean. **The block's own
+                # `uninstall()` is what puts Django's module back** — and that
+                # module is the very object the staging wrote to, because the
+                # shim caches it in `_django_modules` and hands it back
+                # (the property `test_a_reinstall_does_not_re_execute_a_module`
+                # pins). So the `remove` below does real work, and it works for
+                # the reason the two moments are named in this order: the
+                # removal is after the `uninstall()` on purpose, because only
+                # then does `sys.modules` carry the list that was staged. Read
+                # at the first moment, "it is the same object" is false; read at
+                # the second, true, which is why the commit that fixed the
+                # phrasing had to name both rather than swap one claim for its
+                # opposite. The membership guard stays as insurance: if a later
+                # change does swap the object, this removes nothing rather than
+                # raising.
+                if _shim.installed():
+                    _shim.uninstall()
+                current = sys.modules["django.template"]
+                if tmp in list(current.__path__):
+                    current.__path__.remove(tmp)
+                _shim.install()
+
+    def test_strict_mode_refuses_under_the_production_ordering(self):
+        """The refusal's reachability in the configuration this project ships.
+
+        The two rows above both ``uninstall()`` first, which is what makes them
+        each other's control — and is also why neither exercises the ordering a
+        real run has. ``scripts/shimpath/sitecustomize.py:33`` installs
+        non-strict unconditionally, so by the time any caller asks for strict
+        the shim is already in and ``install`` takes its ``if installed():``
+        early return. The check used to sit *after* that return, so strict mode
+        could not refuse in the shipped configuration whatever the meter said:
+        measured here, with a staged module and the shim installed,
+        ``install(strict=True)`` returned silently. The fix moved the check in
+        front of the return, and this row is the one that pins the *ordering*
+        rather than the branch — the branch is the row above's subject, and a
+        fix that ran the check only when ``installed()`` is false would pass
+        that one and fail this one.
+
+        The loop is the second half of the fix's shape. Refusing leaves the shim
+        in place on purpose (the refused install is not rolled back, so the
+        meter can be read and the cause fixed without re-installing); what must
+        not follow is a refusal that fires once. A caller who asks twice gets
+        the same answer twice, and the second call is the one that would
+        regress if the check moved back behind the return.
+
+        The meter assertion before the loop is the positive control, drawn from
+        the same population as the claim: without it a staging that silently
+        failed would leave a *complete* engine, and "strict refused" would then
+        be a row that passes for the wrong reason — the state row one above
+        asserts is accepted.
+        """
+        _shim.uninstall()
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "not_yet_ported.py").write_text("")
+            sys.modules["django.template"].__path__.append(tmp)
+            try:
+                _shim.install()  # the production ordering: non-strict first
+                self.assertEqual(
+                    _shim.unshimmed(),
+                    ["django.template.not_yet_ported"],
+                    "the staging did not reach the meter, so this row would "
+                    "refuse nothing and pass against an engine that is whole",
+                )
+                for attempt in ("first", "second"):
+                    with self.assertRaises(_shim.ShimError) as ctx:
+                        _shim.install(strict=True)
+                    self.assertIn(
+                        "django.template.not_yet_ported",
+                        str(ctx.exception),
+                        f"the {attempt} strict install did not refuse on the meter",
+                    )
+            finally:
+                # Same two moments as the row above, and the same ordering: the
+                # `uninstall()` is what makes `sys.modules` carry the very list
+                # the staging wrote to, so the removal follows it.
                 if _shim.installed():
                     _shim.uninstall()
                 current = sys.modules["django.template"]

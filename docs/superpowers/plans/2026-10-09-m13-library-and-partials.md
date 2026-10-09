@@ -229,6 +229,29 @@ See this task's Files block. Two are mechanical; `test_strict_mode_raises_while_
 Run: `scripts/run_unit_tests.sh tests.test_shim tests.test_collected_tests -v`
 Expected: PASS, 25 tests (22 + 3).
 
+- [ ] **Step 6c: The review's strict-mode finding — the check runs on both paths**
+
+**This step is in the plan because the plan was wrong about the mechanism, not just about a count.** Step 6b's pair of rows is each other's control, as the sentence above says — and both of them `uninstall()` first, so both call `install(strict=True)` on the path that *performs* an install. That is not the path a real run takes. `scripts/shimpath/sitecustomize.py:33` installs **non-strict, unconditionally** under `DJANGO_RUST_TEMPLATES=1`, so every caller-requested strict install is the second call and takes `install`'s `if installed(): return` — which the check sat *behind*. So in the shipped configuration `strict` could not refuse whatever the meter said.
+
+Measured, with a module staged as in the row above:
+
+```text
+uninstall()
+sys.modules['django.template'].__path__.append(tmp)   # not_yet_ported.py in tmp
+install()                                             # what sitecustomize does
+unshimmed() -> ['django.template.not_yet_ported']      # the meter really is non-empty
+install(strict=True) -> RETURNED SILENTLY             # ← the defect
+```
+
+**Fix:** `_refuse_if_incomplete()` in `_shim.py`, called from both paths — from the already-installed branch when `strict`, and from the tail where the inline check was. Both paths leave the shim installed (deliberately), so a refused install is repeatable: two consecutive `install(strict=True)` calls refuse twice, which is the second half of the fix and what the new row's loop pins.
+
+**The third row**, `test_strict_mode_refuses_under_the_production_ordering`, is the one that pins the *ordering*: it installs non-strict first, asserts the meter is exactly the staged module (the positive control — a staging that silently failed would leave a whole engine and the row would pass for the wrong reason), then asserts the refusal on two consecutive calls. A fix that ran the check only when `installed()` is false passes Step 6b's row and fails this one.
+
+`tests/test_collected_tests.py`'s `PINNED` moves `443` → `444` in the same commit.
+
+Run: `scripts/run_unit_tests.sh tests.test_shim tests.test_collected_tests -v`
+Expected: PASS, 26 tests (22 + 3 + 1).
+
 - [ ] **Step 7: Run the acceptance suite — this task's real risk**
 
 The 28 rows of `template_library` and the 166 library-facing rows now exercise **our** `Library`. This is where a transcription that is not verbatim shows up.

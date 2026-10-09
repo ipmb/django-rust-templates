@@ -597,10 +597,55 @@ def _by_depth(names) -> list[str]:
     return sorted(names, key=lambda name: (name.count("."), name))
 
 
+def _refuse_if_incomplete() -> None:
+    """Raise if the engine is not wholly ours — ``strict`` install's check.
+
+    **A function because it runs on both of ``install``'s paths, and that is the
+    fix for a defect the M13 review measured rather than argued.** The check used
+    to sit behind the ``if installed(): return`` guard, so it ran only on the
+    call that actually performed an install — and in the configuration this
+    project ships, that call is *never* the caller's:
+    ``scripts/shimpath/sitecustomize.py:33`` installs **non-strict,
+    unconditionally**, so under ``DJANGO_RUST_TEMPLATES=1`` the shim is already
+    in before any application code runs and every ``install(strict=True)`` is a
+    second call. Measured with a module staged where Django's own are found —
+    a temporary directory holding ``not_yet_ported.py``, appended to the
+    imported package's ``__path__``, which is the lever
+    ``test_strict_mode_raises_when_a_module_is_still_djangos`` describes:
+
+        uninstall()
+        sys.modules['django.template'].__path__.append(tmp)
+        install()                            # exactly what sitecustomize.py:33 does
+        unshimmed() -> ['django.template.not_yet_ported']   # the meter is not empty
+        install(strict=True) -> returned silently           # and strict said nothing
+
+    So ``strict`` could not refuse in production whatever the meter said, while
+    reading as a guarantee. That is round 1's finding 4 one level in: finding 4
+    was *a green suite does not prove the shim ran*; this is *a successful
+    ``install(strict=True)`` does not prove the engine is complete*.
+
+    **The two paths are deliberately not symmetric about the raise.** The
+    already-installed path leaves the shim exactly as it found it, because the
+    caller is not the one who installed it — an earlier, possibly non-strict,
+    caller is. The installing path leaves it in place too, which makes a refused
+    install *repeatable*: the second call now takes this path and refuses again,
+    where before the check could not fire twice for the same reason it could not
+    fire once.
+    """
+    remaining = unshimmed()
+    if remaining:
+        raise ShimError(
+            "strict mode: the engine is not wholly ours, and these engine "
+            "modules are still served by Django's own code: " + ", ".join(remaining)
+        )
+
+
 def install(strict: bool = False) -> None:
     global _installed_finder
 
     if installed():
+        if strict:
+            _refuse_if_incomplete()
         return
 
     # Capture Django's own paths before we take the name over — per namespace,
@@ -648,13 +693,7 @@ def install(strict: bool = False) -> None:
         )
 
     if strict:
-        remaining = unshimmed()
-        if remaining:
-            raise ShimError(
-                "strict mode: the engine is not wholly ours, and these engine "
-                "modules are still served by Django's own code: "
-                + ", ".join(remaining)
-            )
+        _refuse_if_incomplete()
 
 
 def uninstall() -> None:

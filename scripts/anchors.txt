@@ -799,6 +799,7 @@ _shim.py:75	python/django_rust_templates/_shim.py	75	-	TARGET = "django.template
 _shim.py:556	python/django_rust_templates/_shim.py	556	-	-	-
 python/django_rust_templates/host.py:422	python/django_rust_templates/host.py	422	-	-	-
 python/django_rust_templates/host.py:555	python/django_rust_templates/host.py	555	-	-	-
+scripts/shimpath/sitecustomize.py:33	scripts/shimpath/sitecustomize.py	33	-	-	-
 tests/parity_target.py:62	tests/parity_target.py	62	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
 tests/parity_target.py:170	tests/parity_target.py	170	-	So this is the replacement Python side	-
 filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-
