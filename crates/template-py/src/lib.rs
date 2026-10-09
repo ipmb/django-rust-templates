@@ -3,12 +3,16 @@
 //! This is the only crate permitted to depend on Python. The seam traits
 //! defined in `template-core` are implemented here over `PyObject`.
 
-use pyo3::exceptions::PyStopIteration;
+use pyo3::create_exception;
+use pyo3::exceptions::{PyException, PyStopIteration};
 use pyo3::prelude::*;
+use pyo3::types::PyTuple;
 
 // Aliased to keep the call site readable: `CoreLexer` names the crate's lexer,
 // as opposed to anything Python-side that might later be called a lexer.
 use template_core::lexer::Lexer as CoreLexer;
+use template_core::parser::desc::{AttrValue, NodeDesc, NodeListDesc, TokenDesc};
+use template_core::parser::{Error, ErrorKind, NoHost, Parser as CoreParser};
 use template_core::token::{Token, TokenType};
 
 /// Engine version, so the Python shell can assert it is talking to the build it
@@ -78,10 +82,229 @@ fn lex(source: &str, debug: bool) -> Vec<LexedToken> {
         .collect()
 }
 
+/// An opaque handle to a host-owned value carried inside a descriptor.
+///
+/// `template-core` stores the index and never reads it. The shell resolves it
+/// through the `resolve_ref` callback passed to `materialise`; M3's
+/// `FilterExpression` is the first real producer. Constructible from Python so
+/// that a test can hand-build a descriptor, which is the only reason this is a
+/// `#[pyclass]` with a `#[new]` rather than an opaque capsule.
+#[pyclass(frozen)]
+#[derive(Debug)]
+pub struct NodeRef {
+    #[pyo3(get)]
+    pub index: u64,
+}
+
+#[pymethods]
+impl NodeRef {
+    #[new]
+    fn new(index: u64) -> Self {
+        Self { index }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("<NodeRef {}>", self.index)
+    }
+}
+
+/// A string that is already safe (`django.utils.safestring.SafeData`).
+///
+/// It rides on the wire rather than a plain `str` because `{% verbatim %}`'s
+/// content is a `SafeString` computed at **parse** time (Review Focus item 8),
+/// and a plain `str` would be escaped when the node finally renders. The shell
+/// converts it with `mark_safe`; Rust does not import Django to do so.
+#[pyclass(frozen)]
+#[derive(Debug)]
+pub struct SafeStr {
+    #[pyo3(get)]
+    pub text: String,
+}
+
+#[pymethods]
+impl SafeStr {
+    #[new]
+    fn new(text: String) -> Self {
+        Self { text }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("<SafeStr {:?}>", self.text)
+    }
+}
+
+create_exception!(
+    _native,
+    ParseError,
+    PyException,
+    "A template parse failure raised by `_native.parse`.\n\
+     \n\
+     Carries `message` and `token`; the Python shell catches it and raises\n\
+     `django.template.exceptions.TemplateSyntaxError` with the same message and\n\
+     a real `Token` object, which is design decision 2: Rust owns the message,\n\
+     Python owns the exception object that `assertRaisesMessage` and\n\
+     `Template.get_exception_info` inspect."
+);
+
+/// A token's wire shape, shared with `_native.lex`.
+type WireToken = (u8, String, usize, Option<(usize, usize)>);
+
+fn token_to_py(py: Python<'_>, token: &TokenDesc) -> PyResult<Py<PyAny>> {
+    let wire: WireToken = (
+        token.token_type as u8,
+        token.contents.clone(),
+        token.lineno,
+        token.position,
+    );
+    Ok(wire.into_pyobject(py)?.into_any().unbind())
+}
+
+fn attr_value_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
+    Ok(match value {
+        AttrValue::Str(s) => s.as_str().into_pyobject(py)?.into_any().unbind(),
+        AttrValue::SafeStr(s) => Py::new(py, SafeStr::new(s.clone()))?.into_any(),
+        // `bool`'s `IntoPyObject` yields a `Borrowed` (Python's `True`/`False`
+        // are singletons), which must be owned before `into_any` can consume it.
+        AttrValue::Bool(b) => (*b).into_pyobject(py)?.to_owned().into_any().unbind(),
+        AttrValue::Int(i) => (*i).into_pyobject(py)?.into_any().unbind(),
+        AttrValue::None => py.None(),
+        AttrValue::Ref(r) => Py::new(py, NodeRef::new(r.0))?.into_any(),
+    })
+}
+
+/// A `(name, value)` pair as a 2-tuple.
+fn pair_to_py(py: Python<'_>, name: &str, value: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    Ok(
+        PyTuple::new(py, [name.into_pyobject(py)?.into_any().unbind(), value])?
+            .into_any()
+            .unbind(),
+    )
+}
+
+fn node_desc_to_py(py: Python<'_>, desc: &NodeDesc) -> PyResult<Py<PyAny>> {
+    let attrs = desc
+        .attrs
+        .iter()
+        .map(|(name, value)| pair_to_py(py, name, attr_value_to_py(py, value)?))
+        .collect::<PyResult<Vec<Py<PyAny>>>>()?;
+
+    let nodelists = desc
+        .nodelists
+        .iter()
+        .map(|(name, nodelist)| pair_to_py(py, name, nodelist_desc_to_py(py, nodelist)?))
+        .collect::<PyResult<Vec<Py<PyAny>>>>()?;
+
+    let token = match &desc.token {
+        Some(token) => token_to_py(py, token)?,
+        None => py.None(),
+    };
+
+    Ok(PyTuple::new(
+        py,
+        [
+            desc.class_name
+                .as_str()
+                .into_pyobject(py)?
+                .into_any()
+                .unbind(),
+            PyTuple::new(py, attrs)?.into_any().unbind(),
+            PyTuple::new(py, nodelists)?.into_any().unbind(),
+            token,
+        ],
+    )?
+    .into_any()
+    .unbind())
+}
+
+fn nodelist_desc_to_py(py: Python<'_>, nodelist: &NodeListDesc) -> PyResult<Py<PyAny>> {
+    let nodes = nodelist
+        .nodes
+        .iter()
+        .map(|node| node_desc_to_py(py, node))
+        .collect::<PyResult<Vec<Py<PyAny>>>>()?;
+
+    Ok(PyTuple::new(
+        py,
+        [
+            PyTuple::new(py, nodes)?.into_any().unbind(),
+            nodelist
+                .contains_nontext
+                .into_pyobject(py)?
+                .to_owned()
+                .into_any()
+                .unbind(),
+        ],
+    )?
+    .into_any()
+    .unbind())
+}
+
+/// Translate a parse failure into the Python exception the shell will re-raise.
+///
+/// The token rides as an attribute on the exception **instance** rather than
+/// through a `#[pyclass(extends = PyException)]` with a custom `__new__`: every
+/// `BaseException` instance has a `__dict__`, so this needs no extra class and
+/// `e.token` is readable exactly as it will be on the shell's
+/// `TemplateSyntaxError`.
+fn parse_error(py: Python<'_>, error: &Error) -> PyResult<PyErr> {
+    let err = match &error.kind {
+        // Django reaches `next(bits)` on an exhausted iterator and lets
+        // `StopIteration` out of `parse` — only `Exception` is caught, to attach
+        // the token. A bare `StopIteration` has no arguments and so an empty
+        // `str()`, which is what `PyStopIteration::new_err(())` produces; giving
+        // it a message would be a gratuitous difference from Django at the one
+        // place `assertRaises` is used instead of `assertRaisesMessage`.
+        ErrorKind::UnterminatedMarker => PyStopIteration::new_err(()),
+        _ => ParseError::new_err(error.message()),
+    };
+    let token = match &error.token {
+        Some(token) => token_to_py(py, token)?,
+        None => py.None(),
+    };
+    err.value(py).setattr("token", token)?;
+    Ok(err)
+}
+
+/// Parse `source` into a node descriptor tree.
+///
+/// `debug` selects Django's `DebugLexer`, so token positions are recorded.
+/// `origin_template_repr` is Python's `repr()` of `Origin.template_name`, or
+/// `None` when the origin has no template name; it arrives pre-rendered because
+/// a Python `repr` is Python's to produce — the rule §5.2 already records for
+/// `LookupError::Missing::current_repr`.
+#[pyfunction]
+#[pyo3(signature = (source, debug = false, origin_template_repr = None))]
+fn parse(
+    py: Python<'_>,
+    source: &str,
+    debug: bool,
+    origin_template_repr: Option<String>,
+) -> PyResult<Py<PyAny>> {
+    let tokens = if debug {
+        CoreLexer::debug(source).tokenize()
+    } else {
+        CoreLexer::new(source).tokenize()
+    };
+
+    let mut parser = CoreParser::new(tokens, &NoHost);
+    if let Some(repr) = origin_template_repr {
+        parser = parser.with_origin_template_repr(repr);
+    }
+
+    match parser.parse(&[]) {
+        Ok(nodelist) => nodelist_desc_to_py(py, &nodelist),
+        Err(error) => Err(parse_error(py, &error)?),
+    }
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(engine_version, m)?)?;
     m.add_function(wrap_pyfunction!(split_contents, m)?)?;
     m.add_function(wrap_pyfunction!(lex, m)?)?;
+    m.add_function(wrap_pyfunction!(parse, m)?)?;
+    m.add_class::<NodeRef>()?;
+    m.add_class::<SafeStr>()?;
+    m.add("ParseError", m.py().get_type::<ParseError>())?;
     Ok(())
 }
