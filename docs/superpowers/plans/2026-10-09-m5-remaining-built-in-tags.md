@@ -365,9 +365,19 @@ absent. Message `"'firstof' statement requires at least one argument"`
 (`:799`); `{% firstof a b as var %}` detected at `:801-803`.
 
 **D4 — `with`.** `WithNode(None, None, nodelist, extra_context=extra_context)`
-(`:1687`) — the two legacy positionals are `None`, the modern data rides in
-`extra_context`. Compile calls `token_kwargs(remaining_bits, parser,
-support_legacy=True)` (`:1676`), yielding an `AttrValue::Map`. Two messages:
+(`:1687`) — the two legacy values are `None`, the modern data rides in
+`extra_context`. **Measured correction (this is what Step 1 is for):** the
+signature is `WithNode.__init__(self, var, name, nodelist, extra_context=None)`
+(`:566-567`), and `materialise_node` constructs with `cls(**kwargs)`
+(`parser.py:135`) — keyword-only. So the descriptor must emit kwargs **named
+`var` and `name`**, each `AttrValue::None`; two unnamed positionals do not
+exist on that path and the node would raise
+`TypeError: missing 2 required positional arguments: 'var' and 'name'`. `name`
+is not dead: `if name: self.extra_context[name] = var` (`:571-572`) is the
+legacy `{% with a as b %}` form, which Django supports and the descriptor must
+therefore be able to express. Compile calls
+`token_kwargs(remaining_bits, parser, support_legacy=True)` (`:1676`), yielding
+an `AttrValue::Map`. Two messages:
 `"%r expected at least one variable assignment"` (`:1678-1680`) and
 `"%r received an invalid token: %r" % (bits[0], remaining_bits[0])`
 (`:1682-1684`). **The second goes through the host's `repr`, not
@@ -1011,6 +1021,7 @@ token. Corpus:
     "{% with a=1 %}{% endwith %}",
     "{% with a=1 b=2 %}{{ a }}{{ b }}{% endwith %}",
     "{% with a=1|add:2 %}{{ a }}{% endwith %}",   # token_kwargs compiles the value
+    "{% with a as b %}{{ b }}{% endwith %}",        # legacy form: name is not dead (§D4)
     "{% with %}x{% endwith %}",                    # legacy form: no extra_context
 ```
 
@@ -1432,7 +1443,15 @@ names any of M5's eleven. `Ran <N> tests … OK (skipped=6)`.
 - [ ] **Step 2: Record the Step-1 mismatches.** Every place a tag's real
   descriptor differed from §D is evidence the re-measure step is load-bearing —
   list them in this file's close-out, and if there were none, say that too and
-  note that §D was written from the same source.
+  note that §D was written from the same source. **One is already known, found
+  during this plan's own self-review rather than at implementation time:** §D4's
+  `with` said "the two legacy positionals are `None`", and the real signature is
+  `WithNode.__init__(self, var, name, nodelist, extra_context=None)` with
+  `cls(**kwargs)` construction, so the descriptor must emit kwargs *named* `var`
+  and `name`; unnamed positionals raise `TypeError`. The other ten node
+  signatures were measured and match §D. Record this one first, and keep
+  measuring — a plan whose only found defect is the one it went looking for has
+  not been checked.
 
 - [ ] **Step 3: Update the spec's `§10.3` rows.** M5's row becomes the eleven
   names (`M5_TAGS`, cited to `tests/test_tag_inventory.py`, not copied); M6's row
