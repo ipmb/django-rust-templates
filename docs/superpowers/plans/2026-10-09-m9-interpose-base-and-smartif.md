@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.14 (pinned interpreter), Rust (`crates/template-core`, `crates/template-py` via PyO3/maturin), Django 6.0.9 pinned at `.django/`, `unittest`.
 
-**Spec:** `docs/superpowers/specs/2026-10-07-django-template-engine-in-rust-design.md` (§5.2, §5.5, §6, §10.3, §10.4). Recon that produced this plan: `.review/m9-recon.md`; its scripts in `.review/m9-measurements/`.
+**Spec:** `docs/superpowers/specs/2026-10-08-django-template-engine-in-rust-design.md` (§5.2, §5.5, §6, §10.3, §10.4). Recon that produced this plan: `.review/m9-recon.md`; its scripts in `.review/m9-measurements/`.
 
 ## Global Constraints
 
@@ -192,17 +192,28 @@ def setUpModule():
         )
 ```
 
-**(c) The alternative, considered and not taken.** The reviewer proposed holding the pristine module — `import django.template.base as _pristine_base` *before* `install()`, which `_purge()` does not destroy (it deletes the binding, not the object). That is strictly stronger where it works: identity rather than text-equivalence, runtime rather than build time, and it survives every future interposition without re-making the argument.
+**(c) The alternative, considered and not taken — and the reason is its scope, not its feasibility.** The reviewer proposed holding the pristine module — `import django.template.base as _pristine_base` *before* `install()`, which `_purge()` (`_shim.py:156-160`) does not destroy, since it deletes the binding and not the object. That is strictly stronger where it works: identity rather than text-equivalence, runtime rather than build time, and it needs no transcription guard in the premise at all.
 
-It does not work here without a further change, and the reason is worth recording. The comparison would then span **two class universes**: `describe()` dispatches on `isinstance(value, Node)`, and pristine `Node` is not our `Node`. So every node on the Rust side — materialised by `_impl/parser.py`, which after `install()` binds *our* classes — would fail `isinstance` and fall to the address-comparing `repr()` arm. That is the same defect as the one this whole task exists to fix, reintroduced from the other direction.
+**It is feasible.** An earlier draft of this section rejected it on the grounds that `describe()` could not span two class universes. That was wrong, and wrong in a way worth recording so it is not re-derived: the two-universe problem is real but its fix is two tuples, because **`describe()`'s `isinstance` is a dispatch, not an assertion.**
 
-Fixing it needs either a `describe()` that dispatches on class *name* rather than identity (which would silently accept a node of the wrong class, weakening the comparison) or a materialiser pre-imported before `install()` so it binds pristine classes — which would change every other unit test's world, since `_impl/parser.py` is one cached module object for the whole session. Both cost more than repairs (a) and (b), and (a) makes the durability objection mechanical rather than manual: each future interposition fails the disjointness row until it is dealt with, which is a guard rather than a re-argument.
+```python
+_NODE_CLASSES = (Node, _pristine_base.Node)   # both known objects, still identity-based
+if isinstance(value, _NODE_CLASSES):
+```
+
+`type(value).__name__` is already in `describe`'s output and already compared — `"type": type(value).__name__`, and a literal `"type": "NodeList"` for the other arm — so the `isinstance` only chooses *which arm to take*. Widening it to both universes cannot weaken an assertion the dispatch does not make. (Pre-importing `_impl/parser.py` before `install()`, the other option in that draft, was correctly rejected: one cached module object for the session, so it would change every other unit test's world.)
+
+**What actually decides it is the stash's scope, which must grow with the interposition frontier.** `django_parse` builds `Parser(tokens, engine.template_libraries, engine.template_builtins, …)`. Today `engine.py` and `defaulttags.py` are Django's, so one pristine module is internally consistent. §10.3 puts `engine` at **M10** (spec line 789) and `defaulttags` at **M11** (line 790). So a pristine `Parser` would then be fed *our* `Engine`'s builtins and *our* `defaulttags`' node classes: "the pristine side" becomes a **mix**, silently, and the stash has to grow to `{base, engine}` at M10 and `{base, engine, defaulttags, loader_tags, defaultfilters}` at M11. Each growth is a judgement about which modules the target depends on, and forgetting one produces a half-pristine target that still *looks* like Django's.
+
+The disjointness row fails **loudly and names what moved**; a stale stash fails silently. That is the whole trade, and it is why the row is the stronger artifact: it converts a per-milestone argument into a per-milestone failure.
 
 - [ ] **Step 4: Fix the shim fallback row**
 
 `test_a_partial_subpackage_still_falls_back_for_its_siblings` (`tests/test_shim.py:138`) fails because `base` no longer falls back. Read it and change its subject — the row is about the shim's partial-subpackage behaviour, not about `base`.
 
-**Name the new subject explicitly, and say why that one**, since this is the row that will need re-picking at every milestone. Its docstring already names the right pair: it creates a throwaway `_impl/loaders/__init__.py` and checks that `django.template.loaders.filesystem` still resolves. **`django.template.loaders` and `django.template.loaders.filesystem` are the subjects to use** — neither is on M9's or M10's interposition list, and the row's actual assertion (a half-finished package still falls back for its siblings) is fully exercised by them without touching `base` at all. Add a line to the docstring recording that the subject is chosen for being far from the interposition frontier, so the next person re-picks it deliberately rather than by bisecting a failure.
+**Name the new subject explicitly, and say why that one**, since this is the row that will need re-picking at every milestone. Its docstring already names the right pair: it creates a throwaway `_impl/loaders/__init__.py` and checks that `django.template.loaders.filesystem` still resolves. **`django.template.loaders` and `django.template.loaders.filesystem` are the subjects to use.** Add a line to the docstring recording that the subject is chosen for distance from the interposition frontier, so the next person re-picks it deliberately rather than by bisecting a failure.
+
+**And date it, because the re-pick is already scheduled.** §10.3 puts `loaders` at **M10** (spec line 789) — so this subject has exactly one milestone of life, and the next re-pick is a known date rather than a discovery. Record that in the docstring too: the same shape as keeping the stash's growth schedule written down, and cheaper here because the row has one subject rather than a set.
 
 - [ ] **Step 5: Verify each restated guard still has teeth**
 
