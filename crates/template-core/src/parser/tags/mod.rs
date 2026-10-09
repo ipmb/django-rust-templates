@@ -267,6 +267,7 @@ pub(crate) mod support {
     use crate::parser::Parser;
     use crate::parser::TEXT_NODE;
     use crate::token::Token;
+    use std::cell::{Cell, RefCell};
 
     /// Parse `source` with no host, and return the whole top-level nodelist.
     ///
@@ -396,6 +397,90 @@ pub(crate) mod support {
     pub(crate) fn parse_with(source: &str, host: &dyn crate::parser::host::Host) -> NodeListDesc {
         let mut parser = Parser::new(Lexer::new(source).tokenize(), host);
         parser.parse(&[]).expect("expected a successful parse")
+    }
+
+    /// One `register_partial_def` call, as the tag made it.
+    ///
+    /// `expect` rather than `allow`, on purpose: the two items below are used by
+    /// the `partial`/`partialdef` rows, which arrive in the next two tasks of the
+    /// same milestone. When they do, this expectation becomes *unfulfilled* and
+    /// the build fails until the attribute is removed — which is the forcing
+    /// function an `allow` would not give, and the reason to write it this way
+    /// rather than to defer the host to the task that uses it.
+    #[expect(dead_code)]
+    #[derive(Debug, PartialEq, Eq)]
+    pub(crate) struct PartialDefCall {
+        pub(crate) name: String,
+        pub(crate) inline: bool,
+        /// The body's text nodes, in order — `texts` rather than the descriptor,
+        /// so the host does not need `NodeListDesc: Clone` to keep one.
+        pub(crate) body: Vec<String>,
+        pub(crate) source_start: Option<usize>,
+        pub(crate) source_end: Option<usize>,
+    }
+
+    /// The host `{% partial %}` and `{% partialdef %}` compile under.
+    ///
+    /// Two answers, both deliberately uninformative about *materialisation*:
+    /// `partial_node` returns a fixed handle and `register_partial_def` records
+    /// the call and returns another, because nothing parsed under this host is
+    /// ever materialised — `NodeRef` values are indices into a table the real
+    /// host owns. The rows here are about what the **tag** passes across the
+    /// seam; what the shell does with it is `tests/test_partials_rust.py`'s
+    /// subject.
+    #[expect(dead_code)] // used from the `partial`/`partialdef` rows; see above
+    #[derive(Default)]
+    pub(crate) struct PartialHost {
+        pub(crate) defs: RefCell<Vec<PartialDefCall>>,
+        pub(crate) slots: Cell<usize>,
+    }
+
+    impl crate::parser::host::Host for PartialHost {
+        fn has_tag(&self, _command: &str) -> bool {
+            false
+        }
+
+        fn call_tag(
+            &self,
+            _command: &str,
+            _token: &Token,
+            _tokens: &[Token],
+        ) -> Result<(NodeDesc, Vec<Token>), Error> {
+            unreachable!("PartialHost::call_tag is never reached: has_tag returns false")
+        }
+
+        fn alloc_slot(&self) -> usize {
+            let slot = self.slots.get();
+            self.slots.set(slot + 1);
+            slot
+        }
+
+        fn compile_filter(&self, _token: &str) -> Result<NodeRef, Error> {
+            Ok(NodeRef(0))
+        }
+
+        fn partial_node(&self, _name: &str) -> Result<NodeRef, Error> {
+            Ok(NodeRef(0))
+        }
+
+        fn register_partial_def(
+            &self,
+            _token: &Token,
+            name: &str,
+            inline: bool,
+            body: &NodeListDesc,
+            source_start: Option<usize>,
+            source_end: Option<usize>,
+        ) -> Result<NodeRef, Error> {
+            self.defs.borrow_mut().push(PartialDefCall {
+                name: name.to_string(),
+                inline,
+                body: texts(body),
+                source_start,
+                source_end,
+            });
+            Ok(NodeRef(0))
+        }
     }
 
     /// A host that reports an **explicit set** of library tags as loaded.

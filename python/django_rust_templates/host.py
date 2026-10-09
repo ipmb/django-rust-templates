@@ -34,7 +34,9 @@ from __future__ import annotations
 from django.template import defaultfilters as _defaultfilters
 from django.template import defaulttags as _defaulttags
 from django.template import loader_tags as _loader_tags
-from django.template.base import Token, TokenType
+from django.template.base import PartialTemplate, Token, TokenType
+from django.template.exceptions import TemplateSyntaxError
+from django.utils.datastructures import DeferredSubDict
 
 from django_rust_templates import _native
 
@@ -613,3 +615,102 @@ class ShellHost:
         parser.command_stack.pop()
         left = [_wire_token(tok) for tok in reversed(parser.tokens)]
         return node, left
+
+    def partial_node(self, name):
+        """`partial_func`'s second arm (`defaulttags.py:1277-1281`).
+
+        `DeferredSubDict(extra_data, "partials")` is a **live view**, not a copy
+        — the subscript happens at render time — so this method must not resolve
+        `name` and must not read `partials` at all. The failure it would cause is
+        `{% partial p %}{% partialdef p %}…`: that is a template Django renders,
+        and a compile-time lookup raises
+        `Partial 'p' is not defined in the current template.` on it.
+
+        **`PartialNode` is `defaulttags`'s, not `base`'s.** The plan for this
+        task imported it from `django.template.base` inside the method, with a
+        reason about capturing the module at the wrong moment; the first half of
+        that is simply false — measured, `from django.template.base import
+        PartialNode` is `ImportError: cannot import name 'PartialNode'`, since
+        the class is `defaulttags.py:423` — and the second half is aimed at a
+        risk this module does not have: `_defaulttags` is already bound at module
+        level (`python/django_rust_templates/host.py:35`) and is how `register.tags` is reached, so a *second*,
+        deferred route to the same module would be a difference that reads like a
+        reason. Bound at module level, as every other Django class here is, and
+        for the reason the shim's own contract gives: the module is resolved once
+        at interpreter start, after `sitecustomize` has installed it, so the
+        binding and the suite's `isinstance` rows name one object.
+        """
+        return _defaulttags.PartialNode(
+            name, partial_mapping=DeferredSubDict(self.parser.extra_data, "partials")
+        )
+
+    def register_partial_def(
+        self, token_wire, name, inline, body_desc, source_start, source_end
+    ):
+        """`partialdef_func`'s tail (`defaulttags.py:1250-1265`), in its order.
+
+        Four things happen here and the order is Django's: the body is
+        materialised, the duplicate check runs against `extra_data["partials"]`
+        **after** the body exists but **before** anything is stored, the
+        `PartialTemplate` is written, and the node is built **over the same
+        nodelist object** (`defaulttags.py:1258` and `defaulttags.py:1265` are the same
+        argument — `PartialDefNode(nodelist)` and `PartialTemplate(nodelist)`
+        hold one object, and a shell that materialised twice would give the
+        inline and deferred render paths different trees).
+
+        `inline` is Django's: `partialdef_func` passes `parser.parse(…)`'s
+        `contains_nontext` in as the second positional argument
+        (`defaulttags.py:1265`), so a body of nothing but text registers as an
+        inline partial and one with a node in it does not. It reaches here as a
+        flag rather than as the nodelist's own attribute because the descriptor
+        is what crossed the FFI, and `materialise` is what turns it back into a
+        `NodeList` that carries it.
+
+        The duplicate check is here and not in Rust because its message names
+        `parser.origin.name`, which is Python state. Its **class** is what the
+        caller observes, and that survives the FFI through
+        `python_host_error`'s `py_error_kind`.
+
+        The error dance is `call_tag`'s, and it is required rather than
+        defensive: `render.django_exception` re-raises `self.last_error` **by
+        identity** when its class matches, so unless this method attaches the
+        token and stores the object, the `TemplateSyntaxError` a caller catches
+        is a *rebuilt* one with no `.token` — and `Template.get_exception_info`
+        reads exactly that attribute.
+
+        `materialiser` is imported here rather than at module level because
+        `render` imports `ShellHost` from this module (`python/django_rust_templates/render.py:62`), so a
+        module-level import would be a cycle: `import django_rust_templates.host`
+        would reach `render`, which would find `ShellHost` not yet defined. The
+        other names are module-level, as everywhere else in this file —
+        `PartialTemplate` is `django.template.base`'s and `PartialDefNode` is
+        `_defaulttags`'s, both already bound there.
+        """
+        from django_rust_templates.render import materialiser
+
+        parser = self.parser
+        kind, contents, lineno, position = token_wire
+        token = Token(TokenType(kind), contents, position, lineno)
+        try:
+            nodelist = materialiser().materialise(
+                body_desc, parser.origin, None, None, parser
+            )
+            partials = parser.extra_data.setdefault("partials", {})
+            if name in partials:
+                raise TemplateSyntaxError(
+                    f"Partial '{name}' is already defined in the "
+                    f"'{parser.origin.name}' template."
+                )
+            partials[name] = PartialTemplate(
+                nodelist,
+                parser.origin,
+                name,
+                source_start=source_start,
+                source_end=source_end,
+            )
+            return _defaulttags.PartialDefNode(name, inline, nodelist)
+        except Exception as error:
+            error = parser.error(token, error)
+            error.token_wire = _wire_token(error.token)
+            self.last_error = error
+            raise

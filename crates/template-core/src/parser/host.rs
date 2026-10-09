@@ -15,7 +15,7 @@
 //! back is already plain data, and the host is the only thing that touches
 //! Python.
 
-use crate::parser::desc::{NodeDesc, NodeRef};
+use crate::parser::desc::{NodeDesc, NodeListDesc, NodeRef};
 use crate::parser::error::Error;
 use crate::token::Token;
 
@@ -254,6 +254,74 @@ pub trait Host {
     /// `Could not parse the remainder: '>2' from '1>2'`, both of which are the
     /// host's own exception text.
     fn compile_filter(&self, token: &str) -> Result<NodeRef, Error>;
+
+    /// Build the `PartialNode` for `{% partial name %}` — `partial_func`'s
+    /// second arm (`defaulttags.py:1277-1281`).
+    ///
+    /// **A handle, not a descriptor, and the reason is the one thing about this
+    /// tag the registry's rule is about.** `partial_func` builds
+    /// `PartialNode(name, partial_mapping=DeferredSubDict(parser.extra_data,
+    /// "partials"))`, and that mapping is a **live view over a dict that
+    /// outlives the parse** — it is looked up at *render* time, so
+    /// `{% partial p %}` may precede `{% partialdef p %}` and still render. A
+    /// `NodeDesc` cannot represent a value that is re-read later; the host can,
+    /// because the host is the thing that owns the dict.
+    ///
+    /// The name is not resolved here. Resolution is `PartialNode.render`'s
+    /// `self.partial_mapping[self.partial_name]` (`defaulttags.py:430-435`),
+    /// which raises `Partial 'p' is not defined in the current template.` when
+    /// the lookup fails — so a compile-time lookup would raise the *render*
+    /// message at the wrong moment, on a template Django renders.
+    ///
+    /// **Defaulted to an error rather than to a handle.** `NoHost` has no
+    /// `extra_data` and no materialiser, so there is no correct handle for it to
+    /// return; `NodeRef(0)` would be a lie the failure of which is a silent
+    /// empty slot at materialisation. The tag's *failure* paths — the argument
+    /// count — are still testable under `NoHost`, because they raise before this
+    /// call.
+    fn partial_node(&self, _name: &str) -> Result<NodeRef, Error> {
+        Err(Error::internal(
+            "this host cannot build a PartialNode: implement Host::partial_node",
+        ))
+    }
+
+    /// Register `{% partialdef name %}`'s body and return the node —
+    /// `partialdef_func`'s tail (`defaulttags.py:1250-1265`).
+    ///
+    /// The body arrives as the **descriptor** Rust parsed, not as a Python
+    /// object, and the host materialises it: `nodelist` is shared, by identity,
+    /// between the `PartialTemplate` stored in `extra_data` and the
+    /// `PartialDefNode` returned (`defaulttags.py:1258` and `defaulttags.py:1265` both
+    /// take
+    /// the same object), so it must be built exactly once, by the side that can
+    /// build it.
+    ///
+    /// `source_start`/`source_end` are the character offsets `PartialTemplate`
+    /// keeps for `find_partial_source` (`base.py:314-322`), read from the two
+    /// tokens' `position` attributes — `None` under the non-debug lexer, which
+    /// is why they are `Option`.
+    ///
+    /// The duplicate check is the **host's**, not the caller's: it raises
+    /// Django's `TemplateSyntaxError` naming `parser.origin.name`, which is
+    /// Python state Rust does not hold. See `ShellHost.register_partial_def`.
+    ///
+    /// `token` is passed for `Host::call_tag`'s reason: the shell has to attach
+    /// it to the exception object it stores for `django_exception` to re-raise
+    /// by identity.
+    fn register_partial_def(
+        &self,
+        _token: &Token,
+        _name: &str,
+        _inline: bool,
+        _body: &NodeListDesc,
+        _source_start: Option<usize>,
+        _source_end: Option<usize>,
+    ) -> Result<NodeRef, Error> {
+        Err(Error::internal(
+            "this host cannot register a partial definition: implement \
+             Host::register_partial_def",
+        ))
+    }
 }
 
 /// A host with no tags at all.
@@ -304,5 +372,23 @@ impl Host for NoHost {
         // descriptor-shape tests are about the tree, and the message parity for
         // those errors is `_native.parse`'s with the shell's host.
         Ok(NodeRef(0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_host_without_the_partial_seam_says_so_rather_than_returning_a_handle() {
+        // `NoHost` is the default every Rust-only row parses under, and the
+        // failure mode this pins is a *silent* one: a default returning
+        // `NodeRef(0)` would hand the materialiser a handle into a table that
+        // does not exist, and the error would surface much later as an empty
+        // slot. The default is loud, like `NoHost::call_tag`'s `unreachable!`.
+        let error = NoHost
+            .partial_node("p")
+            .expect_err("NoHost cannot build a PartialNode");
+        assert!(error.message().contains("partial_node"), "{error:?}");
     }
 }

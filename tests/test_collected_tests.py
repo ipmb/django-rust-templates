@@ -260,7 +260,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # tests/` since `547bfb9` is `+1` row, in one file, no removals, so 443 + 1 =
 # 444 — and the same diff is why the count moving by one here is the whole
 # story: the fix in `_shim.py` is a function and two call sites, not rows.
-PINNED = 444
+#
+# 444 → 447 is M13 Task 2, **three** rows and a **new module**, which is why the
+# delta is worth measuring rather than reading: `tests/test_partials_rust.py` is
+# this task's, and a new file is the one case where "the rows moved" and "a
+# module entered or left the pattern" look alike from the failure text alone.
+# `git diff tests/` since `08de820` is one new file with three `def test_` and no
+# removals anywhere, so 444 + 3 = 447 and every one of the three is a row rather
+# than a module's worth of rows arriving at once. The three are the seam's live
+# view twice over — a name that was never defined compiles, a definition written
+# *after* the node was built is visible through it, and two parsers see only
+# their own `extra_data`.
+PINNED = 447
 
 
 def collected() -> unittest.TestSuite:

@@ -502,7 +502,7 @@ class CorpusParityTests(unittest.TestCase):
         """Review Focus 4: the host node must be token-bearing *by the same route*
         as every other node, which is the thing Task 2's arm can quietly break.
 
-        Rust ports `extend_nodelist` (`crates/template-core/src/parser/mod.rs:506`)
+        Rust ports `extend_nodelist` (`crates/template-core/src/parser/mod.rs:532`)
         and calls it at `crates/template-core/src/parser/mod.rs:418` for a host
         descriptor exactly as for a Rust-built block node, so the token reaches
         the descriptor either way. The failure

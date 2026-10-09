@@ -213,6 +213,32 @@ impl<'a> Parser<'a> {
         self.host.compile_filter(token)
     }
 
+    /// `partial_func`'s `PartialNode` construction, by handle — a thin forward to
+    /// [`Host::partial_node`], for [`Parser::alloc_slot`]'s reason: the mapping
+    /// is a live view over a dict the *host* owns, while the tag is the caller,
+    /// and `Parser::host` is private so a tag cannot reach around the seam.
+    pub fn partial_node(&self, name: &str) -> Result<NodeRef, Error> {
+        self.host.partial_node(name)
+    }
+
+    /// `partialdef_func`'s `extra_data` write and its duplicate check — a thin
+    /// forward to [`Host::register_partial_def`], for the same reason: the body
+    /// is materialised once, by the side that owns the materialiser, and the
+    /// nodelist has to be one object shared with the stored `PartialTemplate`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_partial_def(
+        &self,
+        token: &Token,
+        name: &str,
+        inline: bool,
+        body: &NodeListDesc,
+        source_start: Option<usize>,
+        source_end: Option<usize>,
+    ) -> Result<NodeRef, Error> {
+        self.host
+            .register_partial_def(token, name, inline, body, source_start, source_end)
+    }
+
     /// Python's `repr()` of `s`, through the host — see [`Host::repr`].
     ///
     /// A forward rather than a call to `py_repr_str`, because the shell's
