@@ -470,7 +470,32 @@ pub trait FilterHost {
     fn phone2numeric(&self, value: &Value) -> Result<Value, Error>;
     /// `django.utils.html.urlize` — a regex over `settings.URLIZE_ASSUME_HTTPS`,
     /// so the setting and the regex engine are both the host's.
-    fn urlize(&self, text: &str, limit: Option<usize>, autoescape: bool) -> String;
+    ///
+    /// **`limit` is `Option<&IntValue>` rather than the `Option<usize>` this
+    /// signature carried until wave B, because that type cannot express two of the
+    /// answers the corpus reaches.** `Urlizer.trim_url` (`html.py:412-415`) is
+    /// `if limit is None or len(x) <= limit: return x` and then
+    /// `"%s…" % x[: max(0, limit - 1)]`, so `trim_url_limit` is compared against a
+    /// length and sliced — both of which take any Python int. Measured on the
+    /// pinned tree through `{{ x|urlizetrunc:… }}` on a URL long enough to
+    /// truncate: `0`, `-1` and `-5` all answer `'…'`, and a 30-digit literal is
+    /// untruncated. A `usize` cannot hold the negatives, and the untruncating
+    /// literal would have to saturate rather than arrive. This is §D2's sentinel
+    /// rule — *a seam's signature is the wrapped function's signature, defaults
+    /// and sentinels included* — in the shape `date_format`/`time_format` gave it
+    /// (`c4027d0`): `trim_url_limit`'s ints are a sentinel range, not a length.
+    ///
+    /// **The `int()` is not this method's.** `urlizetrunc`'s body does it —
+    /// `int(limit)` before the call (`defaultfilters.py:395`) — so
+    /// [`FilterHost::to_int`] is where `int("abc")`'s `ValueError` and
+    /// `int(None)`'s `TypeError` come from, and this seam is handed an int or
+    /// `None` and nothing else. `None` is `urlize`'s own call site
+    /// (`:383`, `trim_url_limit` defaulted), not a spelling of 0.
+    ///
+    /// `nofollow=True` is not a parameter for the same reason `trim_url_limit`
+    /// has no default here: both call sites hardcode it (`:383`, `:395`), so
+    /// carrying it would be carrying a constant.
+    fn urlize(&self, text: &str, limit: Option<&IntValue>, autoescape: bool) -> String;
     /// `Truncator.chars` / `.words` (`text.py:193-261`), **whole**. Delegated
     /// rather than split because even the non-html path needs
     /// `unicodedata.normalize("NFC")`, `unicodedata.combining` per character
@@ -882,7 +907,7 @@ impl FilterHost for NoFilterHost {
         Err(refused("phone2numeric"))
     }
 
-    fn urlize(&self, _text: &str, _limit: Option<usize>, _autoescape: bool) -> String {
+    fn urlize(&self, _text: &str, _limit: Option<&IntValue>, _autoescape: bool) -> String {
         refused_panic("urlize")
     }
 
@@ -1293,7 +1318,7 @@ impl FilterHost for TestFilterHost {
             .ok_or_else(|| refused("phone2numeric"))
     }
 
-    fn urlize(&self, _text: &str, _limit: Option<usize>, _autoescape: bool) -> String {
+    fn urlize(&self, _text: &str, _limit: Option<&IntValue>, _autoescape: bool) -> String {
         self.record_plain("urlize");
         self.urlize
             .clone()

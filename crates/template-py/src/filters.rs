@@ -888,10 +888,25 @@ impl FilterHost for PyFilterHost<'_> {
         outcome.map_err(|e| self.host_error("phone2numeric", e))
     }
 
-    fn urlize(&self, text: &str, limit: Option<usize>, autoescape: bool) -> String {
+    fn urlize(&self, text: &str, limit: Option<&IntValue>, autoescape: bool) -> String {
         let py = self.py;
         let outcome = (|| {
             let kwargs = PyDict::new(py);
+            // `trim_url_limit` rebuilt as a Python int rather than narrowed on
+            // this side: `trim_url` compares it against a length **and slices
+            // with it** (`html.py:412-415`), so a negative sentinel and a literal
+            // too large for any length are both answers Django gives — measured
+            // through `{{ x|urlizetrunc:… }}`, `-1` is `'…'` and a 30-digit
+            // literal truncates nothing. `Big` holds canonical decimal text by
+            // construction, so Python's own `int()` rebuilds it exactly, which is
+            // the route `int_divide_by_power_of_two` takes and never `eval`.
+            let limit = match limit {
+                None => py.None(),
+                Some(IntValue::Small(n)) => (*n).into_pyobject(py)?.into_any().unbind(),
+                Some(IntValue::Big(digits)) => {
+                    py.get_type::<PyInt>().call1((digits.as_str(),))?.unbind()
+                }
+            };
             kwargs.set_item("trim_url_limit", limit)?;
             // `nofollow=True` is not a caller's choice: `urlize` and `urlizetrunc`
             // both hardcode it (`defaultfilters.py:383`, `:395`), and the trait's
