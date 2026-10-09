@@ -45,17 +45,24 @@ lets a row be `mark_safe("AbC")` — and the safety rows are the point of this
 file. A textual format would have needed a second, private encoding for
 `safestring` and then a reason to trust it.
 
-**Four optional keys change what the row is, and each exists because the
-default would quietly score a different question.** `value_factory` replaces
-`value` for a **one-shot** input — a generator is consumed by whichever side
-reads it first, so a shared one makes the second side's answer a statement about
-an exhausted iterator; see [`case_value`]. `context` overrides the `Context` the
-loop reads `autoescape` and `use_tz` off, which is how the `needs_autoescape`
-filters get both branches: `join` with and without escaping answers different
-text from the same input, so nothing but the key can tell the two rows apart.
+**The optional keys change what the row *is*, and each exists because the default
+would quietly score a different question.** They are `value_factory`, `context`,
+`settings`, `arg_variable`, `membership` and `expected`, and they are **named here
+rather than counted**: this sentence said "four" while the file read six, and a
+number in prose that nothing checks is a defect this corpus has been fixed for
+more than once. `value_factory` replaces `value` for a **one-shot** input — a
+generator is consumed by whichever side reads it first, so a shared one makes the
+second side's answer a statement about an exhausted iterator; see [`case_value`].
+`context` overrides the `Context` the loop reads `autoescape` and `use_tz` off,
+which is how the `needs_autoescape` filters get both branches: `join` with and
+without escaping answers different text from the same input, so nothing but the
+key can tell the two rows apart. `arg_variable` carries an argument of a shape a
+template cannot spell as a constant, which is what `pluralize`'s `[1]` and `[","]`
+need (see `arg_token`); `membership` replaces the equality assertion with a
+population test for the filters whose answer is chosen at random.
 
-**`settings` is the fourth, and it is the one key whose rows must carry
-`expected`.** It is an `override_settings` entered around **both** engines' calls
+**`settings` is the key whose rows must carry `expected`.** It is an
+`override_settings` entered around **both** engines' calls
 — the only way a setting can be an input at all, since a body cannot see one: its
 whole contact with the outside world is the host trait. Because both sides get
 the same override, a misspelt setting name is a **silent no-op** that moves both
@@ -201,6 +208,30 @@ class STR_NOT_REPR:
 
     def __eq__(self, other):
         return isinstance(other, STR_NOT_REPR)
+
+
+class LOUD_STR:
+    """An object whose `__str__` raises a class `builtins` does not hold.
+
+    `@stringfilter`'s coercion is `str(value)` (`defaultfilters.py:38-52`), so
+    the exception this raises is the filter's answer, and Django propagates it
+    unchanged. The class is defined *here* — a test module's own — precisely
+    because it is not in `builtins`: the FFI used to rebuild an exception from
+    its class *name*, and a name `builtins` cannot instantiate came back as a
+    plain `Exception` whose text began with the name (measured on the pinned
+    tree: `builtins.Exception: BoomError: loud` where Django raises `BoomError`).
+    See `ERROR_CASES`'s `upper/raising-str` row and
+    `crates/template-py/src/filters.rs`'s `host_error`.
+    """
+
+    class BoomError(Exception):
+        """The class that cannot be found by name."""
+
+    def __str__(self):
+        raise LOUD_STR.BoomError("loud")
+
+    def __repr__(self):
+        return "LOUD_STR()"
 
 
 def case_value(case):
@@ -2900,7 +2931,6 @@ CASES: list[dict] = [
         "settings": {"LANGUAGE_CODE": "de"},
         "expected": "meh",
     },
-]
 
 
 # The inputs whose answer is an **exception**, kept apart from [`CASES`] because a
@@ -3150,5 +3180,30 @@ ERROR_CASES: list[dict] = [
         "value": 10**400,
         "raises": "OverflowError",
         "message": "integer division result too large for a float",
+    },
+    # --- the exception **object**, which is not its class name ---------------
+    {
+        # `{{ x|upper }}` where `str(x)` itself raises. The coercion is
+        # `@stringfilter`'s `str(value)` (`defaultfilters.py:38-52`), so Django's
+        # answer to this row is that exception, unchanged — and the class is a
+        # test module's own, which is the whole point of the row: **a class
+        # `builtins` does not hold**.
+        #
+        # It was measured failing before the FFI kept the exception object: the
+        # host converted the `PyErr` to a core `Error` carrying the class *name*
+        # and the message, and the name was all that came back, so this row
+        # answered `builtins.Exception: BoomError: loud` where Django raises
+        # `BoomError`. `SuspiciousOperation` — what `strip_tags` raises past its
+        # depth limit, and what wave B's `striptags` row will assert — is the
+        # same shape out of a library class rather than a test's.
+        #
+        # The message is `"loud"`, so a name-only reconstruction is caught by the
+        # **class** and not by the text: it happens to prefix the name onto the
+        # message, which is why a row comparing only text would have passed.
+        "name": "upper/raising-str",
+        "filter": "upper",
+        "value_factory": LOUD_STR,
+        "raises": "BoomError",
+        "message": "loud",
     },
 ]

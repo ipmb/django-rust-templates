@@ -415,7 +415,17 @@ pub trait FilterHost {
     /// `django.utils.html.strip_tags` — `HTMLParser`-based (`html.py:238-272`),
     /// so the tag grammar, the entity handling and the malformed-input behaviour
     /// are all Python's.
-    fn strip_tags(&self, text: &str) -> String;
+    ///
+    /// **Fallible where its neighbours here are not, and the measurement is one
+    /// call**: `strip_tags("<a" + "<" * 49 + "x" * 1000)` raises
+    /// `SuspiciousOperation` (empty message) out of `HTMLParser`'s depth limit
+    /// (`MAX_STRIP_TAGS_DEPTH = 50`, `html.py:246`). The input is ASCII, so
+    /// nothing at the FFI boundary stops it arriving, and Django's own
+    /// `striptags` body has no `try` around this call — the raise **is** that
+    /// filter's answer on such a value. A bare `String` here would have to
+    /// swallow it or panic, and the corpus row that pins the behaviour compares
+    /// the exception's class.
+    fn strip_tags(&self, text: &str) -> Result<String, Error>;
     /// `django.utils.text._slugify` (`text.py:473-476`), **whole**: NFKD, the
     /// combining-mark strip, the two `re.sub`s and the `.lower()`.
     ///
@@ -449,9 +459,21 @@ pub trait FilterHost {
     fn wrap(&self, text: &str, width: usize) -> String;
     /// `django.utils.encoding.iri_to_uri`. `iriencode`'s entire body is this one
     /// call (`:225-227`).
+    ///
+    /// **Infallible on the strength of an audit rather than by assumption.** The
+    /// one input that makes it raise is a lone surrogate — `iri_to_uri("\ud800")`
+    /// is `UnicodeEncodeError` from the UTF-8 encoding `quote` does — and a `&str`
+    /// argument cannot carry one, so no body can reach that raise any more than it
+    /// can reach `iri_to_uri` with it. Measured on the pinned tree, with the
+    /// boundary in the way: `{{ x|iriencode }}` with `x = "\ud800"` raises at the
+    /// FFI in both engines (`test_lone_surrogate_raises_at_the_ffi_boundary`).
     fn iri_to_uri(&self, text: &str) -> String;
     /// `urllib.parse.quote` — `urlencode`'s body (`:365-379`), with the `safe`
     /// set Rust selects from `arg`/the default.
+    ///
+    /// Infallible for `iri_to_uri`'s reason, and measured the same way: the
+    /// surrogate that makes `quote("\ud800", safe="")` raise `UnicodeEncodeError`
+    /// is the input a `&str` cannot hold.
     fn quote(&self, text: &str, safe: &str) -> String;
     /// `json.dumps` — `json_script` (`:85-91`), whose separators and
     /// `ensure_ascii` are Django's `_json_script` choice.
@@ -717,8 +739,8 @@ impl FilterHost for NoFilterHost {
         refused_panic("str_title")
     }
 
-    fn strip_tags(&self, _text: &str) -> String {
-        refused_panic("strip_tags")
+    fn strip_tags(&self, _text: &str) -> Result<String, Error> {
+        Err(refused("strip_tags"))
     }
 
     fn slugify(&self, _text: &str) -> String {
@@ -1114,11 +1136,9 @@ impl FilterHost for TestFilterHost {
             .unwrap_or_else(|| refused_panic("str_title"))
     }
 
-    fn strip_tags(&self, _text: &str) -> String {
-        self.record_plain("strip_tags");
-        self.strip_tags
-            .clone()
-            .unwrap_or_else(|| refused_panic("strip_tags"))
+    fn strip_tags(&self, _text: &str) -> Result<String, Error> {
+        self.record("strip_tags")?;
+        self.strip_tags.clone().ok_or_else(|| refused("strip_tags"))
     }
 
     fn slugify(&self, _text: &str) -> String {

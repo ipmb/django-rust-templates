@@ -76,6 +76,14 @@ pub struct PyFilterHost<'py> {
     /// The `Opaque` table. Grows for the life of one `filter` call; ids are
     /// [`ValueId`] and are minted in push order.
     interner: RefCell<Vec<Py<PyAny>>>,
+    /// The exception Python raised, kept from [`PyFilterHost::host_error`].
+    ///
+    /// [`ErrorKind::FilterHost`] carries the class *name* and not the class, so
+    /// an error travelling through `template-core` loses an exception's identity
+    /// — see [`PyFilterHost::host_error`] for why the object is kept here and
+    /// returned from [`run_filter`] instead. One slot, because a body stops at
+    /// the first `?`: the error being reported is always the last one raised.
+    raised: RefCell<Option<PyErr>>,
 }
 
 /// Why a value could not be turned back into the Python object it came from.
@@ -91,6 +99,7 @@ impl<'py> PyFilterHost<'py> {
         Self {
             py,
             interner: RefCell::new(Vec::new()),
+            raised: RefCell::new(None),
         }
     }
 
@@ -210,6 +219,32 @@ impl<'py> PyFilterHost<'py> {
     /// `divisibleby` has no `try`, `add` catches bare `Exception`. A seam that
     /// flattened these to one error would make those three filters
     /// unimplementable — which is why [`PyErrorKind`] exists at all.
+    /// A Python failure as a core `Error` — **and the exception object, kept**.
+    ///
+    /// [`ErrorKind::FilterHost`] carries the class *name* and the message, so a
+    /// name alone is all `template-core` can hand back; `filter_py_error` then
+    /// rebuilds an exception *of that name*, and a name `builtins` does not hold
+    /// degrades to `Exception` with the name prefixed. That is a real divergence
+    /// on the far side of a `catch`, and it was measured twice before this slot
+    /// existed:
+    ///
+    /// * **`SuspiciousOperation`**, raised by `strip_tags`'s depth limit
+    ///   (`html.py:246`) and by nothing in `builtins` — the corpus row wave B
+    ///   lands for `striptags` compares the class, so name-only reconstruction
+    ///   fails it;
+    /// * **a class of the caller's own**, which is the wider half: `str(v)` is
+    ///   the `@stringfilter` coercion, so `{{ x|upper }}` on an object whose
+    ///   `__str__` raises `BoomError` propagates `BoomError` from Django and
+    ///   arrived here as `builtins.Exception: BoomError: loud` (measured on the
+    ///   pinned tree). User-defined exception classes are the *ordinary* case for
+    ///   a template rendering a model, not an edge.
+    ///
+    /// So the exception Python raised is kept, and [`run_filter`] returns it as
+    /// itself rather than anything rebuilt from a name. Keeping it is legitimate
+    /// only because this seam is **in-process with the GIL held**: the `PyErr` is
+    /// a handle to a live Python object, it is `Send`/`Sync`, and it outlives the
+    /// `Error` that describes it. A boundary that crossed a thread or a process
+    /// boundary would have to serialise, and this would not be an option.
     fn host_error(&self, operation: &'static str, err: PyErr) -> Error {
         let py = self.py;
         let kind = py_error_kind(py, &err);
@@ -219,7 +254,21 @@ impl<'py> PyFilterHost<'py> {
             Ok(text) => text.to_string(),
             Err(_) => String::new(),
         };
+        *self.raised.borrow_mut() = Some(err);
         Error::filter_host(kind, operation, message)
+    }
+
+    /// The exception [`PyFilterHost::host_error`] kept, consumed.
+    ///
+    /// Taken rather than read so a stale object cannot stand in for a later
+    /// error: the one error a call reports is the one it just converted. `None`
+    /// means the `Error` was **synthesised on the Rust side** — `wordwrap`'s
+    /// `invalid width 0 (must be > 0)` is one, built from a `ValueError` the body
+    /// chose and no `PyErr` ever existed for — and such an error is the one case
+    /// [`crate::filter_py_error`] reconstructs from the name, which it does
+    /// exactly for every class it can instantiate with one string.
+    pub fn take_raised(&self) -> Option<PyErr> {
+        self.raised.borrow_mut().take()
     }
 
     /// `mark_safe`, able to report a failure.
@@ -802,8 +851,8 @@ impl FilterHost for PyFilterHost<'_> {
         self.call_text("str_title", text, "title")
     }
 
-    fn strip_tags(&self, text: &str) -> String {
-        self.utility_text("strip_tags", "django.utils.html", "strip_tags", text)
+    fn strip_tags(&self, text: &str) -> Result<String, Error> {
+        self.utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)
     }
 
     fn slugify(&self, text: &str) -> String {
@@ -1261,6 +1310,28 @@ impl PyFilterHost<'_> {
         outcome.unwrap_or_else(|e| self.infallible_failure(operation, e))
     }
 
+    /// [`PyFilterHost::utility_text`] for an operation that **can** report a
+    /// failure. Only `strip_tags` is one, and only because its input can make it
+    /// raise: see [`FilterHost::strip_tags`] for the measurement and for why its
+    /// neighbours stay infallible.
+    fn utility_text_checked(
+        &self,
+        operation: &'static str,
+        module: &str,
+        name: &str,
+        text: &str,
+    ) -> Result<String, Error> {
+        let py = self.py;
+        let outcome = (|| {
+            let result = py
+                .import(module)?
+                .getattr(name)?
+                .call1((PyString::new(py, text),))?;
+            result.extract::<String>()
+        })();
+        outcome.map_err(|e| self.host_error(operation, e))
+    }
+
     /// `text.<method>()` → `str`, for `str.lower` and `str.title`.
     ///
     /// A method name rather than a closure because a closure's return type would
@@ -1295,13 +1366,35 @@ impl PyFilterHost<'_> {
 
     /// What an **infallible** operation does when Python nevertheless raises.
     ///
-    /// The trait declares 15 operations as returning a bare value, which means
-    /// they cannot report a failure — a decision taken and reviewed before the
-    /// fan-out, and the reason this path exists at all. It is not a swallow: the
-    /// panic names the operation and carries Python's message, so a filter whose
-    /// host call failed says so rather than producing a plausible wrong string.
-    /// Every one of these is reachable only by an input Django would raise on,
-    /// which the corpus would then see as a difference rather than as silence.
+    /// The trait declares a block of operations as returning a bare value, which
+    /// means they cannot report a failure — a decision taken and reviewed before
+    /// the fan-out, and the reason this path exists at all. It is not a swallow:
+    /// the panic names the operation and carries Python's message, so a filter
+    /// whose host call failed says so rather than producing a plausible wrong
+    /// string.
+    ///
+    /// **The set was then audited against inputs a template can carry, and one
+    /// operation left it**: `strip_tags` raises Django's `SuspiciousOperation`
+    /// from `HTMLParser`'s depth limit on plain ASCII, and is now
+    /// `Result<String, Error>`. The audit is also what says the rest stay — each
+    /// entry is a probe, not an argument:
+    ///
+    /// | operation | the input that raises | why a body cannot reach it |
+    /// |---|---|---|
+    /// | `iri_to_uri`, `quote` | `UnicodeEncodeError` on a lone surrogate | a `&str` cannot hold one; the FFI raises before the call |
+    /// | `str_lower`, `str_title`, `slugify`, `urlize` | none found — all four answer on that same surrogate in Django | the input cannot arrive |
+    /// | `truncate` | none found — `"<p>unclosed"` and a 50-deep unterminated tag both answer | |
+    /// | `wrap` | `ValueError: invalid width 0 (must be > 0)` | the width is `wordwrap`'s argument and the *body* raises it (`wordwrap.rs`) |
+    /// | `number_format` | none found — the landed callers (`floatformat`, `filesizeformat`) answer on `nan`, `inf` and `10**400` exactly as Django does | |
+    /// | `filesize_number_format` | none found — same three inputs, matching Django's own `OverflowError`s, which arrive through `to_int` instead | |
+    /// | `gettext`, `ngettext` | none found | |
+    /// | `timesince` | not yet reachable — Task 10 lands its only caller | |
+    ///
+    /// "None found" is a measurement over the inputs probed, not a proof that
+    /// none exists, and the difference is the whole point of writing it down: an
+    /// operation whose raising input is later found **leaves this list by gaining
+    /// a `Result`**, exactly as `strip_tags` did, and the row that found it is
+    /// what forces the signature change.
     fn infallible_failure(&self, operation: &'static str, err: PyErr) -> String {
         let message = match err.value(self.py).str() {
             Ok(text) => text.to_string(),
@@ -1388,7 +1481,7 @@ pub fn run_filter(
     if entry.flags.expects_localtime {
         current = host
             .localtime(current, use_tz)
-            .map_err(|error| crate::filter_py_error(py, &error))?;
+            .map_err(|error| report(&host, py, error))?;
     }
     let was_safe = host.is_safe(&current);
     // The wrapper's half, and it runs for all 29 `stringfilter` filters rather
@@ -1398,7 +1491,7 @@ pub fn run_filter(
     let (current, coerced_is_safe) = if entry.stringfilter {
         let coerced = host
             .coerce_stringfilter(&current)
-            .map_err(|error| crate::filter_py_error(py, &error))?;
+            .map_err(|error| report(&host, py, error))?;
         // `isinstance(first, SafeData)` — already answered, because `classify`
         // puts a `str` in `Value::Safe` only after asking it.
         let safe = matches!(&coerced, Value::Safe(_));
@@ -1411,14 +1504,28 @@ pub fn run_filter(
         autoescape,
         use_tz,
     };
-    let result = (entry.run)(current, argument, &call)
-        .map_err(|error| crate::filter_py_error(py, &error))?;
+    let result = (entry.run)(current, argument, &call).map_err(|error| report(&host, py, error))?;
     let result = if entry.flags.is_safe && (was_safe || coerced_is_safe) {
         host.mark_safe_checked(result)
             .map_err(|error| host.host_error("mark_safe", error))
-            .map_err(|error| crate::filter_py_error(py, &error))?
+            .map_err(|error| report(&host, py, error))?
     } else {
         result
     };
     host.object(&result)
+}
+
+/// A core `Error` back across the FFI, **as the exception Python raised**.
+///
+/// The host keeps the `PyErr` it converted ([`PyFilterHost::host_error`]), and
+/// this is where it is spent: returning that object rather than one rebuilt from
+/// its class name is what makes `except SuspiciousOperation` and `except
+/// MyModelError` work on this side exactly as they do on Django's.
+///
+/// [`crate::filter_py_error`] answers only for errors **synthesised on the Rust
+/// side** — a body's own refusal, `wordwrap`'s `invalid width 0 (must be > 0)`,
+/// an unimplemented filter — where no Python exception exists to return.
+fn report(host: &PyFilterHost<'_>, py: Python<'_>, error: Error) -> PyErr {
+    host.take_raised()
+        .unwrap_or_else(|| crate::filter_py_error(py, &error))
 }

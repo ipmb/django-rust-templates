@@ -176,20 +176,28 @@ fn filter(
     filters::run_filter(py, name, value, args, autoescape, use_tz)
 }
 
-/// A filter failure (or a filter stub) as a Python exception.
+/// A filter failure (or a filter stub) as a Python exception — **for the errors
+/// that never were one**.
 ///
 /// Lives in `lib.rs` beside `parse_error` because it is the same job — carrying a
 /// core `Error` back across the FFI — and because the exception *classes* it names
 /// are this crate's.
 ///
+/// **A raise inside a host call does not come through here.** The host keeps the
+/// `PyErr` it caught and `run_filter` returns that object, so a caller's `except
+/// SuspiciousOperation` — and its `except <a class of its own>`, raised by a
+/// `__str__` the `@stringfilter` coercion called — sees exactly what Python
+/// raised. See `PyFilterHost::host_error` for why keeping it is legitimate at
+/// this seam and what the alternative measured.
+///
+/// What is left here is what `template-core` **synthesised**: a body's own
+/// refusal (`wordwrap`'s `invalid width 0 (must be > 0)`), an unimplemented
+/// filter, a parser error — errors with no exception object behind them, where
+/// the class name is all there is to rebuild from.
+///
 /// `FilterHost`'s payload carries the class **and** the message separately, which
 /// is why a body's `except IndexError` sees an `IndexError` rather than a generic
-/// error. The exception *object* is reconstructed from the class name rather than
-/// being the one Python raised, because an exception crossing `template-core`'s
-/// error type cannot keep its identity — the boundary `ErrorKind::FilterHost`'s
-/// own doc records.
-///
-/// Reconstruction is by name in two steps: the six classes Django's filters
+/// error. Reconstruction is by name in two steps: the six classes Django's filters
 /// **catch** get a named `PyXError`, because those are the ones a body branches
 /// on; everything else is looked up in `builtins` and instantiated with the
 /// message. The second step is what makes `int(inf)`'s `OverflowError` arrive as
@@ -202,15 +210,17 @@ fn filter(
 /// there, because [`PyErrorKind`] records `__name__` and not the module it came
 /// from, so the name alone cannot find it.
 ///
-/// **That gap is unreachable rather than merely unhit, and the distinction is the
-/// one worth recording.** `InvalidOperation` arises only from `Decimal`
-/// arithmetic, and on the pinned tree the name occurs at exactly three sites
-/// outside tests — `defaultfilters.py:6`, `:155` and `:181` — every one of them
-/// inside `floatformat`, and all three inside an `except` clause that catches it
-/// (`:155`, `:158`, `:181`). No filter lets one escape, so no body can hand this
-/// function a class it cannot rebuild. "We have not hit it yet" leaves a reader
-/// unable to tell whether the next filter will; "no filter can produce it" is a
-/// statement about the registry, and it is the one that holds.
+/// **A name this cannot rebuild is now reachable only from Rust**, which is what
+/// keeps the fallback from being a hole: a body names its own kind, so a body
+/// choosing a name `builtins` cannot instantiate is a bug in that body, and the
+/// corpus row for it shows the wrong class immediately. The measured case that
+/// used to sit here was the *host* half — `InvalidOperation`, which `builtins`
+/// does not hold — and the host half no longer passes through this function at
+/// all. For the record, since it was the argument for calling that gap
+/// unreachable: on the pinned tree the name occurs at exactly three sites outside
+/// tests (`defaultfilters.py:6`, `:155`, `:181`), every one inside `floatformat`
+/// and all three inside an `except` clause that catches it (`:155`, `:158`,
+/// `:181`), so no filter let one escape even then.
 fn filter_py_error(py: Python<'_>, error: &Error) -> PyErr {
     let ErrorKind::FilterHost(inner) = &error.kind else {
         // An `Unimplemented` is a filter this engine has not built. Anything else
