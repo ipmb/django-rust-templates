@@ -402,6 +402,7 @@ smartif.py:179-185	django/template/smartif.py	179	185	-	-
 smartif.py:179-183	django/template/smartif.py	179	183	OPERATORS[token]	-
 smartif.py:198-200	django/template/smartif.py	198	200	-	-
 smartif.py:200	django/template/smartif.py	200	-	display()	-
+smartif.py:214-215	django/template/smartif.py	214	215	def create_var(self, value):	return Literal(value)
 dateformat.py:42	django/utils/dateformat.py	42	-	-	-
 dateformat.py:44-48	django/utils/dateformat.py	44	48	TypeError	-
 dateformat.py:326-329	django/utils/dateformat.py	326	329	-	-

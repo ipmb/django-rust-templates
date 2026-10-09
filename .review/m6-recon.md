@@ -372,3 +372,60 @@ signal in its own right: it may mean nobody quoted it, or it may mean the span
 ends where nothing can be quoted. The second reading is a defect. (`--check`
 still passes on such a row, because it only asks whether *some* line inside the
 span exists.)
+
+## The fourth detector: `unquoted` rows whose span ends where nothing can be asserted
+
+The signal above is runnable, and running it is cheap — 131 unquoted rows, 87 of
+them ranges, and for each one a single question of the end line: does it carry
+text? Ten did not (corrected in `ec4739f`):
+
+| row | old end | end line was | corrected |
+| --- | --- | --- | --- |
+| `base.py:669-671` | 671 | blank | `668-670` |
+| `base.py:822-833` | 833 | `# Not enough OR Too many` | `822-839` |
+| `defaultfilters.py:78-83` | 83 | blank | `78-82` |
+| `defaultfilters.py:447-450` | 450 | blank | `447-448` |
+| `defaultfilters.py:511-516` | 516 | blank | `511-515` |
+| `defaultfilters.py:578-588` | 588 | blank | `578-587` |
+| `defaultfilters.py:669-743` | 743 | blank, three past `unordered_list` | `669-737` |
+| `defaulttags.py:724-757` | 757 | blank | `724-755` |
+| `defaulttags.py:759-805` | 805 | blank | `758-804` |
+| `smartif.py:40-43` | 43 | blank | `40-42` |
+
+Nine are the one-line-past shape. The tenth is not: `base.py:822-833` ends on a
+*comment*, and a comment is not a slip — it is a line somebody chose, and it
+belongs to the `if` at 834 rather than to the `args_check` the sentence names.
+So the repair is not "back up one", it is "take the unit the sentence names",
+which is 822-839. That is the reason the blank/comment distinction is worth
+keeping in the detector rather than collapsing it.
+
+Two more things fell out of the batch:
+
+- **Every one of the ten became a quoted row**, which is the point — the end
+  line is now one a row can assert, so the same signal cannot fire on it twice.
+- **A fourth blind spot: bare `` `N-M` `` numbers.** `smartif.rs` cited
+  `Literal.__repr__` as `` `smartif.py:40-43`, `142-143` `` — the second has no
+  colon, so it is not a `SHORTHAND_RE` match, so `unmigrated` never counted it
+  and no pass would have reached it. A tree-wide sweep found exactly **two**
+  such spans in the whole tree, both in that file: `142-143` and `214-215`. Both
+  are **right** (`Literal.__repr__` and `IfParser.create_var`), and both are
+  named now — so the class cost nothing here. It is listed because it is
+  invisible to every count the project has: neither `unmigrated` nor the
+  stranded list nor `--check` can see a citation that never had a colon. The
+  wrong anchor in that sentence was the one *with* the colon (`40-43`).
+
+One row was read and **left alone**, and it matters because it is the precedent
+for how wide a span should be: `base.py:1060-1063`, the `origin`/`source` read
+in the debug exception path. It ends on
+`context.render_context.template.get_exception_info(`, which is real code, and
+all four of its lines are part of the claim (1060 reads `origin`; 1063 opens the
+`get_exception_info` call). So it passes: the **quotation decides where** inside
+the span, and the **syntactic unit decides how wide**. Applied to the pair that
+prompted it, `:1562-1564` (the three-line `raise`) stands and `base.py:672-676`
+was wrong — not because a quotation was present, but because widening it pulled
+in a signature and a docstring the claim was silent about.
+
+**Four detectors now, and three were discovered rather than designed:** the
+stranded list, the naming read (prose and numbers), and this blank-end signal.
+None of the three was in the plan; the plan had only the manifest and its
+`--check`. Worth saying in the M6 write-up.
