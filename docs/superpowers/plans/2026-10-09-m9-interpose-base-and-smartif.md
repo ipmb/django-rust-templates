@@ -1927,3 +1927,29 @@ Django class is a capture of the current universe**, and it is correct only whil
 no install or uninstall follows. It is mechanically searchable
 (`from django.template… import <CapitalisedName>` at module level in `python/`
 and `tests/`), and its symptom has been a silent wrong answer every time.
+
+**(6) The suite's settings are first-writer-wins, and this file's name is a
+sort order.** Not a prediction the plan made — a defect the plan's own Step 2
+would have written, caught by running it. The first version of the test class
+configured ``USE_I18N=False``, copying the four modules that do
+(`tests/test_filter_rebinding.py`, `tests/test_render_parity.py`,
+`tests/test_host_tags.py`, `tests/test_parser_errors.py`). Measured: four rows in
+`tests/test_filter_parity.py` went red — `yesno/locale-translates-the-default-
+arguments` rendered `'maybe'` against its pinned `'Vielleicht'`, and
+`date/german-default-format` `'8. October 2026'` against `'8. Oktober 2026'`.
+
+The value is not the cause; the **ordering** is. ``settings.configure`` is a
+no-op once settings are configured, and `unittest discover` walks modules
+alphabetically, so `filter_probe.ensure_settings()` — which needs `USE_I18N=True`
+*and* `django.setup()` before a catalog can be read at all — always won, because
+`test_filter_parity` sorts before every other module that configures.
+`test_base_parity` sorts before *it*, so the same line that is harmless in four
+other files silently changed another module's expectations. The class now calls
+`filter_probe.ensure_settings()`, guarded on `settings.configured`, so whichever
+module arrives first the answer is the suite's answer.
+
+This is the third time in M9 that a row has been green or red because of the
+alphabet — `_shim.py`'s own comment records the second, where
+`unittest discover` happened to run `test_interposition` before `test_shim` — and
+Task 7 should decide whether the suite wants a single explicit settings
+configuration rather than five guarded ones racing.
