@@ -711,9 +711,10 @@ pub trait FilterHost {
     ) -> Result<Value, Error>;
 
     // --- CPython string-method semantics ------------------------------------
-    /// `str.lower()`. **Not a per-code-point table**, which is this project's
-    /// fifth Unicode-table finding after `\w`, whitespace, `combining` and the
-    /// case fixup. Measured: `"ΟΣ".lower()` is `"ος"`, not `"οσ"` — Unicode's
+    /// `str.lower()`. **Not a per-code-point table**, and that is the finding:
+    /// this is the project's fifth Unicode surprise after `\w`, whitespace,
+    /// `combining` and the case fixup, and the first that is not a table at all.
+    /// Measured: `"ΟΣ".lower()` is `"ος"`, not `"οσ"` — Unicode's
     /// **Final_Sigma** rule, which is *context*-dependent, so Task 1's
     /// exhaustive per-code-point diff provably cannot see it. Rust's
     /// `str::to_lowercase` implements the rule, but the fixup table needs
