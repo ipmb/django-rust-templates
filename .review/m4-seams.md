@@ -25,7 +25,15 @@ reading.
 | `slugify` | clean |
 | `urlize` | clean |
 | `pformat` | clean |
-| `timesince` | clean |
+| `timesince` | call clean, **doc wrong** — "Django's own signature" is five parameters, the trait expresses three |
+
+**These verdicts are dated, not permanent.** A disposition recorded against one
+shape of a method expires when the method changes shape. `timesince`'s
+"clean" was first written against a `-> String` seam that carried a separate
+`now()` method; the signature is now `-> Result<String, Error>` with
+`now: Option<&Value>` and `now()` deleted, and re-deriving it against the
+current shape is what turned up the doc defect in the row above. A verdict is a
+number only for as long as the thing it numbered holds still.
 
 ## `date_format` / `time_format` — the sentinel the signature cannot spell
 
@@ -109,8 +117,39 @@ django.utils.text.slugify("Straße Ünicode")  = 'strae-unicode'
 `urlize`: the seam's `trim_url_limit`/`nofollow=True`/`autoescape` reproduce
 both call sites, `urlize` and `urlizetrunc`, and `int(limit)` is
 corpus-reachable — `{{ s|urlizetrunc:"5" }}` == `{{ s|urlizetrunc:5 }}`.
-`pformat(value)` takes `pprint`'s defaults on both sides. `timesince(d, None,
-False)` == `timesince(d)`.
+`pformat(value)` takes `pprint`'s defaults on both sides.
+
+### `timesince`, re-derived against the current signature
+
+Not "the same call" — the verdict has to be re-derived, because the seam it was
+recorded against no longer exists. Django's helper is
+`timesince(d, now=None, reversed=False, time_strings=None, depth=2)`
+(`timesince.py:28`): **five** parameters. The trait expresses **three** —
+`FilterHost::timesince` is `(d, now: Option<&Value>, reversed: bool)`. (No
+`host.rs` line number: an earlier draft of this paragraph cited `host.rs:678`
+and the doc edit two rows up moved it to `692` in the same breath, which is the
+staleness this file exists to catch. Cite the symbol.)
+
+The call is clean, and the clean-ness is bounded by the call site rather than
+by the signature. `time_strings` and `depth` are absent because the helper has
+exactly two Rust callers, and the argument triple is visible in each call:
+`timesince.rs`'s `call.host.timesince(&value, now, false)` and `timeuntil.rs`'s
+`call.host.timesince(&value, arg.as_ref(), true)` — three arguments, always.
+The template side reaches the helper only through `timesince_filter`
+(`defaultfilters.py:812`) and `timeuntil_filter` (`:825`), and neither sets the
+last two. So the reachable parameter set is complete and the omission is the
+`ngettext`-`u64` shape: sound for the callers that exist, a thing to widen
+before a caller that wants a custom `depth`. The `now: Option` spelling is the
+repair this file already records (sweep instance #4 below), and `Result` is
+*forced*, not chosen: `AttributeError` escapes the filter's
+`except (ValueError, TypeError)` and only the host sees the raised class.
+
+**The doc was not clean.** It read "`django.utils.timesince.timesince`, **with
+Django's own signature**" — a claim a reader checks against `timesince.py:28`
+and finds false by two parameters, and the exact claim a Task brief would
+carry. Fixed in the doc to name the reachable parameter set and why the other
+two are absent. The call was never wrong; the sentence describing it was, which
+is `localtime`'s shape, not `date_format`'s.
 
 ## The rule, and the sweep it predicts
 
@@ -123,7 +162,7 @@ through.** Five instances now, in order of discovery:
 | `json_dumps` | `separators`, and omitted `cls` | wrong output; wrong failures |
 | `percent_format` | `"%" + spec` | could not express `gettext("%s KB") % x` |
 | `quote` | the `str`/non-`str` classification | refused inputs Django answers |
-| `timesince` | the `now=None` default | raises where Django answers |
+| `timesince` | the `now=None` default | raises where Django answers — **repaired**: `now` is `Option<&Value>`, `now()` deleted |
 | `date_format` | the default's resolution | wrong in any locale with a format module |
 
 The predictive statement: **a seam's signature should be the wrapped function's

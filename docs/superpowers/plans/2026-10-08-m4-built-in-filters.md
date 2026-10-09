@@ -1646,62 +1646,21 @@ CPython string method (`lower`, `title`) nor one that never passes through
 string methods; the third catches a helper's result-changing decorator
 (`phone2numeric`); and the fourth reads our own Rust bodies and is the only one
 that reddens when a body is edited. They are computed and asserted separately, so
-the failure message names which filter moved:
+the failure message names which filter moved.
 
-```python
-def delegating_filters_by_utils():
-    """Filters whose body's answer comes from a django.utils ENGINE — 18.
-
-    The metric, written down because three neighbouring ones are each correct
-    for a different question: 57 filters are registered; 31 reference *any*
-    django.utils name (that sweeps in `mark_safe`, a primitive we reimplement
-    as Value::Safe); 27 reference a utility in a module that imports something
-    stateful (that wrongly sweeps in escape/join/escapeseq/force_escape/
-    linenumbers/linebreaks, because strip_tags shares django/utils/html.py with
-    them). A filter delegates iff the utility its body references bottoms out,
-    within that utility's own module, in state Rust cannot hold (settings,
-    locale, the active language, the clock) or a stdlib table-or-parser port.
-
-    Scope note: this instrument scans only `django.*` imports, so it cannot see
-    `pprint`, `random` and `urllib.parse.quote`, which three filters reach
-    directly (`defaultfilters.py:3`, `:10`, `:11`). Their metric is stated in
-    `DELEGATING_BY_STDLIB_ENGINE`, and `delegating_filters_in_rust` is what
-    checks it.
-
-    Classification is per-UTILITY, not per-module. Two resolver traps are
-    load-bearing and both were hit while measuring: `from django.utils import
-    formats` binds a MODULE, so looking up "formats" inside formats.py finds
-    nothing (the fix is `module_path(f"{m}.{n}")`); and `gettext` resolves
-    through a package __init__ that rebinds it, so a name lookup bottoms out
-    empty and falsely reads as pure.
-    """
-
-def delegating_filters_by_string_method():
-    """Filters calling a `str` method whose result is not a function of the
-    code point alone — 2, `lower` and `title`.
-
-    Found by walking each filter body's AST for `.lower()`/`.title()`/`.upper()`
-    across the pinned tree, then comparing what each one costs: `str.upper()`
-    and `str.title()`'s *uppercase* half are per-code-point (Task 1's table);
-    `str.lower()` is Final_Sigma, so `"ΟΣ".lower()` is `"ος"` and no
-    per-code-point table can express it. `str.title()`'s lowercasing of each
-    run's remainder is Final_Sigma too. So the two `.lower()`-family callers
-    delegate, and Task 1's per-code-point table is *not* their answer — there is
-    deliberately no `lower` in `pyunicode::case` for them to reach for.
-
-    This is the metric that first moved the set past 18 after the plan's first
-    review, which is why the metrics are counted separately rather than merged
-    into a hand-checked list. The third metric was added later, for
-    `phone2numeric`, which this one and metric A both score clean; the fourth
-    reads the Rust bodies.
-
-    The `str` methods are matched **across whitespace** and with `#[cfg(test)]`
-    cut, which is not cosmetic: `truncatewords` writes `call.host\n.truncate(…)`,
-    and the first version of the host-call parse used `host\.(\w+)\(`, which
-    cannot see it — reporting 22 where the answer is larger and mis-attributing
-    two filters. The parse is a claim of the same kind as any number it replaces.
-    """
-```
+**This step does not quote the functions, and that is deliberate.** The first
+draft of this plan embedded `delegating_filters_by_utils` and
+`delegating_filters_by_string_method` verbatim; the shipped versions have since
+grown a scope note and a whitespace-tolerant parse. An embedded snapshot in a
+plan is the same shape as an embedded snapshot in a trait doc, and this project
+already has the evidence that embedded text propagates — wave B copied the wrong
+`html.py:412-415` range out of `host.rs` in `7df817f`. So the artifact is
+`tests/test_filter_inventory.py`:
+`test_the_delegation_set_is_derived` is the derivations and the union assertion,
+`test_the_trait_sections_are_the_delegation_boundary` is the marker list,
+`test_the_filter_modules_are_the_registered_filters` is the 57, and
+`test_host_calls_ignore_test_code` is the parse. Read them there; a pointer
+cannot go stale where a copy can.
 
 `DELEGATING_FILTERS` is the union of the four, asserted from **both**
 directions: against the three Python-side metrics' literals, and against

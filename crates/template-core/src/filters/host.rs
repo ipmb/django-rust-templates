@@ -648,7 +648,21 @@ pub trait FilterHost {
     /// has no `N`, so `dateformat.time_format(t, None)` raises where the `date` twin
     /// answers — `AttributeError: 'TimeFormat' object has no attribute 'N'`.
     fn dateformat_time_format(&self, value: &Value, format: &Value) -> Result<String, Error>;
-    /// `django.utils.timesince.timesince`, **with Django's own signature**.
+    /// `django.utils.timesince.timesince`, over the **reachable** parameter
+    /// set.
+    ///
+    /// Django's signature is `(d, now=None, reversed=False, time_strings=None,
+    /// depth=2)` (`timesince.py:28`) — five. This seam expresses three, because
+    /// `time_strings` and `depth` have exactly two Rust callers, `timesince.rs`
+    /// and `timeuntil.rs`, and both pass the three that remain: the template
+    /// side reaches this helper only through `timesince_filter` and
+    /// `timeuntil_filter` (`defaultfilters.py:812`, `:825`), and neither sets
+    /// the last two. The omission is bounded by the **call site** and not by
+    /// this signature — the same shape as [`Self::ngettext`]'s `u64` — so a
+    /// caller that ever needs a custom `depth` must widen this first. (An
+    /// earlier draft of this doc said "with Django's own signature", which is
+    /// five parameters against three; that claim is what the re-derivation
+    /// caught, not the call.)
     ///
     /// `timeuntil` is not `timesince` with the arguments swapped: Django's
     /// `timesince(d, now, reversed=False)` swaps `d` and `now` *after*
