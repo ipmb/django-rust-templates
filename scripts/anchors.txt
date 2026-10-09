@@ -165,6 +165,7 @@ defaultfilters.py:210	django/template/defaultfilters.py	210	-	if sign and rounde
 defaultfilters.py:213	django/template/defaultfilters.py	213	-	return mark_safe(	-
 defaultfilters.py:213-220	django/template/defaultfilters.py	213	220	return mark_safe(	-
 defaultfilters.py:214	django/template/defaultfilters.py	214	-	formats.number_format(	-
+defaultfilters.py:215	django/template/defaultfilters.py	215	-	number,	-
 defaultfilters.py:223-227	django/template/defaultfilters.py	223	227	def iriencode(value):	return iri_to_uri(value)
 defaultfilters.py:225-227	django/template/defaultfilters.py	225	227	return iri_to_uri(value)	-
 defaultfilters.py:230-244	django/template/defaultfilters.py	230	244	def linenumbers(value, autoescape=True):	return mark_safe("\n".join(lines))

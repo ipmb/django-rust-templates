@@ -424,7 +424,7 @@ fn input_value(input_val: &str) -> Value {
 /// shape both normal returns have (`defaultfilters.py:185` and `defaultfilters.py:213`).
 ///
 /// The operand is a **string**, not an `f64`: `defaultfilters.py:187` hands over `"%d" % int(d)`
-/// and `:214` hands over the assembled `number`, which is [`NumberFormatArgs`]'s
+/// and `defaultfilters.py:215` hands over the assembled `number`, which is [`NumberFormatArgs`]'s
 /// documented str case.
 fn formatted(
     number: String,
