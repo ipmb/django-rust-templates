@@ -574,6 +574,75 @@ replacements, all the same width as what they replaced, so nothing rewrapped,
 and the first correction whose repair was a *reuse* of an existing neighbour
 rather than a new row.
 
+## The end line and the start line, asked of the rows nothing was asking
+
+The fourth detector asked one question — does a row's end line carry text? — of
+the 131 **unquoted** rows. It was never asked of the quoted ones, and it cannot
+be: `_check_entry` requires the snippet to appear *anywhere* in the span, so a
+row with a snippet passes whatever its end line is. Asking all 276 range rows
+instead found **six**, all quoted, all the same one-line-past shape the ten
+unquoted ones were (PEP 8's two blank lines after a top-level `def`; the span
+reaches into them):
+
+| row | old end | corrected | construct |
+| --- | --- | --- | --- |
+| `defaultfilters.py:590-600` | blank | `590-599` | `dictsortreversed` |
+| `defaultfilters.py:757-776` | blank | `757-775` | `get_digit` |
+| `defaultfilters.py:854-858` | blank | `854-857` | `divisibleby` |
+| `defaultfilters.py:942-982` | blank | `942-981` | `pluralize` |
+| `defaulttags.py:1134-1179` | blank | `1134-1178` | `lorem` |
+| `defaulttags.py:1610-1651` | blank | `1610-1650` | `widthratio` |
+
+Two are cited from `parser/error.rs`, which is how the sweep started; the other
+four are cited from files still in the migration queue, so all four would have
+been asked eventually — or never, since all four are quoted. Corrected in
+`c700c1e`; each end was read against `.django/` @ 6.0.9 rather than backed up on
+the arithmetic of the blank line.
+
+**And one row the checker could not have caught at all:** `defaulttags.py:1654-1690`,
+cited from `with.rs` for `defaulttags.do_with`, names three lines that do not
+exist — `do_with` is 1654-1687 and the file ends at 1687. `--check` is silent
+because `_check_entry` tests `snippet in "\n".join(source[start - 1 : end])`, and
+a slice whose stop is past the end is silently *short* rather than an error: the
+snippet at 1679 is well inside, the row counts as cited, and the run reports 0
+failures while the manifest holds an anchor no reading of the file resolves.
+Nothing else bounds a span against its file's length either. Corrected in
+`e4bc17e`.
+
+**The mirror, and its blank branch.** The reviewer mirrored the detector onto
+start lines and reported six hits, all comment starts, with the comment that a
+comment start — unlike a blank end — has a real legitimate class. Reproduced
+here, and the branch they report as empty is not: `defaulttags.py:97` starts on
+a **blank** line, which is the `html.py:246` shape (wrong in the line itself)
+rather than a span defect, and it was invisible for the same reason the blank-end
+rows were — the row records no snippet, so only its line number is checked, and
+`97` is blank while the prose citing it says "`CycleNode.__init__`'s own" (the
+`def` is 99). Two of the six comment starts were wrong the same way:
+
+- `smartif.py:160-171` (`smartif.rs:554`) is cited for "`IfParser.__init__`'s
+  token merge … and nothing else" and stops two lines short of the loop it
+  names: the merge's own `mapped_tokens.append(...)` is 172 and the loop's
+  closing `i += 1` is 173. A span cited for the merge did not contain the line
+  that performs it. Corrected to the `while` loop, `164-173`.
+- `timesince.py:60-70` (`timeuntil.rs:19`) and `timesince.py:60-73`
+  (`host.rs:677`) are two rows for one construct that disagree about the end —
+  **and both are wrong at the front**, opening on the comment for the *date*
+  conversion at 61-62 rather than the timezone block both sentences name
+  ("timezones" and "normalising the timezones"). The timezone unit is 67-70, so
+  one span ends where the unit does and the other reaches one line past it into
+  the unrelated `if reversed: d, now = now, d` swap — and the disagreement about
+  the end is the *visible* half of a defect whose cause is the start. Once the
+  span is the unit named, both are `67-70` and there is one row. Corrected in
+  `5c017bb`.
+
+The other four comment starts are the legitimate class: `base.py:504-505` and
+`defaulttags.py:1250-1251` open on a comment that *states* the claim, and
+`defaulttags.py:106-112` needs a judgement about which unit its sentence names
+(`CycleNode.render` is 104-114) that is better made when the three files citing
+it are named. So the mirror is a suspicion list where the blank-end detector had
+none — the difference the reviewer predicted, and the reason it is worth keeping
+as two questions rather than one signal.
+
 ## Two more shorthand classes, both of which the counts conflate
 
 `SHORTHAND_RE` is `r"`:(\d+)(?:-(\d+))?`"` — it matches a backticked `:N` and
