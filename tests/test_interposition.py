@@ -271,15 +271,28 @@ class InterpositionTests(unittest.TestCase):
         equal = sum(i2 - i1 for tag, i1, i2, _j1, _j2 in opcodes if tag == "equal")
         differing = [op for op in opcodes if op[0] != "equal"]
 
-        # The structure, which is what the guard reads: three edits, two of them
-        # pairs and one a pure insertion of ours. Asserted here too because a
-        # re-alignment that merged two edits into one would move `equal` in a way
-        # this row could not explain on its own.
-        self.assertEqual([op[0] for op in differing], ["delete", "replace", "replace"])
+        # The structure, which is what the guard reads: five edits — the marker
+        # and its blank line as one pure insertion of ours, then two pairs for
+        # `compile_nodelist`'s delegation and two more for
+        # `Variable._resolve_lookup`'s. Asserted here too because a
+        # re-alignment that merged two edits into one would move `equal` in a
+        # way this row could not explain on its own.
+        #
+        # Five rather than three since M9's Task 5, and the pair that grew is
+        # the one worth reading: `difflib` splits the resolver's single
+        # replacement in two because our `return` realigns against upstream's
+        # `if getattr(e, "silent_variable_failure", …)` tail rather than against
+        # the line that follows the loop. Both spans are declared, so the guard
+        # is satisfied either way; this row is what would notice if a future
+        # edit merged them and the declaration stopped describing the diff.
+        self.assertEqual(
+            [op[0] for op in differing],
+            ["delete", "replace", "replace", "replace", "replace"],
+        )
 
         self.assertEqual(
             equal,
-            1192,
+            1121,
             "the number of lines this transcription shares with upstream, in "
             "place, has moved; if that was a delegation, re-pin it here and "
             "declare the region in scripts/check_transcriptions.py",
@@ -357,6 +370,153 @@ class InterpositionTests(unittest.TestCase):
                 with self.subTest(module=name, function=label):
                     self.assertEqual(measured[label], pinned[label])
 
+
+class ResolverDelegationTests(unittest.TestCase):
+    """Task 5: ``Variable._resolve_lookup`` is Rust's, handler included.
+
+    The rows below are direct-entry evidence, which is what this module is for:
+    the accepted suite cannot see whether the resolver delegates. Measured in
+    `.review/m9-recon.md` finding 3, a transcription that delegates nothing is
+    green everywhere except the meter — and the third row here is the one that
+    would have caught the version of this task that shipped the handler in Rust
+    *without* the log.
+
+    **A deviation from the plan's Step 5 and Step 6, recorded because it changes
+    what these rows are evidence for.** The plan put Django's outer `except`
+    block in the shell, with `LookupOutcome::Escaped`'s bit crossing to Python
+    so the log could be emitted there. It cannot be: for the shell to be inside
+    an `except` block, Rust must *raise*, and the bit has no transport that does
+    not either mutate the caller's exception or add an out-parameter whose only
+    purpose is to move one string one frame. So the handler — the log, the
+    `silent_variable_failure` branch, and the re-raise — is
+    `crates/template-py/src/lib.rs::outcome_to_py`, and what the rows below pin
+    is the *record*, which is the same either way.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        # The suite's settings helper rather than a local `configure` — the
+        # alphabet lesson `tests/test_base_parity.py` records. Guarded on
+        # `settings.configured` inside, so this cannot change the answer for
+        # another module; it only supplies one if none exists yet.
+        from scripts.filter_probe import ensure_settings
+
+        ensure_settings()
+        _shim.install()
+
+    def _capture(self):
+        """A ``Capture`` handler on ``django.template``, plus its records.
+
+        The level is set explicitly because the logger inherits ``WARNING`` from
+        the root: ``assertLogs`` does this itself, and a hand-rolled capture that
+        does not would collect nothing and read as "no log was emitted", which
+        is the wrong conclusion in the most expensive direction.
+        """
+        import logging
+
+        records = []
+
+        class Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        logger = logging.getLogger("django.template")
+        handler = Capture()
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        return logger, handler, records
+
+    def test_variable_resolution_reaches_rust(self):
+        """A render that resolves a variable calls `_native.resolve`.
+
+        The meter and the file check above say `base` is ours; neither says the
+        *lookup* is. A transcription that kept upstream's loop would pass both,
+        which is finding 3's shape applied to this method.
+        """
+        from django.template import Context, Engine
+
+        from django_rust_templates import _native
+
+        calls = []
+        original = _native.resolve
+
+        def counting(*args, **kwargs):
+            calls.append(args[0])
+            return original(*args, **kwargs)
+
+        _native.resolve = counting
+        try:
+            Engine().from_string("{{ a.b }}").render(Context({"a": {"b": 1}}))
+        finally:
+            _native.resolve = original
+
+        self.assertEqual(calls, ["a.b"], calls)
+
+    def test_the_failing_bit_is_passed_to_the_logger(self):
+        """The bit `{{ author.name }}` fails on, not the bit it ends on.
+
+        This is the whole reason `LookupOutcome::Escaped` grew a payload, and
+        the path makes it a real distinction: `{{ a.b.c }}` over a context whose
+        `b` raises logs `b`, while the *path's* last bit is `c`. The plan's
+        recon named its two `test_logging` failures as one defect; the silent
+        half is the third row below.
+        """
+        from django.template import Context, Engine
+
+        logger, handler, records = self._capture()
+        try:
+            Engine().from_string("{{ author.name }}").render(Context({}))
+        finally:
+            logger.removeHandler(handler)
+
+        messages = [record.getMessage() for record in records]
+        self.assertIn(
+            "Exception while resolving variable 'author' in template 'unknown'.",
+            messages,
+            messages,
+        )
+
+    def test_the_log_record_carries_the_exception_instance(self):
+        """`exc_info=True` cannot work here, and the obvious assertion hides it.
+
+        Upstream passes `exc_info=True`, which resolves `sys.exc_info()` **at
+        call time** and is `(None, None, None)` outside an active `except`. The
+        M8 stash is exactly "held, never active", so a handler that used the
+        verbatim form would record a truthy tuple of `None`s:
+        `assertIsNotNone(record.exc_info)` passes and `str(record.exc_info[1])`
+        is `'None'`.
+
+        Both halves are executed rather than argued — the naive form first, on
+        this logger, outside any `except`, so the `(None, None, None)` the row
+        warns about is produced here and asserted on, and then the render, whose
+        record must carry the instance.
+        """
+        import logging
+
+        from django.template import Context, Engine
+
+        logger, handler, records = self._capture()
+        try:
+            logger.debug("naive form", exc_info=True)
+            naive = records[-1]
+            self.assertEqual(
+                naive.exc_info,
+                (None, None, None),
+                "the premise of this row: `exc_info=True` outside an `except` "
+                "records a tuple of Nones, which is truthy",
+            )
+            self.assertIsNotNone(naive.exc_info, "and this is the assertion that "
+                                 "would have passed on it")
+
+            Engine().from_string("{{ author.name }}").render(Context({}))
+        finally:
+            logger.removeHandler(handler)
+
+        ours = [record for record in records if record.exc_info is not None]
+        ours = [record for record in ours if record.getMessage() != "naive form"]
+        self.assertEqual(len(ours), 1, [r.getMessage() for r in records])
+        self.assertIsNotNone(ours[0].exc_info[1], "exc_info held no exception")
+        self.assertIn("Failed lookup for key [author]", str(ours[0].exc_info[1]))
 
 if __name__ == "__main__":
     unittest.main()

@@ -421,15 +421,34 @@ class FilterExpressionParityTests(unittest.TestCase):
         See `tests/parity_target.py`. The `assertNotIn("_impl", source)` this
         replaces stopped holding the moment `base` became ours, and it was never
         quite the claim anyway — what matters is that the code each target
-        executes is upstream's, which is asserted per target, and that includes
-        `Parser.parse` and `Variable._resolve_lookup`, the two methods M9
-        delegates to Rust. `_resolve_lookup` is Task 5's, so this row is the one
-        that will notice if its declaration is added without the comparison
-        being reconsidered.
+        executes is upstream's, which is asserted per target.
+
+        **`Variable` is now `Variable.__init__`, and this row is where Task 5's
+        declaration landed.** The previous version of this docstring predicted
+        it: "`_resolve_lookup` is Task 5's, so this row is the one that will
+        notice if its declaration is added without the comparison being
+        reconsidered." It did, on the first run after the declaration existed —
+        the class's span now covers two declared regions, so the guard's
+        region-overlap clause reports the comparison as Rust against Rust.
+
+        Narrowing rather than suppressing, because the widened claim is the
+        false one now. This harness compares *parses*: it builds Django's
+        `FilterExpression` and inspects the `Variable` objects that construction
+        produces, and it never resolves one. `Variable.resolve` and
+        `_resolve_lookup` are not executed by anything here, so naming the class
+        was always coarser than the claim, and it only read as true while the
+        class happened to contain no Rust. `Variable.__init__` is the method the
+        comparison actually runs; the label is passed explicitly because
+        `__init__.__name__` is `"__init__"`, which names no class.
         """
-        for target in (FilterExpression, Parser, Variable):
-            with self.subTest(target=target.__name__):
-                assert_target_is_not_rust_owned(self, target, target.__name__)
+        targets = (
+            (FilterExpression, "FilterExpression"),
+            (Parser, "Parser"),
+            (Variable.__init__, "Variable.__init__"),
+        )
+        for target, label in targets:
+            with self.subTest(target=label):
+                assert_target_is_not_rust_owned(self, target, label)
 
     def test_the_filter_names_come_from_djangos_registry(self):
         """A reverse map is only an oracle if it is injective."""

@@ -2059,12 +2059,112 @@ fn string_if_invalid(context: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         .unbind())
 }
 
+/// The logger Django's outer handler writes to.
+///
+/// It is `logging.getLogger("django.template")`, reached by that call rather
+/// than through `django.template.base.logger`: the two are the same object
+/// upstream (`base.py:94`) and the call is what `assertLogs("django.template")`
+/// itself does, so a row that captures the record finds the logger the handler
+/// wrote to whatever the shim did to the module. It also removes a dependency
+/// on our transcription re-exporting the name.
+///
+/// Cached, and safely: `assertLogs` replaces the *handlers* on the logger the
+/// call returns, not the logger object, so a cached reference still sees the
+/// capture.
+static TEMPLATE_LOGGER: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+/// The three lines of Django's outer `except` that are not a decision about the
+/// value: read `template_name`, log, and let the caller decide.
+///
+/// This is `base.py:1015-1020` — `template_name`, then the `logger.debug`
+/// call with its message left as a `%`-template — so
+/// `record.args` carries the bit and the template name and `getMessage()`
+/// formats it — the two attributes `test_logging` reads.
+fn log_resolution_failure(
+    py: Python<'_>,
+    context: &Bound<'_, PyAny>,
+    bit: &str,
+    error: &PyErr,
+) -> PyResult<()> {
+    // `getattr(context, "template_name", None) or "unknown"` (`base.py:1015`).
+    // A `getattr` with a default swallows exactly `AttributeError` and nothing
+    // else, so a `template_name` property that raises `RuntimeError` propagates
+    // from here — out of the *handler*, replacing the exception it was about to
+    // report. That is what upstream's identical line does, one frame out.
+    let name = match context.getattr("template_name") {
+        Ok(name) => name,
+        Err(err) if err.is_instance_of::<PyAttributeError>(py) => py.None().into_bound(py),
+        Err(err) => return Err(err),
+    };
+    let template_name: Bound<'_, PyAny> = if name.is_truthy()? {
+        name
+    } else {
+        "unknown".into_pyobject(py)?.into_any()
+    };
+
+    // The record is built from the exception **instance**, not from
+    // `exc_info=True`. `logging` accepts either — `Logger._log` converts an
+    // instance to `(type(e), e, e.__traceback__)` and calls `sys.exc_info()`
+    // only for a truthy non-tuple — and the instance is the only one of the two
+    // this frame has: the failure was stashed by an arm and handed back, never
+    // raised, so Python's exception state here is whatever the caller's was.
+    //
+    // Passing `True` would therefore have produced `(None, None, None)` — a
+    // record whose `exc_info` is not `None`, so `assertIsNotNone` passes and the
+    // `str(log_record.exc_info[1])` two lines below it fails with `'None'`.
+    // Measured on the pinned tree before this was written.
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("exc_info", error.value(py))?;
+
+    let logger = TEMPLATE_LOGGER.get_or_try_init(py, || -> PyResult<Py<PyAny>> {
+        Ok(py
+            .import("logging")?
+            .call_method1("getLogger", ("django.template",))?
+            .unbind())
+    })?;
+    logger.bind(py).call_method(
+        "debug",
+        (
+            "Exception while resolving variable '%s' in template '%s'.",
+            bit,
+            template_name,
+        ),
+        Some(&kwargs),
+    )?;
+    Ok(())
+}
+
 /// Turn the port's verdict into Python's: hand back the value behind the
 /// handle, raise Django's `VariableDoesNotExist`, or apply the host half of
 /// Django's outer `except Exception` to the exception it stashed.
 ///
-/// `context` is needed only by the [`LookupOutcome::Escaped`] arm, which is the
-/// one place Django's handler reaches for `context.template.engine`.
+/// `context` is needed by the [`LookupOutcome::Escaped`] arm, which is the one
+/// place Django's handler reaches for `context.template.engine`, and by both
+/// arms that log, which read `context.template_name`.
+///
+/// # The log lives here, and that is a deviation from the M9 plan
+///
+/// Task 5 of `docs/superpowers/plans/2026-10-09-m9-interpose-base-and-smartif.md`
+/// puts the log in Python, in the shell's `Variable._resolve_lookup`, with the
+/// `bit` carried across by [`LookupOutcome::Escaped`]'s new payload. It cannot
+/// go there, and the reason is the same one that makes the payload necessary:
+/// the only way for Python to be inside an `except` block is for Rust to
+/// *raise*, and the bit cannot ride a raised exception.
+///
+/// Rust raises the user's exception object **by identity** — that is what keeps
+/// `__traceback__`, and it is why `render.django_exception` restores a host
+/// error the same way. An exception cannot be given a private attribute to
+/// carry the bit (some classes have no `__dict__`, and it is not ours to write
+/// to a caller's object), and the alternatives are all new state: a mutable
+/// out-parameter, a thread-local stash, or a second entry point. Each of them
+/// exists only to move one `&str` out of the function that already has it, one
+/// frame, into a function that has every other input — `context`, the
+/// exception, and the substitution rule.
+///
+/// So the handler stays whole, in the place that decides its two branches
+/// already. What that costs is written down rather than hidden: the shell's
+/// `_resolve_lookup` is no longer upstream's text, and `test_base_parity`'s
+/// transcription guard is what makes that visible instead of silent.
 fn outcome_to_py(
     py: Python<'_>,
     outcome: LookupOutcome,
@@ -2084,24 +2184,36 @@ fn outcome_to_py(
         LookupOutcome::Found(node) => value_behind(node),
         // The container's handle, which is what Django puts in `params`. It is
         // already in the arena: `node()` put it there when the loop gave up.
+        //
+        // **This arm logs too, and that was the second of two defects the recon
+        // collapsed into one.** Django's `raise VariableDoesNotExist(...)`
+        // (`base.py:989`) is *inside* the outer `try`, so a missing key reaches
+        // the handler at `base.py:1014` and logs before it raises. A port that
+        // treated "missing" as "already decided, nothing to do" produces the
+        // right exception, the right message, and *no log record* —
+        // `test_log_on_variable_does_not_exist_silent` reports "no logs of level
+        // DEBUG or higher triggered on django.template", which is what a
+        // silently-dropped log line looks like from the outside.
         LookupOutcome::Missing { bit, container } => {
-            Err(variable_does_not_exist(py, &bit, value_behind(container)?)?)
+            let error = variable_does_not_exist(py, &bit, value_behind(container)?)?;
+            log_resolution_failure(py, context, &bit, &error)?;
+            Err(error)
         }
         // `pending` is the reason `LookupOutcome` does not carry the exception:
         // the enum derives `PartialEq` and is compared in `template-core`'s
-        // tests, where no Python exists.
+        // tests, where no Python exists. The bit *is* carried — see
+        // [`LookupOutcome::Escaped`] — because the handler logs it and nothing
+        // below Rust can recover it.
         //
-        // Both branches of Django's handler are here, and **the substitution is
-        // the one that was missing**: measured before this arm existed, a
-        // `@property` raising an exception with `silent_variable_failure = True`
-        // re-raised from here where stock Django substituted. Django logs first
-        // (`base.py:1016-1021`); that is deliberately not reproduced — no test
-        // reads it, and a `logger.debug` on the hottest lookup path would be
-        // noise this port has no way to make useful.
-        LookupOutcome::Escaped => {
+        // Both branches of Django's handler are here, in Django's order: log,
+        // then substitute for a `silent_variable_failure`, else re-raise. The
+        // substitution is the one that was missing until M8; the log is the one
+        // M9's recon mistook for the only failure.
+        LookupOutcome::Escaped { bit } => {
             let error = pending
                 .take()
                 .expect("Escaped is only returned after an arm stashed an exception");
+            log_resolution_failure(py, context, &bit, &error)?;
             if silent_variable_failure(py, &error)? {
                 string_if_invalid(context)
             } else {

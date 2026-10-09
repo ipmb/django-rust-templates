@@ -127,3 +127,70 @@ def assert_target_is_not_rust_owned(testcase, target, module_name):
         "transcription region covers it, so this comparison would be Rust "
         "against Rust",
     )
+
+
+_PINNED_RESOLVE_LOOKUP = None
+
+
+def pinned_resolve_lookup():
+    """Django's own ``Variable._resolve_lookup``, executed from ``.django``.
+
+    M9's Task 5 delegates our ``Variable._resolve_lookup`` to
+    ``_native.resolve``. Every harness that compared ``_native.resolve`` against
+    ``Variable._resolve_lookup`` therefore began comparing Rust against Rust —
+    and comparing it *successfully*, since both sides are now one function. That
+    is precisely the failure ``assert_target_is_not_rust_owned`` above exists to
+    refuse, arriving where that guard cannot see it: the guard's
+    ``COMPARED_PATH`` is the reach of the *parse* harness, and none of these is
+    a parse.
+
+    So this is the replacement Python side — upstream's method, byte for byte,
+    read out of the pinned checkout by ``ast``. The five users are
+    ``tests/test_render_parity.py::ResolverParityTests``,
+    ``tests/test_resolve_invalid.py``, ``tests/test_resolve_callarm.py``,
+    ``tests/test_m8_side_effects.py`` and the resolver half of
+    ``tests/differential/cases.py``'s neighbourhood.
+
+    **Returned unbound**, because it is a method: call it as
+    ``pinned_resolve_lookup()(variable, context)``. The ``Variable`` *instance*
+    is ours and stays ours, which is deliberate rather than a compromise — the
+    transcription of ``Variable.__init__`` is what produces the ``lookups`` both
+    sides read, so sharing it keeps the comparison about the resolver instead of
+    about how the path was split.
+
+    ``exec``'d into a copy of the interposed module's globals, so the names the
+    body reaches — ``VariableDoesNotExist``, ``BaseContext``, ``signature``,
+    ``logger`` — are the same objects the render path uses. All four are
+    Django's own (``signature`` is ``inspect``'s; the other three are
+    transcribed unchanged and are not Rust-backed), which is what makes this a
+    comparison of the resolver rather than of its dependencies.
+
+    Not ``importlib``-by-name for the method, for the reason
+    ``tests/test_base_parity.py`` records: under the shim the name
+    ``django.template.base`` resolves to *our* file, so importing it would hand
+    back the very delegation this exists to replace.
+    """
+    global _PINNED_RESOLVE_LOOKUP
+    if _PINNED_RESOLVE_LOOKUP is not None:
+        return _PINNED_RESOLVE_LOOKUP
+
+    import ast
+    import importlib
+
+    path = DJANGO_CHECKOUT / "django" / "template" / "base.py"
+    source = path.read_text()
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.ClassDef) and node.name == "Variable":
+            break
+    else:  # pragma: no cover - the pinned tree has it
+        raise AssertionError(f"no class Variable in {path}")
+    for child in node.body:
+        if isinstance(child, ast.FunctionDef) and child.name == "_resolve_lookup":
+            break
+    else:  # pragma: no cover - the pinned tree has it
+        raise AssertionError(f"Variable._resolve_lookup is not in {path}")
+
+    namespace = dict(importlib.import_module("django.template.base").__dict__)
+    exec(compile(ast.get_source_segment(source, child), str(path), "exec"), namespace)
+    _PINNED_RESOLVE_LOOKUP = namespace["_resolve_lookup"]
+    return _PINNED_RESOLVE_LOOKUP

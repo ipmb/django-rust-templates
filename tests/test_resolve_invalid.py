@@ -10,6 +10,7 @@ path behind a second, unrelated substitution.
 
 import unittest
 
+from tests.parity_target import pinned_resolve_lookup
 from tests.test_render_parity import _ParityTest, _outcome
 
 
@@ -27,7 +28,7 @@ class InvalidSubstitutionParityTests(_ParityTest):
             with theirs_context.bind_template(engine.from_string("")):
                 ours = _outcome(lambda: _native.resolve(path, ours_context))
                 theirs = _outcome(
-                    lambda: Variable(path)._resolve_lookup(theirs_context)
+                    lambda: pinned_resolve_lookup()(Variable(path), theirs_context)
                 )
         self.assertEqual(ours, theirs, f"value: {value!r} path: {path!r}")
 
@@ -107,7 +108,7 @@ class InvalidSubstitutionParityTests(_ParityTest):
         context = Context({"x": Alters()})
         self.assertEqual(
             _outcome(lambda: _native.resolve("x", context)),
-            _outcome(lambda: Variable("x")._resolve_lookup(context)),
+            _outcome(lambda: pinned_resolve_lookup()(Variable("x"), context)),
         )
 
 

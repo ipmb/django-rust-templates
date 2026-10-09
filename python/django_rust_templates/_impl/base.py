@@ -959,78 +959,37 @@ class Variable:
         detail and shouldn't be called by external code. Use Variable.resolve()
         instead.
         """
-        current = context
-        try:  # catch-all for silent variable failures
-            for bit in self.lookups:
-                try:  # dictionary lookup
-                    # Only allow if the metaclass implements __getitem__. See
-                    # https://docs.python.org/3/reference/datamodel.html#classgetitem-versus-getitem
-                    if not hasattr(type(current), "__getitem__"):
-                        raise TypeError
-                    current = current[bit]
-                    # ValueError/IndexError are for numpy.array lookup on
-                    # numpy < 1.9 and 1.9+ respectively
-                except (TypeError, AttributeError, KeyError, ValueError, IndexError):
-                    try:  # attribute lookup
-                        # Don't return class attributes if the class is the
-                        # context:
-                        if isinstance(current, BaseContext) and getattr(
-                            type(current), bit
-                        ):
-                            raise AttributeError
-                        current = getattr(current, bit)
-                    except (TypeError, AttributeError):
-                        # Reraise if the exception was raised by a @property
-                        if not isinstance(current, BaseContext) and bit in dir(current):
-                            raise
-                        try:  # list-index lookup
-                            current = current[int(bit)]
-                        except (
-                            IndexError,  # list index out of range
-                            ValueError,  # invalid literal for int()
-                            KeyError,  # current is a dict without `int(bit)` key
-                            TypeError,
-                        ):  # unsubscriptable object
-                            raise VariableDoesNotExist(
-                                "Failed lookup for key [%s] in %r",
-                                (bit, current),
-                            )  # missing attribute
-                if callable(current):
-                    if getattr(current, "do_not_call_in_templates", False):
-                        pass
-                    elif getattr(current, "alters_data", False):
-                        current = context.template.engine.string_if_invalid
-                    else:
-                        try:  # method call (assuming no args required)
-                            current = current()
-                        except TypeError:
-                            try:
-                                current_signature = signature(current)
-                            except ValueError:  # No signature found.
-                                current = context.template.engine.string_if_invalid
-                            else:
-                                try:
-                                    current_signature.bind()
-                                except TypeError:  # Arguments *were* required.
-                                    # Invalid method call.
-                                    current = context.template.engine.string_if_invalid
-                                else:
-                                    raise
-        except Exception as e:
-            template_name = getattr(context, "template_name", None) or "unknown"
-            logger.debug(
-                "Exception while resolving variable '%s' in template '%s'.",
-                bit,
-                template_name,
-                exc_info=True,
-            )
+        # Delegated to Rust (M9). The docstring above is upstream's verbatim and
+        # the *contract* is unchanged; the body is `template-core`'s
+        # `resolve_lookup`, which walks `base.py:959-992`'s three arms (dictionary,
+        # attribute, list-index) and then applies the outer `except Exception`
+        # handler at `base.py:1014`.
+        #
+        # **The handler is Rust's too, including the `logger.debug`, and that is
+        # a deviation from the M9 plan** — the plan put the log here, in Python,
+        # with `LookupOutcome::Escaped` carrying the failing `bit` across. It
+        # cannot go here: for this frame to be inside an `except` block, Rust
+        # must *raise*, and the bit has no way to ride a raised exception that
+        # is the caller's own object, held by identity. `outcome_to_py` in
+        # `crates/template-py/src/lib.rs` records the whole argument. What is
+        # observable here is only that the record is the same one: same logger,
+        # same message, same `exc_info[1]`.
+        #
+        # `".".join(self.lookups)` is this method's whole input because
+        # `_native.resolve` takes the dotted path, as `Variable.__init__` took
+        # it. It is exact rather than a round trip: `lookups` is
+        # `var.split(VARIABLE_ATTRIBUTE_SEPARATOR)` on the same string, after the
+        # `_(…)` wrapper is stripped, so no bit can contain the separator and no
+        # `translate` flag survives into the path — which is why the M12 refusal
+        # `_native.resolve` raises for a translated variable is unreachable from
+        # here.
+        #
+        # Reached only when `self.lookups is not None` (see `resolve`), so the
+        # literal and translate branches of `Variable.resolve` — which stay
+        # Python, one frame out — are not duplicated by this call.
+        from django_rust_templates import _native
 
-            if getattr(e, "silent_variable_failure", False):
-                current = context.template.engine.string_if_invalid
-            else:
-                raise
-
-        return current
+        return _native.resolve(".".join(self.lookups), context)
 
 
 class Node:

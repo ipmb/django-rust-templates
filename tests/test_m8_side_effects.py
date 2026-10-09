@@ -27,6 +27,7 @@ from django.template import Context, Engine  # noqa: E402
 from django.template.base import Variable  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
+from tests.parity_target import pinned_resolve_lookup  # noqa: E402
 
 
 class Suppressed:
@@ -95,13 +96,13 @@ class ThePropertyNoOutputCanShow(unittest.TestCase):
         # unflagged callable, so `calls` must reach 1.
         value = Control()
         value.reset()
-        self._run(value, lambda c: Variable("x")._resolve_lookup(c))
+        self._run(value, lambda c: pinned_resolve_lookup()(Variable("x"), c))
         self.assertEqual(value.calls, 1, "stock Django did not call the control")
 
     def test_alters_data_suppresses_the_call_stock(self):
         value = Suppressed()
         value.reset()
-        got = self._run(value, lambda c: Variable("x")._resolve_lookup(c))
+        got = self._run(value, lambda c: pinned_resolve_lookup()(Variable("x"), c))
         self.assertEqual(got, "")
         self.assertEqual(value.calls, 0)
 
@@ -112,7 +113,7 @@ class ThePropertyNoOutputCanShow(unittest.TestCase):
         # asserted `== ""` and failed against correct stock Django.
         value = DoNotCall()
         value.reset()
-        got = self._run(value, lambda c: Variable("x")._resolve_lookup(c))
+        got = self._run(value, lambda c: pinned_resolve_lookup()(Variable("x"), c))
         self.assertIs(got, value)
         self.assertEqual(value.calls, 0)
 

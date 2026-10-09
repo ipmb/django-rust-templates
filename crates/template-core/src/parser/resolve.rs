@@ -295,7 +295,24 @@ pub enum LookupOutcome {
     /// that failure on the way out. `template-core` cannot check that; the
     /// invariant is stated here so the host's `step`/`pending` pair has
     /// somewhere to point.
-    Escaped,
+    ///
+    /// **`bit` is carried because the handler's first act is to log it**, and
+    /// this is the only place it exists: the host holds the exception, the
+    /// context and the path, but not the position in the path the loop had
+    /// reached. Django's line is `logger.debug("Exception while resolving
+    /// variable '%s' in template '%s'.", bit, template_name, exc_info=True)`
+    /// (`base.py:1016-1021`), and `test_logging` reads the formatted message —
+    /// the row asserts `'author'` for `Variable("article.author")` over
+    /// `{"article": {"section": "News"}}`, whose *last* bit is `author` and
+    /// whose *failing* bit is also `author`. `{{ a.b.c }}` with `b` raising is
+    /// the pair that separates the two, and it is why the bit cannot be
+    /// recovered from the path one frame out.
+    ///
+    /// It is the bit the loop was *on*, which is the same for a
+    /// [`LookupOutcome::Missing`] and is why that variant carries one too. The
+    /// variant was payload-free until M9 wired the host's handler to it; the
+    /// payload is what the handler reads.
+    Escaped { bit: String },
     /// Something M3 deliberately does not do. Loud rather than wrong (D3).
     Unimplemented(String),
 }
@@ -331,7 +348,9 @@ pub fn resolve_lookup(lookups: &[String], mut current: Box<dyn LookupTarget>) ->
                     Err(CallFailure::NoSignature | CallFailure::ArgsRequired) => {
                         match current.string_if_invalid() {
                             Ok(invalid) => invalid,
-                            Err(PendingFailure) => return LookupOutcome::Escaped,
+                            Err(PendingFailure) => {
+                                return LookupOutcome::Escaped { bit: bit.clone() }
+                            }
                         }
                     }
                     // Not a substitution: `base.py:1013` re-raises into the outer
@@ -339,7 +358,7 @@ pub fn resolve_lookup(lookups: &[String], mut current: Box<dyn LookupTarget>) ->
                     // the
                     // exception object. The host owns that decision, as for
                     // `Escaped`.
-                    Err(CallFailure::Raised) => return LookupOutcome::Escaped,
+                    Err(CallFailure::Raised) => return LookupOutcome::Escaped { bit: bit.clone() },
                 }
             }
             // Not a call and not a raise: Django replaces the value
@@ -360,7 +379,7 @@ pub fn resolve_lookup(lookups: &[String], mut current: Box<dyn LookupTarget>) ->
                 // (`base.py:958`), so its `AttributeError` reaches the handler at
                 // `base.py:1014`. The host has stashed it and applies that
                 // handler.
-                Err(PendingFailure) => return LookupOutcome::Escaped,
+                Err(PendingFailure) => return LookupOutcome::Escaped { bit: bit.clone() },
             },
         }
     }
@@ -413,6 +432,13 @@ pub fn resolve_lookup(lookups: &[String], mut current: Box<dyn LookupTarget>) ->
 /// The last two rows are the same arm and differ only in `dir()`; the first two
 /// are a different arm and no `dir()` answer changes them.
 fn step_one(current: &dyn LookupTarget, bit: &str) -> Result<Box<dyn LookupTarget>, LookupOutcome> {
+    // Every arm below fails the same way and names the same bit — the one being
+    // looked up, which is this function's argument and never the caller's loop
+    // variable. Built once here so the four sites cannot drift apart.
+    let escaped = || LookupOutcome::Escaped {
+        bit: bit.to_string(),
+    };
+
     // 1. Dictionary arm, guarded by `__getitem__`'s presence. Django raises a
     //    `TypeError` for the guard rather than skipping the arm, and that
     //    `TypeError` is the first thing this arm's own `except` swallows — so
@@ -422,7 +448,7 @@ fn step_one(current: &dyn LookupTarget, bit: &str) -> Result<Box<dyn LookupTarge
             Step::Found(found) => return Ok(found),
             // A swallowed miss falls through to the attribute arm.
             Step::Miss => {}
-            Step::Raised => return Err(LookupOutcome::Escaped),
+            Step::Raised => return Err(escaped()),
         }
     }
 
@@ -438,10 +464,10 @@ fn step_one(current: &dyn LookupTarget, bit: &str) -> Result<Box<dyn LookupTarge
             Step::Found(found) => return Ok(found),
             Step::Miss => {
                 if !current.is_context() && current.in_dir(bit) {
-                    return Err(LookupOutcome::Escaped);
+                    return Err(escaped());
                 }
             }
-            Step::Raised => return Err(LookupOutcome::Escaped),
+            Step::Raised => return Err(escaped()),
         }
     }
 
@@ -451,7 +477,7 @@ fn step_one(current: &dyn LookupTarget, bit: &str) -> Result<Box<dyn LookupTarge
         match current.get_index(&index) {
             Step::Found(found) => return Ok(found),
             Step::Miss => {}
-            Step::Raised => return Err(LookupOutcome::Escaped),
+            Step::Raised => return Err(escaped()),
         }
     }
 
@@ -714,7 +740,9 @@ mod tests {
         };
         assert_eq!(
             resolve_lookup(&lookups(&["boom"]), Box::new(property_in_dir)),
-            LookupOutcome::Escaped
+            LookupOutcome::Escaped {
+                bit: "boom".to_string()
+            }
         );
 
         // `__getattr__` raising AttributeError, name not in `dir()` → the index
@@ -743,7 +771,9 @@ mod tests {
             };
             assert_eq!(
                 resolve_lookup(&lookups(&["boom"]), Box::new(runtime)),
-                LookupOutcome::Escaped
+                LookupOutcome::Escaped {
+                    bit: "boom".to_string()
+                }
             );
         }
 
@@ -760,7 +790,9 @@ mod tests {
             };
             assert_eq!(
                 resolve_lookup(&lookups(&["boom"]), Box::new(item)),
-                LookupOutcome::Escaped
+                LookupOutcome::Escaped {
+                    bit: "boom".to_string()
+                }
             );
         }
 
@@ -863,7 +895,9 @@ mod tests {
         };
         assert_eq!(
             resolve_lookup(&lookups(&["f"]), Box::new(holder)),
-            LookupOutcome::Escaped,
+            LookupOutcome::Escaped {
+                bit: "f".to_string()
+            },
         );
     }
 
@@ -975,7 +1009,9 @@ mod tests {
         };
         assert_eq!(
             resolve_lookup(&lookups(&["x"]), Box::new(holder)),
-            LookupOutcome::Escaped,
+            LookupOutcome::Escaped {
+                bit: "x".to_string()
+            },
         );
     }
 }

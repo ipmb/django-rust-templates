@@ -112,13 +112,13 @@ COMPARED_PATH = {
         (744, 788, "FilterExpression.__init__"),
         (876, 927, "Variable.__init__"),
         (929, 945, "Variable.resolve"),
-        (1075, 1087, "Node.get_nodes_by_type"),
-        (1095, 1096, "NodeList.render"),
-        (1098, 1103, "NodeList.get_nodes_by_type"),
-        (1109, 1110, "TextNode.__init__"),
-        (1118, 1125, "TextNode.render_annotated"),
-        (1147, 1148, "VariableNode.__init__"),
-        (1168, 1212, "token_kwargs"),
+        (1034, 1046, "Node.get_nodes_by_type"),
+        (1054, 1055, "NodeList.render"),
+        (1057, 1062, "NodeList.get_nodes_by_type"),
+        (1068, 1069, "TextNode.__init__"),
+        (1077, 1084, "TextNode.render_annotated"),
+        (1106, 1107, "VariableNode.__init__"),
+        (1127, 1171, "token_kwargs"),
     ],
     # 6 functions, spans 138-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
@@ -238,6 +238,45 @@ DECLARED = {
                 "parsed = parse_template(self.source, self.engine, self.origin)\n"
                 "self.extra_data = parsed.extra_data\n"
                 "return parsed.nodelist",
+            ),
+            # M9's resolver seam: `Variable._resolve_lookup` delegates to Rust,
+            # **including Django's outer `except Exception` handler and the
+            # `logger.debug` inside it**. The docstring and the `resolve` that
+            # calls this are still upstream's and still separate regions above;
+            # what is gone is the loop over `self.lookups`, the three arms, and
+            # the handler that decided between substituting and re-raising.
+            #
+            # Two regions rather than one for the same reason `compile_nodelist`
+            # has two: `difflib` pairs our comment block against upstream's loop
+            # (one opcode) and our `return` against upstream's `if
+            # getattr(e, "silent_variable_failure", …)` tail (another). The
+            # second region's upstream span is the handler's body, which is
+            # where the alignment landed rather than where the code moved to —
+            # stating that here because a reader comparing the two spans will
+            # otherwise assume the pairing is meaningful.
+            #
+            # **This is the second declared region that is the Rust-vs-Rust
+            # hazard the guard exists to refuse, and unlike `compile_nodelist`
+            # it is reached by a parity harness.** `tests/differential/cases.py`,
+            # `tests/test_render_parity.py::ResolverParityTests`,
+            # `tests/test_resolve_invalid.py`, `tests/test_resolve_callarm.py`
+            # and `tests/test_m8_side_effects.py` all compared `_native.resolve`
+            # against `Variable._resolve_lookup` — which is exactly the "stock
+            # vs rust" failure those harnesses were built to avoid, arriving
+            # through the front door. Their Python side is now the *pinned
+            # source*, executed from `.django`, by the same `_pinned` mechanism
+            # `tests/test_base_parity.py` uses for `render_value_in_context`.
+            # The guard above is what named all five rather than letting them
+            # pass vacuously.
+            (
+                (962, 990),
+                (957, 1021),
+                "from django_rust_templates import _native",
+            ),
+            (
+                (992, 992),
+                (1023, 1028),
+                'return _native.resolve(".".join(self.lookups), context)',
             ),
         ],
     ),
