@@ -1079,6 +1079,24 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   `_tag_re_split_positions` are private and have no caller anywhere in the
   tree, so they need not be modelled.
 
+- **Every exception this engine synthesises names Django's own function, and a
+  Django release can rename one.** `Error::filter_host`'s message is a
+  transcription of what the pinned tree raises, so it is only as stable as the
+  Python name inside it. The measured case is `base.py:813`'s collision, whose
+  message is `<callable>() got multiple values for argument 'autoescape'` and
+  whose `<callable>` is `linebreaks_filter` for the registered `linebreaks`: a
+  release could change that name without changing any behaviour, because it is
+  the `def`'s own name and not the registry key. The exposure is the same one
+  `ljust`'s and `center`'s `OverflowError` texts and `cut`'s `str.replace`
+  `TypeError` carry, and no diff of upstream source guards it. What guards it is
+  the assertion on the message: `tests/test_filter_parity.py`'s
+  `test_every_error_case` calls both engines live and compares `str(caught)`, so
+  a rename fails on the Django side of the row before our side is consulted.
+  Re-run the message-bearing `ERROR_CASES` rows — the five collision rows
+  (`unordered_list`, `linebreaks`, `linebreaksbr`, `linenumbers`, `urlize`) and
+  every other row that pins a text — whenever the Django pin moves: a
+  synthesised message is correct for one pin at a time.
+
 ## 11. Review workflow
 
 The human has delegated review authority to `rusty-reviewer` and will not review

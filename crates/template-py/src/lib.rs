@@ -129,18 +129,21 @@ fn filter_flags(name: &str) -> PyResult<(bool, bool, bool)> {
 /// was measured rather than argued: of the 23 landed filters that take an
 /// argument, `floatformat`, `pluralize` and `unordered_list` answered where Django
 /// raises — `floatformat:None` is `int(None)`'s `TypeError`, `pluralize:None` is
-/// `TypeError: argument of type 'NoneType' is not a container or iterable` — and
-/// the other 20 agreed only because their bodies happened to treat "no argument"
-/// as `Value::None`. Requiring the length makes the distinction structural: a
-/// caller cannot express "no argument" with a value.
+/// `TypeError: argument of type 'NoneType' is not a container or iterable` —
+/// and the other 20 agreed only because their bodies happened to treat "no
+/// argument" as `Value::None`. Requiring the length makes the distinction
+/// structural: a caller cannot express "no argument" with a value. The third of
+/// those is no longer an example of the collapse, because an argument to it now
+/// refuses outright for the `base.py:813` reason below; that refusal is a better
+/// answer than the one the body gave then.
 ///
-/// **One divergence survives the split, and it is `base.py:813`'s rather than a
-/// body's.** For a `needs_autoescape` filter Django calls
+/// **One divergence at `base.py:813` is the last of the split's, and the engine
+/// refuses rather than diverging.** For a `needs_autoescape` filter Django calls
 /// `func(obj, autoescape=context.autoescape, *arg_vals)` — the keyword goes in
 /// **before** the positional arguments — so a filter whose own second parameter
 /// is named `autoescape` cannot be given an argument at all: Python binds the
 /// positional one to the same name and raises. Measured, five filters are in that
-/// shape and the message names each Python function:
+/// shape, and all five bodies refuse with this message:
 ///
 /// ```text
 /// {{ x|linebreaks:5 }}     -> TypeError: linebreaks_filter() got multiple values for argument 'autoescape'
@@ -151,18 +154,21 @@ fn filter_flags(name: &str) -> PyResult<(bool, bool, bool)> {
 /// ```
 ///
 /// `join` and `urlizetrunc` take an argument of their own, so their second
-/// parameter is not `autoescape` and neither collides. **This seam cannot
-/// reproduce the collision and should not try**: it takes `autoescape` as a
-/// *value*, so there is no keyword to collide with, and the message needs the
-/// *callable's* Python name, which a name-keyed seam does not have — a
-/// `{% load %}`-ed `linebreaks` carries whatever name its library gave it, and
-/// the pinned tree's own `linebreaks` is `linebreaks_filter`. The behaviour is
-/// not lost where it is observable: it is CPython's binding of the *call* and not
-/// a body's decision, so it belongs to whoever makes the call — and M9 inherits
-/// it exactly, when the shim exposes these filters as Python functions carrying
-/// Django's own signatures.
-/// So no corpus row exists for it, by decision and not by omission; a row would
-/// have to pin a divergence we have chosen not to synthesise.
+/// parameter is not `autoescape` and neither collides. Note what does not catch
+/// the rest: `args_check` (`base.py:822`) counts `autoescape` among the filter's
+/// own parameters, so the **parse accepts** `{{ x|linebreaks:5 }}` and the
+/// refusal is at call time — a `TypeError`, not a `TemplateSyntaxError` — which is
+/// why an implementation that rejected the token while parsing would be wrong.
+///
+/// The refusal is each **body's** and not this seam's, which is why the message
+/// is a constant inside the five filter modules rather than a string composed
+/// here. This seam takes `autoescape` as a *value*, so there is no keyword to
+/// collide with, and the message needs the *callable's* Python name, which a
+/// name-keyed seam does not have — `linebreaks_filter` is the pinned tree's `def`
+/// name for the registered `linebreaks`, and a `{% load %}`-ed `linebreaks`
+/// carries whatever name its library gave it. So the module that owns the filter
+/// owns its message; the five `ERROR_CASES` rows that assert them are what fail
+/// if a pin bump renames a callable, and §10.4 records that as a checklist item.
 #[pyfunction]
 #[pyo3(signature = (name, value, args, autoescape = true, use_tz = true))]
 fn filter(

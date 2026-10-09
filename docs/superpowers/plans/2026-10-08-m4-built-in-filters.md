@@ -3143,7 +3143,8 @@ which is the raw-token defect this corpus has already been fixed for once.
   argument's *type*, which is why this filter's rows carry both shapes.
 
 **Three of these twelve — `linebreaks`, `linebreaksbr`, `linenumbers` — can never
-be given an argument, and no row of theirs may carry one.** They are three of the
+be given an argument, and each carries an `ERROR_CASES` row for the refusal rather
+than an exclusion from the corpus.** They are three of the
 five `needs_autoescape` filters whose own second parameter is *named*
 `autoescape`; `unordered_list` (landed under Task 6) and Task 9's `urlize` are the
 other two, out of M4's seven `needs_autoescape` filters — `join` and
@@ -3161,13 +3162,36 @@ counts `autoescape` among the filter's own parameters, so the **parse accepts**
 the token and the refusal is at call time — which is why the measured failure is a
 `TypeError` and not a `TemplateSyntaxError`, and why an implementation that
 rejected the argument while parsing would be wrong in a way the suite would see.
-This engine takes `autoescape` as a *value*, so there is no keyword to collide
-with, and the message needs the callable's Python name, which a name-keyed seam
-does not have. **So these three filters' rows carry neither
-`arg` nor `arg_variable`** — one would pin a divergence rather than a parity, and
-`tests/filter_cases.py`'s `ERROR_CASES` preamble records the exclusion beside the
-rows that would have been there. Their `autoescape` branches are still both
-tested: that is what the `context` key does, and it needs no argument.
+
+**All five bodies reproduce the refusal, and an earlier revision of this paragraph
+argued the other way — in a form worth recording, because the mistake is
+reusable.** It held that this engine takes `autoescape` as a *value*, so there is
+no keyword to collide with, and that the message needs the callable's Python name,
+which a name-keyed seam does not have; the collision was therefore CPython's
+binding of the *call* rather than a body's decision, and belonged to whoever makes
+the call — M9, when the shim exposes these filters as Python functions carrying
+Django's own signatures. Both premises are true and the conclusion does not
+follow, because they are true *of the engine* and false *of the body*. The refusal
+is observable at exactly one point — a token `base.py:822` lets through that
+`base.py:813` then fails — and a filter body is what stands at that point, so
+reproducing it is the body's work. The same reasoning would have refused
+`ljust.rs`'s and `rjust.rs`'s `too_large`, `center.rs`'s `too_many_digits` and
+`cut.rs`'s `not_a_string`, which are CPython- and `str`-level refusals this port
+already synthesises exactly; a rule that condemns four landed bodies is not the
+rule. The unknown callable name is a cost and not an obstacle: it is a per-filter
+constant inside the refusing filter's own module, and the `ERROR_CASES` row is
+what fails if a pin bump renames it. So a body given an argument returns
+`Error::filter_host(PyErrorKind::Other("TypeError".into()), <callable>,
+"<callable>() got multiple values for argument 'autoescape'")` — `operation`
+naming the callable exactly as `cut`'s names `str.replace`, for the reason
+`parser/error.rs` gives: it is diagnostics only and never reaches the author,
+while `message` is the whole of what they see. The corpus carries one row per
+filter — `unordered_list/argument` (Task 6), `linebreaks/argument`,
+`linebreaksbr/argument` and `linenumbers/argument` (here), and
+`urlize/argument` (Task 9) — which replaces the paragraph
+`tests/filter_cases.py`'s `ERROR_CASES` preamble used to carry in their place.
+Their `autoescape` branches are still both tested: that is what the `context` key
+does, and it needs no argument.
 
 ### Task 9: URLs and markup — 6 filters
 
@@ -3190,9 +3214,10 @@ its own task rather than folded into Task 8.
   therefore the `limit`/`autoescape` arity and the flag behaviour, and nothing
   else, and Task 3's derivation test is what asserts that rather than a reader
   taking this paragraph's word for it. **`urlize` is the fifth filter that cannot
-  be given an argument at all** (`base.py:813`; see Task 8's note), so its rows
-  carry no `arg` and no `arg_variable` — unlike `urlizetrunc`, whose `limit` comes
-  *before* `autoescape` and is therefore reachable.
+  be given an argument at all** (`base.py:813`; see Task 8's note), so it carries
+  the same `ERROR_CASES` refusal row as the other four — `urlize/argument` — and
+  no `parity` row with an `arg` or an `arg_variable`; unlike `urlizetrunc`, whose
+  `limit` comes *before* `autoescape` and is therefore reachable.
 - `json_script` (`:85-92`) — `element_id=None`, `is_safe=True`; escapes `<`, `>`
   and `&` in `json.dumps(value)` under `django.utils.html.json_script`. Host for
   `json_dumps`, Rust for the escaping and the `<script id=…>` assembly **if** the
