@@ -2163,6 +2163,30 @@ entirely the host's.
   `mark_safe`d. The corpus needs both `autoescape` states — **and it cannot
   express either one today.** See the harness note below.
 
+  **A measured divergence, recorded rather than fixed: `join`'s result *type*
+  when the separator carries `__html__`.** Django's `mark_safe` is a **no-op on
+  anything with `__html__`** — `django/utils/safestring.py:74-75` is
+  `if hasattr(s, "__html__"): return s` — so a `Markup`-shaped separator survives
+  `join` as itself. markupsafe's `Markup` is the real-world instance: a `str`
+  subclass with `__html__` that is deliberately **not** `SafeData` (the reason
+  `conditional_escape` is a host call, `:1156`).
+
+  ```text
+    separator = MyMarkup(", ")    # str subclass; __html__ returns self
+    join(["a", "b"], separator)   ->  MyMarkup     safe=False   (Django)
+                                  ->  SafeString   safe=True    (ours)
+    join(["a", "b"], ", ")        ->  SafeString   safe=True    (both)
+  ```
+
+  The text is identical, so §D5's safety half is the only thing that can see it —
+  which makes this the one place in M4 where that half is *wrong* rather than
+  merely unexercised. It is recorded rather than fixed because it is not reachable
+  here: markupsafe is not installed, and no template can construct such an object
+  (it takes a context variable holding a third-party `__html__` type). The fix
+  belongs to M8 with the rest of the `__html__`/`Promise` protocol (`:158`,
+  `:950`), not in `join`'s body — the divergence is `mark_safe`'s, and every
+  `mark_safe` site would need the same treatment.
+
 **Harness prerequisite for this group, found by reading the render path rather
 than by hitting it: the corpus has no per-row context.** `scripts/filter_probe.py`'s
 `django_answer` builds `Context({"x": value})` with defaults, and
@@ -2256,11 +2280,21 @@ quietly fixed in code.
    key, and the five generator rows use it. It is a distinct key rather than
    "call `value` if it is callable", because a callable is a legitimate input
    (`x|default:func`) that would otherwise be silently read as a factory.
-3. **A corpus row cannot express an exception** — `resolve` propagates it rather
-   than returning it. The two raising rows each of `first`/`last`/`random` has
-   (`first(5)`'s `TypeError`, `first({})`'s `KeyError`) are body tests, and
-   `join`'s `autoescape=False` non-str-separator `AttributeError` is too. Nine
-   candidate rows were measured and dropped for this reason.
+3. **A corpus row cannot express an exception — and that is exactly why
+   `ERROR_CASES` exists.** `resolve` propagates it rather than returning it, so a
+   `CASES` row whose *point* is that Django raises would abort the comparison
+   instead of making it. Nine candidate rows were measured and dropped for this
+   reason, and their inputs became **body tests**: the raising rows of
+   `first`/`last`/`random` (`first(5)`'s `TypeError`, `first({})`'s `KeyError`) and
+   `join`'s `autoescape=False` non-str-separator `AttributeError`. Dropping them
+   is nonetheless wrong, and the reason is that an exception is an **answer** —
+   the class is what a filter body's own `except` branches on, which makes it
+   exactly the kind of thing `first({})` *does* rather than a detail of how it
+   fails. So the raising inputs get a second list, `ERROR_CASES` in
+   `tests/filter_cases.py`, where both engines must raise the same class **and the
+   same message**; its first two rows are `cut`'s `TypeError`s (`47edea3`). Moving
+   these three filters' rows into it is a change to landed modules and is pending
+   the reviewer's call, so the body tests stand until then.
 
 **And the one body this section got wrong, found by the same measurement.** The
 `if children:` rule above is **not** `!children.is_empty()`: Django tests the
