@@ -146,9 +146,63 @@ The target is now our transcription, and the transcription's fidelity to upstrea
 
 Apply the same restatement, in its own idiom, to the five sibling rows: `test_lexer_parity.py:269`, `test_parser_errors.py:435`, `test_parser_parity.py` (ShapeTests), and the three targets in `test_filter_expr_parity.py`.
 
+**The restated claim has two weaknesses, both the reviewer's, and both are repaired here rather than argued away.**
+
+**(a) The chain holds only where the declared hunks miss the harness's path.** `check_transcriptions.py` gives *our file = upstream + declared hunks*; the parity claim needs *our file ≡ upstream **on the code the harness executes***. Those coincide only if the declared hunks and the harness's call path are disjoint — and M9's declared hunks are exactly the interesting methods. If a declared hunk put `Template.compile_nodelist` on Rust and a parity row built a `Template`, both sides of that comparison would be Rust and the row would be vacuous — `differential.py`'s failure in a new place, "stock vs rust" where stock is rust. Nothing checks this today. Make it an assertion in the same row:
+
+```python
+    def test_the_declared_hunks_miss_the_harness_s_path(self):
+        """The chain is true of the file; it must also be true of the comparison.
+
+        The comparison is Rust against this module's Python, and it is meaningful
+        only if `Parser(tokens).parse()` — the path `django_parse` actually walks
+        — does not itself run Rust. Today's declared hunks are
+        `Template.compile_nodelist` and `Variable._resolve_lookup`; neither is on
+        that path, and `django_parse` calls `Parser(...)` directly rather than
+        through `Template`, so the intersection is empty. That is currently true
+        *by accident*, which is the thing this row removes.
+        """
+        from scripts.check_transcriptions import declared_hunks  # or read the table
+
+        hunks = declared_hunks("base.py")
+        for name in ("parse", "tokenize"):
+            self.assertNotIn(name, hunks, f"{name} is on the harness's path")
+```
+
+**(b) The verification moved from runtime to build time.** The original six rows were self-verifying in the same process by the same invocation and could not be bypassed. The restated form asserts the same thing transitively, through a guard in a **different command at a different time**. So `python -m unittest tests.test_parser_parity` alone would say nothing about drift — structurally the `DJANGO_RUST_TEMPLATES` problem this project already fixed once: a result whose evidence lives in another invocation, and which looks identical whether or not that invocation happened.
+
+Make the evidence travel with the test, in each restated module:
+
+```python
+def setUpModule():
+    """The transcription guard must have run, and this module depends on it.
+
+    Restating the comparison target from "Django's file" to "our transcription"
+    moved the warrant from this process into `check.sh`. Running this module
+    alone would otherwise pass identically whether or not the transcription had
+    drifted — the shape of the provenance hole closed earlier, one layer over.
+    """
+    import scripts.check_transcriptions as guard
+
+    failures = guard.check()
+    if failures:
+        raise AssertionError(
+            "the transcription has drifted; this module's comparison target is "
+            f"no longer Django's: {failures}"
+        )
+```
+
+**(c) The alternative, considered and not taken.** The reviewer proposed holding the pristine module — `import django.template.base as _pristine_base` *before* `install()`, which `_purge()` does not destroy (it deletes the binding, not the object). That is strictly stronger where it works: identity rather than text-equivalence, runtime rather than build time, and it survives every future interposition without re-making the argument.
+
+It does not work here without a further change, and the reason is worth recording. The comparison would then span **two class universes**: `describe()` dispatches on `isinstance(value, Node)`, and pristine `Node` is not our `Node`. So every node on the Rust side — materialised by `_impl/parser.py`, which after `install()` binds *our* classes — would fail `isinstance` and fall to the address-comparing `repr()` arm. That is the same defect as the one this whole task exists to fix, reintroduced from the other direction.
+
+Fixing it needs either a `describe()` that dispatches on class *name* rather than identity (which would silently accept a node of the wrong class, weakening the comparison) or a materialiser pre-imported before `install()` so it binds pristine classes — which would change every other unit test's world, since `_impl/parser.py` is one cached module object for the whole session. Both cost more than repairs (a) and (b), and (a) makes the durability objection mechanical rather than manual: each future interposition fails the disjointness row until it is dealt with, which is a guard rather than a re-argument.
+
 - [ ] **Step 4: Fix the shim fallback row**
 
-`test_a_partial_subpackage_still_falls_back_for_its_siblings` fails because `base` no longer falls back. Read it, and change it to name a module that *does* still fall back — the row is about the shim's partial-subpackage behaviour, not about `base`, so the subject should be a module that is still Django's.
+`test_a_partial_subpackage_still_falls_back_for_its_siblings` (`tests/test_shim.py:138`) fails because `base` no longer falls back. Read it and change its subject — the row is about the shim's partial-subpackage behaviour, not about `base`.
+
+**Name the new subject explicitly, and say why that one**, since this is the row that will need re-picking at every milestone. Its docstring already names the right pair: it creates a throwaway `_impl/loaders/__init__.py` and checks that `django.template.loaders.filesystem` still resolves. **`django.template.loaders` and `django.template.loaders.filesystem` are the subjects to use** — neither is on M9's or M10's interposition list, and the row's actual assertion (a half-finished package still falls back for its siblings) is fully exercised by them without touching `base` at all. Add a line to the docstring recording that the subject is chosen for being far from the interposition frontier, so the next person re-picks it deliberately rather than by bisecting a failure.
 
 - [ ] **Step 5: Verify each restated guard still has teeth**
 
