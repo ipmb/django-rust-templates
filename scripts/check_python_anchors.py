@@ -8,13 +8,31 @@ afterwards found five more defects, in files nobody had re-read. So neither
 "be careful" nor "trust the report" is a mechanism, and this is.
 
 **The propagation case is why the manifest is keyed by snippet rather than by
-site.** `smartif.py:166-172` is the `is not`/`not in` fold; `translate_token`,
+site.** smartif.py:166-172 is the `is not`/`not in` fold; `translate_token`,
 the thing three of our comments claim it is, is at `:179-185`. That one wrong
 number had been copied into `_impl/parser.py:716`, `host.rs:207` and
 `desc.rs:216` — Rust and Python, three files, one defect — and the same review
 that found the first of them found none of the other two. A per-site fix moves
 three numbers and learns nothing; a snippet-keyed entry makes the wrong number
 underivable and the same repair serve all three.
+
+**THE ESCAPE, and it is the delimiter itself.** A backtick is what makes an
+anchor a citation. This tool reads text and cannot tell a citation from a
+quotation or a test fixture, so anything anchor-shaped that is *not* a claim
+about Django is written some other way:
+
+  - **quoting a defect** — write it without backticks, as the paragraph above
+    writes smartif.py:166-172. It reads as prose because it *is* prose.
+  - **anchor-shaped test data** — build the string at runtime; see `anchor()`
+    in `tests/test_anchor_manifest.py`, which exists for exactly this and says
+    so.
+
+Measured, because the size of this is not obvious: the checker's own test file
+held **ten** anchor-shaped literals — two known-wrong quotations and eight
+fixtures — and one fixture, `defaulttags.py:99999`, is deliberately past the end
+of its file, so *no* manifest entry can make it pass. A per-file exemption would
+have been the tempting repair and is how a guard acquires holes; this rule is
+one spelling that any file can use.
 
 `scripts/anchors.txt` records, per anchor as it is written in the tree, the file
 it names and **the source text the claim is about**. That direction is the whole
@@ -28,6 +46,13 @@ perfectly real line of Django.
     python -I scripts/check_python_anchors.py --check --frozen   # also fails on shorthand
     python -I scripts/check_python_anchors.py --triage           # suspicion list, exit 0
     python -I scripts/check_python_anchors.py --update           # derive cited numbers
+    python -I scripts/check_python_anchors.py --seed             # fill missing entries
+
+`--seed` writes a first draft of the manifest from the tree: it takes the number
+as the tree already says it and the snippet from the code the prose quotes
+beside it. It does not verify anything, and it cannot — a snippet read off the
+cited line would agree with it by construction. The draft exists to be failed by
+`--check`, which is where the real defects surface.
 
 `--frozen` exists so the guard could land *before* the shorthand migration and be
 closed after it: plain `--check` reports the shorthand as an `unmigrated` count
@@ -51,6 +76,7 @@ tool *does* check ranges — and it still passes.
 """
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -75,10 +101,26 @@ AMBIGUOUS = {
     "test_partials.py": 2,
 }
 
+# Our own package, which is the third base a qualified anchor may be relative
+# to: `_impl/parser.py:716` is a spelling our prose uses throughout and means
+# `python/django_rust_templates/_impl/parser.py`.
+OWN_PACKAGE = ROOT / "python" / "django_rust_templates"
+
+# Directories a suffix search must not walk. `.django` is here because the
+# checkout is searched separately and first, so leaving it in would make every
+# Django anchor ambiguous with itself; the rest are build and vendor trees.
+_SKIP_DIRS = {".git", ".venv", "target", "__pycache__", ".django", "node_modules"}
+
+# `_index`'s walk cache, keyed by base directory. `resolve` is called once per
+# anchor occurrence and the tree does not change under it, so walking twice is
+# pure waste — and the difference was 49 seconds against 0.4.
+_INDEX_CACHE = {}
+
 # Two forms, because the tree writes both: a bare basename (`` `base.py:615` ``)
 # and a qualified path (`` `django/template/base.py:615` ``,
-# `` `_impl/parser.py:210` ``). Resolution tries a qualified path under
-# `.django/` then the repo root; a bare basename resolves through `resolve`.
+# `` `_impl/parser.py:210` ``). A qualified path resolves against the four bases
+# `resolve` documents; a bare basename resolves through the same function's
+# basename rules.
 ANCHOR_RE = re.compile(r"`([a-zA-Z_0-9/]+\.py):(\d+)(?:-(\d+))?`")
 
 # The third form — a bare `` `:N` `` meaning "the file this comment is about" —
@@ -106,7 +148,7 @@ NOT_SCANNED_BECAUSE = {
     ".review/": (
         "Same class, and for one reason beyond churn: a review record is "
         "evidence about a date. The reviewer's next report on a wrong anchor "
-        "quotes our wrong anchor *verbatim* — `smartif.py:166-172` at "
+        "quotes our wrong anchor *verbatim* — smartif.py:166-172 at "
         "`_impl/parser.py:716` was reported exactly that way — so scanning this "
         "directory would fail the build on the reviewer's accurate quotation of "
         "our own defect, and the only way to make it green is to falsify the "
@@ -142,56 +184,102 @@ _DATED_REVIEW_RE = re.compile(r"^(m\d+|round-\d+)(-\S+)?\.md$")
 _SPAN_RE = re.compile(r"`([^`\n]+)`")
 
 
-def _scan(checkout):
-    """Every basename under `checkout`, so ambiguity is measured not assumed."""
-    found = {}
-    for path in checkout.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        found.setdefault(path.name, []).append(path)
-    return found
+def _index(base):
+    """`(basenames, relative paths)` under `base`, walked once and cached.
+
+    Pruned **during** the walk rather than filtered after it, because `rglob`
+    descends into `.venv` and `target` anyway: an unpruned per-anchor walk
+    measured **49 seconds** over this tree, which is not a price a gate can pay
+    for a check that runs on every commit. Cached because `resolve` is called
+    once per anchor occurrence and the tree does not change under it.
+    """
+    key = str(base)
+    if key not in _INDEX_CACHE:
+        names, paths = {}, []
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
+            for filename in sorted(filenames):
+                path = Path(dirpath) / filename
+                relative = path.relative_to(base).as_posix()
+                paths.append(relative)
+                names.setdefault(filename, []).append(relative)
+        _INDEX_CACHE[key] = (names, paths)
+    return _INDEX_CACHE[key]
+
+
+def _suffix_match(name, base):
+    """Relative paths under `base` ending with `name`."""
+    _, paths = _index(base)
+    return [relative for relative in paths if relative.endswith("/" + name)]
 
 
 def resolve(name, checkout=None, manifest=None):
     """The file an anchor names, or `SystemExit` when it cannot be decided.
 
-    Each step is an error rather than a guess. A qualified path is tried under
-    `.django/` then the repo root. A bare basename that is one of `OUR_OWN`
-    resolves to ours; otherwise it is looked up under `.django/`, and exactly
-    one hit resolves — more than one is ambiguous and zero is a missing file.
-    `manifest` carries the explicit paths the author already decided, consulted
-    before the search, because the decision belongs in a reviewable file rather
-    than in a heuristic.
+    Each step is an error rather than a guess. A **qualified** path is first
+    tried against `checkout` and the repo root, which covers the fully-spelled
+    forms (`django/template/base.py`, `python/django_rust_templates/…`).
+
+    What remains are **suffix** citations, not prefix ones, and that is a
+    measurement rather than a style: `filter_tests/test_dictsort.py` is
+    `tests/template_tests/filter_tests/test_dictsort.py` while
+    `i18n/test_blocktranslate.py` is
+    `tests/template_tests/syntax_tests/i18n/test_blocktranslate.py`, so **no
+    single base makes both resolve** — the ellipsis sits at a different depth in
+    each. So a name that resolves exactly nowhere is matched against path
+    suffixes under `checkout` then the repo root, and exactly one hit resolves;
+    more than one is ambiguous. A *wrong* prefix still fails here, which is the
+    point: `.django/tests/` is where Django's suite lives, so
+    `django/tests/filter_tests/…` has no suffix match either and
+    `desc.rs:319`'s `django/tests/…` was caught exactly this way.
+
+    A bare basename that is one of `OUR_OWN` resolves to ours; otherwise it is
+    looked up under `checkout`, and exactly one hit resolves — more than one is
+    ambiguous and zero is a missing file. `manifest` carries the explicit paths
+    the author already decided, consulted before the search, because the
+    decision belongs in a reviewable file rather than in a heuristic.
     """
     checkout = CHECKOUT if checkout is None else checkout
     explicit = (manifest or {}).get(name) if "/" not in name else None
     if explicit is not None:
         return Path(explicit) if Path(explicit).is_absolute() else ROOT / explicit
     if "/" in name:
-        for base in (checkout, ROOT):
+        bases = (checkout, ROOT, OWN_PACKAGE)
+        for base in bases:
             candidate = base / name
             if candidate.is_file():
                 return candidate
-        raise SystemExit(f"anchor names `{name}`, which is in neither {checkout} nor {ROOT}")
+        for base in (checkout, ROOT):
+            hits = _suffix_match(name, base)
+            if len(hits) == 1:
+                return base / hits[0]
+            if len(hits) > 1:
+                raise SystemExit(
+                    f"anchor names `{name}`, which {len(hits)} files under {base} "
+                    f"end with:\n  "
+                    + "\n  ".join(sorted(hits))
+                    + "\nGive the path explicitly in scripts/anchors.txt."
+                )
+        raise SystemExit(
+            f"anchor names `{name}`, which is no file under {checkout} and no "
+            f"path suffix under {ROOT}"
+        )
     if name in OUR_OWN:
         candidate = ROOT / name
         if candidate.is_file():
             return candidate
         raise SystemExit(f"`{name}` is in OUR_OWN but is not at {candidate}")
-    hits = [
-        path
-        for path in checkout.rglob(name)
-        if path.is_file() and "__pycache__" not in path.parts
-    ]
+    names, _ = _index(checkout)
+    hits = names.get(name, [])
     if len(hits) == 1:
-        return hits[0]
+        return checkout / hits[0]
     if not hits:
         raise SystemExit(f"anchor names `{name}`, which is not under {checkout}")
-    listing = "\n  ".join(str(path.relative_to(checkout)) for path in sorted(hits))
     raise SystemExit(
         f"anchor names `{name}`, which is ambiguous under {checkout} "
-        f"({len(hits)} candidates):\n  {listing}\n"
-        f"Give the path explicitly in scripts/anchors.txt."
+        f"({len(hits)} candidates):\n  "
+        + "\n  ".join(hits)
+        + "\nGive the path explicitly in scripts/anchors.txt."
     )
 
 
@@ -235,6 +323,7 @@ def check(checkout=None, tree=None, manifest=None, frozen=False, report=None):
 
     failures = []
     shorthand = []
+    unquoted = set()
     occurrences = 0
     for path, text in tree:
         for match in ANCHOR_RE.finditer(text):
@@ -244,9 +333,21 @@ def check(checkout=None, tree=None, manifest=None, frozen=False, report=None):
             if entry is None:
                 failures.append(f"{path}: `{anchor}` has no entry in scripts/anchors.txt")
                 continue
+            if entry[2] is None:
+                unquoted.add(anchor)
             failures.extend(_check_entry(path, anchor, match, entry, checkout))
         for match in SHORTHAND_RE.finditer(text):
             shorthand.append(f"{path}: `{match.group(0).strip('`')}` names no file")
+
+    if unquoted:
+        # An entry with no snippet is *unverified*, not a failure: `--seed`
+        # writes one where our prose quotes no code, and recording the cited
+        # line's own text would be the direction that detects nothing. Counted
+        # so the backlog is visible rather than silently green.
+        report(
+            f"unquoted: {len(unquoted)} entr(ies) record no source text, so only "
+            f"the line number is checked (not a failure)"
+        )
 
     if shorthand:
         # Reported either way, failed on only under `--frozen`: the guard lands
@@ -269,7 +370,21 @@ def check(checkout=None, tree=None, manifest=None, frozen=False, report=None):
 
 
 def _check_entry(tree_path, anchor, match, entry, checkout):
-    """The failures for one anchor, as a list of messages."""
+    """The failures for one anchor, as a list of messages.
+
+    `snippet` is checked **within the anchor's span**, not at its first line.
+    The common form of an anchor here is a whole function, and its prose is
+    about the function body while its first line is a decorator: requiring the
+    quotation on line `start` failed 178 true claims of that shape and caught
+    nothing the in-span rule misses except a start that is too *early* — which
+    the number and `end_snippet` still constrain. A guard that fails on true
+    claims is one that gets deleted.
+
+    A `None` snippet means the entry records no claim about the source text, so
+    only the line's *existence* is checked. That is a weaker guarantee than the
+    rest of this tool and it is labelled as such rather than dressed up: it
+    catches a renamed file or a shrunken one, and nothing else.
+    """
     named, line, snippet, end_snippet = entry
     start = int(match.group(2))
     end = int(match.group(3)) if match.group(3) else None
@@ -284,13 +399,15 @@ def _check_entry(tree_path, anchor, match, entry, checkout):
         path = resolve(named, checkout=checkout)
     except SystemExit as error:
         return [f"{tree_path}: `{anchor}` — {error}"]
-    text = _line_of(path, start)
-    if text is None:
+    lines = path.read_text().splitlines()
+    if start < 1 or start > len(lines):
         return [f"{tree_path}: `{anchor}` — {named} has no line {start}"]
-    if snippet not in text:
+    span = "\n".join(lines[start - 1 : end or start])
+    if snippet is not None and snippet not in span:
+        where = f"{named}:{start}" if end is None else f"{named}:{start}-{end}"
         problems.append(
-            f"{tree_path}: `{anchor}` — {named}:{start} is {text.strip()!r}, "
-            f"which does not contain {snippet!r}"
+            f"{tree_path}: `{anchor}` — {where} does not contain {snippet!r} "
+            f"(it starts {_line_of(path, start).strip()!r})"
         )
     if end is not None and end_snippet is not None:
         end_text = _line_of(path, end)
@@ -348,7 +465,14 @@ def triage(checkout=None, tree=None, report=None):
 
 
 def load_manifest(path=None):
-    """`scripts/anchors.txt` as `{anchor: (path, line, snippet, end_snippet)}`."""
+    """`scripts/anchors.txt` as `{anchor: (path, line, snippet, end_snippet)}`.
+
+    `-` in the snippet column means **no claim about the source text** — the
+    entry records only that the line exists. That is a weaker guarantee than the
+    rest of this tool and it is spelled as a value rather than left as an empty
+    field, because `"" in line` is vacuously true and would make an unstated
+    entry indistinguishable from a satisfied one.
+    """
     path = MANIFEST_PATH if path is None else path
     manifest = {}
     if not path.exists():
@@ -363,7 +487,7 @@ def load_manifest(path=None):
         manifest[anchor] = (
             named,
             int(line),
-            snippet,
+            None if snippet == "-" else snippet,
             None if end_snippet == "-" else end_snippet,
         )
     return manifest
@@ -376,19 +500,147 @@ def save_manifest(manifest, path=None):
         end = anchor.split(":")[1]
         end = end.split("-")[1] if "-" in end else "-"
         rows.append(
-            "\t".join([anchor, named, str(line), end, snippet, end_snippet or "-"])
+            "\t".join(
+                [anchor, named, str(line), end, snippet or "-", end_snippet or "-"]
+            )
         )
     rows.sort(key=lambda row: (row.split("\t")[1], int(row.split("\t")[2])))
     path.write_text("\n".join(rows) + "\n")
 
 
+def seed(checkout=None, tree=None, manifest=None, report=None):
+    """Fill missing entries from the prose's own quotation of the code.
+
+    **The snippet is the claim and the number is whatever the tree already
+    says**, so a seeded entry whose quotation is not inside the cited span fails
+    `--check` — which is the point. Seeding decides *what each anchor claims*; it
+    does not decide whether the claim is true, and it must not, because a snippet
+    read off the cited line would agree with it by construction and detect
+    nothing.
+
+    Where the prose quotes nothing selective near the anchor, the entry records
+    `-`: no claim about the source text, only that the line exists. Those are
+    counted by `--check` as `unquoted` rather than passed off as verified.
+
+    **Selective is the load-bearing word, and it was measured.** The first draft
+    of this function took the *nearest* backticked span found anywhere in the
+    file, and produced 430 failures over 544 occurrences — a list nobody can
+    read, and a manifest of claims the prose never made. What the prose quotes
+    beside an anchor is usually its own shorthand — the filter's name, `None`,
+    `try`, `SafeString` — and those are not claims about a line. Requiring the
+    span to occur on exactly **one** line of the named file removes the shorthand
+    (it recurs by construction) and leaves 107 rows, which is a list a person can
+    read and which contains the defects the tool exists for.
+    """
+    checkout = CHECKOUT if checkout is None else checkout
+    manifest = {} if manifest is None else manifest
+    tree = list(scan_tree() if tree is None else tree)
+    report = print if report is None else report
+
+    quoted = unquoted = 0
+    for path, text in tree:
+        for match in ANCHOR_RE.finditer(text):
+            anchor = match.group(0).strip("`")
+            if anchor in manifest:
+                continue
+            named, start = match.group(1), int(match.group(2))
+            path_for_named = _seed_path(named, checkout)
+            snippet = _seed_snippet(text, match, path_for_named, checkout)
+            manifest[anchor] = (path_for_named or named, start, snippet, None)
+            if snippet is None:
+                unquoted += 1
+            else:
+                quoted += 1
+    report(f"seeded {quoted} quoted and {unquoted} unquoted entr(ies)")
+    return manifest
+
+
+def _seed_path(named, checkout):
+    """The path to record for `named`, or `None` if it cannot be decided.
+
+    A bare basename that is ambiguous is resolved through `BASENAMES`, which is
+    a decision about *our* prose (`base.py` in a template-engine port means
+    `django/template/base.py`) and not a guess about Django. Anything else is
+    recorded as the path `resolve` found, so the manifest carries an explicit
+    path rather than an ambiguity the tool would have to re-decide.
+    """
+    candidate = BASENAMES.get(named, named)
+    try:
+        path = resolve(candidate, checkout=checkout)
+    except SystemExit:
+        return None
+    for base in (checkout, ROOT):
+        if path.is_relative_to(base):
+            return path.relative_to(base).as_posix()
+    return None
+
+
+def _seed_snippet(text, match, path, checkout):
+    """The nearest quoted span the named file uses on exactly one line.
+
+    Three rules, and each was measured rather than assumed — the first two
+    drafts of this function produced 430 and then 311 failures, lists nobody
+    reads.
+
+    **Nearest, on the anchor's own line first.** Our prose convention is
+    `` `code` (`file.py:N`) `` — the quotation and its citation on one line —
+    so a span on another line belongs to another sentence. The first draft
+    sorted by distance computed across two coordinate systems (a position
+    inside the window against a position in the whole file), which sorted by
+    *position in the window* and so took the first backtick rather than the
+    nearest one; that alone was most of the 430.
+
+    **Unique in the named file.** This is what separates a citation from a
+    name. `None`, `def`, `SafeString`, `try` are words the prose repeats and
+    lines of the file repeat; a span the file uses once is the kind of thing a
+    claim is about. Requiring it also drops Rust quoted in a Rust doc comment
+    (`Value::Str`) and our own syntax (`{% partial %}`), neither of which is a
+    claim about Django at all.
+
+    **The end column is left `-`**, not read off the end line: that is the
+    circular direction this function exists to avoid, and an author who wants
+    the far boundary pinned by text writes it.
+    """
+    if path is None:
+        return None
+    lines = resolve(path, checkout=checkout).read_text().splitlines()
+    start = max(0, match.start() - TRIAGE_WINDOW)
+    window = text[start : match.end() + TRIAGE_WINDOW]
+    anchor_line = text.count("\n", 0, match.start())
+    candidates = []
+    for found in _SPAN_RE.finditer(window):
+        span = found.group(1)
+        if len(span) < 3 or "\n" in span:
+            continue
+        if ANCHOR_RE.fullmatch(f"`{span}`") or SHORTHAND_RE.fullmatch(f"`{span}`"):
+            continue
+        position = start + found.start()
+        candidates.append(
+            (0 if text.count("\n", 0, position) == anchor_line else 1,
+             abs(position - match.start()),
+             span)
+        )
+    for _, _, span in sorted(candidates):
+        if sum(1 for line in lines if span in line) == 1:
+            return span
+    return None
+
+
 def update(manifest=None, checkout=None, report=None):
-    """Rewrite each entry's number from where its snippet actually is."""
+    """Rewrite each entry's number from where its snippet actually is.
+
+    An entry whose snippet is `-` records no claim, so there is nothing to
+    derive a number from and it is skipped: `--update` is the second half of
+    "the snippet is the claim and the number is computed from it", and it has no
+    second half without a claim.
+    """
     checkout = CHECKOUT if checkout is None else checkout
     manifest = MANIFEST if manifest is None else manifest
     report = print if report is None else report
     changed = 0
     for anchor, (named, line, snippet, end_snippet) in list(manifest.items()):
+        if snippet is None:
+            continue
         path = resolve(named, checkout=checkout)
         lines = path.read_text().splitlines()
         hits = [i for i, text in enumerate(lines, start=1) if snippet in text]
@@ -433,6 +685,9 @@ def main(argv=None):
     group.add_argument("--check", action="store_true", help="gate: exit 1 on drift")
     group.add_argument("--triage", action="store_true", help="print the suspicion list")
     group.add_argument("--update", action="store_true", help="derive cited numbers")
+    group.add_argument(
+        "--seed", action="store_true", help="fill missing entries from the prose"
+    )
     parser.add_argument(
         "--frozen",
         action="store_true",
@@ -444,6 +699,8 @@ def main(argv=None):
         triage()
     elif args.update:
         save_manifest(update())
+    elif args.seed:
+        save_manifest(seed(manifest=MANIFEST))
     else:
         check(frozen=args.frozen)
 

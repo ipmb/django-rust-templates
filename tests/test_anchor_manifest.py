@@ -27,6 +27,32 @@ def _load(name, filename):
 anchor_manifest = _load("check_python_anchors", "check_python_anchors.py")
 
 
+def anchor(name, number):
+    """`name:N` — a citation as the *scanner* reports it, without backticks.
+
+    This is the manifest key form: `check` looks up `match.group(0).strip("`")`.
+
+    **The backtick is what makes an anchor a citation.** `check_python_anchors`
+    reads text, so it cannot tell a citation from a quotation or a fixture, and
+    this file needs both: fixtures that *are* anchors on purpose, and mentions of
+    wrong numbers that are not claims about Django. So fixtures are built by
+    these two helpers, and mentions are written unbackticked — one rule, applied
+    two ways, instead of a per-file exemption, which is how a guard acquires
+    holes.
+
+    Measured when the rule was set: this file held ten anchor-shaped literals,
+    and one fixture points past the end of its file, so **no** manifest entry
+    could have made it pass. That is what a literal can do to a checker that only
+    reads text.
+    """
+    return "%s:%s" % (name, number)
+
+
+def cited(name, number):
+    """`` `name:N` `` — the same citation as the *tree* spells it."""
+    return "`%s`" % anchor(name, number)
+
+
 class AnchorManifestTests(unittest.TestCase):
     def setUp(self):
         # Every test that calls `check` restores the real manifest afterwards,
@@ -43,24 +69,24 @@ class AnchorManifestTests(unittest.TestCase):
         """The whole value is failing on a *wrong number*, so this moves the
         number rather than trusting a clean sweep over the tree.
 
-        `node.token = token` is at `base.py:615`; the entry below cites `616`,
-        which is the off-by-one the reviewer reported for this exact anchor and
-        which two rounds of correction got wrong in both directions. The anchor
-        in the tree and the anchor in the manifest are the **same string** — a
-        test whose two spellings differ would pass on the missing-entry path
-        instead, which is how a test for one defect ends up covering another.
+        `node.token = token` is at base.py:615; the entry below cites 616, which
+        is the off-by-one the reviewer reported for this exact anchor and which
+        two rounds of correction got wrong in both directions. The anchor in the
+        tree and the anchor in the manifest are the **same string** — a test
+        whose two spellings differ would pass on the missing-entry path instead,
+        which is how a test for one defect ends up covering another.
 
         (The plan first wrote this key as `"base.py:node_token"`, a label the
-        tree never contains. Measured: that version exits on "no manifest entry
-        for `base.py:616`" and never reaches the snippet comparison, so it
-        passes whether or not the checker can compare a snippet at all.)
+        tree never contains. Measured: that version exits on "no manifest entry"
+        and never reaches the snippet comparison, so it passes whether or not the
+        checker can compare a snippet at all.)
         """
         anchor_manifest.MANIFEST = {
-            "base.py:616": ("django/template/base.py", 616, "node.token = token", None)
+            anchor("base.py", 616): ("django/template/base.py", 616, "node.token = token", None)
         }
         with self.assertRaises(SystemExit):
             anchor_manifest.check(
-                checkout=DJANGO_CHECKOUT, tree=self.tree_with("`base.py:616`")
+                checkout=DJANGO_CHECKOUT, tree=self.tree_with(cited("base.py", 616))
             )
 
     def test_the_same_anchor_with_the_right_number_passes(self):
@@ -68,18 +94,26 @@ class AnchorManifestTests(unittest.TestCase):
         # refuses for any reason, which would make the guard's own test a
         # no-op the day `check` starts rejecting everything.
         anchor_manifest.MANIFEST = {
-            "base.py:615": ("django/template/base.py", 615, "node.token = token", None)
+            anchor("base.py", 615): ("django/template/base.py", 615, "node.token = token", None)
         }
-        anchor_manifest.check(checkout=DJANGO_CHECKOUT, tree=self.tree_with("`base.py:615`"))
+        anchor_manifest.check(
+            checkout=DJANGO_CHECKOUT, tree=self.tree_with(cited("base.py", 615))
+        )
 
     def test_an_anchor_in_the_tree_with_no_manifest_entry_fails(self):
         """This is the half that catches drift introduced *after* this task: a
-        fresh `` `defaulttags.py:123` `` written into a comment fails here, which
-        is what makes the check a gate rather than a snapshot of today's tree."""
+        fresh defaulttags.py:123 written into a comment fails here, which is what
+        makes the check a gate rather than a snapshot of today's tree.
+
+        The fixture is deliberately past the end of `defaulttags.py`, so it is
+        the one anchor here that **no** manifest entry could make pass — which is
+        why it is built by `anchor()` rather than written out.
+        """
         anchor_manifest.MANIFEST = {}
         with self.assertRaises(SystemExit):
             anchor_manifest.check(
-                checkout=DJANGO_CHECKOUT, tree=self.tree_with("`defaulttags.py:99999`")
+                checkout=DJANGO_CHECKOUT,
+                tree=self.tree_with(cited("defaulttags.py", 99999)),
             )
 
     def test_a_basename_that_is_not_unique_needs_an_explicit_path(self):
@@ -90,8 +124,8 @@ class AnchorManifestTests(unittest.TestCase):
             anchor_manifest.resolve("base.py", manifest={})
 
     def test_the_two_anchors_that_were_wrong_twice_are_pinned(self):
-        """`base.py:518-519` and `base.py:522-523` were reported wrong, repaired
-        to `517-518`/`521-522`, and were correct all along. Named here so the
+        """base.py:518-519 and base.py:522-523 were reported wrong, repaired to
+        517-518/521-522, and were correct all along. Named here so the
         regression is a row rather than a memory, and asserted against the
         checkout rather than against the manifest the tool would consult."""
         for anchor, snippet in (
@@ -127,6 +161,42 @@ class AnchorManifestTests(unittest.TestCase):
             "manifest and drop it from OUR_OWN",
         )
 
+    def test_an_unbackticked_reference_is_prose_and_anchor_builds_a_real_one(self):
+        """The escape rule as a property of the scanner, not a convention somebody
+        remembers to apply.
+
+        This file needs anchor-shaped text that is *not* a claim about Django:
+        the fixtures, and every mention of a wrong number. The rule is that a
+        backtick delimits a citation and nothing else does, so a mention is
+        written plainly and a fixture is built by `anchor()`. Both halves are
+        asserted here, because either alone would pass on a broken helper.
+        """
+        self.assertTrue(
+            anchor_manifest.ANCHOR_RE.fullmatch(cited("base.py", 615)),
+            "anchor() must build something the scanner reads as an anchor",
+        )
+        self.assertIsNone(
+            anchor_manifest.ANCHOR_RE.search("base.py:615"),
+            "an unbackticked reference is prose and must not be scanned",
+        )
+
+    def test_this_file_holds_no_anchor_the_scanner_would_read(self):
+        """The rule above, enforced over this whole file rather than argued for.
+
+        Measured when it was set: ten anchor-shaped literals here, of which one
+        (defaulttags.py:99999) points past the end of its file, so **no**
+        manifest entry could ever have made it pass. A per-file exemption was the
+        tempting repair and is how a guard acquires holes; this test is what
+        keeps the rule true instead, and it reddens the moment someone writes a
+        literal anchor into this file.
+        """
+        self.assertEqual(
+            anchor_manifest.ANCHOR_RE.findall(Path(__file__).read_text()),
+            [],
+            "this file writes an anchor-shaped literal; use anchor() for a "
+            "fixture or drop the backticks to quote one",
+        )
+
     def test_the_plans_exclusion_of_the_dated_plans_is_a_rule_not_a_glob(self):
         # `docs/superpowers/plans/` carries most of the whole-tree occurrences,
         # and a dated plan records what was believed on a date. Rewriting its
@@ -144,8 +214,8 @@ class AnchorManifestTests(unittest.TestCase):
         are `round-N`, `mN-summary`, `mN-dispatch`, `mN-brief`, `mN-seams` or
         `mN-recon`, and no filename lacks a milestone or round. The extra reason
         is that a review record quotes our anchors *verbatim*: this round's
-        finding on `_impl/parser.py:716` carried the wrong number
-        `smartif.py:166-172` inside it, so scanning here fails the build on the
+        finding on _impl/parser.py:716 carried the wrong number
+        smartif.py:166-172 inside it, so scanning here fails the build on the
         reviewer's accurate quotation of our own defect.
         """
         self.assertNotIn(".review", anchor_manifest.TREE_ROOTS)
