@@ -16,7 +16,10 @@ Five things are pinned here:
    `defaultfilters.escape` **is not** the registered `escape` (it is the raw
    `django.utils.html.escape`, which takes no `arg` and does not mark safe) — the
    trap the plan's own review found;
-3. the two delegating metrics of §D2, **derived here rather than transcribed**;
+3. the three delegating metrics of §D2, **derived here rather than transcribed**;
+   the third was added after `phone2numeric` scored clean on the first two and
+   was still not Rust's — a helper's result-changing decorator is invisible to a
+   metric that measures what the body references;
 4. the Rust registry's names and flags against Django's live registry, including
    `cut`'s and `escapejs`'s **absent** `is_safe`;
 5. the Rust registry's `stringfilter` column against the decorators — the one
@@ -123,7 +126,73 @@ DELEGATING_BY_UTILS = {
 # `str.title()` lowercases each run's remainder.
 DELEGATING_BY_STRING_METHOD = {"lower", "title"}
 
-DELEGATING_FILTERS = DELEGATING_BY_UTILS | DELEGATING_BY_STRING_METHOD
+# Metric C: the body **reproduces** a helper whose `def` carries a result-changing
+# lazy decorator, rather than calling it. This is the metric `phone2numeric`
+# needed: it references nothing stateful (metric A says no) and calls no
+# context-sensitive `str` method (metric B says no), and it was still not pure,
+# because `@keep_lazy_text` sits between the registry and the `def` — so the
+# wrapped function is the *decorated* one, and a lazy argument returns a lazy
+# result, with nothing in the body or in the Python source showing it.
+#
+# The rule, which is why this is a third clause in §D2 rather than a note on one
+# filter: **the wrapped function is the decorated one, not the `def` body.** A
+# body that *calls* the host's method for the helper inherits the decorator; a
+# body that owns the helper's algorithm owns the wrapper's behaviour too, and
+# cannot see it.
+#
+# The 1 is an intersection of two cuts and both are load-bearing, so the near-miss
+# is derived and asserted as well:
+#
+# * `@stringfilter` resolves the `Promise` with `str(first)` before the body runs,
+#   so the laziness branch cannot fire for any of the 29 decorated bodies —
+#   `cut`, `safe`, `escape` (whose table *is* Rust's, five replacements) and the
+#   six others that reach a lazy-decorated helper. That cut leaves **5**.
+# * of those 5, four call `mark_safe`, which is a **host method** calling Django's
+#   own `mark_safe` (`filters.rs:69-71`) — so `keep_lazy` rides along and the
+#   argument's laziness is answered by Python. That cut leaves **1**.
+DELEGATING_BY_LAZY_DECORATOR = {"phone2numeric"}
+
+# The five candidates metric C's two cuts are applied to — derived, not typed in,
+# and asserted, so a Django bump that adds or removes one fails here rather than
+# silently moving the 1.
+REACHING_A_LAZY_HELPER_WITHOUT_STRINGFILTER = {
+    "floatformat", "join", "phone2numeric", "safeseq", "unordered_list",
+}
+
+# One verdict per candidate, in the `UTILITY_VERDICTS` shape and for the same
+# reason: which of them owns the helper's algorithm is a property of *our* Rust
+# bodies, not of `defaultfilters.py`, so it cannot be derived from the pinned
+# source. An unclassified candidate is an error rather than a silent
+# non-delegation, and every verdict must still be a candidate.
+LAZY_HELPER_VERDICTS = {
+    "phone2numeric": (
+        True,
+        "the body owned the helper's 26-entry table and its own `.lower()`; "
+        "now one call to `FilterHost::phone2numeric`",
+    ),
+    "floatformat": (
+        False,
+        "`mark_safe` is a host method — Django's own decorated function is what "
+        "runs, so `keep_lazy` is inherited rather than reproduced",
+    ),
+    "join": (
+        False,
+        "`mark_safe(data)`, and `mark_safe` is the host's",
+    ),
+    "safeseq": (
+        False,
+        "`mark_safe` per element is the host's; a `Promise` element answers a "
+        "`__proxy__` through it",
+    ),
+    "unordered_list": (
+        False,
+        "`mark_safe(list_formatter(value))`, and `mark_safe` is the host's",
+    ),
+}
+
+DELEGATING_FILTERS = (
+    DELEGATING_BY_UTILS | DELEGATING_BY_STRING_METHOD | DELEGATING_BY_LAZY_DECORATOR
+)
 
 # The neighbouring counts for metric A — each correct for its own question, each
 # wrong for this one. Derived below, not typed in.
@@ -178,13 +247,29 @@ UTILITY_VERDICTS = {
     "django.utils.html.linebreaks": (False, "regexes over portable primitives"),
     "django.utils.html.avoid_wrapping": (False, "one `str.replace`"),
     "django.utils.text.normalize_newlines": (False, "one `str.replace`"),
-    "django.utils.text.phone2numeric": (False, "Django's own hand table"),
+    # Metric A's answer only, and deliberately still `False`: `phone2numeric`'s
+    # own module bottoms out in nothing stateful, so A is right to say no and the
+    # delegation comes from metric C. A `True` here would credit A with a
+    # finding that is C's, which is the count confusion this file exists to stop.
+    "django.utils.text.phone2numeric": (False, "a hand table — see metric C"),
 }
 
 # The `str` methods whose result is not a function of the code point alone.
 DELEGATING_STR_METHODS = {
     "lower": "Final_Sigma: `\"ΟΣ\".lower()` is `\"ος\"`",
     "title": "lowercases each run's remainder, so Final_Sigma again",
+}
+
+# The decorators that change a helper's *result* rather than only its call count
+# or its metadata — the ones a filter's body cannot see and cannot reproduce.
+#
+# Swept over `django/utils/*.py`: the other decorators in the tree are
+# `lru_cache`, `functools.cache`, `cached_property` (all result-preserving) and
+# `wraps` (metadata only), plus `staticmethod`/`classmethod`/`property` and one
+# `contextmanager`, none of which a filter body can reach as a call.
+DELEGATING_LAZY_DECORATORS = {
+    "keep_lazy": "`keep_lazy(SafeString)`: returns a lazy proxy for a lazy argument",
+    "keep_lazy_text": "`keep_lazy(str)`: the same, over the text helpers",
 }
 
 # `str` methods checked by metric B that do **not** delegate, listed so the
@@ -393,6 +478,75 @@ def delegating_filters_by_string_method():
     return out
 
 
+def _def_decorators(utility):
+    """The decorator names on the def a fully-qualified path names, or `None`.
+
+    `None` means the path names something that is not a top-level def — a
+    module (`django.utils.formats`), or a name the module rebinds. That is a
+    fact about the path, not a "this has no decorators" answer, so it is
+    returned as `None` rather than as an empty set.
+    """
+    source = _defining_module_source(utility)
+    wanted = utility.rsplit(".", 1)[-1]
+    for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == wanted:
+            return _decorator_names(node)
+    return None
+
+
+def filters_reaching_a_lazy_helper_without_stringfilter():
+    """Metric C's candidates, derived — the 5.
+
+    A filter is a candidate iff its body references a helper whose own `def`
+    carries a result-changing lazy decorator, and the filter's own `def` carries
+    no `@stringfilter` — which would have resolved the `Promise` with `str(first)`
+    before the body ran, making the decorator's laziness branch unreachable.
+
+    The decorator is read off the **helper's** `def` in its own module, not off
+    the import site, because that is where the wrapper actually is; and the
+    filter's own decorators are read off `defaultfilters.py`. Both come from the
+    pinned tree.
+    """
+    out = set()
+    imports = _import_map()
+    for name, node in _filter_defs_by_registry_name().items():
+        if "stringfilter" in _decorator_names(node):
+            continue
+        for utility in _referenced_utilities(node):
+            decorators = _def_decorators(utility)
+            if decorators and decorators & set(DELEGATING_LAZY_DECORATORS):
+                out.add(name)
+    return out
+
+
+def delegating_filters_by_lazy_decorator():
+    """Metric C — the 1, and it is the candidates plus a verdict each.
+
+    The derivation above gives the five filters that reach a lazy-decorated
+    helper with no `@stringfilter` in between; which of them *reproduces* the
+    helper rather than calling it is a property of our Rust bodies and cannot be
+    read off `defaultfilters.py`, so it is a verdict table in the
+    `UTILITY_VERDICTS` shape. An unclassified candidate raises rather than
+    reading as a non-delegation.
+
+    This is the axis metrics A and B cannot see. Both scored `phone2numeric`
+    clean, and it was still not Rust's — which is why the rule is a third clause
+    in §D2 rather than a note on one filter.
+    """
+    out = set()
+    for name in filters_reaching_a_lazy_helper_without_stringfilter():
+        if name not in LAZY_HELPER_VERDICTS:
+            raise AssertionError(
+                f"`{name}` reaches a result-changing decorator with no "
+                f"`@stringfilter` in between and has no verdict in "
+                f"LAZY_HELPER_VERDICTS; classify it rather than letting it read "
+                f"as a non-delegation"
+            )
+        if LAZY_HELPER_VERDICTS[name][0]:
+            out.add(name)
+    return out
+
+
 def filters_referencing_any_django_utils():
     """The 31 — the neighbouring count that sweeps in `mark_safe`."""
     return {name for name, refs in _utilities_by_registry_name().items() if refs}
@@ -480,23 +634,26 @@ class FilterInventoryTests(unittest.TestCase):
         )
 
     def test_the_delegation_set_is_derived(self):
-        """18 by utilities, 2 by string method, 20 in union.
+        """18 by utilities, 2 by string method, 1 by lazy decorator, 21 in union.
 
-        Each half is asserted separately against its own literal, and the failure
+        Each third is asserted separately against its own literal, and the failure
         message prints the computed sets, so a future drift reports "19 by utils,
         2 by string method" rather than just red.
         """
         by_utils = delegating_filters_by_utils()
         by_method = delegating_filters_by_string_method()
+        by_decorator = delegating_filters_by_lazy_decorator()
+        union = by_utils | by_method | by_decorator
         # Printed, not just asserted. The plan's Task 3 Step 1 runs this file
         # while the Rust side is still a stub, so the run ends in an
-        # `AttributeError` from `_native.filter_names` — these three lines are
+        # `AttributeError` from `_native.filter_names` — these four lines are
         # what makes the derivation's answer visible in a run that fails for a
         # reason that has nothing to do with the derivation.
         print(
             f"\n  utils={len(by_utils)} {sorted(by_utils)}"
             f"\n  string_method={len(by_method)} {sorted(by_method)}"
-            f"\n  union={len(by_utils | by_method)}"
+            f"\n  lazy_decorator={len(by_decorator)} {sorted(by_decorator)}"
+            f"\n  union={len(union)}"
         )
         self.assertEqual(
             by_utils, DELEGATING_BY_UTILS,
@@ -507,10 +664,38 @@ class FilterInventoryTests(unittest.TestCase):
             f"by string method: {sorted(by_method)} ({len(by_method)})",
         )
         self.assertEqual(
-            by_utils | by_method, DELEGATING_FILTERS,
-            f"union: {sorted(by_utils | by_method)} ({len(by_utils | by_method)})",
+            by_decorator, DELEGATING_BY_LAZY_DECORATOR,
+            f"by lazy decorator: {sorted(by_decorator)} ({len(by_decorator)})",
         )
-        self.assertEqual(len(DELEGATING_FILTERS), 20)
+        self.assertEqual(
+            union, DELEGATING_FILTERS,
+            f"union: {sorted(union)} ({len(union)})",
+        )
+        self.assertEqual(len(DELEGATING_FILTERS), 21)
+
+    def test_the_lazy_decorator_metric_cuts_its_five_to_one(self):
+        """Metric C's candidates, its verdicts, and the cut from 5 to 1.
+
+        The five are derived from the pinned tree and asserted as a set, so a
+        Django bump that adds or removes a candidate fails here. The verdicts are
+        asserted total in both directions — an unclassified candidate would
+        silently read as a non-delegation, and a stale verdict would outlive the
+        candidate it describes — and the four non-delegating ones each say which
+        host call inherits the decorator instead of reproducing it.
+        """
+        reaching = filters_reaching_a_lazy_helper_without_stringfilter()
+        self.assertEqual(
+            reaching, REACHING_A_LAZY_HELPER_WITHOUT_STRINGFILTER,
+            f"reaching a lazy helper: {sorted(reaching)} ({len(reaching)})",
+        )
+        self.assertEqual(
+            set(LAZY_HELPER_VERDICTS) - reaching, set(),
+            "these verdicts are for filters that no longer reach a lazy helper",
+        )
+        self.assertEqual(
+            reaching - delegating_filters_by_lazy_decorator(),
+            REACHING_A_LAZY_HELPER_WITHOUT_STRINGFILTER - DELEGATING_BY_LAZY_DECORATOR,
+        )
 
     def test_every_utility_verdict_is_referenced_and_total(self):
         """Both directions, so a verdict cannot be stale or missing.

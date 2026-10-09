@@ -37,17 +37,27 @@
 //!   classification can only say `'object'`, because [`Value::Opaque`] cannot
 //!   name its Python class and its `type_name` doc says as much.
 //!
-//! §D2's third clause is the rule this is the instance of: **a filter whose
-//! helper carries a result-changing decorator is delegated regardless of what
-//! its body references.** `phone2numeric` references nothing stateful and calls
-//! no string method whose Rust and CPython answers diverge — the two axes that
-//! classified it as pure — and was still not pure, because neither axis can see
-//! a decorator that changes the *result*. Swept over all fourteen
-//! `@keep_lazy`/`@keep_lazy_text` helpers in `django/utils`, this is the only
-//! filter that reaches one with no `@stringfilter` in between (every other such
-//! filter has `str(first)` run first, resolving the `Promise` before the helper
-//! sees it), so the class is closed at one rather than open at the head of a
-//! family.
+//! §D2's third clause is the rule this is the instance of: **a filter's body
+//! must call the host for a helper whose `def` carries a result-changing
+//! decorator, rather than reproduce it** — a body that owns the algorithm owns
+//! the wrapper's behaviour too, and nothing in the `def` line or in the body
+//! shows it. `phone2numeric` references nothing stateful and calls no string
+//! method whose Rust and CPython answers diverge — the two axes that classified
+//! it as pure — and was still not pure, because neither axis can see a decorator
+//! that changes the *result*.
+//!
+//! **The bound is a sweep, and this module's first version of this paragraph got
+//! it wrong: the count is fifteen, not fourteen, and the cut is not
+//! `@stringfilter` alone.** Measured on the pinned tree: 15 helpers in
+//! `django/utils/*.py` carry `@keep_lazy`/`@keep_lazy_text`, 10 of them are
+//! referenced by a filter body in 23 `(filter, helper)` pairs, and **5** pairs
+//! sit in bodies with no `@stringfilter` — `floatformat`, `join`, `safeseq` and
+//! `unordered_list` reaching `mark_safe`, and this one. Four of those five are
+//! safe because `mark_safe` is a **host method** calling Django's own decorated
+//! function, so `keep_lazy` rides along; this is the only one whose body owned
+//! the helper's algorithm. `tests/test_filter_inventory.py` derives the five and
+//! asserts a verdict for each, so the class is closed at one by measurement
+//! rather than by the claim that every other filter has `str(first)` run first.
 //!
 //! No `@stringfilter` — it is one of the four the 29 exclude (see
 //! `tests/test_filter_inventory.py`'s `STRINGFILTER`), which is the other half

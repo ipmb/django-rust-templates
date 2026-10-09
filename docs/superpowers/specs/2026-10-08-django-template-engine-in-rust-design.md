@@ -1122,6 +1122,31 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   reader cannot tell the two apart reads as coverage and is worse than none, for
   the reason the class-scan bullet above gives about stale deferred lists.
 
+- **The 1547-test acceptance gate cannot see a single filter body, so "the suite
+  is green" is not evidence that a filter works.** Measured at M4: the gate's only
+  call into the Rust filter layer is `_native.parse`'s `check_filter`, which reads
+  the registry for a name and an arity and nothing else, and
+  `_materialise_filter_expression` rebuilds every filter as Django's own registry
+  function — so the Rust body is not on the render path the suite exercises. A
+  body can be a stub, or wrong in every row, and the suite still reports `OK
+  (skipped=6)`. This is the §2 criterion working as designed rather than a defect
+  in it: the gate is *"the suite is unchanged"*, and an unchanged suite is exactly
+  what a filter body that never runs produces.
+  **What separates them is the corpus** — `tests/test_filter_parity.py` driving
+  `_native.filter` with Django's own filter on the other side — which makes the
+  corpus a gate in its own right for every milestone that lands a filter or a tag
+  body, not a supporting test. M4's review found the shape this hides: a seam
+  method whose only caller is still a stub is unverified code behind a verified
+  doc comment (the `json_dumps` bullet above), and the corpus cannot name a
+  method whose filter has no rows yet.
+  **The standing obligation: rows land with the body, in the same task or the
+  same wave, for every filter and every tag from here on.** A body landed without
+  its rows is not "done, pending tests" — it is unverified in a way no other gate
+  in this project can turn into signal, and the milestone that lands it is the
+  only one that can. `STILL_STUBBED` in the filter registry and the stub count in
+  `tests/test_filter_parity.py` are the mechanical half: they name what is left,
+  and the count is meant to be edited deliberately as bodies land.
+
 ## 11. Review workflow
 
 The human has delegated review authority to `rusty-reviewer` and will not review

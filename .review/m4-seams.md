@@ -258,19 +258,35 @@ rendered text matches — not the `Markup` one. (b) is structurally incomplete
 rather than merely partial: `@keep_lazy_text` changes the *result*, which no
 argument-level operation can reach.
 
-**And the class is bounded at one — swept, not assumed.** Fourteen helpers in
-`django/utils` carry `@keep_lazy` or `@keep_lazy_text`, and exactly **one**
-filter reaches one of them without `@stringfilter` in between:
+**And the class is bounded at one — swept, and the first sweep of it was wrong in
+both its count and its mechanism.** The claim was: fourteen helpers in
+`django/utils` carry `@keep_lazy`/`@keep_lazy_text`, and exactly one filter
+reaches one without `@stringfilter` in between, because "every other such filter
+has `str(first)` run first". Re-measured against `.django/` @ 6.0.9:
 
 ```
-phone2numeric_filter  (no @stringfilter)  calls  phone2numeric
+lazy-decorated helpers in django/utils/*.py          15
+of those, referenced by a filter body                10
+(filter, helper) pairs reaching one                  23
+pairs in bodies with no @stringfilter                 5
+   floatformat      -> mark_safe
+   join             -> mark_safe
+   phone2numeric    -> phone2numeric
+   safeseq          -> mark_safe
+   unordered_list   -> mark_safe
 ```
 
-Every other filter touching a lazy-preserving helper is `@stringfilter`-wrapped,
-so `str(first)` has already resolved the `Promise` before the helper sees it.
-That is why this is the first instance in eight waves and also the last, and it
-makes the retraction of the plan's purity bullet *"delegate one more helper"*
-rather than *"the classification was wrong"*.
+So the cut is not `@stringfilter` alone — that leaves five. Four of those five
+are safe for a different reason: `mark_safe` is a **host method**
+(`template-py/src/filters.rs:69-71`) calling Django's own decorated function, so
+`keep_lazy` is *inherited* rather than reproduced. That is what makes the class
+one, and it is a better rule than the one it replaces: **a body that calls the
+host's method for a helper gets whatever sits between the registry and the `def`;
+a body that owns the helper's algorithm owns the wrapper too.** It also makes the
+retraction of the plan's purity bullet *"delegate one more helper"* rather than
+*"the classification was wrong"*, and `tests/test_filter_inventory.py` now
+derives the five and asserts a verdict per candidate, so the bound is checked
+rather than asserted in prose.
 
 ## The third clause the §D2 metric was missing
 
@@ -282,8 +298,9 @@ orthogonal to the other two, and it belongs in the rule rather than in this one
 bullet, so that the next derivation asks the question instead of rediscovering
 it:
 
-> a filter whose helper carries a result-changing decorator is delegated
-> regardless of what its body references.
+> a filter's body must **call** the host for a helper whose `def` carries a
+> result-changing decorator, rather than reproduce it — a body that owns the
+> algorithm owns the wrapper's behaviour too.
 
 **The generalisation this extends, which is the part worth keeping, and which
 belongs in §D2 rather than here: the wrapped function is the *decorated* one,

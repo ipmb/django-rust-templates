@@ -453,15 +453,20 @@ pub trait FilterHost {
     /// the naming.
     ///
     /// Whole rather than a [`FilterHost::str_lower`] the body would drive, per
-    /// §D2's third clause: **a filter whose helper carries a result-changing
-    /// decorator is delegated regardless of what its body references.** The two
-    /// axes that classified `phone2numeric` as pure — no stateful reference, no
-    /// divergent string method — are both blind to a decorator that changes the
-    /// *result*, which is why a classification that asked only those two
-    /// questions said this filter's Rust body was safe to write. Swept over all
-    /// fourteen `@keep_lazy`/`@keep_lazy_text` helpers in `django/utils`, this is
-    /// the **only** filter that reaches one without `@stringfilter` in between,
-    /// so the class is closed at one rather than open at the start of a family.
+    /// §D2's third clause: **a filter's body must call the host for a helper
+    /// whose `def` carries a result-changing decorator, rather than reproduce
+    /// it.** The two axes that classified `phone2numeric` as pure — no stateful
+    /// reference, no divergent string method — are both blind to a decorator
+    /// that changes the *result*, which is why a classification that asked only
+    /// those two questions said this filter's Rust body was safe to write.
+    /// Swept over the pinned tree: **15** helpers in `django/utils/*.py` carry
+    /// `@keep_lazy`/`@keep_lazy_text`, **10** are referenced by a filter body in
+    /// **23** `(filter, helper)` pairs, and **5** pairs sit in bodies with no
+    /// `@stringfilter`. Of those five, four call `mark_safe` — a host method, so
+    /// `keep_lazy` is inherited rather than reproduced — which leaves this one,
+    /// the only body that owned its helper's algorithm. `tests/
+    /// test_filter_inventory.py` derives the five and asserts a verdict each, so
+    /// the class is closed at one by measurement.
     fn phone2numeric(&self, value: &Value) -> Result<Value, Error>;
     /// `django.utils.html.urlize` — a regex over `settings.URLIZE_ASSUME_HTTPS`,
     /// so the setting and the regex engine are both the host's.

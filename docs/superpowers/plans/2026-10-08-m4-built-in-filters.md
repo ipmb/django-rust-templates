@@ -89,10 +89,11 @@ exercise. Each is pinned by a test in the task that owns the code.
    reads `settings.URLIZE_ASSUME_HTTPS`, `timesince`/`timeuntil` read the wall
    clock and `gettext`. The plan's answer is §D2, and §D2 was **corrected after
    review**: this is a *permanent* delegation, not a stage that M10 ends, and the
-   set is **20 filters, derived** — see §D2 for the derivation, the second
+   set is **21 filters, derived** — see §D2 for the derivation, the second
    independent metric (`lower` and `title`, via CPython's context-sensitive case
-   methods), and the three neighbouring counts that are each a right answer to a
-   different question.
+   methods), the third (`phone2numeric`, via a helper's result-changing
+   decorator), and the three neighbouring counts that are each a right answer to
+   a different question.
    **Pinned by Task 3's derivation test** (which computes the set rather than
    trusting it) and Task 10's corpus, which renders the settings-sensitive ones
    under two settings states and asserts both sides move together.
@@ -244,7 +245,7 @@ Django for everything else" — so it is the spec working as written; §6 has be
 corrected, because it said Rust owns "all built-in tags and filters" and that was
 too strong.
 
-**The set is derived rather than enumerated**, by two metrics, because this
+**The set is derived rather than enumerated**, by three metrics, because this
 project has now had seven count disputes that were each two right answers to two
 unstated questions. The first metric, which Task 3's `test_filter_inventory.py`
 computes:
@@ -266,13 +267,55 @@ first that is **not a table**: after `\w`, whitespace, `combining` and this
 milestone's own per-code-point case fixup, `str.lower()` turns out to depend on
 what surrounds the code point.
 
+**A third metric, because both of the first two measure what the body
+*references*, and a decorator sitting between the registry and the `def` can
+change the answer without appearing anywhere in the body:**
+
+> a filter delegates iff its body **reproduces** a helper whose `def` carries a
+> result-changing decorator, rather than calling it.
+
+It found **one more**, `phone2numeric`, so the set is **21**. Wave A is what
+produced it: the body was written as Rust — the 26-entry a–z table, plus a
+delegated `.lower()` for Final_Sigma — and the corpus then showed a `lazy(…)`
+argument coming back as a `__proxy__` and a `dict` argument refused as
+`'object' object has no attribute 'lower'` where Django says `'dict'`. Both are
+the work of `@keep_lazy_text` on `django.utils.text.phone2numeric`
+(`text.py:313`), which returns a lazy result for a lazy argument and lets the
+helper's own `phone.lower()` raise the `AttributeError` with the argument's own
+class in it. Neither is expressible from inside a body that owns the table.
+
+**The generalisation this is the instance of, which is the part worth carrying:
+the wrapped function is the *decorated* one, not the `def` body.** `@stringfilter`
+and `@keep_lazy_text` both sit between the registry and the code, so a seam
+derived from the `def` line is right about the arguments and wrong about the
+wrapper — `@stringfilter` is already the reason `cut`'s argument takes a
+`&Value`, and `@keep_lazy_text` is why `phone2numeric`'s does too. And the *rule*
+generalises further than the decorator: **a body that calls the host's method for
+a helper inherits whatever sits between the registry and the `def`; a body that
+owns the helper's algorithm owns the wrapper's behaviour too, and cannot see it.**
+
+The class is **bounded at one, and the bound is a sweep rather than an
+assumption — the first version of this paragraph got both the numbers and the
+mechanism wrong, and the sweep is what corrected it.** Measured on `.django` @
+6.0.9: **fifteen** helpers in `django/utils/*.py` carry `@keep_lazy` or
+`@keep_lazy_text`; **ten** of them are referenced by a filter body, in **23**
+`(filter, helper)` pairs; **five** of those pairs are in bodies with no
+`@stringfilter`, because `str(first)` would otherwise have resolved the `Promise`
+before the body ran; and of those five, **four** call `mark_safe`, which is a
+**host method** (`filters.rs:69-71`) calling Django's own decorated function — so
+`keep_lazy` rides along and Python answers the argument's laziness. That leaves
+`phone2numeric`, the one body that owned its helper's algorithm.
+`tests/test_filter_inventory.py` derives the five and asserts them, one verdict
+per candidate, so a Django bump that moves one fails there rather than silently
+shrinking the 1.
+
 Measured against `.django` @ 6.0.9: **18** by the first metric — `date`,
 `filesizeformat`, `floatformat`, `iriencode`, `json_script`, `slugify`,
 `striptags`, `time`, `timesince`, `timeuntil`, `truncatechars`,
 `truncatechars_html`, `truncatewords`, `truncatewords_html`, `urlize`,
-`urlizetrunc`, `wordwrap`, `yesno` — and **2** more by the second, `lower` and
-`title`, for **20**. `slugify` was already in the 18 and its `.lower()` now goes
-through `str_lower` as well.
+`urlizetrunc`, `wordwrap`, `yesno` — **2** more by the second, `lower` and
+`title`, and **1** more by the third, `phone2numeric`, for **21**. `slugify` was
+already in the 18 and its `.lower()` now goes through `str_lower` as well.
 
 The three neighbouring counts for the *first* metric, each correct for its own
 question and each wrong for this one: **57** registered filters; **31** reference
@@ -1604,14 +1647,18 @@ def delegating_filters_by_string_method():
 
     This is the metric that moved the set from 18 to 20 after the plan's first
     review, which is why the two are counted separately rather than merged into
-    a hand-checked list of 20.
+    a hand-checked list of 20. A third metric was added later, for
+    `phone2numeric`, which this one and metric A both score clean.
     """
 ```
 
-`DELEGATING_FILTERS` is the union of the two, asserted to equal the literal
-**20**; each half is asserted separately against its own literal (18 and 2), and
-the failure message prints the computed set plus both halves, so a future drift
-reports "19 by utils, 2 by string method" rather than just red. It also asserts
+`DELEGATING_FILTERS` is the union of the three, asserted to equal the literal
+**21**; each third is asserted separately against its own literal (18, 2 and 1),
+and the failure message prints the computed set plus each third, so a future
+drift reports "19 by utils, 2 by string method" rather than just red. The third
+metric's near-miss — the five filters that reach a lazy-decorated helper with no
+`@stringfilter` — has its own assertion, so its cut from five to one is derived
+rather than described. It also asserts
 that each delegating filter's `FilterHost` method is actually reached by the
 corpus, so a filter cannot be reclassified into or out of the set by editing one
 line.
@@ -3222,6 +3269,19 @@ does, and it needs no argument.
 The group with the least Rust in it and the most to justify, which is why it is
 its own task rather than folded into Task 8.
 
+**Task 9 ran as two waves rather than one, and the split is recorded here because
+the second wave's brief is written from this section.** Wave A —
+`slugify`, `phone2numeric`, `pprint` — landed in `055c6fc`, with `phone2numeric`
+later rewritten to delegate the helper whole (`09a7774`) once the corpus refuted
+the split the first attempt made; that rewrite is what added §D2's third metric
+and moved the delegating set from 20 to 21. Wave B — `urlize`, `urlizetrunc`,
+`json_script` — is unlanded, and its brief is the first one in the milestone
+written from a §D2 that has all three metrics in it. The reason for two waves and
+not one is the reason this whole milestone is serial: wave A's finding changed
+the **shared surface** (a new `FilterHost` method) and the delegating set, and a
+wave running concurrently would have written its bodies against a seam that was
+about to change.
+
 - `urlize` (`:382-387`) / `urlizetrunc` (`:389-401`) — `needs_autoescape`,
   `is_safe=True`; `urlizetrunc` takes `limit` and then `autoescape`, making it one
   of the two three-positional-parameter filters in the set. Both bodies are
@@ -3275,11 +3335,24 @@ its own task rather than folded into Task 8.
   `PyErrorKind::name()` and the kept exception object are for, and the corpus
   needs a `value` class whose `__repr__` raises (there is already a `LOUD_STR`
   in `tests/filter_cases.py` whose `__str__` raises; this needs its `__repr__`
-  twin). The dump itself is `FilterHost::pformat`, whole — `pprint`'s width,
+  twin — wave A landed it as `LOUD_REPR`, with `phone2numeric` and `slugify`'s
+  rows). The dump itself is `FilterHost::pformat`, whole — `pprint`'s width,
   sorting and recursion are not Rust's.
-- `phone2numeric` (`:984-988`) — `django.utils.text.phone2numeric`, a
-  `str.translate` over a fixed 26-letter table; pure, so it is Rust's, and the
-  table is in the module.
+- `phone2numeric` (`:984-988`) — **`django.utils.text.phone2numeric` is the
+  host's, whole, and an earlier revision of this bullet said the opposite**: it
+  read the helper's `def` as a 26-entry a–z table joined over `phone.lower()` and
+  called it pure, so the table would be Rust's and the module would hold it. The
+  table is pure. The helper is not, because it is `@keep_lazy_text`-decorated
+  (`text.py:313`) and the wrapped function is the decorated one — §D2's third
+  metric, and the reason the set there is 21. Wave A wrote the split version and
+  the corpus is what refuted it: `5`, `True`, `5.0`, `None`, a list, a dict and a
+  tuple all raise `AttributeError: '<own class>' object has no attribute 'lower'`
+  where a Rust-side classification can only say `'object'`, because
+  `Value::Opaque` cannot name its Python class; and a `lazy(…)` argument answers a
+  `__proxy__`, which the corpus sees as a type difference even though the text
+  matches. The retraction is *"delegate one more helper"* — a third metric — not
+  *"the classification was wrong"*: metric A and metric B both scored this filter
+  clean, correctly, and neither can see a decorator.
 - `slugify` (`:266-275`) — `@stringfilter`, `is_safe=True`; `allow_unicode` was
   removed in Django 5.0, so the body is `_slugify(value)` from
   `django.utils.text`, which is `unicodedata.normalize("NFKD", …)` then a
@@ -3351,7 +3424,9 @@ for filter bodies nobody scheduled. (e) **The delegation count had no derivation
 and was given three different values across two sessions before being measured;
 Task 3 Step 1b computes it — and computing it found a **second metric the first
 one cannot see**, which moved the set from 18 to 20 (`lower` and `title`, via
-CPython's context-sensitive case methods). Both are asserted separately.
+CPython's context-sensitive case methods), and later a **third**, which moved it
+to 21 (`phone2numeric`, via a helper's result-changing decorator). Each is
+asserted separately.
 
 **Five things in this plan were wrong on first writing, and review caught all
 five.** The M10 `utils` claim in §D2 was a factual error about which module a
