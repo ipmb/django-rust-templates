@@ -116,6 +116,107 @@ class AnchorManifestTests(unittest.TestCase):
                 tree=self.tree_with(cited("defaulttags.py", 99999)),
             )
 
+    def test_update_leaves_an_entry_whose_claim_is_already_inside_its_span(self):
+        """The reviewer's finding, pinned: `--check` accepts a snippet anywhere in
+        the span (`_check_entry`), so a green entry has nothing to derive and
+        `--update` must not move it.
+
+        Measured on the committed manifest: the unconditional version would have
+        moved **63** entries, of which **61 were correct anchors** and all 61 in
+        exactly this state — a snippet inside the span but not on its first line.
+        The row here is real: base.py:669-670 quotes
+        `self.filters.update(lib.filters)`, which is on 670 — written without
+        backticks, because a backtick is what makes an anchor a claim about Django
+        and this is a mention of one.
+        """
+        key = anchor("base.py", "669-670")
+        manifest = {
+            key: ("django/template/base.py", 669, "self.filters.update(lib.filters)", None)
+        }
+        seen = []
+        updated = anchor_manifest.update(
+            manifest=manifest, checkout=DJANGO_CHECKOUT, report=seen.append
+        )
+        self.assertEqual(updated[key][1], 669, "an in-span claim is left where it is")
+        self.assertNotIn("→", " ".join(seen), "and it is not reported as moved")
+
+    def test_update_moves_only_a_claim_outside_its_span_and_check_then_names_it(self):
+        """The other direction, with the property that makes the move safe: a
+        moved entry is never a silent green. Its number now disagrees with the
+        tree's, so `--check` prints both numbers and the reader fixes the
+        *citation* — which this tool cannot write, because the number lives in the
+        prose. Without that, `--update` would be the mutation the reviewer found:
+        a command that repairs by breaking."""
+        key = anchor("base.py", "660-668")
+        manifest = {
+            key: ("django/template/base.py", 660, "self.filters.update(lib.filters)", None)
+        }
+        seen = []
+        updated = anchor_manifest.update(
+            manifest=manifest, checkout=DJANGO_CHECKOUT, report=seen.append
+        )
+        self.assertEqual(updated[key][1], 670, "moved to where the claim actually is")
+        self.assertIn("→", " ".join(seen), "and the move is reported")
+        with self.assertRaises(SystemExit):
+            anchor_manifest.check(
+                checkout=DJANGO_CHECKOUT,
+                tree=self.tree_with(cited("base.py", "660-668")),
+                manifest=updated,
+            )
+
+    def test_a_row_the_tree_stops_citing_is_counted_and_fatal_only_when_frozen(self):
+        """The one defect `check` cannot see by construction: it walks the tree
+        and looks *citations* up, so a stale row is never asked for, never
+        compared, and never fails.
+
+        Measured on the real manifest when this was written: two such rows, left
+        behind by a re-pointing sweep, and one of them recorded a snippet that is
+        not on its line — a wrong claim sitting in the manifest that no `--check`
+        could reach. The stale row here is built the same way, with a snippet that
+        is deliberately not on line 616, to pin that it is the *absence of a
+        citation* being reported and not the snippet.
+
+        Both halves are asserted, because "report it" and "fail on it" are
+        separate decisions and only the second is a gate.
+        """
+        live = anchor("base.py", 615)
+        stale = anchor("base.py", 616)
+        anchor_manifest.MANIFEST = {
+            live: ("django/template/base.py", 615, "node.token = token", None),
+            stale: ("django/template/base.py", 616, "not on that line at all", None),
+        }
+        tree = self.tree_with(cited("base.py", 615))
+        seen = []
+        anchor_manifest.check(
+            checkout=DJANGO_CHECKOUT, tree=tree, report=seen.append
+        )
+        self.assertIn("dead", " ".join(seen), "the stale row must be visible")
+        with self.assertRaises(SystemExit):
+            anchor_manifest.check(checkout=DJANGO_CHECKOUT, tree=tree, frozen=True)
+
+    def test_prune_drops_the_stale_row_and_prints_the_claim_it_dropped(self):
+        """`--prune` is the repair, and it prints each dropped row rather than a
+        count: the snippet column is the only copy of that claim, so a row
+        dropped by mistake is still recoverable from the terminal."""
+        live = anchor("base.py", 615)
+        stale = anchor("base.py", 616)
+        manifest = {
+            live: ("django/template/base.py", 615, "node.token = token", None),
+            stale: ("django/template/base.py", 616, "not on that line at all", None),
+        }
+        seen = []
+        pruned = anchor_manifest.prune(
+            tree=self.tree_with(cited("base.py", 615)),
+            manifest=manifest,
+            report=seen.append,
+        )
+        self.assertEqual(sorted(pruned), [live], "only the cited row survives")
+        self.assertIn(
+            "not on that line at all",
+            " ".join(seen),
+            "the dropped snippet is printed, so a mis-prune is recoverable",
+        )
+
     def test_a_basename_that_is_not_unique_needs_an_explicit_path(self):
         """38 files in the checkout are named `base.py`, 89 `formats.py`, 210
         `tests.py`. A bare basename for one of those is ambiguous, and ambiguity

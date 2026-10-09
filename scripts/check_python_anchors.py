@@ -47,6 +47,7 @@ perfectly real line of Django.
     python -I scripts/check_python_anchors.py --triage           # suspicion list, exit 0
     python -I scripts/check_python_anchors.py --update           # derive cited numbers
     python -I scripts/check_python_anchors.py --seed             # fill missing entries
+    python -I scripts/check_python_anchors.py --prune            # drop rows nothing cites
 
 `--seed` writes a first draft of the manifest from the tree: it takes the number
 as the tree already says it and the snippet from the code the prose quotes
@@ -73,6 +74,28 @@ which spans the wrong region passes both `--check` and `--triage`: `if.rs` cites
 `:1009-1018` for a claim about the optional `else` and the `endif` check, whose
 real span is `:1007-1018`. Both ends look right, the anchor *is* a range, the
 tool *does* check ranges — and it still passes.
+
+**Two of those limits select for the same anchors, and the largest is not a limit
+of this tool at all.** Unquoted entries — measured 184 of the 349 on 2026-10-09 —
+are not a random half: an entry is unquoted exactly when its cited line is
+unremarkable (a blank, a bare delimiter, or a range spanning a whole function),
+which is the population the loose range above selects for too, so the residual
+risk is concentrated rather than spread. And **prose that cites nothing cannot be
+anchored at all**: a wrong statement about Django with no `name.py:N` beside it is
+invisible to every mode here, which is how this task's misquoted bodies and its
+one function name that exists nowhere in the checkout survived four rounds of
+checking it. A green `--check` is a statement about the entries that carry a
+claim, not about our prose.
+
+**A row the tree no longer cites is not checked at all**, and that direction is
+worth stating because it looks like coverage. `--check` walks the *tree* and
+looks each citation up, so an entry whose anchor has been re-pointed is never
+asked for, never compared, and never fails — it just sits in the manifest,
+counted in the entry total, holding a claim nothing re-measures. Measured when
+this paragraph was written: two such rows, left by the previous sweep, and one
+of them recorded a snippet that is not on its line at all — a wrong claim no
+`--check` could reach. So `--check` now splits the count into cited and dead,
+`--frozen` fails on a dead row, and `--prune` is the repair.
 """
 
 import argparse
@@ -307,6 +330,35 @@ def _line_of(path, number):
     return lines[number - 1]
 
 
+def _numbers_of(anchor):
+    """`(start, end)` as the anchor itself spells them, `end == start` for one line.
+
+    The numbers live in the *key*, which is the anchor as the tree writes it, so
+    this is the pair `_check_entry` compares the manifest's `line` against.
+    """
+    tail = anchor.split(":", 1)[1]
+    first, _, last = tail.partition("-")
+    return int(first), int(last) if last else int(first)
+
+
+def _span_of(anchor, lines):
+    """The source text the anchor's own numbers span, or `None` past the end.
+
+    **The one acceptance rule this tool has, called by both halves.** `--check`
+    accepts a snippet that occurs anywhere in here; `--update` moves a number only
+    when the snippet occurs nowhere in here. It is a function rather than a
+    comment because the two modes were written with the rule duplicated, and the
+    disagreement was measured: running `--update` on this manifest reddened 61 of
+    its 160 quoted entries — every one a *correct* anchor whose snippet sits
+    inside its span but not on the span's first line (`base.py:198-200` quotes
+    `parser.parse()`, which is at 199).
+    """
+    first, last = _numbers_of(anchor)
+    if first < 1 or first > len(lines):
+        return None
+    return "\n".join(lines[first - 1 : last])
+
+
 def check(checkout=None, tree=None, manifest=None, frozen=False, report=None):
     """Verify every anchor in `tree` against its manifesto entry.
 
@@ -324,11 +376,13 @@ def check(checkout=None, tree=None, manifest=None, frozen=False, report=None):
     failures = []
     shorthand = []
     unquoted = set()
+    cited = set()
     occurrences = 0
     for path, text in tree:
         for match in ANCHOR_RE.finditer(text):
             occurrences += 1
             anchor = match.group(0).strip("`")
+            cited.add(anchor)
             entry = manifest.get(anchor)
             if entry is None:
                 failures.append(f"{path}: `{anchor}` has no entry in scripts/anchors.txt")
@@ -338,6 +392,8 @@ def check(checkout=None, tree=None, manifest=None, frozen=False, report=None):
             failures.extend(_check_entry(path, anchor, match, entry, checkout))
         for match in SHORTHAND_RE.finditer(text):
             shorthand.append(f"{path}: `{match.group(0).strip('`')}` names no file")
+
+    dead = sorted(set(manifest) - cited)
 
     if unquoted:
         # An entry with no snippet is *unverified*, not a failure: `--seed`
@@ -359,11 +415,29 @@ def check(checkout=None, tree=None, manifest=None, frozen=False, report=None):
         if frozen:
             failures.extend(shorthand)
 
+    if dead:
+        # A dead row is unchecked by construction — `check` looks entries up by
+        # the tree's citations, so nothing ever compares one. Reported always, so
+        # the manifest cannot quietly overstate its coverage, and failed on under
+        # `--frozen`, where the manifest is meant to be settled. `--prune` drops
+        # them and prints each, because the snippet is the only copy of that
+        # claim.
+        report(
+            f"dead: {len(dead)} manifest entr(ies) are cited nowhere in the tree"
+            + ("" if frozen else " (not a failure until --frozen)")
+        )
+        if frozen:
+            failures.extend(
+                f"scripts/anchors.txt: `{anchor}` is cited nowhere in the tree"
+                for anchor in dead
+            )
+
     for failure in failures:
         report(failure)
     report(
         f"{occurrences} anchor occurrence(s) checked, "
-        f"{len(manifest)} manifest entr(ies), {len(failures)} failure(s)"
+        f"{len(manifest) - len(dead)} cited of {len(manifest)} manifest entr(ies), "
+        f"{len(failures)} failure(s)"
     )
     if failures:
         raise SystemExit(1)
@@ -391,8 +465,9 @@ def _check_entry(tree_path, anchor, match, entry, checkout):
     problems = []
     if line != start:
         problems.append(
-            f"{tree_path}: `{anchor}` — the tree says line {start}, "
-            f"scripts/anchors.txt says {line}"
+            f"{tree_path}: `{anchor}` — the tree cites line {start}, "
+            f"scripts/anchors.txt records {line}. `--update` writes the line the "
+            f"entry's snippet is on, so one of these two numbers is wrong"
         )
         return problems
     try:
@@ -400,9 +475,9 @@ def _check_entry(tree_path, anchor, match, entry, checkout):
     except SystemExit as error:
         return [f"{tree_path}: `{anchor}` — {error}"]
     lines = path.read_text().splitlines()
-    if start < 1 or start > len(lines):
+    span = _span_of(anchor, lines)
+    if span is None:
         return [f"{tree_path}: `{anchor}` — {named} has no line {start}"]
-    span = "\n".join(lines[start - 1 : end or start])
     if snippet is not None and snippet not in span:
         where = f"{named}:{start}" if end is None else f"{named}:{start}-{end}"
         problems.append(
@@ -506,6 +581,30 @@ def save_manifest(manifest, path=None):
         )
     rows.sort(key=lambda row: (row.split("\t")[1], int(row.split("\t")[2])))
     path.write_text("\n".join(rows) + "\n")
+
+
+def prune(tree=None, manifest=None, report=None):
+    """Drop the rows the tree no longer cites, printing each one it drops.
+
+    The repair for the one defect `--check` cannot see by construction: an entry
+    is only ever looked up through a citation, so a row whose anchor moved is
+    never compared and never fails. It prints each dropped row rather than the
+    count alone, because the recorded snippet is the only copy of that claim —
+    if the row was dropped by mistake, the terminal still has it.
+    """
+    manifest = MANIFEST if manifest is None else manifest
+    tree = list(scan_tree() if tree is None else tree)
+    report = print if report is None else report
+    cited = set()
+    for _path, text in tree:
+        for match in ANCHOR_RE.finditer(text):
+            cited.add(match.group(0).strip("`"))
+    dropped = sorted(set(manifest) - cited)
+    for anchor in dropped:
+        named, line, snippet, _end_snippet = manifest.pop(anchor)
+        report(f"dropped `{anchor}` — {named}:{line} {snippet or '-'}")
+    report(f"pruned {len(dropped)} entr(ies) cited nowhere in the tree")
+    return manifest
 
 
 def seed(checkout=None, tree=None, manifest=None, report=None):
@@ -627,12 +726,31 @@ def _seed_snippet(text, match, path, checkout):
 
 
 def update(manifest=None, checkout=None, report=None):
-    """Rewrite each entry's number from where its snippet actually is.
+    """Move the entries whose claim is *outside* their cited span, and no others.
 
-    An entry whose snippet is `-` records no claim, so there is nothing to
-    derive a number from and it is skipped: `--update` is the second half of
-    "the snippet is the claim and the number is computed from it", and it has no
-    second half without a claim.
+    The second half of "the snippet is the claim and the number is derived from
+    it" — but the derivation is only meaningful where the claim and the number
+    disagree, and that is what `_span_of` decides, shared with `--check`.
+
+    **The unconditional version of this was a mutation, not a repair**, and it is
+    the one defect in this tool the reviewer found by reading rather than by
+    running: an entry whose snippet sits inside its span but not on its first
+    line is *green* — `_check_entry` accepts the snippet anywhere in the span —
+    and rewriting its number to `hits[0]` moved the manifest off the tree's
+    number, failing `--check` on the entry it had just "repaired". Measured on
+    the committed manifest of 2026-10-09: it would have moved **63** entries, of
+    which **61 were correct anchors** (`base.py:198-200` quotes
+    `parser.parse()`, which is at 199) and the other two were the stale rows the
+    tree no longer cites — so every single move it would have made was either a
+    corruption or a row that should have been pruned. Now it moves only a claim
+    that is outside its span, which is the one case where the number is genuinely
+    wrong.
+
+    An entry whose snippet is `-` records no claim, so there is nothing to derive
+    a number from and it is skipped. A move is never a silent success either: the
+    entry now disagrees with the tree's number, so `--check` names the citation
+    whose number is wrong — which is the repair this command cannot make, because
+    the number lives in the prose, not in the manifest.
     """
     checkout = CHECKOUT if checkout is None else checkout
     manifest = MANIFEST if manifest is None else manifest
@@ -643,6 +761,9 @@ def update(manifest=None, checkout=None, report=None):
             continue
         path = resolve(named, checkout=checkout)
         lines = path.read_text().splitlines()
+        span = _span_of(anchor, lines)
+        if span is not None and snippet in span:
+            continue
         hits = [i for i, text in enumerate(lines, start=1) if snippet in text]
         if not hits:
             report(f"`{anchor}`: {snippet!r} is not in {named} at any line")
@@ -651,10 +772,10 @@ def update(manifest=None, checkout=None, report=None):
             report(f"`{anchor}`: {snippet!r} is at {hits} in {named}; pick one by hand")
             continue
         if hits[0] != line:
-            report(f"`{anchor}`: {line} → {hits[0]}")
+            report(f"`{anchor}`: {line} → {hits[0]} (outside the cited span)")
             manifest[anchor] = (named, hits[0], snippet, end_snippet)
             changed += 1
-    report(f"{changed} entr(ies) moved")
+    report(f"{changed} entr(ies) moved; their spans now disagree with the cited number")
     return manifest
 
 
@@ -688,6 +809,9 @@ def main(argv=None):
     group.add_argument(
         "--seed", action="store_true", help="fill missing entries from the prose"
     )
+    group.add_argument(
+        "--prune", action="store_true", help="drop manifest rows nothing cites"
+    )
     parser.add_argument(
         "--frozen",
         action="store_true",
@@ -701,6 +825,8 @@ def main(argv=None):
         save_manifest(update())
     elif args.seed:
         save_manifest(seed(manifest=MANIFEST))
+    elif args.prune:
+        save_manifest(prune(manifest=MANIFEST))
     else:
         check(frozen=args.frozen)
 
