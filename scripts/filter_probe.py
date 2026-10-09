@@ -33,8 +33,14 @@ token as a template constant — `add 3 4` becomes the token `x|add:4`, and
 Django's own `filter_re` decides whether the argument is a constant or a variable
 lookup, and `resolve` then `mark_safe`s the constant ones
 (`base.py:788-792`). Passing the argument straight into the body would bypass
-that, and the difference is visible — `add:4` and `add:"4"` are not the same
-input, and Django answers `7` and `"34"` respectively.
+that, and the difference is visible on the filters whose answer **is** the
+argument — measured, `default 0 "'x'"` is `(SafeString, 'x') safe=True` while
+`default 0 0` is `(int, 0) safe=False`, because a quoted constant comes back
+marked where an int one does not. (The first revision of this paragraph used
+`add:4` against `add:"4"` as the example and claimed they answer `7` and `"34"`;
+measured, both are `7` — `int("4")` succeeds, so the safety of the argument never
+reaches the answer. The claim was wrong and the example is the one filter where
+it holds.)
 
 `DJANGO_RUST_TEMPLATES=1` is set by `scripts/env.sh` and is irrelevant here:
 the shim is installed by `scripts/shimpath/sitecustomize.py`, which is only on
