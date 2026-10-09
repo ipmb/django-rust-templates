@@ -213,7 +213,7 @@ pub trait FilterHost {
     /// `len(v)` — `length` (`defaultfilters.py:633-639`), `pluralize`, `wordcount`'s fallback.
     fn len(&self, value: &Value) -> Result<usize, Error>;
     /// `list(v)`, **not** an index walk: `unordered_list`'s whole-value case is a
-    /// generator (`test_unordered_list.py:141`), which has no `[]`. `first`/`last`
+    /// generator (`test_unordered_list.py:143`), which has no `[]`. `first`/`last`
     /// are the mirror image — they are `value[0]`/`value[-1]` and must go through
     /// [`FilterHost::get_index`], because Django's `except IndexError` lets a
     /// generator's `TypeError` escape, and an `iter_values`-based implementation
@@ -344,12 +344,11 @@ pub trait FilterHost {
     /// seam.
     ///
     /// Measured, not inferred: an implementation without this method gets one of
-    /// the two suite rows wrong.
-    /// `filter_tests/test_unordered_list.py:141` is
+    /// the two suite rows wrong. `test_unordered_list.py:143` is
     /// `unordered_list(item_generator())` — the **whole value** is a generator,
     /// so [`FilterHost::iter_values`] must be `list(v)` and must not index — and
-    /// `:150`'s `test_nested_generators` is a list whose **element** is a
-    /// generator, which must nest rather than render flat.
+    /// `test_unordered_list.py:148`'s `test_nested_generators` is a list whose
+    /// **element** is a generator, which must nest rather than render flat.
     ///
     /// The returned [`NestedSequence`] carries Django's `if children:` for the
     /// **object**, not for the items it materialises — the two differ for a

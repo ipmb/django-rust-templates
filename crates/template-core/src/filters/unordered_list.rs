@@ -396,7 +396,7 @@ mod tests {
     }
 
     /// **The whole value is `iter_values`, not an index walk.** The generator case
-    /// (`test_unordered_list.py:141`) is why: `run` iterates the value as a whole
+    /// (`test_unordered_list.py:143`) is why: `run` iterates the value as a whole
     /// and never indexes it, so the host is asked for `iter_values` and not
     /// `get_index`.
     #[test]
