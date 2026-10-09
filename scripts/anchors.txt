@@ -156,7 +156,9 @@ base.py:997	django/template/base.py	997	-	current = context.template.engine.stri
 base.py:1000-1013	django/template/base.py	1000	1013	bind()	-
 base.py:1000	django/template/base.py	1000	-	current()	-
 base.py:1002-1013	django/template/base.py	1002	1013	-	-
+base.py:1004	django/template/base.py	1004	-	No signature found.	-
 base.py:1005	django/template/base.py	1005	-	current = context.template.engine.string_if_invalid	-
+base.py:1009	django/template/base.py	1009	-	Arguments *were* required.	-
 base.py:1011	django/template/base.py	1011	-	current = context.template.engine.string_if_invalid	-
 base.py:1013	django/template/base.py	1013	-	raise	-
 base.py:1014	django/template/base.py	1014	-	except Exception as e:	-

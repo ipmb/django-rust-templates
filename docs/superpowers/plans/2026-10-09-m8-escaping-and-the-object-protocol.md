@@ -1743,6 +1743,21 @@ a plan that commits a tree failing it is worse than a plan with a stale number).
 `--check --frozen` is `640 cited of 640, 0 failures`. The seeding is also what
 found §D2's wrong span — the instrument earned its place a second time.
 
+**Task 1 execution added a reading heuristic, not a tool.** Four of that task's
+cited line numbers were wrong, and two are the same sub-shape — cite the block
+*header* and mean its *body*: `base.py:996` is the `elif`, and the assignment
+is at `:997`; `base.py:957` is `current = context`, and the `try` is at `:958`.
+That is now at least five instances across M5–M8 (`filesizeformat`'s `:905→906`,
+`floatformat`'s `:160→161` and `:162→163`). The guard cannot catch it, and the
+reason is worth stating: **a quoted single-line manifest row with this defect is
+already red**, so the shape only survives where the prose does not quote — which
+is why `--frozen`'s `name-only` and unquoted entries are exactly where to look.
+Also measured in Task 1: the gate reaches a *plan* citation only through the
+code the plan produced, since `docs/superpowers/plans/` is excluded by rule.
+All four moved rows were caught, because Task 1's edits moved the code they
+pointed at (`parser/resolve.rs:107→139`, `resolve.rs:170→236`,
+`template-py/src/lib.rs:117→119`).
+
 ### §D4 — a rule this milestone adds to the no-op family
 
 The project already carries one: **a mutation is a no-op when the test inputs do
@@ -1766,3 +1781,26 @@ way: the assertion *runs*, it *can* fail in principle, and it fails on inputs
 nobody will ever pass it. The check that catches it is the one Task 3 ran —
 **ask what the two states look like to the comparison**, not whether the
 comparison is a real assertion.
+
+**Task 1 executed found a third cause, and it is the one that will not look
+wrong in the code.** The plan's Step 2 named a mutation for the lazy-read
+guard — an eager `let _ = current.string_if_invalid();` at the top of the loop
+— and predicted that `test_the_invalid_read_is_lazy` would turn red. Run, it
+did not: all eight rows stayed green. The reason is not the test and not the
+guard. `PyTarget`'s error channel **stashes** rather than raises (the `pending`
+cell, §5.2's by-identity rule), so a mutation whose only effect is to *cause*
+an error is absorbed before anything observes it. The mutation that reproduces
+is one that **acts on** the failure:
+
+> **A mutation is a no-op when its effect is absorbed before anything observes
+> it.** The first two causes are defects in a test; this one is a consequence
+> of correct production code.
+
+That distinction is what makes it dangerous. It applies to *every* row that
+reads through `PyTarget` — all of M8's, and everything M9 adds once the
+resolver is on the render path — and the stash is right, so nothing about it
+will ever look wrong. The operative rule for the rest of this milestone: **a
+mutation against the resolver must change what happens *to* a failure, not
+whether one occurs.** And a green result under mutation now has two readings —
+"the guard is vacuous" and "the mutation never landed" — so before concluding
+the first, check the second.

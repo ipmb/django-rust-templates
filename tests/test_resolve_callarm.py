@@ -56,7 +56,7 @@ class CallArmParityTests(_ParityTest):
         Django's fallback has two questions, not one: `signature()` raising
         `ValueError` ("No signature found", `base.py:1004`) and `bind()` raising
         `TypeError` ("Arguments *were* required", `base.py:1009`). The comment at
-        `:1009` is the one a reader remembers, so `bind()` reads as the whole
+        `base.py:1009` is the one a reader remembers, so `bind()` reads as the whole
         test and this branch goes missing. Both substitute, so a port that
         dropped it is right on every fixture that has a signature — which is
         all of them except this shape. `__signature__` raising is exactly what a
