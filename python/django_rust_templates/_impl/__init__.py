@@ -1,5 +1,17 @@
 """The implementation substituted for :mod:`django.template`.
 
+# TRANSCRIBED: django/template/__init__.py (Django 6.0.9)
+
+This file is a transcription, and deliberately so. The export list *is* the
+behaviour here: import order is load-bearing (``engines`` must be bound before
+the later imports; ``from . import autoreload`` registers signal receivers), and
+a "fresh" version that differed would be wrong. Only the module docstring and
+the ``# NOQA isort:skip`` comments differ from upstream.
+
+Because it is a transcription, **diff it against upstream on every Django bump**
+rather than reviewing it as original work. See §6 of the design spec for the
+policy and the list of other transcribed files.
+
 This file is loaded *as* ``django.template``, with a ``__path__`` that searches
 this directory first and Django's own template directory second. Imports below
 therefore resolve to our modules where they exist and to Django's where they do
