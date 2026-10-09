@@ -68,6 +68,18 @@ use crate::token::Token;
 /// The pattern cannot match the empty string — it requires a comma — so Python's
 /// `re.split` and `regex`'s [`Regex::split`] agree on every input, including the
 /// adjacent-comma case: `"a,,b"` is `["a", "", "b"]` in both.
+///
+/// **Two other classes where the two libraries can disagree, and only one of
+/// them is closed by the above.** The pattern is reachable on an *empty haystack*
+/// — `{% for in y reversed %}` makes `in_index == 1`, so `bits[1..1]` is empty —
+/// and there they still agree (`re.split(r" *, *", "")` is `[""]`, measured;
+/// `Regex::split("")` is `[""]`). But **capturing groups** are not covered by any
+/// structural argument: Python's `re.split` interleaves captured groups into the
+/// result and `regex`'s `split` never does. `" *, *"` has no group today, so
+/// there is no divergence — the risk is that a future edit adds one, and the
+/// failure would be silent, a loop variable list subtly wrong rather than an
+/// error. If this pattern ever gains a group, it stops being portable and the
+/// split has to be hand-rolled.
 fn loopvar_split() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r" *, *").expect("the loop-variable separator is a valid pattern"))

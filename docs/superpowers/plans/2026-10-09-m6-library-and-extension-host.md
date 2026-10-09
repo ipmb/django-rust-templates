@@ -1255,6 +1255,25 @@ is **not** a parse row: it takes `takes_context=True` and raises from inside
 `render` (`defaulttags.py:1325-1349`) — put it in the render-level tests, not
 here.
 
+**Plus one row that is not an M6 tag**, because grading the corpus is this task
+and the gap is in it. `{% for in y reversed %}` — the reviewer found it:
+
+```python
+        # Not an M6 tag: this is the only input that reaches `loopvar_split` on an
+        # *empty* haystack, and nothing in either corpus reaches it. `reversed`
+        # appears once in the whole corpus (`parser_corpus.py:158`) and that is the
+        # success row; the two `for` error rows (`parser_error_corpus.py:229`,
+        # `:235`) both fail the `bits[in_index] != "in"` test instead. With four
+        # bits and `is_reversed`, `in_index` is 1, `bits[1]` *is* "in", so the
+        # check passes and `bits[1..1]` is empty: `re.split(r" *, *", "")` runs.
+        # Django then rejects the empty loop variable —
+        # `'for' tag received an invalid argument: for in y reversed` (measured on
+        # the pinned tree). One row pins the `in_index == 1` arithmetic, the empty
+        # haystack, and `is_invalid_loopvar` at once, none of which anything else
+        # reaches.
+        "{% for in y reversed %}x{% endfor %}",
+```
+
 - [ ] **Step 6: Pin Review Focus 4 — a host node's token comes from Rust's `extend_nodelist`**
 
 ```python
@@ -1311,28 +1330,66 @@ themselves wrong, and repairing them broke two anchors that had been correct:**
 (`521` is `self.libraries = libraries` and `516-517` is the `libraries` guard, so
 both reported pairs pointed one line short and at the *other* variable's guard.)
 
-So this class has now produced errors in **both directions** — in the anchor, and
-in the correction of the anchor — and the second round was caught only because
-the numbers happened to sit next to a variable whose name they contradicted. The
-remedy "be careful" has failed three times and "trust the report" has failed
-once. What remains is mechanical.
+The reviewer's own account of the split is the part worth keeping, because it is
+not random: *"everything I measured was right and everything I counted was
+wrong"* — five read off `grep -n`/`awk`, two derived by counting lines in a `sed`
+window, while the same batch printed `521: self.libraries = libraries`, the exact
+line that contradicted the derivation. So this class has produced errors in
+**both directions** — in the anchor, and in the correction of the anchor — and
+the second round was caught only because the numbers happened to sit beside a
+name they contradicted. "Be careful" has failed three times; "trust the report"
+has failed once.
 
-**And the size is not fourteen.** Measured over `crates python tests docs .review`:
+**Both bad anchors carried the right snippet and the wrong number — which is
+exactly the disagreement `--check` fails on.** So this guard is not only an
+author-drift ratchet: it is the one thing in the project that checks a
+*reviewer's* numbers, and it would have rejected that patch before it was
+applied. That is a different justification from the one this task was first
+written with, and a stronger one.
+
+**Two defect kinds, not one.** Sampling the tree found both:
+
+| where | prose says the line is | the line actually is | kind |
+|---|---|---|---|
+| `crates/template-py/src/lib.rs` | `defaulttags.py:1037` = `condition.eval(context)` | `{% for date in days %}`; the call is at `:326` | wrong number |
+| same file | `defaulttags.py:1035` = `IfNode.render` | `<h1>Archive for {{ year }}</h1>`; the class opens at `:307` | wrong number |
+| `crates/template-py/src/filters.rs` | `defaultfilters.py:383` = `nofollow=True` | `@stringfilter`; the call is at `:386` | wrong number |
+| `crates/template-py/src/lib.rs` | `smartif.py:73` = `smartif.OPERATORS` | `"""`; `OPERATORS` is at `:98` | wrong number |
+| `crates/template-core/src/filters/host.rs` | `defaultfilters.py:996` = `type(e).__name__` | the number is right and the line reads `e.__class__.__name__` | **misquote** |
+
+All five measured on the pinned tree. The fifth is the reason the manifest's
+snippet must be the code **the prose is about** rather than the text at the cited
+line: seeding the snippet from the cited line makes the check circular and
+cannot find any of these five. Authored snippets find both kinds with one rule.
+
+**And the size is not fourteen.** Measured over `crates python tests docs .review`,
+with the metric named because two of us counted this differently and both were
+right:
 
 ```
-grep -rhoE '`[a-z_]+\.py:[0-9]+(-[0-9]+)?`' … | tr -d '`' | sort -u | wc -l   → 426
-minus anchors naming our own files (_shim, differential, parser,
-  test_materialise, test_parser_parity)                                       → 415
-of which name a module under django/template/                                 → 332
+bare-basename anchors, `name.py:N`                     430
+plus qualified paths, `dir/name.py:N`                  +47   → 477
+minus anchors naming our own files (_shim, differential,
+  parser, test_materialise, test_parser_parity)        → ~415 in the pinned tree
+of which name a module under django/template/          332
 ```
 
-**415 anchors, of which at most a handful have ever been checked.** The two
-known-wrong ones are fixed (commit pending); what the number of *unknown* wrong
-ones is cannot be stated without the guard.
+The 477 the reviewer measured and the 426 first measured here are the same corpus
+under two patterns — theirs allowed a `/` in the path, so it also counted
+qualified citations like `django/template/base.py:615` and the tree's own files.
+**The checker must handle both forms**, resolving a bare basename against
+`.django/` and a qualified path against `.django/` then the repo root.
+
+What that triage can reach: of 834 in-scope occurrences, **283 have a code span
+quoted within 200 characters and 228 of those do not appear at the cited line.**
+Most of the 228 are the heuristic firing on an unrelated nearby backtick, not a
+defect — but the five above are in it, and it is the list to read first, because
+it is ordered by suspicion rather than by file. **415 anchors read cold is the
+alternative.**
 
 **Files:**
 - Create: `scripts/check_python_anchors.py`
-- Create: `scripts/anchors.txt` (the generated manifest)
+- Create: `scripts/anchors.txt` (the manifest — authored snippets, derived numbers)
 - Modify: `scripts/check.sh` (add the `--check` pass — it belongs on the full
   path beside the other two generators, which are already there and already
   documented as "the way to verify currency")
@@ -1341,7 +1398,9 @@ ones is cannot be stated without the guard.
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
 - Produces: `python -I scripts/check_python_anchors.py --check` → exit 1 on drift,
-  modelled on `scripts/gen_python_word_ranges.py --check`.
+  modelled on `scripts/gen_python_word_ranges.py --check`. A `--triage` mode
+  prints the 228-row suspicion list without failing, so it can be read before
+  the corpus is clean.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1410,38 +1469,53 @@ yet, so the first three fail on the import and the fourth on the anchors being
 files: the seven sed'd files and the plan) so the fourth test is a regression row
 and not a to-do.
 
-- [ ] **Step 3: The manifest records the snippet; the number is derived from it**
+- [ ] **Step 3: The manifest's snippets are authored; the numbers are derived**
 
-The direction matters: **the snippet is the specification and the line number is
-computed from it**, so a wrong number has exactly one repair and cannot be
-authored by hand. The reverse (record the number, compare the text) can only
-*detect* drift; this can fix it.
+The direction matters, and it is the opposite of the obvious one. **The snippet
+is the claim and the number is computed from it**, so a wrong number has exactly
+one repair. The reverse — record the number, compare the text at it — can only
+*detect* drift, and detects nothing about the five defects above, because at
+`defaulttags.py:1037` the text at the cited line is a perfectly real line.
+
+**Author the snippets; do not seed them from the cited line.** Seeding is
+circular: it would transcribe `{% for date in days %}` for the `condition.eval`
+anchor and call it consistent. Each snippet is the code *the prose is about* —
+usually already quoted beside the anchor in our own tree, which is where the
+triage list comes from. Where the prose quotes nothing, read the line and decide.
 
 ```python
 # scripts/check_python_anchors.py
-"""Every `` `name.py:N` `` and `` `name.py:N-M` `` anchor in our tree, checked
-against the pinned checkout at `.django/`.
+"""Every `` `name.py:N` `` anchor in our tree, checked against `.django/`.
 
-Three defects of this class were found by reading; a fourth round found that the
-*repair* of those numbers introduced two more. So the numbers are **derived, not
-authored**: `scripts/anchors.txt` records, for each anchor as it is written in
-the tree, the file it names and the source text that must appear at the cited
-line. `--check` fails when the tree's number and that text disagree; `--update`
-re-derives the numbers from the text.
+The reviewer checked fourteen, reported seven wrong, and two of the seven reports
+were themselves wrong; applying them broke two anchors that had been correct.
+Sampling afterwards found five more defects, including one where the number was
+right and the *quoted source text* was wrong. So neither "be careful" nor "trust
+the report" is a mechanism.
+
+`scripts/anchors.txt` records, per anchor as it is written in the tree, the file
+it names and **the source text the claim is about** — authored, not read off the
+cited line, because reading it off is what makes the check circular. `--check`
+fails when that text is not at the cited line; `--update` derives the numbers
+from the text.
 
     python -I scripts/check_python_anchors.py --check    # gate, exit 1 on drift
+    python -I scripts/check_python_anchors.py --triage   # suspicion list, exit 0
     python -I scripts/check_python_anchors.py --update   # rewrite cited numbers
 
-What this does **not** check: that the snippet *supports the claim being made
-next to it*. It is a number-versus-text guard, not a reviewer. Its whole value is
-that it removes the class of defect where the two disagree, which is the class
-that has actually occurred four times.
+**What this does not check: that the snippet supports the claim beside it.** It
+is a number-versus-text guard, not a reviewer — a green `--check` means the
+citations point where they say, not that they are the right citations. The
+triage mode is the part that reads like a reviewer, and it is a heuristic: it
+reports every anchor with a code span quoted within 200 characters that is not
+at the cited line (228 of 283 candidates today) and leaves the judgement to a
+reader. Do not treat its silence as approval, and do not treat a green
+`--check` as "the citations are correct".
 
 Manifest line format (tab-separated, sorted by file then line, so it reads as a
 table of what we claim each line says):
 
-    <anchor as written>\t<path relative to .django/>\t<line>\t<end line or ->
-    \t<snippet at line>\t<snippet at end line or ->
+    <anchor as written>\t<path>\t<line>\t<end line or ->\t<snippet>\t<end snippet>
 """
 
 # Ambiguous basenames: 415 anchors, of which 188 name one of these. Each needs an
@@ -1454,37 +1528,53 @@ AMBIGUOUS = {
     "custom.py": 2, "tests.py": 210, "test_base.py": 6, "test_partials.py": 2,
 }
 
-ANCHOR_RE = re.compile(r"`([a-z_]+\.py):(\d+)(?:-(\d+))?`")
+# Two forms, because the tree writes both and the 477-vs-426 reconciliation found
+# the difference: a bare basename (`` `base.py:615` ``) and a qualified path
+# (`` `django/template/base.py:615` ``, `` `_impl/parser.py:210` ``). 47 of the
+# corpus is the second form, and 5 of those 47 name our own files.
+ANCHOR_RE = re.compile(r"`([a-z_0-9/]+\.py):(\d+)(?:-(\d+))?`")
 TREE_ROOTS = ["crates", "python", "tests", "docs", ".review"]
 OUR_OWN = {"_shim.py", "differential.py", "parser.py", "test_materialise.py", "test_parser_parity.py"}
 ```
 
-`resolve(basename, ...)` walks `.django/` for that basename, excluding
-`__pycache__`; exactly one hit resolves, more than one requires the manifest's
-explicit path, zero fails. The two snippets (`line`, `end line`) are exact
-substrings of those lines, so a Django pin bump that reflows the line reports
-"snippet not found" rather than silently re-pointing at whatever now occupies
-the old number.
+Resolution order, and each step is an error rather than a guess: a qualified path
+is tried under `.django/` then the repo root; a bare basename is looked up under
+`.django/` excluding `__pycache__`, and exactly one hit resolves — more than one
+needs the manifest's explicit path (the `AMBIGUOUS` rows), zero fails.
 
-- [ ] **Step 4: Add the pass to `check.sh` and run it**
+A snippet is an exact substring of the cited line (and of the end line, when the
+anchor is a range), so a Django pin bump that reflows the line reports "snippet
+not found" rather than silently re-pointing at whatever now occupies the old
+number.
 
-In the existing `step "generated files are current"` block:
+- [ ] **Step 4: Read the triage list, then make `--check` green, then add the pass**
+
+Run: `python -I scripts/check_python_anchors.py --triage`
+Expected: ~228 rows, each an anchor with a code span quoted nearby that is not at
+the cited line. **Read them before writing any manifest entries** — the four
+wrong numbers above are in that list, and reading it is what turns "415 anchors,
+unknown how many wrong" into a number. Each row is resolved one of three ways,
+and the third is a real answer: fix the anchor, fix the prose's quotation of the
+source (the `defaultfilters.py:996` kind — the number was right), or record that
+the heuristics fired on an unrelated backtick.
+
+Run: `python -I scripts/check_python_anchors.py --check`
+Expected: exit 0, and **every failure before it is green is a hand decision on a
+row the tool named** — a stale number, a misquote, or a snippet that is not
+unique in its file. The tool found them; a reader had not, four times running.
+
+Then add it to `check.sh`, in the existing `step "generated files are current"`
+block:
 
 ```bash
   "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_python_anchors.py" --check
 ```
 
-Run: `python -I scripts/check_python_anchors.py --check`
-Expected: exit 0. Every failure it reports on the first run is either a real
-stale number (fix the tree to match the derived number) or a snippet that is not
-unique in its file (record a longer snippet). **Both are hand decisions on a
-row the tool names**, which is the point: the tool found them, not a reader.
-
 - [ ] **Step 5: Commit**
 
 ```bash
 git add scripts/check_python_anchors.py scripts/anchors.txt scripts/check.sh tests/test_anchor_manifest.py
-git commit -m "scripts: derive django source anchors instead of authoring them"
+git commit -m "scripts: check django source anchors against the pinned tree"
 ```
 
 ---
@@ -1640,10 +1730,14 @@ two defects into a tree that did not have them, and they were caught only becaus
 the numbers sat beside a name they contradicted. Measured now: `:518-519` is
 `if builtins is None: / builtins = []`, `:522-523` is `for builtin in builtins: /
 self.add_library(builtin)`, both cited correctly again, and Task 6 pins them as a
-named regression row. The inventory is not fourteen: **426 distinct anchors in our
-tree, 415 of them into the pinned checkout, 332 naming `django/template/`** — and
-the count of unknown-wrong among them cannot be stated without the guard. Three
-occurrences of this class, one failed repair, and the remedy each time was "be
-careful"; hence Task 6, which derives the numbers from the snippets instead of
-authoring them.
+named regression row. The inventory is not fourteen: **430 bare-basename anchors
+plus 47 qualified-path ones — the reviewer's 477 and the 426 first counted here
+are the same corpus under two patterns, and the difference is the `/` their
+pattern allowed.** Excluding the tree's own files and resolving into the pinned
+checkout: ~415 anchors, 332 naming `django/template/`. Sampling that corpus found
+five more defects — four wrong numbers and one misquoted source, listed in Task 6.
+The count of *unknown* wrong among them still cannot be stated without the guard.
+Three occurrences of this class, one failed repair, and the remedy each time was
+"be careful"; hence Task 6, which derives the numbers from authored snippets
+rather than authoring the numbers.
 
