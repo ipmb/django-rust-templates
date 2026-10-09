@@ -382,6 +382,47 @@ ERRORS = [
         "{% load custom %}{% div %}a",
         "Unclosed tag on line 1: 'div'. Looking for one of: enddiv.",
     ),
+    # --- the innermost token, when the failure is *inside* a host tag --------
+    # The message alone cannot tell these apart from the row above: the same
+    # `now` failure is raised with the same text whether the host tag encloses
+    # it or not. What moves is the **token** — Django's `Parser.error` sets
+    # `.token` on the first exception it sees and never replaces one already set
+    # (`base.py:619-630`), so `do_div`'s nested `parser.parse` attaches the
+    # `now a b` token and the outer frame's `self.error(div_token, e)` leaves it
+    # alone. Measured on the pinned tree, debug off and on:
+    #
+    #     {% load custom %}{% div %}{% now a b %}{% enddiv %}
+    #     → "'now' statement takes one argument", token (2, 'now a b', 1, None)
+    #       and with debug, position (26, 39) — the `now` block, not `div`'s
+    #
+    # Rust has the matching guard (`Error::error`'s `token.or_else`,
+    # `parser/mod.rs:369-373`) and is inert without this: the token never
+    # crosses the seam, so the guard sees `None` and attaches the **outer**
+    # token — `(2, 'div', 1, None)`. Both assertions of
+    # `test_every_case_carries_the_same_token*` fail without the transport, and
+    # only the token ones: the message matches either way.
+    (
+        "{% load custom %}{% div %}{% now a b %}{% enddiv %}",
+        "'now' statement takes one argument",
+    ),
+    # The same failure one frame deeper, because "the innermost wins" is a claim
+    # about depth and one level cannot distinguish it from "the first nested
+    # frame wins".
+    (
+        "{% load custom %}{% div %}{% div %}{% now a b %}{% enddiv %}{% enddiv %}",
+        "'now' statement takes one argument",
+    ),
+    # And the inner failure Django raises itself rather than the inner tag's
+    # compile function: `Parser.parse` stopped at `{% enddiv %}`'s absence finds
+    # a block tag it was not told to stop for and goes through
+    # `invalid_block_tag` → `self.error(token, msg)` (`base.py:632-651`). Same
+    # seam, second producer of the token, so the transport has to be in
+    # `call_tag`'s raise path rather than in a particular tag's error.
+    (
+        "{% load custom %}{% div %}{% badtag %}{% enddiv %}",
+        "Invalid block tag on line 1: 'badtag', expected 'enddiv'. Did you "
+        "forget to register or load this tag?",
+    ),
     # --- and one row that is not an M6 tag, because grading the corpus is the
     # task and the gap is in it ---------------------------------------------
     # The only input that reaches `loopvar_split` on an *empty* haystack, and

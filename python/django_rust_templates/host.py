@@ -169,7 +169,38 @@ class ShellHost:
         # exception out of the compile leaves the entry and the parse dies with
         # it, and the `Parser` is per-parse.
         parser.command_stack.append((command, token))
-        node = parser.tags[command](parser, token)
+        try:
+            node = parser.tags[command](parser, token)
+        except Exception as error:
+            # Django's wrapper, at Django's line (`base.py:583-585`):
+            # `Parser.parse` catches `Exception` and re-raises through
+            # `Parser.error`, which sets `.token` on the first exception to reach
+            # it and never replaces one already set (`base.py:619-630`).
+            #
+            # Rust drives the outer loop, so that wrapper is not on this call
+            # path and the token has to be picked up here. Two producers, one
+            # clause: a tag that raises directly gets *its own* token attached
+            # (Django attaches the same one, one frame up, so this is a no-op
+            # there), and a failure inside the tag's body arrives already
+            # carrying the **innermost** token, set by the nested `parser.parse`
+            # the tag itself ran. Measured on the pinned tree, the difference is
+            # the whole point:
+            #
+            #     {% load custom %}{% div %}{% now a b %}{% enddiv %}
+            #     → Django blames `now a b`; without the transport below, Rust's
+            #       `Parser::error` sees no token and attaches `div`
+            #
+            # `error = parser.error(token, error)` is rebinding rather than
+            # wrapping: for an `Exception` — which the clause above guarantees —
+            # `Parser.error` returns the object it was handed, so the bare
+            # `raise` re-raises the same one, traceback intact. `token_wire` is
+            # not Django's attribute; it is this seam's transport, the same
+            # four-field tuple `_native.lex` emits, because the other side may
+            # not name a Django `Token`. Read by `python_host_error` in
+            # `crates/template-py/src/lib.rs`.
+            error = parser.error(token, error)
+            error.token_wire = _wire_token(error.token)
+            raise
         parser.command_stack.pop()
         left = [_wire_token(tok) for tok in reversed(parser.tokens)]
         return node, left

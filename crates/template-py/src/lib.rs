@@ -1018,6 +1018,51 @@ fn python_error_message(py: Python<'_>, error: &PyErr) -> String {
     }
 }
 
+/// The token Django attached to a host exception, as a [`TokenDesc`].
+///
+/// Read from `token_wire`, the attribute `ShellHost.call_tag` sets on its way
+/// out (`python/django_rust_templates/host.py`) — not from Django's own
+/// `.token`, which is a `Token` object and would mean this crate naming its
+/// fields. The wire form is the same four-field tuple `_native.lex` emits, so
+/// the mapping back is one `TokenType::from_wire` and no new shape.
+fn python_host_token(py: Python<'_>, error: &PyErr) -> Option<TokenDesc> {
+    let wire = error.value(py).getattr("token_wire").ok()?;
+    let (kind, contents, lineno, position) = wire.extract::<WireToken>().ok()?;
+    Some(TokenDesc {
+        token_type: TokenType::from_wire(kind)?,
+        contents,
+        lineno,
+        position,
+    })
+}
+
+/// The [`Error`] a Python exception raised by `ShellHost.call_tag` becomes.
+///
+/// [`python_error_message`] plus the token, and the token is why this exists:
+/// a tag's compile function can re-enter Django's parse, so when its body fails
+/// the exception arrives already carrying the **innermost** token, set by the
+/// nested frame. Flattening it to a message loses that, and Rust's own
+/// `Parser::error` — whose `token.or_else(...)` guard exists precisely to honour
+/// an already-set token — then attaches the **outer** tag's token instead.
+///
+/// Measured on the pinned tree, `{% load custom %}{% div %}{% now a b %}{% enddiv %}`
+/// attributes `(2, 'now a b', 1, None)` in Django and `(2, 'div', 1, None)` here
+/// without this, with the message identical either way — so the divergence is
+/// invisible to every test that compares only text.
+///
+/// `None` — no `token_wire`, which is every exception the *filter* seam and the
+/// shell's own bookkeeping produce — falls back to [`Error::host`], and a token
+/// this side cannot read does too. That is the pre-existing behaviour rather
+/// than a guess, and the shell is the only producer of the attribute, so a
+/// missing one means no token was attached and not that one was lost.
+fn python_host_error(py: Python<'_>, error: &PyErr) -> Error {
+    let message = python_error_message(py, error);
+    match python_host_token(py, error) {
+        Some(token) => Error::host_with_token(message, token),
+        None => Error::host(message),
+    }
+}
+
 /// The [`Host`] that puts Django's filter checks where Django calls them.
 ///
 /// `has_tag` is `false` and `call_tag` panics, exactly as in [`NoHost`], and for
@@ -1157,7 +1202,7 @@ impl Host for FilterCheckHost<'_> {
         // token, which is what `token.split_contents()` needs.
         let answer = host
             .call_method1("call_tag", (command, wire(token), stream))
-            .map_err(|error| Error::host(python_error_message(py, &error)))?;
+            .map_err(|error| python_host_error(py, &error))?;
         let (node, left) = match answer.extract::<(Bound<'_, PyAny>, Bound<'_, PyAny>)>() {
             Ok(pair) => pair,
             // Not `Error::host`: no Python exception was raised, so claiming one

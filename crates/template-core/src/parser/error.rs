@@ -161,6 +161,11 @@ pub struct Error {
     /// That is Django's `if not hasattr(e, "token")`, and it is what makes the
     /// **innermost** token win when a compile error unwinds through nested
     /// `parse` frames (Review Focus item 5).
+    ///
+    /// [`Error::host_with_token`] is the one producer that sets it ahead of any
+    /// `error()` call, and for the same reason from the other end: the host is
+    /// the *innermost* frame, and once an exception has crossed the seam Rust's
+    /// `error()` frames are all outer.
     pub token: Option<TokenDesc>,
 }
 
@@ -176,6 +181,37 @@ impl Error {
         Self {
             kind: ErrorKind::Host(message.into()),
             token: None,
+        }
+    }
+
+    /// A Python exception from the **tag** seam, with the token Django attached
+    /// to it.
+    ///
+    /// [`Error::host`]'s twin, and a second constructor rather than an
+    /// `Option` argument on the first, because the two are different claims:
+    /// `host` is "the host raised and had no token to give", this one is "the
+    /// host raised and Django would have blamed *this* token". A caller that
+    /// has a token and passes it through `host` would be silently indistinguishable
+    /// from one that has none, which is the state this exists to end.
+    ///
+    /// The token is set **at construction**, so it is already present when the
+    /// first `error()` frame sees the error and [`Error::token`]'s
+    /// never-replace rule keeps it — the innermost token wins because the host
+    /// is the innermost frame. Why the tag seam and not the filter one: a tag's
+    /// compile function can re-enter the parse (`{% div %}`'s body is a
+    /// `parser.parse`), so a failure inside it is attributed by a *nested* frame
+    /// that this side never sees. Measured on the pinned tree, and the token is
+    /// the only part that moves:
+    ///
+    /// ```text
+    /// {% load custom %}{% div %}{% now a b %}{% enddiv %}
+    /// → Django: "'now' statement takes one argument", token (2, 'now a b', 1, None)
+    /// → ours without this: the same message, token (2, 'div', 1, None)
+    /// ```
+    pub fn host_with_token(message: impl Into<String>, token: TokenDesc) -> Self {
+        Self {
+            kind: ErrorKind::Host(message.into()),
+            token: Some(token),
         }
     }
 
