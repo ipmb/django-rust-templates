@@ -3,21 +3,21 @@
 //! # The synthetic source
 //!
 //! The tag does not compile the text it was given. It rebuilds a *variable*
-//! around it — `parser.compile_filter("var|%s" % rest)` (`:745`) — so the
-//! descriptor's `FilterExpr` is built from `"var|lower"` for
+//! around it — `parser.compile_filter("var|%s" % rest)` (`defaulttags.py:745`) —
+//! so the descriptor's `FilterExpr` is built from `"var|lower"` for
 //! `{% filter lower %}`, and `var` is a name that appears nowhere in the
 //! template. The variable part is what `FilterNode.render` pushes onto the
-//! context as `var` before resolving (`:144`), so the prefix is not cosmetic:
-//! change it and the node resolves something else.
+//! context as `var` before resolving (`defaulttags.py:144`), so the prefix is
+//! not cosmetic: change it and the node resolves something else.
 //!
 //! # The refusal, and why it is checked by name
 //!
 //! `escape` and `safe` are refused because a `{% filter %}` block would apply
 //! them to *already-rendered* output, which is what `{% autoescape %}` is for.
 //! Django reads the name off the **compiled function** —
-//! `getattr(func, "_filter_name", None)` (`:747`) — not off the source text, and
-//! the distinction is real: a custom library may register the `escape` function
-//! under another name, and Django would still refuse it.
+//! `getattr(func, "_filter_name", None)` (`defaulttags.py:747`) — not off the
+//! source text, and the distinction is real: a custom library may register the
+//! `escape` function under another name, and Django would still refuse it.
 //!
 //! This port reads [`FilterCall::name`], the name as written. Measured on the
 //! pinned tree, that is exact for every built-in — all 57 entries of
@@ -30,10 +30,10 @@
 //!
 //! # The unguarded unpack
 //!
-//! `_, rest = token.contents.split(None, 1)` (`:744`) has no length check, so
-//! `{% filter %}` — whose contents hold no separating run — raises a bare
-//! `ValueError` out of Django's parser. See [`ErrorKind::ValueError`]; the shell
-//! raises the same class for us.
+//! `_, rest = token.contents.split(None, 1)` (`defaulttags.py:744`) has no
+//! length check, so `{% filter %}` — whose contents hold no separating run —
+//! raises a bare `ValueError` out of Django's parser. See
+//! [`ErrorKind::ValueError`]; the shell raises the same class for us.
 //!
 //! [`ErrorKind::ValueError`]: crate::parser::error::ErrorKind::ValueError
 //! [`FilterCall::name`]: crate::parser::desc::FilterCall
@@ -68,8 +68,8 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
 
     // Every filter in the chain is checked, and the FIRST offender raises —
     // `{% filter upper|safe %}` reports `safe`, not nothing. The order is
-    // Django's `for func, unused in filter_expr.filters` (`:746-752`), which
-    // walks the chain as written.
+    // Django's `for func, unused in filter_expr.filters`
+    // (`defaulttags.py:746-752`), which walks the chain as written.
     for call in &filter_expr.filters {
         if call.name == "escape" || call.name == "safe" {
             return Err(Error::syntax(format!(

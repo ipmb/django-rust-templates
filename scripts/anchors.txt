@@ -283,6 +283,7 @@ defaultfilters.py:990-996	django/template/defaultfilters.py	990	996	def pprint(v
 defaultfilters.py:996	django/template/defaultfilters.py	996	-	"Error in formatting: %s: %s" % (e.__class__.__name__, e)	-
 defaulttags.py:99	django/template/defaulttags.py	99	-	def __init__(self, cyclevars, variable_name=None, silent=False):	-
 defaulttags.py:106-112	django/template/defaulttags.py	106	112	# First time the node is rendered in template	if self.silent:
+defaulttags.py:144	django/template/defaulttags.py	144	-	with context.push(var=output):	-
 defaulttags.py:176-179	django/template/defaulttags.py	176	179	if nodelist_empty is None:	self.nodelist_empty = nodelist_empty
 defaulttags.py:262	django/template/defaulttags.py	262	-	-	-
 defaulttags.py:262-265	django/template/defaulttags.py	262	265	def __init__(self, nodelist_true, nodelist_false, *varlist):	self._varlist = varlist
@@ -314,6 +315,8 @@ defaulttags.py:700	django/template/defaulttags.py	700	-	parser._last_cycle_node 
 defaulttags.py:724-755	django/template/defaulttags.py	724	755	def do_filter(parser, token):	return FilterNode(filter_expr, nodelist)
 defaulttags.py:744	django/template/defaulttags.py	744	-	_, rest = token.contents.split(None, 1)	-
 defaulttags.py:745	django/template/defaulttags.py	745	-	filter_expr = parser.compile_filter("var|%s" % (rest))	-
+defaulttags.py:746-752	django/template/defaulttags.py	746	752	for func, unused in filter_expr.filters:	-
+defaulttags.py:747	django/template/defaulttags.py	747	-	filter_name = getattr(func, "_filter_name", None)	-
 defaulttags.py:758-804	django/template/defaulttags.py	758	804	@register.tag	return FirstOfNode([parser.compile_filter(bit) for bit in bits], asvar)
 defaulttags.py:807-906	django/template/defaulttags.py	807	906	def do_for(parser, token):	return ForNode(loopvars, sequence, is_reversed, nodelist_loop, nodelist_empty)
 defaulttags.py:877	django/template/defaulttags.py	877	-	is_reversed = bits[-1] == "reversed"	-
