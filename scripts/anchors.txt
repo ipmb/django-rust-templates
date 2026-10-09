@@ -9,14 +9,17 @@ slugify.rs:99	crates/template-core/src/filters/slugify.rs	99	-	pub fn run(value:
 wordwrap.rs:73	crates/template-core/src/filters/wordwrap.rs	73	-	unwrap_or(Value::None)	-
 error.rs:292-293	crates/template-core/src/parser/error.rs	292	293	str.replace	-
 parser/mod.rs:267	crates/template-core/src/parser/mod.rs	267	-	NodeDesc::new("VariableNode")	-
+crates/template-core/src/parser/mod.rs:341	crates/template-core/src/parser/mod.rs	341	-	self.extend_nodelist(&mut nodelist, node, &token)?;	-
 parser/mod.rs:369-373	crates/template-core/src/parser/mod.rs	369	373	token.or_else	-
 crates/template-core/src/parser/mod.rs:429	crates/template-core/src/parser/mod.rs	429	-	pub fn extend_nodelist(	-
 tags/mod.rs:180	crates/template-core/src/parser/tags/mod.rs	180	-	Ok(NodeDesc::with_nodelist(	-
 url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
 with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
 filters.rs:69-71	crates/template-py/src/filters.rs	69	71	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
+crates/template-py/src/filters.rs:248-257	crates/template-py/src/filters.rs	248	257	*self.raised.borrow_mut() = Some(err)	-
 crates/template-py/src/filters.rs:871	crates/template-py/src/filters.rs	871	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
 template-py/src/filters.rs:1587-1589	crates/template-py/src/filters.rs	1587	1589	Some(host.classify(&args.get_item(0)?)?)	-
+crates/template-py/src/filters.rs:1644-1645	crates/template-py/src/filters.rs	1644	1645	host.take_raised()	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-

@@ -473,8 +473,9 @@ class CorpusParityTests(unittest.TestCase):
         as every other node, which is the thing Task 2's arm can quietly break.
 
         Rust ports `extend_nodelist` (`crates/template-core/src/parser/mod.rs:429`)
-        and calls it at `:304` for a host descriptor exactly as for a Rust-built
-        block node, so the token reaches the descriptor either way. The failure
+        and calls it at `crates/template-core/src/parser/mod.rs:341` for a host
+        descriptor exactly as for a Rust-built block node, so the token reaches
+        the descriptor either way. The failure
         mode is therefore not "Django forgot to attach it" but "the
         `materialise_node` arm returned the stored object before the attachment
         ran", leaving a user tag's node the one shape that renders tokenless in
