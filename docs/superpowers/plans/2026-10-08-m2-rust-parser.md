@@ -1575,7 +1575,14 @@ fn standin_first(_parser: &mut Parser<'_>, _token: &Token) -> Result<NodeDesc, E
 Add the imports that makes necessary at the top of the file:
 
 ```rust
-use crate::parser::desc::{AttrValue, NodeDesc, NodeRef};
+use crate::parser::desc::NodeDesc;
+// `AttrValue` and `NodeRef` are used only by the `#[cfg(test)]` stand-ins
+// below. Importing them unconditionally fails the non-test build under
+// `-D warnings` with `unused_imports`, which is how this was found — the
+// task's own note about the stand-in arms being gated covers dead *code*, and
+// this is the import half of the same gate.
+#[cfg(test)]
+use crate::parser::desc::{AttrValue, NodeRef};
 use crate::parser::error::Error;
 use crate::parser::Parser;
 use crate::token::Token;
@@ -1873,18 +1880,42 @@ Per the project's rule that a guard which has never failed is not known to work,
 break each of the three properties Task 3 exists to protect and confirm the
 failure, then revert:
 
-1. In `parse`, replace `self.prepend_token(token);` with nothing (drop the
-   token) → `the_terminator_is_prepended_not_consumed` and
-   `an_unclosed_block_names_the_tag_that_was_left_open` must fail.
-2. In `extend_nodelist`, replace `token: error.token.or_else(…)` with
-   `Some(TokenDesc::of(token))` → `the_innermost_token_wins_across_a_nested_parse`
-   must fail on line 3.
+The three predictions below were **wrong twice**. They are recorded here as
+observed rather than as planned, because a prediction that disagrees with the
+measurement is the useful part:
+
+1. In `parse`, drop the token instead of `self.prepend_token(token);` →
+   **4** failures, not the 2 predicted:
+   `the_terminator_is_prepended_not_consumed`,
+   `a_block_tag_reads_its_body_and_terminates` (`left: ["a"]`,
+   `right: ["a", "c"]`), `contains_nontext_starts_false_for_every_nodelist`,
+   `text_alone_never_sets_contains_nontext`.
+   The predicted `an_unclosed_block_names_the_tag_that_was_left_open` does
+   **not** fail — it exercises the `command_stack` path on token exhaustion,
+   which never reaches the prepend.
+2. In `Parser::error` — **not** `extend_nodelist`, where this plan first put
+   it; that function does not contain this expression — replace
+   `token: error.token.or_else(|| Some(TokenDesc::of(token)))` with
+   `token: Some(TokenDesc::of(token))` → 3 failures:
+   `the_innermost_token_wins_across_a_nested_parse` at line 3 (as predicted),
+   `an_invalid_tag_inside_a_block_lists_what_was_expected`, and
+   `the_token_is_attached_once_and_never_replaced`.
 3. In `extend_nodelist`, move `nodelist.contains_nontext = true` outside the
-   `if node.class_name != TEXT_NODE` guard → `text_alone_never_sets_contains_nontext`
-   must fail.
+   `if node.class_name != TEXT_NODE` guard → 5 failures, not the 1 predicted:
+   `text_alone_never_sets_contains_nontext` (as predicted), plus
+   `contains_nontext_starts_false_for_every_nodelist`,
+   `a_first_node_may_lead_any_nodelist`, `comment_tokens_are_dropped_entirely`,
+   and `the_innermost_token_wins_across_a_nested_parse`.
 
 Record the three observed failures in the task's commit message; a revert that
 is not confirmed green afterwards is how a broken guard gets committed.
+
+The lesson worth carrying: each prediction named the test its author expected
+to be sensitive to that property, and two were wrong — both because the
+predicted test was insensitive for a structural reason the plan had not
+traced. A guard-break step is a measurement, not a formality. Writing the
+expected result down first is what makes it informative, and it is also what
+makes the disagreement visible when it comes.
 
 - [ ] **Step 6: Commit**
 
@@ -1894,10 +1925,16 @@ git commit -m "M2 Task 3: tag dispatch and the stand-ins
 
 Registry plus compile-function dispatch, and three test-only tags that prove
 what no M2 built-in can reach: a body-reading block, an AttrValue::Ref carrier,
-and a must_be_first node. Guards broken and confirmed failing:
- - dropping the prepended terminator -> 2 failures
- - overwriting an attached token -> innermost-token test fails at line 3
- - always setting contains_nontext -> text-only test fails
+and a must_be_first node. Guards broken and confirmed failing, as observed
+rather than as predicted — two of the three predictions were wrong, and the
+counts and failing tests here are the measured ones:
+ - dropping the prepended terminator -> 4 failures (predicted 2, and named a
+   test that turns out not to reach this code path at all)
+ - overwriting an attached token, in Parser::error -> 3 failures, including
+   the innermost-token test at line 3 as predicted
+ - always setting contains_nontext -> 5 failures (predicted 1)
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
 "
 ```
 
