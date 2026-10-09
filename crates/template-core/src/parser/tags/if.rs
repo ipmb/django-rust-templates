@@ -197,7 +197,7 @@ mod tests {
             let mut seen = self.seen.borrow_mut();
             seen.push(token.to_string());
             if Some(token) == self.unknown {
-                // Django's own message, from `find_filter` (`base.py:690`).
+                // Django's own message, from `find_filter` (`base.py:682`).
                 return Err(Error::host(format!("Invalid filter: '{token}'")));
             }
             Ok(NodeRef(seen.len() as u64 - 1))
@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn a_merged_operator_is_one_key_rather_than_two_tokens() {
         // `merge_tokens` folds `not in` and `is not` into a single operator
-        // before `translate_token` looks them up (`smartif.py:120-172`), so the
+        // before `translate_token` looks them up (`smartif.py:159-173`), so the
         // key is the two-word one and no operand named `in` exists.
         let node = compile("{% if a not in b %}x{% endif %}");
         let (key, first, second) = operator(tree_of(&node));
@@ -418,7 +418,7 @@ mod tests {
     #[test]
     fn every_operand_is_compiled_before_the_operator_algorithm_runs() {
         // `translate_token` tries `OPERATORS[token]` first and falls through to
-        // `create_var` only for the rest (`smartif.py:166-172`), so the host sees
+        // `create_var` only for the rest (`smartif.py:179-183`), so the host sees
         // operands alone, left to right — never an operator. `TemplateIfParser.__init__`
         // compiles every token before `parse` runs, so the whole sequence is
         // complete before the tree is built.
