@@ -296,6 +296,7 @@ defaulttags.py:361-365	django/template/defaulttags.py	361	365	class RegroupNode(
 defaulttags.py:403	django/template/defaulttags.py	403	-	tzinfo = timezone.get_current_timezone() if settings.USE_TZ else None	-
 defaulttags.py:439	django/template/defaulttags.py	439	-	-	-
 defaulttags.py:479-483	django/template/defaulttags.py	479	483	def __init__(self, view_name, args, kwargs, asvar):	self.asvar = asvar
+defaulttags.py:541-548	django/template/defaulttags.py	541	548	max_width = int(self.max_width.resolve(context))	raise TemplateSyntaxError("widthratio final argument must be a number")
 defaulttags.py:611-701	django/template/defaulttags.py	611	701	@register.tag	return node
 defaulttags.py:612	django/template/defaulttags.py	612	-	-	-
 defaulttags.py:657	django/template/defaulttags.py	657	-	args = token.split_contents()	-
@@ -382,6 +383,9 @@ defaulttags.py:1575-1577	django/template/defaulttags.py	1575	1577	"Malformed arg
 defaulttags.py:1579	django/template/defaulttags.py	1579	-	if name:	-
 defaulttags.py:1584	django/template/defaulttags.py	1584	-	return URLNode(viewname, args, kwargs, asvar)	-
 defaulttags.py:1610-1650	django/template/defaulttags.py	1610	1650	parser.compile_filter(max_width)	-
+defaulttags.py:1634-1637	django/template/defaulttags.py	1634	1637	tag, this_value_expr, max_value_expr, max_width = bits	tag, this_value_expr, max_value_expr, max_width, as_, asvar = bits
+defaulttags.py:1643	django/template/defaulttags.py	1643	-	raise TemplateSyntaxError("widthratio takes at least three arguments")	-
+defaulttags.py:1648	django/template/defaulttags.py	1648	-	parser.compile_filter(max_width)	-
 defaulttags.py:1654-1687	django/template/defaulttags.py	1654	1687	"%r expected at least one variable assignment" % bits[0]	-
 defaulttags.py:1676	django/template/defaulttags.py	1676	-	support_legacy=True	-
 defaulttags.py:1678-1680	django/template/defaulttags.py	1678	1680	"%r expected at least one variable assignment"	-
