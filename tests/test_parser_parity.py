@@ -526,15 +526,15 @@ class ShapeTests(unittest.TestCase):
         Django builds.
 
         Asserted on the **wire descriptor** — `_native.parse` returns
-        `(nodes, contains_nontext)` and each node is
-        `(class_name, attrs, nodelists, token)` — rather than through
+        `(nodes, contains_nontext, refs)` and each node is
+        `(class_name, attrs, nodelists, token, slot)` — rather than through
         `ours_parse`. Materialising a `VariableNode` needs
         `NODE_CLASSES["VariableNode"]`, which is Task 6's deliverable, and
         reaching for it here would make this task's test depend on the next
         one's. The class name is compared against `type(...).__name__` on
         Django's side so it is still Django's name and not a transcription.
         """
-        nodes, contains_nontext = _native.parse("a{{ x }}b")
+        nodes, contains_nontext, _refs = _native.parse("a{{ x }}b")
         theirs = django_parse("a{{ x }}b")
         self.assertEqual(
             [desc[0] for desc in nodes],
@@ -542,9 +542,10 @@ class ShapeTests(unittest.TestCase):
         )
         self.assertTrue(contains_nontext)
 
-        class_name, attrs, nodelists, token = nodes[1]
+        class_name, attrs, nodelists, token, slot = nodes[1]
         self.assertEqual(class_name, "VariableNode")
         self.assertEqual(nodelists, ())
+        self.assertIsNone(slot, "a node outside a `{% cycle %}` names no slot")
         self.assertEqual(token[1], "x")
         expression = dict(attrs)["filter_expression"]
         self.assertEqual(expression.token, "x")

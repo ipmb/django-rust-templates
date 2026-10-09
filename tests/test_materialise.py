@@ -88,8 +88,8 @@ def collect_class_names(nodelist_desc):
     names = set()
     stack = [nodelist_desc]
     while stack:
-        nodes, _contains_nontext = stack.pop()
-        for class_name, _attrs, nodelists, _token in nodes:
+        nodes, _contains_nontext, *_refs = stack.pop()
+        for class_name, _attrs, nodelists, _token, *_slot in nodes:
             names.add(class_name)
             stack.extend(nodelist for _name, nodelist in nodelists)
     return names
@@ -418,13 +418,19 @@ class ParseToMaterialiseTests(unittest.TestCase):
         self.assertEqual(caught.exception.token[2], 1)
 
     def test_the_wire_form_is_plain_data(self):
-        """Nothing Python reaches Rust, and nothing Rust-shaped reaches Python."""
+        """Nothing Python reaches Rust, and nothing Rust-shaped reaches Python.
+
+        `refs` — the parse's reference table, third element of the result — is a
+        `list` rather than a tuple, because the materialiser writes into it
+        (`register_ref` is `list.__setitem__`). It is walked like the rest: its
+        entries are `None` placeholders until something fills them.
+        """
         def walk(value):
-            if isinstance(value, tuple):
+            if isinstance(value, (tuple, list)):
                 for item in value:
                     walk(item)
                 return
-            if isinstance(value, (_native.NodeRef, _native.SafeStr)):
+            if isinstance(value, (_native.NodeRef, _native.NodeSlot, _native.SafeStr)):
                 return
             self.assertIsInstance(value, (str, int, bool, type(None)), f"odd {value!r}")
 
@@ -836,9 +842,7 @@ class VariableNodeTests(unittest.TestCase):
     """`{{ … }}` end to end: `_native.parse` → registry → real `FilterExpression`."""
 
     def test_a_variable_node_carries_a_real_filter_expression(self):
-        nodelist = materialiser.materialise(
-            _native.parse("a{{ x|upper }}b"), None, None, parser()
-        )
+        nodelist = materialiser.materialise(_native.parse("a{{ x|upper }}b"), parser=parser())
         self.assertEqual(len(nodelist), 3)
         node = nodelist[1]
         self.assertIsInstance(node, VariableNode)
@@ -853,9 +857,7 @@ class VariableNodeTests(unittest.TestCase):
 
     def test_a_variable_node_matches_djangos_own_construction(self):
         source = 'a{{ "x"|default:"d" }}b'
-        ours = materialiser.materialise(
-            _native.parse(source), None, None, parser()
-        )[1]
+        ours = materialiser.materialise(_native.parse(source), parser=parser())[1]
 
         engine = Engine()
         django_parser = Parser(

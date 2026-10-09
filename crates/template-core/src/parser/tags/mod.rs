@@ -456,6 +456,13 @@ mod tests {
                 Err(Error::host("the host refused"))
             }
         }
+
+        fn alloc_slot(&self) -> usize {
+            // Neither of this host's tags is `{% cycle %}`, and no descriptor it
+            // builds names a slot. Zero rather than a counter so that `&TestHost`
+            // stays a promotable unit struct.
+            0
+        }
     }
 
     #[test]

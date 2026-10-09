@@ -30,8 +30,14 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
         // not exist until `{% cycle %}` has run, and the name may not be in it.
         // Both mean "no such cycle", so a miss in the map is the whole story —
         // the absent-attribute case is the map being empty.
+        //
+        // The value is a reference-table *slot*, not a node: the `CycleNode` is
+        // Python's and is built at materialisation. `{% cycle %}` reserved the
+        // slot, so this resolves to that same object.
         return match parser.named_cycle_nodes.get(name) {
-            Some(node) => Ok(NodeDesc::new("ResetCycleNode").attr("node", AttrValue::Ref(*node))),
+            Some(slot) => {
+                Ok(NodeDesc::new("ResetCycleNode").attr("node", AttrValue::NodeSlot(*slot)))
+            }
             None => Err(Error::syntax(format!(
                 "Named cycle '{name}' does not exist."
             ))),
@@ -39,7 +45,7 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
     }
 
     match parser.last_cycle_node {
-        Some(node) => Ok(NodeDesc::new("ResetCycleNode").attr("node", AttrValue::Ref(node))),
+        Some(slot) => Ok(NodeDesc::new("ResetCycleNode").attr("node", AttrValue::NodeSlot(slot))),
         None => Err(Error::syntax("No cycles in template.")),
     }
 }
@@ -48,7 +54,6 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
 mod tests {
     use super::*;
     use crate::lexer::Lexer;
-    use crate::parser::desc::NodeRef;
     use crate::parser::error::ErrorKind;
     use crate::parser::host::NoHost;
     use crate::parser::tags::support::{attr, failure};
@@ -80,22 +85,22 @@ mod tests {
     fn resetcycle_finds_a_named_cycle_the_parser_already_holds() {
         // M2 cannot reach this through a template, so the registry is populated
         // by hand. It is the only check that the *success* shape — and the
-        // `AttrValue::Ref` it carries — is what M5 will need.
+        // `AttrValue::NodeSlot` it carries — is what M5 will need: `{% cycle %}`'s
+        // Task 6 writes the other end, and `tests/test_ref_table.py` resolves
+        // this operand against a real `CycleNode`.
         let mut parser = Parser::new(Lexer::new("{% resetcycle named %}").tokenize(), &NoHost);
-        let cycle = NodeRef(11);
-        parser.named_cycle_nodes.insert("named".to_string(), cycle);
+        parser.named_cycle_nodes.insert("named".to_string(), 11);
         let nodelist = parser.parse(&[]).unwrap();
 
         assert_eq!(nodelist.nodes[0].class_name, "ResetCycleNode");
-        assert_eq!(attr(&nodelist.nodes[0], "node"), &AttrValue::Ref(cycle));
+        assert_eq!(attr(&nodelist.nodes[0], "node"), &AttrValue::NodeSlot(11));
     }
 
     #[test]
     fn resetcycle_falls_back_to_the_last_cycle_node() {
         let mut parser = Parser::new(Lexer::new("{% resetcycle %}").tokenize(), &NoHost);
-        let cycle = NodeRef(12);
-        parser.last_cycle_node = Some(cycle);
+        parser.last_cycle_node = Some(12);
         let nodelist = parser.parse(&[]).unwrap();
-        assert_eq!(attr(&nodelist.nodes[0], "node"), &AttrValue::Ref(cycle));
+        assert_eq!(attr(&nodelist.nodes[0], "node"), &AttrValue::NodeSlot(12));
     }
 }

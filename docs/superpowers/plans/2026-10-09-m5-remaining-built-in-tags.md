@@ -956,19 +956,21 @@ declares, because a gate nobody has seen fail is a comment.
 ## Task 2: The host-owned reference table
 
 **Files:**
-- Modify: `crates/template-core/src/parser/desc.rs` (add `AttrValue::NodeSlot(usize)` — §B)
-- Modify: `crates/template-core/src/parser/host.rs` (the `Host` trait gains `alloc_slot` and `compile_filter`)
-- Modify: `crates/template-py/src/lib.rs` (`FilterCheckHost` gains the table; `parse` returns it; `render` threads it)
-- Modify: `python/django_rust_templates/_impl/parser.py` (`materialise`/`materialise_node` gain `register_ref` and the `NodeSlot` arm)
-- Modify: `tests/test_parser_parity.py` (pass `resolve_ref`/`register_ref` from the returned table)
+- Modify: `crates/template-core/src/parser/desc.rs` (add `AttrValue::NodeSlot(usize)` and `NodeDesc::slot` — §B)
+- Modify: `crates/template-core/src/parser/host.rs` (the `Host` trait gains `alloc_slot`)
+- Modify: `crates/template-core/src/parser/mod.rs` (`last_cycle_node`/`named_cycle_nodes` become slot indices)
+- Modify: `crates/template-core/src/parser/tags/resetcycle.rs` (the two arms emit `AttrValue::NodeSlot`)
+- Modify: `crates/template-py/src/lib.rs` (`FilterCheckHost` gains the table; `parse` returns it; `render` threads it; `NodeSlot` pyclass)
+- Modify: `python/django_rust_templates/_impl/parser.py` (`materialise`/`materialise_node` gain `register_ref`, the slot rule and the `NodeSlot` arm)
+- Modify: `tests/test_parser_parity.py`, `tests/test_materialise.py` (the five-element descriptor)
 - Test: `tests/test_ref_table.py` (new — the table's wire test, and the identity assertion that closes §Review Focus 3)
 
 **Interfaces:**
-- Produces: `AttrValue::NodeSlot(usize)`; `Host::alloc_slot(&self) -> usize` and
-  `Host::compile_filter(&self, token: &str) -> Result<NodeRef, Error>`;
+- Produces: `AttrValue::NodeSlot(usize)`; `NodeDesc::slot: Option<usize>`;
+  `Host::alloc_slot(&self) -> usize`;
   `_native.parse` → `(nodes, contains_nontext, refs)`;
   `materialise(nodelist_desc, origin=None, resolve_ref=None, register_ref=None, parser=None)`.
-- Consumes: `AttrValue::Ref(NodeRef)` (exists), `AttrValue::NodeListRef` (exists, the precedent), `smartif::CompileFilter` (exists).
+- Consumes: `AttrValue::Ref(NodeRef)` (exists), `AttrValue::NodeListRef` (exists, the precedent).
 
 **Design, and the one part most likely to need review.** Two tags need a value
 that is built outside `template-core`, at two different *times*, and one table
@@ -1206,11 +1208,96 @@ Expected: `test_ref_table.py` PASS; the whole suite green **except** Task 1's
 
 ```bash
 git add crates/template-core/src/parser/desc.rs \
-        crates/template-core/src/parser/host.rs crates/template-py/src/lib.rs \
+        crates/template-core/src/parser/host.rs \
+        crates/template-core/src/parser/mod.rs \
+        crates/template-core/src/parser/filter_expr.rs \
+        crates/template-core/src/parser/tags/mod.rs \
+        crates/template-core/src/parser/tags/resetcycle.rs \
+        crates/template-py/src/lib.rs \
         python/django_rust_templates/_impl/parser.py tests/test_ref_table.py \
-        tests/test_parser_parity.py
+        tests/test_parser_parity.py tests/test_materialise.py \
+        docs/superpowers/plans/2026-10-09-m5-remaining-built-in-tags.md
 git commit -m "tags: the per-parse table and NodeSlot, so a cycle's second mention is the same node"
 ```
+
+**Seven corrections to the draft, every one of them found by running it.**
+
+*1. Step 1 and Step 2's `{% cycle %}` test cannot run, and the red is not the one
+the draft predicted.* The plan has the identity assertion reached through
+`ours_parse("{% cycle … %}")`. It cannot be: `cycle.rs` is still
+`Err(unimplemented(...))` until Task 6. Measured, the failure is
+`ValueError: not enough values to unpack (expected 3, got 2)` — the *old*
+two-element parse result — before it is anything about a slot, and once the wire
+grows it is `IndexError` / `AssertionError: 4 != 5`. The draft's predicted
+`LookupError: … needs a resolve_ref callback` is not reachable from a template
+at all. So `tests/test_ref_table.py` drives the table with **hand-built
+descriptors** that are exactly the ones `cycle.rs` must write, and states that
+limitation in its module docstring. What Task 6 owes is therefore narrow and
+written down: write those descriptors and add the corpus row.
+
+*2. `CycleNode` is patched into `NODE_CLASSES` in the test's `setUp`, not
+registered.* Registering it for real would redden `tests/test_materialise.py`'s
+static gate `test_every_node_class_is_emitted_somewhere` — a registered class no
+`class_name` in the corpus ever emits is exactly the dead-registration that gate
+exists to catch, and it stays dead until `cycle.rs` names it. `setUp` inserts it
+and `addCleanup` removes it, so the patch cannot leak; Task 6 registers it for
+real in the same commit as the corpus row.
+
+*3. The materialiser rule the draft wrote is wrong, and the fix is a descriptor
+field.* The draft says: "`materialise_node`, on decoding `NodeSlot(k)`, returns
+`refs[k]` if it is already filled, else builds the node". That is one rule for
+two different things, and it breaks `{% resetcycle %}`: `ResetCycleNode`'s
+`node` attribute is *also* a `NodeSlot(k)`, so decoding it would hand back the
+`CycleNode` as the value of `ResetCycleNode.node` **and** return it in place of
+the `ResetCycleNode`. The two cases are not the same question:
+
+* **"this node IS the object at slot k"** — a property of the node, so it is a
+  field on the descriptor: `NodeDesc.slot: Option<usize>`, carried on the wire as
+  the descriptor's **fifth element** (`None`, or a `_native.NodeSlot`). Only
+  `{% cycle %}` produces it, and only for a *reused* named cycle.
+* **"this attribute's value IS the object at slot k"** — a property of the value,
+  so it is an `AttrValue` variant: `AttrValue::NodeSlot(usize)`
+  (`ResetCycleNode.node` is its only producer).
+
+The draft's reserved-attribute-name sentinel is dropped for the same reason: it
+would be an entry in a table of constructor kwargs that `CycleNode.__init__`
+(`defaulttags.py:97`) does not accept, so `cls(**kwargs)` would raise, and on the
+reuse form there is no attribute list to put it in at all.
+
+*4. The draft missed the token re-attachment.* Django's `extend_nodelist` does
+`node.token = token` at **every** append (`base.py:598`), not only on
+construction, so the one shared object ends up carrying the *last* occurrence's
+token and **both** positions read it. Measured on the pinned tree:
+
+    [n.token.contents for n in nodelist]  →  ['cycle c', 'cycle c', 'resetcycle c']
+
+A "return the existing object and stop" shortcut passes without this, so it is
+pinned separately: `test_the_shared_object_carries_the_last_occurrences_token`.
+
+*5. `Host::compile_filter` is deferred to Task 7.* The draft declares it as
+Task 2's other product. Nothing calls it until `{% if %}`, so shipping it here
+would be an unexercised seam — the shape this project keeps removing. Task 2
+adds `alloc_slot` alone; `compile_filter` is declared and consumed in Task 7.
+
+*6. `NoHost::alloc_slot` returns `0`.* `NoHost` must stay free of interior
+mutability — no `Cell` — because `Parser::new(tokens, &NoHost)` const-promotes
+`&NoHost` to `'static`. `0` is a lie about a counter and an honest statement
+about the null host: nothing built under it is ever materialised. The consequence
+for Task 6 is written down there: a Rust test that needs two distinct slots needs
+a *counting* test host, which is a new `#[cfg(test)]` host beside `TestHost` in
+`tags/mod.rs`.
+
+*7. Every reader of a descriptor changed shape with it, and the Files list did
+not name them.* A node descriptor is now five elements, so
+`materialise_node`'s unpack, `describe`'s walker, `test_materialise.py`'s
+`collect_class_names` and `test_parser_parity.py`'s descriptor assertions all
+move in the same commit — the two files the draft's Files list did not name are
+now in this task's, along with `resetcycle.rs`, whose two `AttrValue::Ref` arms
+become `AttrValue::NodeSlot`. `tests/test_ref_table.py`'s `materialise` helper
+passes the callbacks explicitly, but `_impl/parser.py` also derives them from the
+table's third element, which is what keeps every existing
+`materialise(_native.parse(s), …)` call site source-compatible; the two in
+`VariableNodeTests` that passed `parser()` positionally become keyword arguments.
 
 ---
 
@@ -1606,14 +1693,16 @@ git commit -m "tags: ifchanged and for, and the factory NODE_CLASSES needed for 
 
 **Files:**
 - Modify: `crates/template-core/src/parser/tags/cycle.rs`
+- Modify: `crates/template-core/src/parser/tags/mod.rs` (a **counting** test host for the `#[cfg(test)]` cycle tests — `Host::alloc_slot` must hand out two distinct indices for two definitions, and `TestHost` (`:445`), like `NoHost`, returns `0` for everything)
+- Modify: `python/django_rust_templates/_impl/parser.py` (`NODE_CLASSES` gains `"CycleNode"` for real — Task 2's `tests/test_ref_table.py` patches it in `setUp` and this task removes the need)
 - Modify: `crates/template-core/src/parser/tags/resetcycle.rs` — its three messages **and** its wire form: `AttrValue::Ref` (`:34`, `:42`) becomes `AttrValue::NodeSlot`, because the thing it points at is a node built at materialisation, not a host object. Its own `#[cfg(test)]` fixtures assert `AttrValue::Ref` (`:90`, `:99`) and go with it, as does the comment at `:83` that says the `Ref` "is what M5 will need"
 - Modify: `crates/template-core/src/parser/mod.rs` — `last_cycle_node: Option<NodeRef>` and `named_cycle_nodes: HashMap<String, NodeRef>` (`:71-72`) become slot indices, and their doc comment changes with them: it currently says "Both hold host-owned `CycleNode`s, so they are handles here. M2 only ever reads them and always finds them empty" — the first clause is the sentence this task falsifies
-- Modify: `tests/parser_corpus.py`, `tests/parser_error_corpus.py`, `tests/test_ref_table.py`
+- Modify: `tests/parser_corpus.py`, `tests/parser_error_corpus.py`, `tests/test_ref_table.py` (drop the `setUp` patch, drop `"resetcycle"` from the error-corpus `deferred` set, and add the `{% cycle %}` success rows)
 
 **Interfaces:**
 - Consumes: `parser.named_cycle_nodes` / `parser.last_cycle_node`
-  (`resetcycle.rs:34`, `:42` already read them), `AttrValue::{Str, Bool, FilterExpr, List, NodeSlot}`, and `Host::alloc_slot` from Task 2.
-- Produces: the `AttrValue::NodeSlot` wire form every named-`CycleNode` descriptor carries.
+  (`resetcycle.rs:34`, `:42` already read them), `AttrValue::{Str, Bool, FilterExpr, List, NodeSlot}`, `NodeDesc::slot`, and `Host::alloc_slot` from Task 2.
+- Produces: the `NodeDesc::slot` / `AttrValue::NodeSlot` wire forms every named-`CycleNode` descriptor carries — the exact descriptors `tests/test_ref_table.py` already materialises from hand.
 
 **`cycle`** — `CycleNode(cyclevars, variable_name=None, silent=False)`
 (`:612-702`). Five parse shapes, and the shapes are the design:
@@ -1719,9 +1808,11 @@ git commit -m "tags: cycle's five shapes, and the one object they must all share
 - Modify: `tests/parser_corpus.py`, `tests/parser_error_corpus.py`
 
 **Interfaces:**
-- Consumes: `IfParser::template(compiler, tokens)` (`smartif.rs:313`) and
-  `IfParser::parse()` (`:345`); the `CompileFilter` impl over `Host::compile_filter` from Task 2.
-- Produces: nothing later tasks call; this is M5's last tag.
+- Consumes: `Host::alloc_slot` (Task 2), `IfParser::template(compiler, tokens)`
+  (`smartif.rs:313`) and `IfParser::parse()` (`:345`).
+- Produces: `Host::compile_filter(&self, token: &str) -> Result<NodeRef, Error>`
+  — declared here rather than in Task 2, because this task is its first and only
+  caller (Task 2 correction 5).
 
 `do_if` (`:933-1021`) drives `IfParser` and then walks its arena into
 `IfNode(conditions_nodelists)`, where each element is

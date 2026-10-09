@@ -72,9 +72,26 @@ NODE_CLASSES = {
 }
 
 
-def materialise(nodelist_desc, origin=None, resolve_ref=None, parser=None):
-    """Build a real :class:`~django.template.base.NodeList` from a descriptor."""
-    nodes, contains_nontext = nodelist_desc
+def materialise(nodelist_desc, origin=None, resolve_ref=None, register_ref=None, parser=None):
+    """Build a real :class:`~django.template.base.NodeList` from a descriptor.
+
+    ``nodelist_desc`` is ``(nodes, contains_nontext)`` — or, from ``_native.parse``,
+    ``(nodes, contains_nontext, refs)``, where ``refs`` is the per-parse reference
+    table. The third element is **optional and tolerated** rather than required,
+    because every hand-built fixture in ``tests/test_materialise.py`` predates it,
+    and because a table is not needed by a tree that names no slots.
+
+    When it *is* there, the two callbacks are derived from it: ``refs`` is part of
+    the parse result, so a caller that materialises that result should not have to
+    hand the same list back a second time. Explicit arguments still win, which is
+    what the hand-built fixtures use.
+    """
+    nodes, contains_nontext, *rest = nodelist_desc
+    refs = rest[0] if rest else None
+    if resolve_ref is None and refs is not None:
+        resolve_ref = refs.__getitem__
+    if register_ref is None and refs is not None:
+        register_ref = refs.__setitem__
 
     nodelist = NodeList()
     # Django's `contains_nontext` is a *class* attribute, so leaving it alone is
@@ -84,12 +101,12 @@ def materialise(nodelist_desc, origin=None, resolve_ref=None, parser=None):
         nodelist.contains_nontext = True
 
     for desc in nodes:
-        nodelist.append(materialise_node(desc, origin, resolve_ref, parser))
+        nodelist.append(materialise_node(desc, origin, resolve_ref, register_ref, parser))
 
     return nodelist
 
 
-def materialise_node(desc, origin=None, resolve_ref=None, parser=None):
+def materialise_node(desc, origin=None, resolve_ref=None, register_ref=None, parser=None):
     """Build one real node, children first.
 
     The ordering is load-bearing twice over (Review Focus item 10). A node's
@@ -111,8 +128,14 @@ def materialise_node(desc, origin=None, resolve_ref=None, parser=None):
     ``IfNode`` is why — its ``__init__`` takes exactly one parameter,
     ``conditions_nodelists``, and holds the branch nodelists inside that list,
     so there is no parameter name to give them.
+
+    A fifth element, when the wire carries one, is ``AttrValue::NodeSlot``: the
+    reference-table slot this node **is**. It is read before anything else,
+    because a node that is already in the table is not built at all — see below.
     """
-    class_name, attrs, nodelists, token = desc
+    class_name, attrs, nodelists, token, *rest = desc
+    slot = rest[0] if rest else None
+    slot_index = slot.index if isinstance(slot, _native.NodeSlot) else None
 
     try:
         cls = NODE_CLASSES[class_name]
@@ -121,8 +144,28 @@ def materialise_node(desc, origin=None, resolve_ref=None, parser=None):
             f"no materialiser for node class {class_name!r}; add it to NODE_CLASSES"
         ) from None
 
+    # `{% cycle … as c %}` and every later `{% cycle c %}` are one node in
+    # Django: `do_cycle` returns the *identical* object the second time
+    # (`defaulttags.py:669-671`), and `CycleNode.render` keys
+    # `context.render_context` by that object (`:106-112`), so two equal-but-
+    # distinct nodes would cycle separately. The table is what makes them one:
+    # the first mention reserves the slot and stores what it built, and every
+    # later mention finds it here and returns it.
+    #
+    # The token is re-attached on the way out, and that is not tidiness — it is
+    # `extend_nodelist` doing `node.token = token` at *every* append
+    # (`base.py:598`), so the shared object ends up carrying the **last**
+    # occurrence's token and every position reads that one. Measured on the
+    # pinned tree: `[n.token.contents for n in …] == ['cycle c', 'cycle c']`.
+    if slot_index is not None:
+        existing = resolve_ref(slot_index) if resolve_ref is not None else None
+        if existing is not None:
+            existing.token = _decode_token(token) if token is not None else None
+            existing.origin = origin
+            return existing
+
     children = [
-        (name, materialise(child, origin, resolve_ref, parser))
+        (name, materialise(child, origin, resolve_ref, register_ref, parser))
         for name, child in nodelists
     ]
     child_lists = [child for _name, child in children]
@@ -135,6 +178,12 @@ def materialise_node(desc, origin=None, resolve_ref=None, parser=None):
 
     node.token = _decode_token(token) if token is not None else None
     node.origin = origin
+    # Filled **after** the node exists, which is what makes a second mention of
+    # the same cycle find this one rather than build its own. The slot is not a
+    # constructor argument — `CycleNode.__init__` takes none — so it is stored
+    # here rather than passed to `cls`.
+    if slot_index is not None:
+        register_ref(slot_index, node)
     return node
 
 
@@ -346,6 +395,26 @@ def _decode_value(value, resolve_ref=None, parser=None, child_lists=None):
                 f"{value!r} needs a resolve_ref callback; none was passed to materialise"
             )
         return resolve_ref(value.index)
+    if isinstance(value, _native.NodeSlot):
+        # `AttrValue::NodeSlot` as an attribute *value*: the object at that slot.
+        # The same table `NodeRef` indexes, reached the other way round — a
+        # `NodeRef` entry is filled by the host during the parse, a `NodeSlot`
+        # entry by the materialiser as it builds, so both are read the same way
+        # here. `ResetCycleNode.node` is the only attribute that holds one.
+        #
+        # Empty is loud rather than `None`: Django raises at compile time for a
+        # `{% resetcycle %}` with no `{% cycle %}` (`defaulttags.py:1440-1443`),
+        # so an empty slot here is a wire bug, and a `ResetCycleNode` holding
+        # `None` would fail later and elsewhere — inside `render`, as
+        # `None.reset(context)`.
+        if resolve_ref is None:
+            raise LookupError(
+                f"{value!r} needs a resolve_ref callback; none was passed to materialise"
+            )
+        found = resolve_ref(value.index)
+        if found is None:
+            raise LookupError(f"{value!r} is an empty reference-table slot")
+        return found
     if isinstance(value, _native.NodeListRef):
         # `AttrValue::NodeListRef`: a position in the *enclosing* node's own
         # nodelists, already materialised by `materialise_node`. Its own type

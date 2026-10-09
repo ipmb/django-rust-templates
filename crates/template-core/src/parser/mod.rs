@@ -64,12 +64,17 @@ pub struct Parser<'a> {
     /// `parser._last_cycle_node` and `parser._named_cycle_nodes`, which
     /// `{% cycle %}` sets and `{% resetcycle %}` reads by name or by default.
     ///
-    /// Both hold host-owned `CycleNode`s, so they are handles here. M2 only ever
-    /// reads them and always finds them empty, because `{% cycle %}` is M5; the
-    /// fields exist now so that `{% resetcycle %}`'s two error paths are the
+    /// **Indices into the per-parse reference table, not node objects.** The
+    /// object Django stores here is a materialised `CycleNode`, which does not
+    /// exist during the parse, so what is held is the slot the materialiser will
+    /// fill — the same slot a second `{% cycle c %}` names so that it resolves
+    /// to the first one's node ([`NodeDesc::slot`]).
+    ///
+    /// M5 only ever reads them and finds them empty until `{% cycle %}` lands;
+    /// the fields exist now so that `{% resetcycle %}`'s two error paths are the
     /// real ones rather than a hard-coded "no cycles".
-    last_cycle_node: Option<NodeRef>,
-    named_cycle_nodes: HashMap<String, NodeRef>,
+    last_cycle_node: Option<usize>,
+    named_cycle_nodes: HashMap<String, usize>,
 }
 
 impl<'a> Parser<'a> {
@@ -104,6 +109,21 @@ impl<'a> Parser<'a> {
     pub fn with_origin_template_repr(mut self, repr: String) -> Self {
         self.origin_template_repr = Some(repr);
         self
+    }
+
+    /// Reserve a reference-table slot for the node being compiled.
+    ///
+    /// `{% cycle %}` is the caller: it reserves once for a definition form and
+    /// records the index in `named_cycle_nodes`/`last_cycle_node`, so that a
+    /// later `{% cycle c %}` and a `{% resetcycle %}` name the same slot. The
+    /// node itself is built and stored by the materialiser, not here — see
+    /// [`NodeDesc::slot`].
+    ///
+    /// A thin forward to [`Host::alloc_slot`], and it exists because the table is
+    /// the host's while the *tag* is the allocator: the tag holds a `Parser`, and
+    /// `Parser::host` is private so that a tag cannot reach around the seam.
+    pub fn alloc_slot(&mut self) -> usize {
+        self.host.alloc_slot()
     }
 
     /// `Parser.next_token` — `self.tokens.pop()`.

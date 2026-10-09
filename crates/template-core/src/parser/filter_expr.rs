@@ -312,6 +312,13 @@ mod tests {
             }
             Ok(())
         }
+
+        fn alloc_slot(&self) -> usize {
+            // This host compiles no tags, so no descriptor it builds ever names a
+            // slot. Returning 0 keeps it `Cell`-free, which is what lets
+            // `&Rejecting::default()` be passed where a `'static` host is wanted.
+            0
+        }
     }
 
     /// Parse a token that must succeed.

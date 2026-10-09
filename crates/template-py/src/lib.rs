@@ -450,6 +450,39 @@ impl NodeListRef {
     }
 }
 
+/// `AttrValue::NodeSlot` — an index into the per-parse reference table.
+///
+/// Filled by the **materialiser**, not by the host: the value that has to be
+/// shared is a materialised Python object, so it does not exist during the parse
+/// (`{% cycle %}`'s `CycleNode` is the producer). The descriptor carries the
+/// index in two positions, and they are different things:
+///
+/// * as an attribute **value** — `ResetCycleNode.node` is the cycle's object;
+/// * as a node descriptor's own fifth element — the descriptor *is* that object,
+///   which is how a second `{% cycle c %}` resolves to the first one's node.
+///
+/// Its own type rather than a bare `int`, for `NodeListRef`'s reason: an integer
+/// attribute arrives as an `int` too, and a materialiser dispatching on
+/// `isinstance(value, int)` could not tell them apart.
+#[pyclass(frozen)]
+#[derive(Debug)]
+pub struct NodeSlot {
+    #[pyo3(get)]
+    pub index: usize,
+}
+
+#[pymethods]
+impl NodeSlot {
+    #[new]
+    fn new(index: usize) -> Self {
+        Self { index }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("<NodeSlot {}>", self.index)
+    }
+}
+
 create_exception!(
     _native,
     ParseError,
@@ -545,6 +578,7 @@ fn attr_value_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
             mapping.into_any().unbind()
         }
         AttrValue::NodeListRef(index) => Py::new(py, NodeListRef::new(*index))?.into_any(),
+        AttrValue::NodeSlot(index) => Py::new(py, NodeSlot::new(*index))?.into_any(),
     })
 }
 
@@ -711,6 +745,16 @@ fn node_desc_to_py(py: Python<'_>, desc: &NodeDesc) -> PyResult<Py<PyAny>> {
         None => py.None(),
     };
 
+    // The fifth element, and it is not an attribute: `NodeDesc::slot` says this
+    // node *is* the object in a reference-table slot, which the materialiser
+    // reads before it looks at `attrs` — a `{% cycle c %}` descriptor has no
+    // attributes at all. `None`, never `0`, when there is no slot: index 0 is a
+    // real slot.
+    let slot = match desc.slot {
+        Some(index) => Py::new(py, NodeSlot::new(index))?.into_any(),
+        None => py.None(),
+    };
+
     Ok(PyTuple::new(
         py,
         [
@@ -722,6 +766,7 @@ fn node_desc_to_py(py: Python<'_>, desc: &NodeDesc) -> PyResult<Py<PyAny>> {
             PyTuple::new(py, attrs)?.into_any().unbind(),
             PyTuple::new(py, nodelists)?.into_any().unbind(),
             token,
+            slot,
         ],
     )?
     .into_any()
@@ -844,6 +889,37 @@ struct FilterCheckHost<'py> {
     /// which is what the Rust-only tests and the parity corpus's "no host"
     /// rows use.
     check_filter: Option<Bound<'py, PyAny>>,
+    /// The per-parse reference table — the one side collection two tags share.
+    ///
+    /// One entry per `Host::alloc_slot`, a `None` placeholder until something
+    /// fills it. `{% if %}`'s handle is filled during the parse; `{% cycle %}`'s
+    /// node is filled by the *materialiser*, which is why the table outlives the
+    /// parse and is handed to `materialise` as a third element of the descriptor
+    /// tuple. Its lifetime is the parse and the materialisation that follows it,
+    /// exactly as `PyTarget.arena`'s is the `resolve` call — a handle is
+    /// meaningless outside the pair.
+    refs: RefCell<Vec<Option<Py<PyAny>>>>,
+}
+
+impl FilterCheckHost<'_> {
+    /// The table as the Python list the wire and the two callbacks use.
+    ///
+    /// A `list`, not a tuple: `materialise`'s `register_ref` is
+    /// `list.__setitem__`, and reserving an index without filling it is a
+    /// normal state rather than an error — a `None` placeholder is what the
+    /// materialiser reads as "nothing is here yet, so build the node".
+    fn ref_list(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let refs: Vec<Py<PyAny>> = self
+            .refs
+            .borrow()
+            .iter()
+            .map(|entry| match entry {
+                Some(value) => value.clone_ref(py),
+                None => py.None(),
+            })
+            .collect();
+        Ok(PyList::new(py, refs)?.into_any().unbind())
+    }
 }
 
 impl Host for FilterCheckHost<'_> {
@@ -867,6 +943,16 @@ impl Host for FilterCheckHost<'_> {
             Err(error) => Err(Error::host(python_error_message(check.py(), &error))),
         }
     }
+
+    fn alloc_slot(&self) -> usize {
+        // The placeholder is a Rust `None` rather than `py.None()`, because this
+        // is called from `template-core` with no `Python<'_>` to hand — and it is
+        // the right shape anyway: `ref_list` is the only reader, and "reserved
+        // but not filled" is a state this table has rather than an error.
+        let mut refs = self.refs.borrow_mut();
+        refs.push(None);
+        refs.len() - 1
+    }
 }
 
 /// `FilterExpression.__init__` for a token the caller already knows is one.
@@ -883,7 +969,10 @@ fn parse_filter_expression(
     token: &str,
     check_filter: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
-    let host = FilterCheckHost { check_filter };
+    let host = FilterCheckHost {
+        check_filter,
+        refs: RefCell::new(Vec::new()),
+    };
     match template_core::parser::filter_expr::parse_filter_expression(token, &host) {
         Ok(desc) => filter_expr_desc_to_py(py, &desc),
         Err(error) => Err(parse_error(py, &error)?),
@@ -920,13 +1009,51 @@ fn parse_source(
     }
 }
 
-/// Parse `source` into a node descriptor tree.
+/// Attach the parse's reference table to its descriptor tuple.
+///
+/// `parse_source` returns `(nodes, contains_nontext)` — the nodelist alone — and
+/// this appends the table, which lives on the host and so cannot be built from
+/// the nodelist. Two callers, one place: `parse` hands the result to Python and
+/// `render` hands it straight to `materialise`, and both need the third element.
+///
+/// The elements are re-read out of the tuple rather than returned separately, so
+/// that the nodelist's wire shape has exactly one producer.
+fn with_ref_table(
+    py: Python<'_>,
+    nodelist: Py<PyAny>,
+    host: &FilterCheckHost<'_>,
+) -> PyResult<Py<PyAny>> {
+    let nodelist = nodelist.bind(py);
+    let nodes = nodelist.get_item(0)?;
+    let contains_nontext = nodelist.get_item(1)?;
+    Ok(PyTuple::new(
+        py,
+        [
+            nodes.unbind(),
+            contains_nontext.unbind(),
+            host.ref_list(py)?,
+        ],
+    )?
+    .into_any()
+    .unbind())
+}
+
+/// Parse `source` into a node descriptor tree, **with the reference table it
+/// allocated**.
 ///
 /// `debug` selects Django's `DebugLexer`, so token positions are recorded.
 /// `origin_template_repr` is Python's `repr()` of `Origin.template_name`, or
 /// `None` when the origin has no template name; it arrives pre-rendered because
 /// a Python `repr` is Python's to produce — the rule §5.2 already records for
 /// `LookupError::Missing::current_repr`.
+///
+/// The result is `(nodes, contains_nontext, refs)`. The third element is the
+/// per-parse table `Host::alloc_slot` reserves into; a caller that materialises
+/// passes it straight through (`materialise` reads the two callbacks off it), and
+/// a caller that only inspects the tree can ignore it. It is part of the parse
+/// result rather than a second call because it is a property *of this parse*:
+/// `{% cycle %}`'s first mention reserves a slot that its second mention names,
+/// so a table fetched separately could belong to a different parse.
 ///
 /// `check_filter` is **Task 6's prerequisite, discharged here**: `None` means
 /// "accept every filter name", which is what the descriptor-shape tests want,
@@ -946,8 +1073,12 @@ fn parse(
     origin_template_repr: Option<String>,
     check_filter: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
-    let host = FilterCheckHost { check_filter };
-    parse_source(py, source, debug, origin_template_repr, &host)
+    let host = FilterCheckHost {
+        check_filter,
+        refs: RefCell::new(Vec::new()),
+    };
+    let nodelist = parse_source(py, source, debug, origin_template_repr, &host)?;
+    with_ref_table(py, nodelist, &host)
 }
 
 /// Which of Django's three `except` clauses a failed arm is being judged by, so
@@ -1538,12 +1669,28 @@ fn render(
     let check = tree.getattr("check_filter")?.call1((parser.bind(py),))?;
     let host = FilterCheckHost {
         check_filter: Some(check),
+        refs: RefCell::new(Vec::new()),
     };
 
     let desc = parse_source(py, source, false, None, &host)?;
-    let nodelist =
-        tree.getattr("materialise")?
-            .call1((desc, py.None(), py.None(), parser.bind(py)))?;
+    // The table is the render's own, and it is handed to `materialise` **with**
+    // the descriptor rather than being left for the shell to find: this is the
+    // hole §Review Focus 3 names. Before this, a `Ref` in the tree reached
+    // `_decode_value` with no resolver and raised
+    // `LookupError: … needs a resolve_ref callback`, because nothing produced a
+    // table here. The two callbacks are the bound methods of the same list the
+    // descriptor carries, so there is one table and no second place to lose it.
+    let refs = host.ref_list(py)?;
+    let resolve_ref = refs.bind(py).getattr("__getitem__")?;
+    let register_ref = refs.bind(py).getattr("__setitem__")?;
+    let desc = with_ref_table(py, desc, &host)?;
+    let nodelist = tree.getattr("materialise")?.call1((
+        desc,
+        py.None(),
+        resolve_ref,
+        register_ref,
+        parser.bind(py),
+    ))?;
     let template = tree
         .getattr("template_for")?
         .call1((nodelist, engine.bind(py)))?;
@@ -1573,6 +1720,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(render, m)?)?;
     m.add_class::<NodeRef>()?;
     m.add_class::<NodeListRef>()?;
+    m.add_class::<NodeSlot>()?;
     m.add_class::<SafeStr>()?;
     m.add_class::<Variable>()?;
     m.add_class::<FilterExpr>()?;

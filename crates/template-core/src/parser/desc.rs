@@ -146,6 +146,27 @@ pub enum AttrValue {
     /// be a silently wrong nodelist, so the FFI has a `NodeListRef` pyclass in
     /// the same style as `NodeRef` and `SafeStr`.
     NodeListRef(usize),
+    /// An index into the **per-parse reference table**, filled at
+    /// materialisation time rather than at parse time.
+    ///
+    /// [`AttrValue::NodeListRef`] is the same idiom one level down: the wire is
+    /// a tree and the thing being expressed is not, so the tree carries an index
+    /// that is resolved once the side collection exists. [`AttrValue::Ref`]
+    /// indexes the *same* table, but the **host** fills its entry during the
+    /// parse — `{% if %}`'s `FilterExpression` is built while the tag compiles
+    /// because that is where Django builds it. This one the **materialiser**
+    /// fills as it builds, because the value that has to be shared is a
+    /// materialised Python object and does not exist during the parse.
+    ///
+    /// `{% resetcycle %}`'s operand is the only producer, and it is an attribute
+    /// *value*: `ResetCycleNode.node` is the cycle's object. The other half of
+    /// the idiom — a descriptor whose whole identity *is* a slot — is
+    /// [`NodeDesc::slot`].
+    ///
+    /// Its own type rather than a bare `int`, for `NodeListRef`'s reason: an
+    /// integer attribute is a Python `int` too, and a materialiser dispatching
+    /// on `isinstance(value, int)` could not tell them apart.
+    NodeSlot(usize),
 }
 
 /// A `Variable` as it crosses the wire (`django.template.base.Variable`).
@@ -269,6 +290,30 @@ pub struct NodeDesc {
     /// Attached by `extend_nodelist` **after** construction, which is why it is
     /// not one of the `attrs` (Review Focus item 10).
     pub token: Option<TokenDesc>,
+    /// The reference-table slot this node **is**, or `None`.
+    ///
+    /// `{% cycle %}` is the only producer and it sets this on *both* forms of
+    /// the tag, which is what makes the field worth having:
+    ///
+    /// - `{% cycle a b as c %}` — the definition. The materialiser builds a real
+    ///   `CycleNode` and stores it at this index.
+    /// - `{% cycle c %}` — a later mention. Django's `do_cycle` returns the
+    ///   identical object (`defaulttags.py:693-696` and `:669-671`), so this
+    ///   descriptor has no constructor arguments at all and exists only to name
+    ///   the slot the already-built node is.
+    ///
+    /// The materialiser's rule is therefore one sentence: **if the table already
+    /// holds this slot, hand back what is there; otherwise build the node and
+    /// store it there.** The index is stable across both occurrences because the
+    /// host reserves it before either descriptor is built ([`Host::alloc_slot`]).
+    ///
+    /// **Not an `attrs` entry.** It is a property of the *node*, not of one of
+    /// its constructor arguments — and on the second form there are no
+    /// constructor arguments. `CycleNode.__init__(cyclevars, variable_name=None,
+    /// silent=False)` takes no slot parameter, so leaving it in `attrs` would
+    /// reach `cls(**kwargs)` and raise `TypeError`; a reserved attribute *name*
+    /// would work only by convention, and no reader or type could see it.
+    pub slot: Option<usize>,
 }
 
 impl NodeDesc {
@@ -280,6 +325,7 @@ impl NodeDesc {
             nodelists: Vec::new(),
             must_be_first: false,
             token: None,
+            slot: None,
         }
     }
 
@@ -317,6 +363,13 @@ impl NodeDesc {
     /// Django's `TextNode(token.contents)`, whose parameter is named `s`.
     pub fn text(contents: &str) -> Self {
         Self::new(TEXT_NODE).attr("s", AttrValue::Str(contents.to_string()))
+    }
+
+    /// The reference-table slot this node is; see [`NodeDesc::slot`].
+    #[must_use]
+    pub fn slot(mut self, index: usize) -> Self {
+        self.slot = Some(index);
+        self
     }
 }
 

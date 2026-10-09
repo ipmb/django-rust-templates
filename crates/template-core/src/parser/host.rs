@@ -107,6 +107,29 @@ pub trait Host {
     fn check_filter(&self, _name: &str, _arg_count: usize) -> Result<(), Error> {
         Ok(())
     }
+
+    /// Reserve an entry in the per-parse reference table and return its index.
+    ///
+    /// The table is the one side collection two tags share, and this is the only
+    /// way to get an index into it. **It reserves and does not fill**, and that
+    /// split is the whole point: `{% cycle %}` reserves here during the *parse*,
+    /// and the *materialiser* stores the object later ([`NodeDesc::slot`]) —
+    /// which is what lets a second `{% cycle c %}` find the first one's node
+    /// instead of building a second one. The other filler is `{% if %}`'s
+    /// `FilterExpression`, which the host builds during the parse because that is
+    /// where Django builds it.
+    ///
+    /// `&self` rather than `&mut self` because there is one table per parse and
+    /// the parser owns its host by shared reference; the shell keeps the table
+    /// behind interior mutability. A Rust implementation that needs a counter
+    /// must therefore use a `Cell` — which is fine for a test host and is not
+    /// fine for [`NoHost`], whose `&NoHost` is const-promoted to `'static` in
+    /// every `Parser::new(tokens, &NoHost)`.
+    ///
+    /// Reserved-before-use is why the shell's table arrives *sized*: the
+    /// materialiser's `register_ref` is `list.__setitem__`, not `append`, and an
+    /// entry that has been reserved but not filled is a `None` placeholder.
+    fn alloc_slot(&self) -> usize;
 }
 
 /// A host with no tags at all.
@@ -125,5 +148,21 @@ impl Host for NoHost {
         // A panic here rather than a silent `Err` so that a future dispatch bug
         // is loud; `parse` never lets it out of a Rust test.
         unreachable!("NoHost::call_tag is never reached: has_tag always returns false")
+    }
+
+    fn alloc_slot(&self) -> usize {
+        // Always 0, and stated rather than hidden: `NoHost` is the *null* host —
+        // it has no table, so it has no second index to give. Nothing built
+        // under it is ever materialised (`_native.parse` always builds the
+        // shell's host; `NoHost` appears only in Rust unit tests and in
+        // `builtin_tag_stubs`'s probe), so a collision cannot be observed here.
+        //
+        // The `unreachable!` alternative would be a lie: unlike `call_tag`
+        // above, this *is* reachable — a tag that allocates a slot is compiled
+        // under `NoHost` in every Rust test that parses it. A test that needs
+        // two distinct indices needs a host with a counter, and that host
+        // belongs in `tags::support`, not here — `NoHost` must stay free of
+        // interior mutability so that `&NoHost` remains const-promotable.
+        0
     }
 }
