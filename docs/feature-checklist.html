@@ -536,7 +536,9 @@
       wraps objects Rust already hands back, or belongs to Django's view layer, which reaches
       down into the template package rather than the other way round. They are subtracted from
       the meter rather than counted against it, and listed here so that anyone reading the
-      module count can see where the other ten went.
+      module count can see where the other ten went. That list is read from §3 of the design
+      document by the port's own tests, not restated, so the ten named there and the ten
+      excluded from the count cannot drift apart.
     </p>
     <div class="tablewrap">
       <table>
@@ -569,6 +571,15 @@
       Django's discovery collects, which modules are still served by Django, and the
       line-level correspondence between the ported Python and the pinned original. The
       numbers on this page are read from the tree at each commit.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      The acceptance run refuses to start unless both module counts are zero. Before the
+      suite begins, every module the engine owns is imported and checked to be Rust's — all
+      twenty-one of them, the sixteen under <code>django.template</code> and the five under
+      <code>django.templatetags</code> — and a non-empty count stops the run rather than
+      being printed beside it. The <em>list</em> of modules declared not the engine is read
+      out of §3 of the design document by the port's own tests rather than restated here or
+      in code, so the count cannot reach zero by quietly widening what it excludes.
     </p>
   </section>
 

@@ -821,6 +821,7 @@ python/django_rust_templates/_impl/parser.py:568	python/django_rust_templates/_i
 python/django_rust_templates/_impl/parser.py:669	python/django_rust_templates/_impl/parser.py	669	-	-	-
 python/django_rust_templates/_shim.py:75	python/django_rust_templates/_shim.py	75	-	TARGET = "django.template"	-
 python/django_rust_templates/_shim.py:556	python/django_rust_templates/_shim.py	556	-	-	-
+python/django_rust_templates/_shim.py:755	python/django_rust_templates/_shim.py	755	-	-	-
 python/django_rust_templates/host.py:35	python/django_rust_templates/host.py	35	-	-	-
 python/django_rust_templates/host.py:422	python/django_rust_templates/host.py	422	-	-	-
 python/django_rust_templates/host.py:555	python/django_rust_templates/host.py	555	-	-	-

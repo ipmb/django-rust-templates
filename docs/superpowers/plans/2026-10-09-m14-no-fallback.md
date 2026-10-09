@@ -439,14 +439,17 @@ git commit -m "M14 close-out: the record, the spec row, and the status page"
   with no fallback". The empty-in-both-scopes half is asserted (Task 1) and the
   full-suite-green half is the run (Task 1 Step 7). The "every name it still
   reports" clause is vacuous at an empty set and is carried by
-  `tests/test_milestone_ownership.py`'s partition row, which the record cites.
+  `tests/test_milestone_ownership.py`'s partition row and — added as Task 1b
+  after review — by the row that ties the declared set to §3 itself, which is the
+  clause's own referent and was the one document in that three-way tie nothing
+  read.
 - **Placeholder scan:** no TBDs; every step names a file and a command.
 - **Type consistency:** `engine_fallbacks(unshimmed, scopes)` is the same signature
   in the test and the script; `NAMESPACES`/`NOT_THE_ENGINE`/`unshimmed` are the
   shim's own names.
-- **Review Focus:** each of the six lines names its task. 1–4 and 6 have rows or
-  assertions; 5 (the dated condition) is carried by the script's docstring and its
-  refusal message, and repeated in the record.
+- **Review Focus:** each of the seven lines names its task. 1–4, 6 and 7 (added
+  after review) have rows or assertions; 5 (the dated condition) is carried by the
+  script's docstring and its refusal message, and repeated in the record.
 - **M15** ("§2 met with margin") is deliberately **not** planned here: "margin" has
   no definition in the spec yet, and defining it is M15's opening question rather
   than a dependency of M14. Flagged for the next sitting.
