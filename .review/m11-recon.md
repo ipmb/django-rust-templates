@@ -184,3 +184,55 @@ exercises*.
    anything (M9 finding 3). At minimum: a call-count row proving `filter_tests`
    reaches `_native.filter`, and a row that a `{% load %}`-rebound filter does
    **not** reach it.
+
+---
+
+## 8. The review of this recon, appended
+
+`PASS`, with three additions and one correction of emphasis. The headline
+reproduced independently, including `find_filter('lower') is
+defaultfilters.lower` and `FilterExpression.resolve` defined at
+`_impl/base.py:790` — so §1 is not a reading of the guard's table but a
+measurement of the live interpreter. The fork is the right call.
+
+The additions, each re-measured here before it was written down (a claim that
+names a Python builtin or a line number gets measured, whichever of us makes
+it):
+
+1. **§2's fork has a consequence the recon does not draw, and it changes a
+   task.** A chain can mix arms — `{{ x|lower|mycustom }}` after a
+   `{% load %}` — so the delegation is per-filter and never whole-loop, and
+   upstream's `resolve` applies `needs_autoescape`, the `stringfilter` coercion
+   and `mark_safe` around *every* arm. Therefore
+   **`_impl/base.py`'s `FilterExpression.resolve` stops being upstream's text**,
+   and M11 declares its first render-path region in `base.py`.
+2. **That region sits outside clause (4)'s reach, measured.** Re-measured here
+   on the closed tree: `COMPARED_PATH["base.py"]` holds 29 entries, its
+   `FilterExpression.*` ones are `__init__` (744-788) and `args_check`
+   (827-844), and `FilterExpression.resolve` **is not among them**, because the
+   compared path measures the parse harness and `resolve` is render-time. The
+   guard permits the region correctly and silently, so the entry itself has to
+   say it is under-protected — the `utils.py`-zero discipline, not a new clause.
+3. **The routing table must be named.** `defaultfilters.register.filters`, read
+   at the module the shim serves, never `parser.filters` — which is the table
+   that reads natural at the call site and is post-merge. This is
+   `django_own_tags()`'s recorded defect one level over: the predicate's first
+   version snapshotted `parser.tags` *after* `Parser.__init__` merged the
+   engine's builtins, so a caller's `OPTIONS["builtins"]` entry compared equal
+   to the snapshot and its `for` was silently ignored. Re-measured:
+   `register.filters` is 57 entries and `register.filters["lower"] is
+   defaultfilters.lower` is True.
+4. **The instrument pair is right and incomplete** — both proposed rows pass if
+   the loop runs twice, which is §2's constraint 1 and M5's `Host::repr` shape
+   (a seam with a caller and no discriminating input). `escape` discriminates
+   (`escape("&")` → `&amp;`, `escape(escape("&"))` → `&amp;amp;`, measured), and
+   the `stringfilter` table gets compared **by name**: 29 on each side today
+   (`grep -c '^@stringfilter'` on the pin, and
+   `_native.stringfilter_filters()`, both measured), which a count cannot
+   distinguish from 29 matching names.
+
+And the caution on §6: M7's vacuity reason expiring means the row must be
+re-read, not that either instrument may be retired on the strength of "now
+covered". Which of the two is redundant is a measurement — break the behaviour
+and see which fails.
+
