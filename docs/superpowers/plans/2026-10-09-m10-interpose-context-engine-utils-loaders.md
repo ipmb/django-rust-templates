@@ -49,7 +49,7 @@ Each line is a failure mode this milestone can ship while every count stays gree
 | `tests/milestone_ownership.py` | **Create (Task 1).** `OWNERS`, `UNDECIDED`, `INTERPOSED`, `interposed()`, `spec_milestones()`. |
 | `tests/test_milestone_ownership.py` | **Create (Task 1).** The table asserted against `_shim.django_modules()` and `unshimmed()` in both directions. |
 | `tests/pinned_module.py` | **Create (Task 2).** `load_pinned(relative)` — the pinned file executed under a private name, the only way to reach the copy the shim replaced. |
-| `tests/transcription_equivalence.py` | **Create (Task 2).** `EQUIVALENCE` and `TemplateExceptionsEquivalenceTests`, the stated warrant for the one `fresh` file. |
+| `tests/test_transcription_equivalence.py` | **Create (Task 2).** `EQUIVALENCE` and `TemplateExceptionsEquivalenceTests`, the stated warrant for the one `fresh` file. |
 | `tests/test_interposition.py` | **Modify (Tasks 3–7).** A `ModuleInterpositionTests` class: per module, resolution, identity against the pinned copy, and reach through `tests/compared_path.instrumented`. `ShadowingTests` gains the `fresh` clause (Task 2). |
 | `tests/parity_target.py` | **Modify (Task 6).** Key `DECLARED`/`COMPARED_PATH` by `_impl`-relative path, not by basename. |
 | `tests/test_shim.py` | **Modify (Tasks 3–7).** The meter count moves 23 → 22 → 21 → 20 → 14; the partial-subpackage row moves its subject to `django.template.backends` **and** its cleanup to create-if-missing / remove-only-what-it-wrote (Task 6). |
@@ -469,13 +469,13 @@ The reviewer's replacement for the 5/4 transcribed/fresh split: **transcribe unl
 
 **Files:**
 - Create: `tests/pinned_module.py`
-- Create: `tests/transcription_equivalence.py`
+- Create: `tests/test_transcription_equivalence.py`
 - Modify: `tests/test_interposition.py` (`ShadowingTests`)
 - Modify: `python/django_rust_templates/_shim.py` (`SHADOWING`'s docstring)
 
 **Interfaces:**
 - Consumes: `_shim.SHADOWING`, `scripts.check_transcriptions.DECLARED`.
-- Produces: `tests.pinned_module.load_pinned(relative: str) -> module`; `tests.transcription_equivalence.EQUIVALENCE: dict[str, tuple[str, str]]` and `TemplateExceptionsEquivalenceTests`. Tasks 3–7 use `load_pinned`.
+- Produces: `tests.pinned_module.load_pinned(relative: str) -> module`; `tests.test_transcription_equivalence.EQUIVALENCE: dict[str, tuple[str, str]]` and `TemplateExceptionsEquivalenceTests`. Tasks 3–7 use `load_pinned`.
 
 - [ ] **Step 1: Write the failing test row.**
 
@@ -496,7 +496,7 @@ In `tests/test_interposition.py`, replace `ShadowingTests.test_each_kind_is_the_
           the pin** is the warrant, and it is the only instrument that falsifies
           a transcription (M9's finding 3: a verbatim copy and a wrongly
           transcribed file both keep all 1547 tests green).
-        * ``fresh`` must be a name ``tests/transcription_equivalence.py`` states
+        * ``fresh`` must be a name ``tests/test_transcription_equivalence.py`` states
           an equivalence for. A fresh file has no diff of its own, so nothing in
           the transcription guard can see it, and the suite cannot see it
           either — for the same reason. Without this arm ``fresh`` is the free
@@ -510,7 +510,7 @@ In `tests/test_interposition.py`, replace `ShadowingTests.test_each_kind_is_the_
 
         import scripts.check_transcriptions as guard
 
-        from tests import transcription_equivalence as equivalence
+        from tests import test_transcription_equivalence as equivalence
 
         for name, kind in sorted(_shim.SHADOWING.items()):
             with self.subTest(name=name):
@@ -543,7 +543,7 @@ In `tests/test_interposition.py`, replace `ShadowingTests.test_each_kind_is_the_
 - [ ] **Step 2: Run it to verify it fails.**
 
 Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_interposition.ShadowingTests -v`
-Expected: `ModuleNotFoundError: No module named 'tests.transcription_equivalence'`.
+Expected: `ModuleNotFoundError: No module named 'tests.test_transcription_equivalence'`.
 
 - [ ] **Step 3: Write the pinned-module reader.**
 
@@ -601,7 +601,7 @@ def load_pinned(relative: str):
 
 - [ ] **Step 4: State the `fresh` file's equivalence.**
 
-Create `tests/transcription_equivalence.py`:
+Create `tests/test_transcription_equivalence.py`:
 
 ```python
 """What a ``fresh`` ``_impl`` file owes, stated as rows rather than as a promise.
@@ -773,7 +773,7 @@ In `python/django_rust_templates/_shim.py`, append this paragraph to the comment
 # `transcribed` file is falsified by `scripts/check_transcriptions.py`: the diff
 # against the pin is its instrument. A `fresh` file has no diff of its own, so
 # its instrument is a stated equivalence —
-# `tests/transcription_equivalence.py`'s `EQUIVALENCE` — and
+# `tests/test_transcription_equivalence.py`'s `EQUIVALENCE` — and
 # `ShadowingTests.test_each_kind_is_the_transcription_guards_own_answer` refuses
 # a `fresh` name that is missing from it. Without that second clause `fresh` is
 # the free option: changing one word here would move a file out of every guard in

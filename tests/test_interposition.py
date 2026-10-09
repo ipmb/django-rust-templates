@@ -413,7 +413,7 @@ class ShadowingTests(unittest.TestCase):
           the pin** is the warrant, and it is the only instrument that falsifies
           a transcription (M9's finding 3: a verbatim copy and a wrongly
           transcribed file both keep all 1547 tests green).
-        * ``fresh`` must be a name ``tests/transcription_equivalence.py`` states
+        * ``fresh`` must be a name ``tests/test_transcription_equivalence.py`` states
           an equivalence for. A fresh file has no diff of its own, so nothing in
           the transcription guard can see it, and the suite cannot see it
           either — for the same reason. Without this arm ``fresh`` is the free
@@ -427,7 +427,7 @@ class ShadowingTests(unittest.TestCase):
 
         import scripts.check_transcriptions as guard
 
-        from tests import transcription_equivalence as equivalence
+        from tests import test_transcription_equivalence as equivalence
 
         for name, kind in sorted(_shim.SHADOWING.items()):
             with self.subTest(name=name):
@@ -445,7 +445,7 @@ class ShadowingTests(unittest.TestCase):
                     name,
                     equivalence.EQUIVALENCE,
                     f"{name} is declared 'fresh' in SHADOWING but states no "
-                    "equivalence in tests/transcription_equivalence.py, so "
+                    "equivalence in tests/test_transcription_equivalence.py, so "
                     "nothing in this tree can falsify it — transcribe it "
                     "instead, or state the equivalence as rows",
                 )

@@ -52,7 +52,7 @@ one — the ``render.py``-at-``engine.py`` case — is a test failure in the com
 that causes it, rather than an ``ImportError`` that blames Django three files
 away. The table's ``kind`` is checked against the guard that owns each kind's
 question — ``scripts/check_transcriptions.py`` for a transcription's diff against
-the pin, ``tests/transcription_equivalence.py`` for a fresh file's stated
+the pin, ``tests/test_transcription_equivalence.py`` for a fresh file's stated
 equivalence — so it cannot rot into a second, disagreeing account of which files
 are transcriptions.
 
@@ -100,7 +100,7 @@ _installed_finder: "_ShimFinder | None" = None
 # `transcribed` file is falsified by `scripts/check_transcriptions.py`: the diff
 # against the pin is its instrument. A `fresh` file has no diff of its own, so
 # its instrument is a stated equivalence —
-# `tests/transcription_equivalence.py`'s `EQUIVALENCE` — and
+# `tests/test_transcription_equivalence.py`'s `EQUIVALENCE` — and
 # `ShadowingTests.test_each_kind_is_the_transcription_guards_own_answer` refuses
 # a `fresh` name that is missing from it. Without that second clause `fresh` is
 # the free option: changing one word here would move a file out of every guard in

@@ -23,6 +23,16 @@ the entry mean something.
 made the rule necessary: written from scratch at M0, behaviourally upstream's,
 and the only reason anyone knows that is that a reviewer diffed it by hand — an
 instrument nothing re-runs.
+
+**Why this file is named ``test_*`` even though it is mostly a table.**
+``check.sh`` discovers with ``-p 'test_*.py'``, so a module named
+``transcription_equivalence.py`` would never be collected and these rows would
+never run — the table would be a warrant nothing executes, which is the exact
+failure this module exists to avoid one level down. The first version of this
+file was named that way and the unit count did not move; that is how it was
+found. The table and the rows that give it teeth therefore live in one
+discovered module, and ``EQUIVALENCE`` names this module rather than a
+data-only sibling.
 """
 
 import pickle
@@ -33,7 +43,7 @@ from tests.pinned_module import load_pinned
 EQUIVALENCE = {
     # `_impl`-relative path → (importable module, TestCase class name).
     "exceptions.py": (
-        "tests.transcription_equivalence",
+        "tests.test_transcription_equivalence",
         "TemplateExceptionsEquivalenceTests",
     ),
 }
