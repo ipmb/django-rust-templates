@@ -46,10 +46,17 @@
 //! `ValueError: Too many decimal digits in format string` (measured). Quote the
 //! filter's class.
 //!
+//! **A third regime sits between those and neither guard covers it**: a width
+//! that fits `Py_ssize_t` and is too large to *allocate*. `center("ab", 10**18)`
+//! is a `MemoryError` in Python (measured, empty message), so the padding
+//! allocates **fallibly** — `" ".repeat(margin)` would abort the process rather
+//! than raise. See [`pad_spaces`](crate::filters::padding::pad_spaces).
+//!
 //! `@stringfilter` coerces the value and `is_safe=True` marks the result in the
 //! loop; this body calls only `to_int` and `to_str`.
 
 use crate::filters::host::FilterCall;
+use crate::filters::padding::pad_spaces;
 use crate::filters::value::Value;
 use crate::parser::error::{Error, PyErrorKind};
 use crate::pynum::IntValue;
@@ -93,10 +100,11 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
     }
     let margin = (width - length) as usize;
     let left = margin / 2;
-    let mut padded = " ".repeat(left);
-    padded.push_str(&text);
-    padded.push_str(&" ".repeat(margin - left));
-    Ok(Value::Str(padded.into()))
+    // Fallible: `" ".repeat(margin)` aborts the process on a margin the
+    // allocator refuses, where Django raises `MemoryError`. See `padding`.
+    Ok(Value::Str(
+        pad_spaces("str.format", &text, left, margin - left)?.into(),
+    ))
 }
 
 #[cfg(test)]
@@ -190,6 +198,44 @@ mod tests {
         match result {
             Value::Str(text) => assert_eq!(text.len(), 65536, "no u16 cap on the format width"),
             other => panic!("expected a Str, got {other:?}"),
+        }
+    }
+
+    /// **The allocation guard**, and the one this body could not see before:
+    /// past `u16::MAX` is fine (above), but a margin the allocator *refuses* is a
+    /// different animal. `" ".repeat(10**18)` does not panic — it calls
+    /// `handle_alloc_error` and **aborts**, which no `catch_unwind` sees and which
+    /// takes the interpreter with it, where Django's `center("ab", 10**18)` raises
+    /// a catchable `MemoryError` (measured, empty message). The margin must go
+    /// through the fallible path in `filters::padding`.
+    ///
+    /// The failure mode is worth stating because it is unusual: this is a
+    /// *behaviour* assertion, and if the body regresses to an infallible
+    /// allocation the **abort is the failure** — the test binary dies by signal 6
+    /// instead of reporting a failed assertion. There is no way to assert on an
+    /// allocation that must not happen, so the abort is the signal.
+    #[test]
+    fn a_width_the_allocator_refuses_is_a_memory_error_not_an_abort() {
+        let h = host(IntValue::Small(10_i64.pow(18)), "ab");
+        let error = run(
+            Value::Str("ab".into()),
+            Some(Value::Str("1000000000000000000".into())),
+            &call(&h),
+        )
+        .unwrap_err();
+        match error.kind {
+            ErrorKind::FilterHost(host_error) => {
+                assert_eq!(host_error.kind, PyErrorKind::Other("MemoryError".into()));
+                assert_eq!(
+                    host_error.message, "",
+                    "CPython's MemoryError carries no message"
+                );
+                assert_eq!(
+                    host_error.operation, "str.format",
+                    "the error is the format spec's, not the shared helper's"
+                );
+            }
+            other => panic!("expected a filter-host MemoryError, got {other:?}"),
         }
     }
 

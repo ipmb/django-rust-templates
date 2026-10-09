@@ -30,11 +30,18 @@
 //! is exactly the set `IntValue::Big` names, so the class is reproduced rather
 //! than the padding attempted.
 //!
+//! **A width that fits `Py_ssize_t` and is still too large to allocate is a
+//! `MemoryError`**, not an `OverflowError` — `ljust("ab", 10**18)` raises one in
+//! Python (measured) — so the padding allocates **fallibly**:
+//! `" ".repeat(margin)` would abort the process rather than raise. See
+//! [`pad_spaces`](crate::filters::padding::pad_spaces).
+//!
 //! `@stringfilter` coerces the **value** (never `arg`), so the text comes back
 //! through [`FilterHost::to_str`]; `is_safe=True`, so the loop marks the result
 //! safe when it should and this body never calls `mark_safe`.
 
 use crate::filters::host::FilterCall;
+use crate::filters::padding::pad_spaces;
 use crate::filters::value::Value;
 use crate::parser::error::{Error, PyErrorKind};
 use crate::pynum::IntValue;
@@ -72,8 +79,7 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
     if width <= length {
         return Ok(Value::Str(text.into()));
     }
-    let mut padded = text;
-    padded.push_str(&" ".repeat((width - length) as usize));
+    let padded = pad_spaces("str.ljust", &text, 0, (width - length) as usize)?;
     Ok(Value::Str(padded.into()))
 }
 
@@ -150,6 +156,42 @@ mod tests {
         match result {
             Value::Str(text) => assert_eq!(text.len(), 65536, "no u16 cap on the format width"),
             other => panic!("expected a Str, got {other:?}"),
+        }
+    }
+
+    /// **The allocation guard**, and it is a *different* huge-width regime from
+    /// `too_large` above: `IntValue::Big` (past `Py_ssize_t`) is `OverflowError`
+    /// before any padding is attempted, but a width that *fits* `Py_ssize_t` and
+    /// is still too large to allocate reaches the padding — and there
+    /// `" ".repeat(n)` calls `handle_alloc_error` and **aborts**, where Django's
+    /// `ljust("ab", 10**18)` raises a catchable `MemoryError` (measured). So the
+    /// two are not one guard split in two: one is a width Python cannot convert,
+    /// the other a buffer Python cannot allocate. See `filters::padding`.
+    ///
+    /// The failure mode is the abort: if the body regresses to an infallible
+    /// allocation this test kills the test binary by signal 6 rather than failing.
+    #[test]
+    fn a_width_the_allocator_refuses_is_a_memory_error_not_an_abort() {
+        let h = host(IntValue::Small(10_i64.pow(18)), "ab");
+        let error = run(
+            Value::Str("ab".into()),
+            Some(Value::Str("1000000000000000000".into())),
+            &call(&h),
+        )
+        .unwrap_err();
+        match error.kind {
+            ErrorKind::FilterHost(host_error) => {
+                assert_eq!(host_error.kind, PyErrorKind::Other("MemoryError".into()));
+                assert_eq!(
+                    host_error.message, "",
+                    "CPython's MemoryError carries no message"
+                );
+                assert_eq!(
+                    host_error.operation, "str.ljust",
+                    "the error is this method's, not the shared helper's"
+                );
+            }
+            other => panic!("expected a filter-host MemoryError, got {other:?}"),
         }
     }
 

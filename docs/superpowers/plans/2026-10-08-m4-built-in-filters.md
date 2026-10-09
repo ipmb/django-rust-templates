@@ -1297,6 +1297,21 @@ mutations, on two filters sharing one host call, moved 1 and 3 rows — the numb
 of rows that actually observe each argument is measured by mutating the argument
 and counting, never inferred from the filter's shape.
 
+**Recording arguments as well was considered and declined, for a reason sharper
+than "the corpus is enough".** A test asserting the body passed the arguments the
+test scripted is a restatement of the body rather than a check of it: it can only
+fail if both sides are changed together, which is the same shape as the 205
+identity-compared subtests this project already paid for. The corpus fails when
+the arguments are wrong **against Django**, which is the contract; a second
+mechanism pinning the same thing would pin the wrong thing more precisely.
+
+But "never" would be too strong, and the measurement above is why — a wrong
+argument moving **1** row on one filter and **3** on another means 0 is reachable.
+So the rule is a trigger rather than a standing judgement: **the corpus is the
+contract, and Step 8.5's count is the detector — a mutation that moves 0 rows is
+the signal that a local pin is needed.** That makes it a thing measured, from a
+number already collected, instead of a matter of taste.
+
 - [ ] **Step 3: Write the 57 stubs**
 
 `crates/template-core/src/filters/mod.rs` declares all 57 modules and the
@@ -1839,6 +1854,28 @@ to detect, and neither half alone would have caught it.
   A count that says "2" for a defect with one named observer is the ambiguity this
   project has paid for four times; the corpus row carries the measurement in its
   comment so the next reader does not re-introduce it.
+
+  **That is the first time the count was the signal rather than the colour.**
+  Every other §11 finding here arrived as a *failure* — a red row, a falsified
+  docstring, a wrapper whose replacement half was inverted. This one arrived as
+  `2` where `1` was expected, in a suite that was **green**: nothing was failing,
+  and nobody was looking for it. So the number is not bookkeeping that
+  accompanies the mutation; it is a second instrument, and the only one of the
+  two that can find a defect with no symptom. Collect it even when the guard is
+  already known to work.
+
+  **Restoring a mutated file is `cp`, never git.** The fan-out agents' work in
+  this tree is uncommitted, so `git checkout` on a mutated file does not restore
+  it — it reverts to the last commit and destroys everything the agent wrote
+  since. That happened once, during Task 5's run. The body came back byte-exact,
+  but only because the agent had independently `cp`'d it outside the repo and the
+  pre-mutation `md5` was still on hand to check the restore against; without
+  either, "restored" would have been a re-typing rather than a verification. So a
+  §11 run copies the file out with `cp`, restores with `cp`, and compares `md5`
+  before and after. **The stronger remedy costs nothing and removes the class
+  entirely: commit the group before running 8.5**, since the mutation is reverted
+  either way and a committed body is recoverable from git rather than only from a
+  scratch copy.
 
 ---
 

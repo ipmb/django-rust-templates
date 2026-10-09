@@ -30,6 +30,11 @@ use crate::parser::error::Error;
 pub mod host;
 pub mod value;
 
+/// Shared helpers — code the bodies use but which is not itself a filter. Not
+/// `pub`: nothing outside this module tree calls it, and a filter module reaches
+/// it as `crate::filters::padding::…`.
+mod padding;
+
 pub mod add;
 pub mod addslashes;
 pub mod capfirst;
