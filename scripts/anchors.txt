@@ -54,7 +54,7 @@ base.py:755	django/template/base.py	755	-	var_obj = Variable(constant).resolve({
 base.py:757-761	django/template/base.py	757	761	-	-
 base.py:757-772	django/template/base.py	757	772	-	-
 base.py:758-761	django/template/base.py	758	761	-	-
-base.py:768	django/template/base.py	768	-	-	-
+base.py:768	django/template/base.py	768	-	args.append((False, Variable(constant_arg).resolve({})))	-
 base.py:771	django/template/base.py	771	-	-	-
 base.py:771-772	django/template/base.py	771	772	-	-
 base.py:771-774	django/template/base.py	771	774	-	-
@@ -62,7 +62,7 @@ base.py:773	django/template/base.py	773	-	filters.append((filter_func, args))	-
 base.py:774	django/template/base.py	774	-	-	-
 base.py:783	django/template/base.py	783	-	self.is_var = isinstance(var_obj, Variable)	-
 base.py:788-792	django/template/base.py	788	792	-	-
-base.py:793	django/template/base.py	793	-	-	-
+base.py:793	django/template/base.py	793	-	string_if_invalid = context.template.engine.string_if_invalid	-
 base.py:800-806	django/template/base.py	800	806	-	-
 base.py:803-819	django/template/base.py	803	819	expects_localtime	-
 base.py:804-809	django/template/base.py	804	809	arg_vals = []	arg_vals.append(arg.resolve(context))
@@ -109,6 +109,7 @@ base.py:1023-1024	django/template/base.py	1023	1024	if getattr(e, "silent_variab
 base.py:1024	django/template/base.py	1024	-	current = context.template.engine.string_if_invalid	-
 base.py:1036	django/template/base.py	1036	-	-	-
 base.py:1054	django/template/base.py	1054	-	if context.template.engine.debug:	-
+base.py:1060-1063	django/template/base.py	1060	1063	and context.render_context.template.origin == e._culprit_node.origin	context.render_context.template.get_exception_info(
 base.py:1139	django/template/base.py	1139	-	-	-
 base.py:1160	django/template/base.py	1160	-	kwarg_re = _lazy_re_compile(r"(?:(\w+)=)?(.+)")	-
 base.py:1163-1207	django/template/base.py	1163	1207	token_kwargs	-
@@ -370,7 +371,7 @@ smartif.py:22-26	django/template/smartif.py	22	26	-	-
 smartif.py:40-43	django/template/smartif.py	40	43	-	-
 smartif.py:51	django/template/smartif.py	51	-	class Operator(TokenBase):	-
 smartif.py:54-56	django/template/smartif.py	54	56	self.first = left	self.second = parser.expression(bp)
-smartif.py:81-83	django/template/smartif.py	81	83	-	-
+smartif.py:81-83	django/template/smartif.py	81	83	self.first = parser.expression(bp)	self.second = None
 smartif.py:83	django/template/smartif.py	83	-	self.second = None	-
 smartif.py:115-116	django/template/smartif.py	115	116	-	-
 smartif.py:140	django/template/smartif.py	140	-	return self.value	-

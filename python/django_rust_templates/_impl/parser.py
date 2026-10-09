@@ -274,13 +274,13 @@ def materialise_node(desc, origin=None, resolve_ref=None, register_ref=None, par
             f"no materialiser for node class {class_name!r}; add it to NODE_CLASSES"
         ) from None
 
-    # `{% cycle … as c %}` and every later `{% cycle c %}` are one node in
-    # Django: `do_cycle` returns the *identical* object the second time
-    # (`defaulttags.py:669-671`), and `CycleNode.render` keys
-    # `context.render_context` by that object (`:106-112`), so two equal-but-
-    # distinct nodes would cycle separately. The table is what makes them one:
-    # the first mention reserves the slot and stores what it built, and every
-    # later mention finds it here and returns it.
+    # `{% cycle … as c %}` and every later `{% cycle c %}` are one node in Django:
+    # `do_cycle` returns the *identical* object the second time
+    # (`defaulttags.py:669-671`), and `CycleNode.render` keys `context.render_context`
+    # by that object (`defaulttags.py:106-112`), so two equal-but-distinct nodes would
+    # cycle separately. The table is what makes them one: the first mention reserves
+    # the slot and stores what it built, and every later mention finds it here and
+    # returns it.
     #
     # The token is re-attached on the way out, and that is not tidiness — it is
     # `extend_nodelist` doing `node.token = token` at *every* append
@@ -347,11 +347,11 @@ def _materialise_operand(lookup, value, parser=None):
 
     ``(lookup, value)`` is the shape Django holds — ``args`` is a list of pairs
     and ``resolve`` unpacks it (`base.py:804-810`), and ``args_check`` counts it
-    (`:822-826`) — so this returns the pair rather than the value.
+    (`base.py:822-826`) — so this returns the pair rather than the value.
 
     ``False`` means a **constant**, and Django holds its *value*:
     ``Variable(constant).resolve({})`` (`base.py:755` for the variable part,
-    `:768` for an argument). For a plain quoted string that value is a
+    `base.py:768` for an argument). For a plain quoted string that value is a
     ``SafeString``; for ``_("…")`` it is ``gettext_lazy(msgid)`` — a lazy proxy,
     which is exactly why the wire carries a ``Variable`` and this flag rather
     than a resolved value: Rust cannot build a proxy, and
@@ -379,14 +379,14 @@ def template_for(nodelist, engine=None, parser=None):
     """A real :class:`~django.template.base.Template` around a materialised tree.
 
     The render goes through this rather than calling ``nodelist.render(context)``
-    directly, because **rendering a nodelist requires a
-    bound context** and binding is a `Template`-level act: Django's
-    `Template.render` enters `context.bind_template(self)`, and the render path
-    reads `context.template.engine` in five places — `string_if_invalid` for a
-    failed lookup (`base.py:793`, `:997`, `:1005`, `:1011`, `:1024`) and
-    `engine.debug` for the annotated traceback (`:1054`). With `context.template`
-    left `None`, `{{ nope }}` raises `AttributeError: 'NoneType' object has no
-    attribute 'engine'` instead of rendering `string_if_invalid` — measured.
+    directly, because **rendering a nodelist requires a bound context** and binding is
+    a `Template`-level act: Django's `Template.render` enters
+    `context.bind_template(self)`, and the render path reads `context.template.engine`
+    in five places — `string_if_invalid` for a failed lookup (`base.py:793`,
+    `base.py:997`, `base.py:1005`, `base.py:1011`, `base.py:1024`) and `engine.debug`
+    for the annotated traceback (`base.py:1054`). With `context.template` left `None`,
+    `{{ nope }}` raises `AttributeError: 'NoneType' object has no attribute 'engine'`
+    instead of rendering `string_if_invalid` — measured.
 
     Built by ``__new__`` and direct assignment rather than by
     ``Template(source, engine=…)``, for the reason `_materialise_variable` gives:
@@ -398,7 +398,7 @@ def template_for(nodelist, engine=None, parser=None):
     * ``engine`` — the five `string_if_invalid`/`debug` reads above.
     * ``name`` — `Template.render` assigns it to `context.template_name`.
     * ``origin``, ``source`` — only the debug exception path
-      (`get_exception_info`, `:1060-1063`). Set so that path fails on Django's
+      (`get_exception_info`, `base.py:1060-1063`). Set so that path fails on Django's
       terms rather than on an `AttributeError` from here.
     * ``extra_data`` — ``self.extra_data = parser.extra_data``, but **not** in
       `Template.__init__`: it is inside `compile_nodelist`'s `try`, immediately
@@ -708,16 +708,16 @@ def _decode_condition(condition, resolve_ref=None):
     ``condition.eval(context)`` on each branch's first element
     (``defaulttags.py:326``): ``Operator.eval`` recurses through its own
     ``self.first``/``self.second`` and ``TemplateLiteral.eval`` calls
-    ``self.value.resolve(context, ignore_failures=True)`` (``:917-918``). So the
-    two shapes here are Django's two, built from Django's own table and Django's
+    ``self.value.resolve(context, ignore_failures=True)`` (``defaulttags.py:917-918``).
+    So the two shapes here are Django's two, built from Django's own table and Django's
     own class.
 
-    ``OPERATORS[key]()`` rather than a class kept on the wire, because that is
-    exactly what ``IfParser.translate_token`` does (``smartif.py:179-185``) — one
-    instance per occurrence, whose ``id`` was set by the module-level loop
-    (``smartif.py:115-116``). ``first``/``second`` are then assigned, which is
-    what ``led`` and ``nud`` do (``:54-56``, ``:81-83``), and the assignment rather
-    than a constructor is deliberate: ``Operator`` is built inside a closure in
+    ``OPERATORS[key]()`` rather than a class kept on the wire, because that is exactly
+    what ``IfParser.translate_token`` does (``smartif.py:179-185``) — one instance per
+    occurrence, whose ``id`` was set by the module-level loop (``smartif.py:115-116``).
+    ``first``/``second`` are then assigned, which is what ``led`` and ``nud`` do
+    (``smartif.py:54-56``, ``smartif.py:81-83``), and the assignment rather than a
+    constructor is deliberate: ``Operator`` is built inside a closure in
     ``infix``/``prefix`` and its signature is not part of anything we may rely on.
 
     The two error paths are both wire bugs rather than template bugs, so they are
