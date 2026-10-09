@@ -2,7 +2,7 @@
 //!
 //! The tag is small; what makes it M5's largest is that its condition is a
 //! **parse tree Python has to hold**. `do_if` runs
-//! `TemplateIfParser(parser, bits).parse()` (`defaulttags.py:995`) and `IfNode.render` calls
+//! `TemplateIfParser(parser, bits).parse()` (`defaulttags.py:993`) and `IfNode.render` calls
 //! `condition.eval(context)` on the result (`defaulttags.py:326`), so the arena
 //! `smartif.rs` builds has to cross as shape, and the materialiser rebuilds
 //! real `smartif` nodes from it — see [`IfConditionDesc`].

@@ -210,7 +210,7 @@ defaulttags.py:929	django/template/defaulttags.py	929	-	return TemplateLiteral(s
 defaulttags.py:932-1020	django/template/defaulttags.py	932	1020	@register.tag("if")	return IfNode(conditions_nodelists)
 defaulttags.py:993	django/template/defaulttags.py	993	-	condition = TemplateIfParser(parser, bits).parse()	-
 defaulttags.py:993-995	django/template/defaulttags.py	993	995	condition = TemplateIfParser(parser, bits).parse()	conditions_nodelists = [(condition, nodelist)]
-defaulttags.py:995	django/template/defaulttags.py	995	-	-	-
+defaulttags.py:995	django/template/defaulttags.py	995	-	conditions_nodelists = [(condition, nodelist)]	-
 defaulttags.py:995-996	django/template/defaulttags.py	995	996	-	-
 defaulttags.py:996	django/template/defaulttags.py	996	-	token = parser.next_token()	-
 defaulttags.py:1001-1006	django/template/defaulttags.py	1001	1006	-	-
