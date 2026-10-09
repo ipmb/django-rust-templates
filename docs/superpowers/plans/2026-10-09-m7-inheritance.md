@@ -678,12 +678,14 @@ Django's was an `Origin`, and the misrouted `{% extends %}` reached
 after that one argument was added**, and it dissolves the recorded symptom
 entirely: 0 of 106 corpus rows differ, 0 of 3 `ORIGIN_ERRORS` rows differ, and
 the whole suite's only failures are the three subTests of the predicate row. The
-half-fix's only detector is the predicate itself.
+half-fix's only detector at the time was the predicate itself; a wire-shape row
+asking the same question structurally was added later (Task 4 Step 8, below) and
+sees the half-fix too.
 
 Two things are worth keeping from this, and neither is the predicted row.
 **First: a routing change under a seam that re-enters Django's own parse is
 invisible to every message-comparing corpus.** `do_extends` calls `parser.parse()`
-(`loader_tags.py:305`) before its duplicate scan (`:306-309`), so a misrouted
+(`loader_tags.py:307`) before its duplicate scan (`:308-311`), so a misrouted
 `{% extends %}` runs the same code down a different path and reaches the same
 rule — the routing does not skip the check, it re-enters the parser that makes
 it. **Second: the harness defect is the better finding**, and it is M6's
@@ -2162,8 +2164,8 @@ Rust's, which is why five commits of M7 passed over it. One argument fixes it
 half-fix: no row sees the half-fix at all.
 
 **Why the predicted symptom cannot happen by that route.** `do_extends` calls
-`parser.parse()` itself (`loader_tags.py:305`) and scans what it returns for an
-`ExtendsNode` (`:306-309`). `ShellHost.call_tag` hands the host's `Parser` the
+`parser.parse()` itself (`loader_tags.py:307`) and scans what it returns for an
+`ExtendsNode` (`:308-311`). `ShellHost.call_tag` hands the host's `Parser` the
 remaining tokens, so that inner parse runs Django's own tag table and compiles
 the second `{% extends %}` into the nodelist the outer scan then finds. The
 duplicate rule is not skipped by the routing — the routing *reaches* it. The
@@ -2178,6 +2180,22 @@ a different path.** The second generalisation is the harness one, and it is M6's
 `parser_for` shape repeating: a harness `Parser` missing one constructor argument
 is invisible until a host-compiled tag reads the thing that argument supplies,
 and the first place a reader looks is the tag.
+
+**A second detector was added while Task 6 was being executed**, and it is the
+one that survives a rewrite of the predicate:
+`HostPredicateTests.test_the_wire_shows_which_side_compiled_each_name` reads
+*which side compiled a name* off the parse result rather than off the predicate.
+A Rust-compiled tag arrives from `_native.parse` as a plain class name
+(`BlockNode`/`ExtendsNode`/`IncludeNode`); a host-compiled one arrives as
+`HostNode` carrying a `NodeRef`. Measured under the half-fix — rebinding
+`.django`'s `defaulttags.register.tags` into `django_own_tags`, the same model
+`m7_measure_half_fix.py` uses — the wire reads `HostNode` for all three names,
+so the row fails for the same reason the predicate row does but through a
+mechanism that does not consult `has_tag` at all. The two are not redundant in
+the other direction either: a routing break with the predicate intact (Rust
+declining a name it should compile, or the reverse) moves the wire and leaves
+the predicate row green. The pair says *why* the routing is what it is; the wire
+says *that* it is — which is the property a change will actually alter.
 
 - [ ] **Step 9: Commit**
 
@@ -2424,23 +2442,54 @@ class IncludeCacheGateTests(unittest.TestCase):
 
 - [ ] **Step 2: Confirm the instrument fails for its intended reason**
 
-Mutate `IncludeNode.render`'s cache key in a scratch copy — or, cheaper and what
-the project's rule asks for, break our side: in `_impl/parser.py::materialise_node`,
-make the `IncludeNode` arm return a *copy* of the node. Run the test and confirm
-it reports `"012345678"` vs a string with repeated digits — the counter
-restarting. Revert.
+**Corrected at execution time (D10): it does not, and it cannot.** Measured, the
+mutation this step names — make the `IncludeNode` arm of `materialise_node`
+return a copy — leaves the row green, because materialisation runs once per
+*parse*: the copy is one object across the loop's nine iterations and the cache
+still hits. "One node per tag" is structural on our side, not something the
+materialiser chooses, so no mutation of ours makes the counter restart.
+
+What does make it restart is breaking Django's own cache — popping
+`render_context.dicts[0][self]` before every render — and that gives
+`'000000000'` on **both** engines. So the row is a *parity* instrument: it
+detects our engine disagreeing with stock about what it handed the renderer, not
+a per-render rebuild.
+
+The shipped file therefore carries a second row, and it is the one a mutation of
+ours can fail: `test_the_loop_body_holds_exactly_one_include_node` walks the
+materialised tree with Django's own `get_nodes_by_type` and asserts that the
+body holds exactly one node and that it is the `IncludeNode` the walk found.
+Measured, with the materialiser appending a stray empty `TextNode` to every
+nodelist: this row fails (`2 != 1`) and the counter row stays green — which is
+the whole reason for having it, since an empty text node renders `''` and the
+output cannot see it.
 
 - [ ] **Step 3: Run the gates**
 
-Run: `source scripts/env.sh && .venv/bin/python -m pytest tests/test_inheritance_gate.py -q`
+Run: `source scripts/env.sh && maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m unittest tests.test_inheritance_gate -v`
 Expected: PASS.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add tests/test_inheritance_gate.py
+git add tests/test_inheritance_gate.py scripts/anchors.txt \
+        docs/superpowers/plans/2026-10-09-m7-inheritance.md
 git commit -m "M7 Task 6: the include-cache gate, pointed at our engine"
 ```
+
+The three files, and why each is in: the gate file carries the counter row, the
+structural row Step 2 describes, and the wire-shape row; the manifest carries the
+two pin anchors those rows cite (`loader_tags.py:197`,
+`syntax_tests/test_include.py:371-397`); this plan carries D10 and the Task 4
+Step 8 note. **The manifest entry is not optional** — `--check --frozen` fails a
+build on a cited anchor with no entry, and it caught two wrong spans here while
+this step was being written: `test_host_tags.py:15-19` named a paragraph about
+error text where the sentence claimed the `sys.path` bootstrap
+(`tests/test_host_tags.py:32-37`), and the pin row was cited one line short, at
+`syntax_tests/test_include.py:371-396` rather than `…:371-397`, dropping the
+`self.assertEqual(output, "012345678")` that is the row's whole claim.
+Both are the class of defect the guard exists for, and neither is visible to a
+reader skimming the test.
 
 ---
 

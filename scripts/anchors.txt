@@ -477,6 +477,7 @@ loader_tags.py:87	django/template/loader_tags.py	87	-	-	-
 loader_tags.py:94	django/template/loader_tags.py	94	-	self.blocks = {n.name: n	-
 loader_tags.py:118	django/template/loader_tags.py	118	-	parent = self.parent_name.resolve(context)	-
 loader_tags.py:121	django/template/loader_tags.py	121	-	self.parent_name.var	-
+loader_tags.py:197	django/template/loader_tags.py	197	-	cache = context.render_context.dicts[0].setdefault(self, {})	-
 loader_tags.py:215	django/template/loader_tags.py	215	-	def do_block(parser, token):	-
 loader_tags.py:219-220	django/template/loader_tags.py	219	220	# token.split_contents() isn't useful here because this tag doesn't accept	# variable as arguments.
 loader_tags.py:221-241	django/template/loader_tags.py	221	241	bits = token.contents.split()	parser.invalid_block_tag(endblock, "endblock", acceptable_endblocks)
@@ -607,6 +608,7 @@ test_unordered_list.py:143	tests/template_tests/filter_tests/test_unordered_list
 test_unordered_list.py:148	tests/template_tests/filter_tests/test_unordered_list.py	148	-	def test_nested_generators(self):	-
 i18n/test_blocktranslate.py:881	tests/template_tests/syntax_tests/i18n/test_blocktranslate.py	881	-	-	-
 tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py:16	tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py	16	-	-	-
+tests/test_host_tags.py:32-37	tests/test_host_tags.py	32	37	PROJECT_ROOT = Path(__file__).resolve().parent.parent	sys.path.insert(0, str(_path))
 syntax_tests/test_for.py:334	tests/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 syntax_tests/test_include.py:371-397	tests/template_tests/syntax_tests/test_include.py	371	397	def test_include_cache(self):	-
 bad_tag.py:6-8	tests/template_tests/templatetags/bad_tag.py	6	8	badtag	-

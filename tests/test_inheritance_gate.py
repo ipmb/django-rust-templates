@@ -1,20 +1,31 @@
-"""A2's matrix, as two tests: the predicate says "Rust's" for all three, and a `{% load %}` still wins.
+"""M7's gate file: the host seam's three questions, each with the instrument that can fail.
 
-The host seam's one question is *"is this callable the one Rust implements?"*
-(`python/django_rust_templates/host.py`), and until M7 it was answered by two
-clauses: an exception list of three names, then an identity comparison against
-`defaulttags`' table. Task 4 deletes the exception list, and the pair of tests
-here is what makes both halves of that visible — including the half that is a
-*regression* the list was hiding, which is why one of them is written to fail
-first.
+Three tasks land here because each is a place where the *seam* — the pair of
+callbacks in `python/django_rust_templates/host.py` — is what could be wrong
+rather than the Rust, and where the 1547 cannot see it:
 
-The three names are `loader_tags`', not `defaulttags`', which is what made the
-exception list look necessary: a predicate that only reads `defaulttags` says
-"not mine" for `block`/`extends`/`include` and routes them to the host. Both are
-Django built-ins — `Engine.default_builtins` (`engine.py:14-18`) lists
-`django.template.loader_tags` third, and `Parser.__init__` merges each through
-`add_library` (`base.py:668-670`) — so the fix is to widen the comparison's
-*table*, not to keep a list beside it.
+- **A2, the predicate.** Its one question is *"is this callable the one Rust
+  implements?"*, and until M7 it was answered by two clauses: an exception list
+  of three names, then an identity comparison against `defaulttags`' table. Task
+  4 deletes the exception list, and the pair of tests here is what makes both
+  halves of that visible — including the half that is a *regression* the list was
+  hiding, which is why one of them is written to fail first.
+
+  The three names are `loader_tags`', not `defaulttags`', which is what made the
+  exception list look necessary: a predicate that only reads `defaulttags` says
+  "not mine" for `block`/`extends`/`include` and routes them to the host. Both are
+  Django built-ins — `Engine.default_builtins` (`engine.py:14-18`) lists
+  `django.template.loader_tags` third, and `Parser.__init__` merges each through
+  `add_library` (`base.py:668-670`) — so the fix is to widen the comparison's
+  *table*, not to keep a list beside it.
+
+- **A4, `must_be_first` inbound.** M6's seam carried every node field but that
+  one, so a host node setting it was accepted where Django refuses.
+
+- **A6, the include cache.** §10.3 names `test_include_cache` as M7's gate, and
+  the `.django` row cannot be it: the shim does not yet interpose `loader_tags`,
+  so the suite runs on stock Django's parser and would pass whether or not M7
+  shipped.
 """
 
 import sys
@@ -23,8 +34,13 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
-if str(DJANGO_CHECKOUT) not in sys.path:
-    sys.path.insert(0, str(DJANGO_CHECKOUT))
+# `template_tests.templatetags.custom` is reached by name rather than
+# re-implemented, so the rows below exercise Django's own fixture and not a copy
+# of it that could drift — `tests/test_host_tags.py:32-37` is the precedent, and
+# it needs the same second path entry.
+for _path in (DJANGO_CHECKOUT, DJANGO_CHECKOUT / "tests"):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 from django.template import Engine, Library, loader_tags  # noqa: E402
 
@@ -75,6 +91,49 @@ class HostPredicateTests(unittest.TestCase):
         parser = parser_for("", engine)
         parser.add_library(lib)
         self.assertIs(ShellHost(parser).has_tag("block"), True)
+
+    def test_the_wire_shows_which_side_compiled_each_name(self):
+        """The same claim asked structurally, which is the detector that survives a predicate rewrite.
+
+        A Rust-compiled tag arrives as a plain class name (`BlockNode`); a
+        host-compiled one arrives as `HostNode` carrying a `NodeRef` to the node
+        the host built. So *"which side compiled this"* is readable off the parse
+        result without asking the predicate anything — and that is what makes
+        this a second detector rather than a restatement of the pair above. The
+        pair says *why* the routing is what it is and has to be rewritten when
+        the predicate changes; this says *that* it is, and the routing is exactly
+        what a change will alter. Measured use: Task 4's half-fix (the table
+        un-widened) is invisible to every message-comparing corpus — 0 of 106
+        error rows differ — and visible here, where `.django`'s `defaulttags`
+        table rebound reads `has_tag -> True` and the wire reads `HostNode` for
+        all three names.
+
+        The table names the three because a valid source per tag cannot be
+        generated, and that is the whole of the coupling: the assertion is about
+        the wire's *shape*, not about how the predicate decides.
+        """
+        from django_rust_templates import _native
+
+        engine = Engine(libraries={"custom": "template_tests.templatetags.custom"})
+        for name, source, class_name in (
+            ("block", "{% block a %}{% endblock %}", "BlockNode"),
+            ("extends", '{% extends "a" %}', "ExtendsNode"),
+            ("include", '{% include "a" %}', "IncludeNode"),
+        ):
+            with self.subTest(name=name):
+                self.assertIs(ShellHost(parser_for("", engine)).has_tag(name), False)
+                nodes, _contains_nontext, _refs = _native.parse(
+                    source, host=ShellHost(parser_for(source, engine))
+                )
+                self.assertEqual(nodes[0][0], class_name)
+
+        # The other direction, so the rows above are not satisfied by everything
+        # being Rust's: `{% load %}` is Rust's host's, and so is what it brings
+        # in (`test_the_host_declines_every_name_rust_owns`' third clause).
+        nodes, _contains_nontext, _refs = _native.parse(
+            "{% load custom %}{% counter %}", host=ShellHost(parser_for("", engine))
+        )
+        self.assertEqual([node[0] for node in nodes], ["HostNode", "HostNode"])
 
 
 class MustBeFirstGateTests(unittest.TestCase):
@@ -244,6 +303,108 @@ class MustBeFirstGateTests(unittest.TestCase):
         # outcome — the same shape as the two rows above.
         with self.assertRaises(AttributeError):
             engine.from_string(source)
+
+
+class IncludeCacheGateTests(unittest.TestCase):
+    """§5.5 / §10.3 / A6: the included template is resolved once, node identity stable.
+
+    `syntax_tests/test_include.py:371-397` is Django's own row and the reason
+    this one exists: it asserts that
+    `{% include %}` keeps resolved templates constant (#27974) by rendering a
+    loop whose body includes a template that increments a counter. If the node is
+    re-created per render the counter restarts and the output repeats digits.
+
+    The `.django` row cannot be M7's gate, and that is the whole of A6: the shim
+    does not yet interpose `loader_tags`, so the pinned suite runs that row on
+    **stock Django's** parser — it passes whether or not M7 shipped. This is the
+    same instrument pointed at our engine, and the same reason the two engines
+    are compared in one row.
+
+    The cache is Python's own: `IncludeNode.render` keys
+    `render_context.dicts[0]` on `self` (`loader_tags.py:197`), so identity is
+    the mechanism, and a materialiser that rebuilt the node per render would miss
+    every time. Our side renders the outer source inline while stock renders it
+    from the loader; that difference does not touch what is measured — the
+    identity of the node the *loop body* re-enters — and the loader is what
+    resolves `include`/`next` on both sides.
+    """
+
+    SOURCE = '{% for x in vars %}{% include "include" %}{% endfor %}'
+
+    def _engine(self):
+        from django.template import Engine
+
+        return Engine(
+            loaders=[
+                (
+                    "django.template.loaders.locmem.Loader",
+                    {
+                        "template": self.SOURCE,
+                        "include": '{% include "next" %}',
+                        "next": "{% load custom %}{% counter %}",
+                    },
+                ),
+            ],
+            libraries={"custom": "template_tests.templatetags.custom"},
+        )
+
+    def test_the_included_template_is_resolved_once(self):
+        from django.template import Context
+
+        from django_rust_templates.render import parse_template, render_string
+
+        engine = self._engine()
+        # `range(9)` is Django's, and it is what makes the instrument able to
+        # fail: a restarting counter prints `0` nine times, not a different
+        # string of the same shape.
+        self.assertEqual(render_string(self.SOURCE, {"vars": range(9)}, engine), "012345678")
+        self.assertEqual(
+            engine.render_to_string("template", {"vars": range(9)}), "012345678"
+        )
+        # The stock side in the same row, rendered through the same engine, so a
+        # row that stopped measuring anything would be visible as agreement on
+        # the wrong value rather than as a pass.
+        self.assertEqual(
+            engine.from_string(self.SOURCE).render(Context({"vars": range(9)})),
+            "012345678",
+        )
+
+    def test_the_loop_body_holds_exactly_one_include_node(self):
+        """The mechanism, asserted as shape — and the only assertion here a mutation of ours can fail.
+
+        **A copy in `materialise_node` does not fail the row above, measured.**
+        Materialisation runs once per *parse*, so a node copied there is still one
+        object across the loop's nine iterations and the cache still hits. The
+        plan's Step 2 says to make the `IncludeNode` arm return a copy and watch
+        the counter restart; it does not restart, and nothing on our side can make
+        it, because "one node per tag" is structural rather than something the
+        materialiser chooses. Breaking Django's cache instead — popping
+        `render_context.dicts[0][self]` before every render — gives `'000000000'`
+        on **both** engines, which shows the row above is sensitive and that its
+        sensitivity is not ours.
+
+        So the counter row is a parity instrument: it detects our engine
+        disagreeing with stock about what it handed the renderer. This row
+        detects the *shape* of what it handed over — one `IncludeNode`, and it is
+        the loop body's only node — which is the fact the counter row can only
+        observe indirectly. Django's own walk provides it
+        (`NodeList.get_nodes_by_type`, `base.py:1093-1098`), over the
+        materialised tree, so a second node or a stray empty one in the body
+        fails here while leaving the output identical.
+        """
+        from django.template import loader_tags
+
+        from django_rust_templates.render import parse_template
+
+        template = parse_template(self.SOURCE, self._engine())
+        includes = template.nodelist.get_nodes_by_type(loader_tags.IncludeNode)
+        self.assertEqual(len(includes), 1)
+        # `ForNode.child_nodelists` is `('nodelist_loop', 'nodelist_empty')` —
+        # the walk reaches the body through Django's own declaration, and this
+        # line names the pinned attribute rather than walking it again.
+        body = template.nodelist[0].nodelist_loop
+        self.assertEqual(len(body), 1)
+        self.assertIs(body[0], includes[0])
 
 
 if __name__ == "__main__":
