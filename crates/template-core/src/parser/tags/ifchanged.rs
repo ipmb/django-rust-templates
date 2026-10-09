@@ -2,22 +2,22 @@
 //!
 //! # Two *named* nodelists, and the false one is an empty `NodeList`
 //!
-//! `IfChangedNode(nodelist_true, nodelist_false, *varlist)` (`:262-265`) keeps
-//! both as attributes. Without an `{% else %}`, Django assigns a fresh
-//! `NodeList()` (`:1057-1058`) rather than leaving it absent, so the descriptor
-//! must emit `nodelist_false` as an **empty nodelist** — omitting it would build
-//! a node whose `nodelist_false` is missing, and the parity harness compares
-//! `vars(node)`.
+//! `IfChangedNode(nodelist_true, nodelist_false, *varlist)`
+//! (`defaulttags.py:262-265`) keeps both as attributes. Without an `{% else %}`,
+//! Django assigns a fresh `NodeList()` (`:1057-1058`) rather than leaving it
+//! absent, so the descriptor must emit `nodelist_false` as an **empty nodelist**
+//! — omitting it would build a node whose `nodelist_false` is missing, and the
+//! parity harness compares `vars(node)`.
 //!
 //! # The values are variadic, and that is a wire problem, not a naming one
 //!
 //! `values = [parser.compile_filter(bit) for bit in bits[1:]]` (`:1059`) is
 //! splatted into the constructor's `*varlist`, which Django stores as the tuple
-//! `self._varlist` (`:265`). There is no keyword for it, so `cls(**kwargs)`
-//! cannot build this node — the descriptor names the attribute `_varlist` and
-//! `NODE_CLASSES["IfChangedNode"]` is a factory that splices the list back into
-//! position. `IfChangedNode` is the **only** variadic node among M5's twelve,
-//! measured by scanning each `__init__`.
+//! `self._varlist` (`defaulttags.py:265`). There is no keyword for it, so
+//! `cls(**kwargs)` cannot build this node — the descriptor names the attribute
+//! `_varlist` and `NODE_CLASSES["IfChangedNode"]` is a factory that splices the
+//! list back into position. `IfChangedNode` is the **only** variadic node among
+//! M5's twelve, measured by scanning each `__init__`.
 //!
 //! # `parser.next_token()` reads the terminator
 //!

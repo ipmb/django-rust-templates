@@ -285,6 +285,7 @@ defaulttags.py:97	django/template/defaulttags.py	97	-	-	-
 defaulttags.py:106-112	django/template/defaulttags.py	106	112	# First time the node is rendered in template	if self.silent:
 defaulttags.py:176-179	django/template/defaulttags.py	176	179	if nodelist_empty is None:	self.nodelist_empty = nodelist_empty
 defaulttags.py:262	django/template/defaulttags.py	262	-	-	-
+defaulttags.py:262-265	django/template/defaulttags.py	262	265	def __init__(self, nodelist_true, nodelist_false, *varlist):	self._varlist = varlist
 defaulttags.py:265	django/template/defaulttags.py	265	-	self._varlist = varlist	-
 defaulttags.py:308-309	django/template/defaulttags.py	308	309	def __init__(self, conditions_nodelists):	self.conditions_nodelists = conditions_nodelists
 defaulttags.py:323	django/template/defaulttags.py	323	-	-	-
