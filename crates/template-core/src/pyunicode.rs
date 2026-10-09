@@ -13,6 +13,24 @@
 //! over U+0000..=U+10FFFF in both directions: Python has 29 such code points,
 //! Rust 25, and nothing is whitespace in Rust that is not whitespace in Python.
 //!
+//! Python's half was checked across interpreter builds rather than assumed
+//! stable: `str.isspace()` yields the same 29 code points, byte-identical, on
+//! CPython 3.10.16 / 3.11.9 / 3.12.9 / 3.13.7 / 3.14.4 — spanning Unicode
+//! 13.0.0 through 16.0.0. The ASCII range comes from a hardcoded CPython table
+//! rather than from `unicodedata`, so it does not move with a Unicode revision.
+//! That is what makes `White_Space ∪ {U+001C..U+001F}` safe to write out here
+//! instead of computing.
+//!
+//! What is *not* safe is the Rust half's stability, and the risk runs the other
+//! way from the one above. Because `is_space` is `c.is_whitespace() || ...`, it
+//! inherits Rust's table, which tracks the Unicode version of the toolchain; a
+//! future `White_Space` addition would be picked up by Rust and Python at
+//! different times, and this function would quietly begin over-trimming. No
+//! `cargo test` can see that. The guard is
+//! `test_whitespace_table_is_exactly_pythons` in `tests/test_lexer_parity.py`,
+//! which compares `_native.whitespace_codepoints()` against `str.isspace()` over
+//! the whole range — the one place both languages are present.
+//!
 //! This is observable rather than theoretical. `{% \u{1c} if x %}` trims to
 //! `if x` in Python and to `\u{1c} if x` in Rust, so the two engines disagree
 //! about the tag's contents, and therefore about which tag it is.

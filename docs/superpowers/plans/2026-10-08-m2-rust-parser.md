@@ -82,6 +82,34 @@ So M2 delivers:
 **M2's tag set is nine tags**: `autoescape`, `comment`, `csrf_token`, `debug`,
 `now`, `resetcycle`, `spaceless`, `templatetag`, `verbatim`.
 
+**First the count, stated so it can be checked rather than trusted.** The metric
+is the *registry*, not decorated functions, because the registry is what a
+template can actually invoke:
+
+| Count | Meaning |
+|---|---|
+| **27** | registry entries — `defaulttags.register.tags` (24) + `loader_tags.register.tags` (3) |
+| **26** | functions carrying an `@register.tag` decorator — 23 + 3 |
+
+They differ by exactly one name: **`querystring`**
+(`@register.simple_tag(name="querystring", takes_context=True)`,
+`defaulttags.py:1286`), which is in the registry but is not `tag`-decorated. An
+AST walk for `@register.tag` therefore under-reports by one — which is how an
+earlier draft reached 26, and how a review of that draft "confirmed" it. Both
+counts were taken correctly; the metric was never named. 27 is the one this plan
+needs.
+
+**The arithmetic is 27 = 14 + 13, and 13 = 4 + 9:**
+
+- **14** reach `parser.compile_filter`: 11 directly (`cycle`, `extends`,
+  `filter`, `firstof`, `for`, `ifchanged`, `include`, `lorem`, `regroup`, `url`,
+  `widthratio`), plus `with` through `token_kwargs`, `if` through
+  `TemplateIfParser`, and `querystring` through `simple_tag`'s generated compile
+  function, which hands `parser.compile_filter` to `parse_bits`
+  (`library.py:454`).
+- **13** touch no `FilterExpression` at all — the four deferred below plus M2's
+  nine.
+
 The other eighteen arrive with their dependencies, and the assignment is not
 arbitrary — each waits on something the spec schedules elsewhere:
 

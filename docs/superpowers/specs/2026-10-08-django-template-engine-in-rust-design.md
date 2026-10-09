@@ -417,11 +417,60 @@ def extend_nodelist(self, nodelist, node, token):
     nodelist.append(node)
 ```
 
-The shadow tree must run the equivalent for **every** node: `token` and `origin`
-are what `render_annotated` reads when annotating an exception (§5.2), so a
-materialised node missing them turns a template error into an `AttributeError`
-inside the exception handler. `contains_nontext` and `must_be_first` are the
-`{% extends %}` ordering rule, with that exact message.
+The shadow tree must run the equivalent for **every node `render_annotated` can
+reach** — not for every node unconditionally. Django draws that line itself:
+`BlockNode.render` (`loader_tags.py:63`) builds a node at *render* time with
+`type(self)(block.name, block.nodelist)`, which never passes through
+`extend_nodelist` and so carries neither attribute. That is safe only because
+the result is used for `block.nodelist.render(context)` and nothing else, and
+those inner nodes did come from `extend_nodelist`. An invariant phrased as
+"every materialised node has `token` and `origin`" would therefore fire on the
+verbatim-ported `BlockNode.render` at M7 — a false alarm in the one place the
+missing pair is deliberate.
+
+The two attributes are not equally dangerous, and that asymmetry is the reason
+the property is worth stating rather than leaving implied:
+
+- a missing `token` is survivable — `get_exception_info(e, None)` accepts it;
+- a missing `origin` is fatal. `render_annotated` evaluates
+  `context.render_context.template.origin == e._culprit_node.origin`
+  (`base.py:1060`) *inside* its `except` block, and `Node` supplies no
+  class-level `origin`, where `token` does have one (`token = None`,
+  `base.py:1036`). The `AttributeError` is therefore raised while handling the
+  original exception — the "Django bug, not a seam bug" symptom.
+
+`contains_nontext` and `must_be_first` are the `{% extends %}` ordering rule,
+with that exact message.
+
+`must_be_first` is `True` in exactly one place in the whole template package —
+`ExtendsNode` (`loader_tags.py:87`). Everything else inherits `Node`'s `False`.
+
+**The `Parser` surface, verified against the pinned source** (M2 builds this
+exactly; recorded here because §6's ownership claim is only meaningful with the
+contract written down):
+
+- `__init__(tokens, libraries=None, builtins=None, origin=None)` sets `tokens` as
+  `list(reversed(tokens))` — so `next_token()` is `tokens.pop()` and
+  `delete_first_token()` is `del tokens[-1]`, both O(1) at the end — plus `tags`,
+  `filters`, `command_stack`, `extra_data`, `libraries`, `origin`. `builtins` is
+  consumed via `add_library` and **not stored**.
+- There is **no `add_libraries`**; only `add_library(lib)`, which does
+  `tags.update(lib.tags)` and `filters.update(lib.filters)`.
+- `compile_filter(token)` takes **one** argument — there is no flags or
+  `ignore_invalid` parameter in 6.0.9. Every call site passes a bare string.
+- `error(token, e)` **returns** the exception rather than raising it, wrapping a
+  non-`Exception` in `TemplateSyntaxError`, and sets `e.token = token` **only if
+  the attribute is absent**. So the *innermost* token wins, which is what makes a
+  compile error inside an `{% if %}` body point at the inner tag. Rust owns the
+  message; the shell owns the Python exception object.
+- `parse_until` termination is `prepend_token` (put it back) plus `return`; an
+  exhausted token list with a non-empty `parse_until` reaches
+  `unclosed_block_tag`, which pops `command_stack` for the message.
+- No tag in `defaulttags.py` or `loader_tags.py` calls `parser.error` directly.
+  The only two calls to `invalid_block_tag` are `{% partialdef %}` and
+  `{% block %}`; everything else raises `TemplateSyntaxError` itself, and
+  `parse`'s `except Exception as e: raise self.error(token, e)` is what attaches
+  the token.
 
 **Python owns:** the `Library` registry and dotted-path loading; `Engine` and the
 configured loader classes (framework-coupled: `override_settings`,
@@ -620,7 +669,7 @@ the highest-risk milestone, and §5.5 is where the answer to it lives.
 | | Component | Done when |
 |---|---|---|
 | M0 | Bootstrap, substitution mechanism, harness | ✅ 1547 run / 6 structural skips; full suite green with `exceptions` interposed |
-| M1 | Rust lexer, `Token` + `Token.split_contents`, `smart_split`, `TokenType`, `DebugLexer`, `_native.lex` | Lexer reproduces Django's token stream exactly, incl. positions, verbatim state, and non-DOTALL tag matching; `split_contents` parity incl. the `_("` rejoining |
+| M1 | Rust lexer, `Token` + `Token.split_contents`, `smart_split`, `TokenType`, `DebugLexer`, `_native.lex` | ✅ token-stream parity with Django's real `Lexer`/`DebugLexer` over `tests/lexer_corpus.py` (51 sources × both lexers), debug character positions included, plus `split_contents` parity and the 3000-source randomised pass; progress meter unchanged from M0 at 25 |
 | M2 | Rust parser, node AST, `_native.parse` | Parse tree descriptor for every built-in tag; syntax-error parity |
 | M3 | `FilterExpression`, `Variable`, `smartif`, primitive resolver | First `_native.render`; text, variables, dotted/index lookup, filters |
 | M4 | All 57 built-in filters | Filter corpus parity, incl. `FilterFlags` round-tripping |
@@ -664,12 +713,59 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   of `Lexer`/`DebugLexer` must preserve `token.lineno` and
   `token.position` exactly, since `template_debug` reports both.
 - **§2's case-sensitivity coverage hole** — project-side test at M10.
-- **§6's `extend_nodelist` contract** — `token`/`origin` attached at parse time,
-  plus `contains_nontext`/`must_be_first`; M2, but its consequence lands at M9 via
-  `render_annotated`.
+- **§6's `extend_nodelist` contract** — `token`/`origin` attached at parse time
+  for every node `render_annotated` can reach (not unconditionally; §6 records
+  why `BlockNode.render`'s render-time construction is exempt), plus
+  `contains_nontext`/`must_be_first`; M2, but its consequence lands at M9 via
+  `render_annotated`. `origin` has no class-level fallback, so a miss there is an
+  `AttributeError` raised *inside* the exception handler rather than a graceful
+  degradation — and `BlockNode.render`'s exemption is specific to that one node,
+  not licence to skip the pair elsewhere.
 - **§6's ownership correction** — `block`/`extends`/`include` render-time logic is
   Python, ported verbatim; Rust supplies the compiled structure. Affects M7's and
   M11's sizing, and §6's estimate of the Python side.
+- **Materialisation must yield real Python instances, not opaque handles**
+  (found while surveying M2's design). §5.5 describes shadow nodes as objects
+  with a Python `render`, but the requirement is stronger than that: Python
+  render-time code in `loader_tags` *isinstance-tests* the materialised tree.
+  `ExtendsNode.render:147-156` walks `compiled_parent.nodelist` and branches on
+  `isinstance(node, TextNode)` then `isinstance(node, ExtendsNode)`, and calls
+  `compiled_parent.nodelist.get_nodes_by_type(BlockNode)` to build the block
+  mapping. So the materialised top-level nodelist must contain genuine
+  instances of the shell's `TextNode`, `ExtendsNode` and `BlockNode` — a single
+  generic node class carrying a Rust handle would fail here while passing §5.5's
+  stated tests. Nothing in `tests/template_tests/` isinstance-tests a node, so
+  the suite would not catch it directly; the failure surfaces in inheritance
+  rendering. M2 owns the descriptor; M7 is where it bites.
+  (`base.py:611`'s `isinstance(node, TextNode)` is the same test in
+  `extend_nodelist`, which §6 makes Rust's, so that one is a Rust-side check.)
+- **`{% verbatim %}` renders at *parse* time** (found surveying M2). Its compile
+  function is `VerbatimNode(nodelist.render(Context()))` — the only built-in tag
+  whose compilation performs a render. It is benign rather than a hole in §6:
+  inside verbatim the lexer emits everything as TEXT, and
+  `TextNode.render_annotated` (`base.py:1113`) returns `self.s` without
+  annotation, so the result is exactly `SafeString("".join(text contents))`. Rust
+  can compute that directly, but it must produce a **safe** string: `VerbatimNode.render`
+  returns `self.content` unchanged, so losing the safeness flag would start
+  escaping verbatim output. M5 (the tag) and M8 (`SafeData`).
+- **`TextNode.render_annotated` overrides the base implementation**
+  (`base.py:1113-1120`) and returns `self.s` — text nodes are never annotated.
+  This keeps §5.5's per-node boundary cheap for the commonest node type, but it
+  also means an exception whose innermost culprit is a TextNode cannot arise, so
+  `ErrorIndexTest`-style `(start, end)` pairs never point at text.
+- **`Lexer.verbatim` is a public attribute, not private state** (found during M1
+  close-out). Django's lexer holds `verbatim` as `False` or a `str` such as
+  `"endverbatim foo"`, and `Lexer.__repr__` renders it, so it is observable
+  without tokenizing — `test_parser.py:49` asserts
+  `'<Lexer template_string="{% for i in 1 %}{{ a...", verbatim=False>'` on a
+  freshly constructed lexer. The Rust side models the same state as
+  `Option<&str>` (a test-facing accessor, `None` ≡ `False`), so the shell must
+  translate `None` → `False` and reproduce the 20-character `template_string`
+  truncation in `__repr__`. M9, via the shell's `Lexer`.
+  The merged Rust model is sufficient for the rest: `DebugLexer`'s only public
+  member beyond `Lexer` is its own `tokenize`; `_tag_re_split` and
+  `_tag_re_split_positions` are private and have no caller anywhere in the
+  tree, so they need not be modelled.
 
 ## 11. Review workflow
 
@@ -680,6 +776,20 @@ responses as `.review/round-N-response.md`.
 
 A change is not committed until its review round returns `APPROVE` or all
 `blocker`/`major` findings are resolved.
+
+**The unit of review is the milestone, not the commit.** A milestone's task
+commits land on the branch as they are written; the milestone close-out carries
+the review round, and *that* commit is the one the rule above holds. The literal
+reading — a round per commit — is not workable: fifteen milestones of roughly
+eight tasks each is a hundred review rounds for one reviewer session, which puts
+the review rate rather than the work on the critical path.
+
+**A section a plan marks as reviewable before code exists gates its
+implementing tasks.** M2's "Design decision 1" is the pattern — it says outright
+that it is stated "so the reviewer can reject it before any code exists". Tasks
+implementing such a section wait for the round, even though the rule above
+otherwise holds only the milestone close-out. This is the one place a commit
+genuinely must precede a review round's existence.
 
 **Known environment deviation:** `rusty-reviewer` runs as a peer Claude session
 (`django-rust-templates-a8`), not as a subagent of this session. A

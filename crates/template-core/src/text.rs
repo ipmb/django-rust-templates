@@ -22,6 +22,13 @@ pub fn smart_split(text: &str) -> Vec<&str> {
         // spelled out as `crate::pyunicode::WS_CLASS` here. Substituting the
         // class for `\s` and its negation for `\S` is the whole change — the
         // rest of the pattern is Django's verbatim.
+        //
+        // A caution for anyone re-verifying this later: comparing the two
+        // spellings *in Python* proves nothing about the substitution, because
+        // there they denote the same 29 code points and the substitution is a
+        // no-op. It is exercised only by the Rust-side parity run in
+        // `tests/test_lexer_parity.py` — which is why those corpora carry the
+        // separators at all.
         let pattern = format!(
             r#"((?:[^{ws}'"]*(?:(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')[^{ws}'"]*)+)|[^{ws}]+)"#,
             ws = crate::pyunicode::WS_CLASS,

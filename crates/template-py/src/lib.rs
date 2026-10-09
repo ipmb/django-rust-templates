@@ -22,6 +22,25 @@ fn engine_version() -> &'static str {
     template_core::version()
 }
 
+/// Every code point `pyunicode::is_space` accepts, ascending.
+///
+/// Exposed because the parity test lives where both languages exist.
+/// `is_space` inherits Rust's `char::is_whitespace`, whose Unicode version is
+/// the toolchain's, while Python's `str.isspace()` follows CPython's; nothing
+/// in `cargo test` can compare the two, so the test that does has to call in.
+///
+/// A table rather than a per-code-point `is_space(c: &str)` predicate on
+/// purpose. A Python `str` may hold a lone surrogate, which answers `False` but
+/// which a Rust `&str` cannot represent, so a predicate would raise at all 2048
+/// of them instead of returning; `char::from_u32` returns `None` for them, so
+/// they drop out here without a special case.
+#[pyfunction]
+fn whitespace_codepoints() -> Vec<u32> {
+    (0..=0x10FFFF)
+        .filter(|&code| char::from_u32(code).is_some_and(template_core::pyunicode::is_space))
+        .collect()
+}
+
 /// Split template-tag contents into arguments.
 ///
 /// Raises `StopIteration` where Django's implementation would — its inner
@@ -300,6 +319,7 @@ fn parse(
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(engine_version, m)?)?;
+    m.add_function(wrap_pyfunction!(whitespace_codepoints, m)?)?;
     m.add_function(wrap_pyfunction!(split_contents, m)?)?;
     m.add_function(wrap_pyfunction!(lex, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
