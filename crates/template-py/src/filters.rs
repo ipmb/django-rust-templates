@@ -914,7 +914,7 @@ impl FilterHost for PyFilterHost<'_> {
             };
             kwargs.set_item("trim_url_limit", limit)?;
             // `nofollow=True` is not a caller's choice: `urlize` and `urlizetrunc`
-            // both hardcode it (`defaultfilters.py:386`, `:399`), and the trait's
+            // both hardcode it (`defaultfilters.py:386`, `defaultfilters.py:399`), and the trait's
             // signature carries no `nofollow` for that reason.
             kwargs.set_item("nofollow", true)?;
             kwargs.set_item("autoescape", autoescape)?;
@@ -1147,7 +1147,7 @@ impl FilterHost for PyFilterHost<'_> {
 
             let subject = self.object(value)?.bind(py).clone();
             // `input_val = str(text)` shares the `try` with the parse, and the
-            // handler names `InvalidOperation` **only** (`:152-155`), so a
+            // handler names `InvalidOperation` **only** (`defaultfilters.py:152-155`), so a
             // `__str__` that raises anything else is not retried — it leaves the
             // filter. That is why this is `str()` and not `text_of`, whose
             // fallback would swallow exactly the case this must not.
@@ -1160,7 +1160,7 @@ impl FilterHost for PyFilterHost<'_> {
                         return Err(error);
                     }
                     // `Decimal(str(float(text)))`, with the source's own tuple —
-                    // `(ValueError, InvalidOperation, TypeError)` at `:158` — so
+                    // `(ValueError, InvalidOperation, TypeError)` at `defaultfilters.py:158` — so
                     // an `OverflowError` from an object whose `__float__` cannot
                     // fit escapes rather than answering `""`.
                     let retried = py
@@ -1187,16 +1187,15 @@ impl FilterHost for PyFilterHost<'_> {
             for digit in tuple.get_item(1)?.try_iter()? {
                 digits.push(digit?.extract::<u8>()?);
             }
-            // `None` for a `"F"`/`"n"`/`"N"` exponent **and** for an integer one
-            // that does not fit an `i64`. The fold is safe rather than merely
-            // convenient: a `Decimal` whose exponent exceeds `i64` has
-            // `len(digits) + abs(exponent) > 200`, so `:176` refuses it and
-            // returns `input_val` — the same answer the non-finites get at
-            // `:168-170` and `:180-182`, which is the only thing the body does
-            // with a `None`.
+            // `None` for a `"F"`/`"n"`/`"N"` exponent **and** for an integer one that does not fit
+            // an `i64`. The fold is safe rather than merely convenient: a `Decimal` whose exponent
+            // exceeds `i64` has `len(digits) + abs(exponent) > 200`, so `defaultfilters.py:176`
+            // refuses it and returns `input_val` — the same answer the non-finites get at
+            // `defaultfilters.py:168-170` and `defaultfilters.py:180-182`, which is the only thing
+            // the body does with a `None`.
             let exponent = tuple.get_item(2)?.extract::<i64>().ok();
 
-            // `m = int(d) - d` (`:180`), inside a handler that names
+            // `m = int(d) - d` (`defaultfilters.py:180`), inside a handler that names
             // `(ValueError, OverflowError, InvalidOperation)`. That handler is
             // where the non-finites land — `int(Decimal("inf"))` raises
             // `OverflowError`, `int(Decimal("NaN"))` a `ValueError` — so
@@ -1245,10 +1244,10 @@ impl FilterHost for PyFilterHost<'_> {
             let decimal_type = decimal_module.getattr("Decimal")?;
             let subject = self.object(decimal)?.bind(py).clone();
 
-            // `exp = Decimal(1).scaleb(-abs(p))` (`:194`). The negation happens
+            // `exp = Decimal(1).scaleb(-abs(p))` (`defaultfilters.py:194`). The negation happens
             // on the Python side because `p` is an arbitrary-precision int: a
             // `u64` does not fit an `i64`, and `scaleb` must see the real
-            // magnitude — `:194` is one of the two places where a `p` past
+            // magnitude — `defaultfilters.py:194` is one of the two places where a `p` past
             // `2*(Emax + prec)` is observable, clamping below that and raising
             // `InvalidOperation` above it.
             let negative_places = -(i128::from(places));
@@ -1257,7 +1256,7 @@ impl FilterHost for PyFilterHost<'_> {
                 .call_method1("scaleb", (negative_places,))?;
 
             // `units = len(tupl[1]); units += -tupl[2] if m else tupl[2]`
-            // (`:196-198`). `m` truthy is `!integral`.
+            // (`defaultfilters.py:196-198`). `m` truthy is `!integral`.
             let tuple = subject.call_method0("as_tuple")?;
             let tuple_exponent = tuple.get_item(2)?.extract::<i128>()?;
             let mut units = i128::try_from(tuple.get_item(1)?.len()?).unwrap_or(i128::MAX);
@@ -1268,7 +1267,7 @@ impl FilterHost for PyFilterHost<'_> {
             };
 
             // `prec = abs(p) + units + 1; prec = max(getcontext().prec, prec)`
-            // (`:199-200`). The context read is the point of the whole method:
+            // (`defaultfilters.py:199-200`). The context read is the point of the whole method:
             // it bounds the quantize below, so a caller that computed its own
             // `prec` would be answering a different question.
             let mut prec = i128::from(places) + units + 1;
@@ -1285,7 +1284,7 @@ impl FilterHost for PyFilterHost<'_> {
             kwargs.set_item("prec", prec)?;
             let context = decimal_module.getattr("Context")?.call((), Some(&kwargs))?;
 
-            // `d.quantize(exp, ROUND_HALF_UP, Context(prec=prec))` (`:204`).
+            // `d.quantize(exp, ROUND_HALF_UP, Context(prec=prec))` (`defaultfilters.py:204`).
             let rounded = subject.call_method1(
                 "quantize",
                 (exponent, decimal_module.getattr("ROUND_HALF_UP")?, context),
@@ -1300,7 +1299,7 @@ impl FilterHost for PyFilterHost<'_> {
                 sign: rounded_tuple.get_item(0)?.is_truthy()?,
                 digits,
                 exponent: rounded_tuple.get_item(2)?.extract::<i64>()?,
-                // `:210`'s second half, and a question `integral` does not
+                // `defaultfilters.py:210`'s second half, and a question `integral` does not
                 // answer: `m` is the *unrounded* value's truthiness, this the
                 // rounded one's. Measured `floatformat("-0.0001", 2)` is
                 // `"0.00"` — `m` truthy, `Decimal("-0.00")` falsy.
@@ -1355,7 +1354,7 @@ impl FilterHost for PyFilterHost<'_> {
         let py = self.py;
         let outcome = (|| {
             let int_type = py.get_type::<PyInt>();
-            // `int(value) % int(arg)`, in that order (`:857`): Python evaluates
+            // `int(value) % int(arg)`, in that order (`defaultfilters.py:857`): Python evaluates
             // the value's conversion first, so a `ValueError` from it is the one
             // that escapes when both operands are bad. No `try` in the source, so
             // `arg == 0` leaves as a `ZeroDivisionError` and a non-numeric
@@ -1581,7 +1580,7 @@ pub fn run_filter(
     let host = PyFilterHost::new(py);
     let mut current = host.classify(value)?;
     // `arg_vals` (`base.py:804-809`), length 0 or 1 — the list Django spreads
-    // into the call at `:815`. **The length is the argument's presence and the
+    // into the call at `base.py:815`. **The length is the argument's presence and the
     // element is its value; neither stands for the other.** A Python `None`
     // element is `Some(Value::None)`, the argument `None`, which is what
     // `{{ x|floatformat:price }}` with `price = None` hands the body — an
