@@ -2605,12 +2605,25 @@ source's behaviour for `|bytes_| > f64::MAX`**, and the predicted divergence is
 `'inf.0\xa0PB'` where Django raises. The `inf`/`nan` rows do **not** depend on
 this: they are `int()`'s, and `to_int` already propagates them (measured through
 `int_modulo`, whose `OverflowError` crosses the FFI with its class intact). Only
-the >308-digit case does. Two candidate fixes: a seventh method doing
-`int(value) / (1 << shift)` whole, or folding the division into
-`filesize_number_format`'s signature. The first leaves that method's doc intact —
-a doc whose whole content is that `round` on a **float** rounds against the binary
-value, not the decimal one. Decide when the body lands and the divergence is
-measured rather than predicted, not before.
+the >308-digit case does. Three candidate fixes:
+
+* **A seventh method** doing `int(value) / (1 << shift)` whole. The division is
+  then Python's and the boundary is exact by construction. Leaves
+  `filesize_number_format`'s doc intact — a doc whose whole content is that
+  `round` on a **float** rounds against the binary value, not the decimal one.
+* **Folding the division into `filesize_number_format`'s signature**, which
+  changes a signature already written down and gives that method four operations
+  and one doc.
+* **A Rust-side boundary check** — no seam change, but the body must then
+  reproduce CPython's rounding-to-overflow condition exactly, and the *message*
+  becomes a synthesis, not a pass-through. That is the `cut.rs` pattern and it is
+  legitimate provided an `ERROR_CASES` row pins Django's wording; the cost is
+  that the **condition** would have no authority above the corpus, where an
+  approximate test diverges only on inputs right at the boundary. Whichever
+  lands, the row at the boundary is what checks it.
+
+Decide when the body lands and the divergence is measured rather than predicted,
+not before.
 
 **3. What measurement says about the individual bullets above**, three of which
 the plan got wrong and the rest of which it got only partly:
