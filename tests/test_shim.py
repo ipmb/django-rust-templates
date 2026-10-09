@@ -164,17 +164,24 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         was true until M9 interposed it — and which told us nothing about the
         other twenty-four modules, so a later change that handed any of them
         *back* would have gone on passing. The count is the claim each milestone
-        is accepted on, so the count is what is asserted; it moves by one in the
+        is accepted on, so the count is what is asserted; it moved by one in the
         same commit as each interposition (25 at M8, 24 with `base`, 23 with
         `smartif`, 22 with `utils`, 21 with `context`, 20 with `engine`, 14 with
         the six `loaders` files — the milestone's number — 13 with
         `loader_tags`, M11's first, 12 with `defaultfilters`, M11's second, and
         11 with `defaulttags`, M11's third).
+
+        **11 → 1 is the scope correction, not a ten-module interposition**, and
+        it is the largest single move this number has ever made: ten of the
+        eleven were declared *not the engine* and are subtracted now. The one
+        left is `library`, which M13 owns. The number is asserted as the set
+        below as well, because a count that fell by ten could mean ten modules
+        were ported.
         """
         _shim.install()
 
         remaining = _shim.unshimmed()
-        self.assertEqual(len(remaining), 11, sorted(remaining))
+        self.assertEqual(sorted(remaining), ["django.template.library"])
         self.assertNotIn("django.template.base", remaining)
         self.assertNotIn("django.template.smartif", remaining)
         self.assertNotIn("django.template.utils", remaining)
@@ -326,12 +333,17 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         # **Record what was here before writing anything.** The first version of
         # this row asserted the directory did not exist and removed it in
         # `finally`, which is a row that can only run while its subject is
-        # absent — so it went from a test to a deletion the day M13 gave
-        # `_impl/backends/` a transcription, and the failure would have looked
-        # like a broken fallback rather than a test cleaning up after itself.
-        # Whether or not the subject exists is now the row's input rather than
-        # its premise: the probe file is ours to remove, and the `__init__.py`
-        # and the directory are ours to remove only if we made them.
+        # absent — so it went from a test to a deletion the day something gave
+        # `_impl/backends/` a file, and the failure would have looked like a
+        # broken fallback rather than a test cleaning up after itself. Whether or
+        # not the subject exists is now the row's input rather than its premise:
+        # the probe file is ours to remove, and the `__init__.py` and the
+        # directory are ours to remove only if we made them.
+        #
+        # `backends` stays the staging ground even though the scope correction
+        # put it out of the engine, because what is staged is the *shape* — a
+        # package of ours with Django siblings beside it — and the row is about
+        # the finder's fallback rather than about this family.
         created_package_dir = not package_dir.exists()
         package_dir.mkdir(parents=True, exist_ok=True)
         init = package_dir / "__init__.py"
@@ -361,11 +373,17 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
                 "our partial package cut its Django sibling off from the fallback",
             )
 
-            # The meter must now tell the truth about this case too: `backends`
-            # is ours, its siblings are not, and they still import.
-            remaining = _shim.unshimmed()
-            self.assertNotIn("django.template.backends", remaining)
-            self.assertIn("django.template.backends.django", remaining)
+            # **The meter cannot answer this any more, and that is the scope
+            # correction showing up in an existing row.** `backends` and its
+            # siblings are declared not the engine, so `unshimmed()` subtracts
+            # both whether the package is ours or not — the number stopped being
+            # a file-ownership report for this family. The question this row is
+            # really asking is ownership, so it asks the expression the meter is
+            # built from, and keeps one meter assertion to show the subtraction.
+            ours_now = _shim._our_modules_in("django.template")
+            self.assertIn("backends", ours_now)
+            self.assertNotIn("backends.django", ours_now)
+            self.assertNotIn("django.template.backends", _shim.unshimmed())
         finally:
             probe.unlink(missing_ok=True)
             # The bytecode importing `probe` wrote, and only that — anything
@@ -599,16 +617,22 @@ class NamespaceTests(unittest.TestCase):
         """
         _shim.install()
         self.assertEqual(_shim.unshimmed(), _shim.unshimmed(scope="django.template"))
-        self.assertEqual(len(_shim.unshimmed()), 11)
+        # **1, not 11, since the scope correction.** The ten that left are the
+        # declaration rather than ten interpositions, and this line is the only
+        # place the correction shows up as a number in *this* file — the
+        # membership and the arithmetic live in `test_milestone_ownership.py`,
+        # which is where a reader should go to ask why it is one and not eleven.
+        self.assertEqual(len(_shim.unshimmed()), 1)
         self.assertEqual(_shim.unshimmed(scope="django.templatetags"), [])
         # **The zero above needs a denominator, and the line beneath is it.**
-        # `unshimmed` is `django_modules(scope) - ours`, and `django_modules`
-        # reads Django's own directories — so an empty *universe* satisfies the
-        # zero just as well as the five libraries being ours, and the `== 11`
-        # control two lines up is drawn from a **different population**.
-        # Measured, not argued: forcing the lookup empty left both assertions
-        # green. Written out as the set rather than counted, so the row fails if
-        # the scope ever names a module this milestone has not decided about.
+        # `unshimmed` is `django_modules(scope) - ours - NOT_THE_ENGINE`, and
+        # `django_modules` reads Django's own directories — so an empty
+        # *universe* satisfies the zero just as well as the five libraries being
+        # ours, and the control two lines up is drawn from a **different
+        # population**. Measured, not argued: forcing the lookup empty left both
+        # assertions green. Written out as the set rather than counted, so the
+        # row fails if the scope ever names a module this milestone has not
+        # decided about.
         self.assertEqual(
             sorted(_shim.django_modules("django.templatetags")),
             ["cache", "i18n", "l10n", "static", "tz"],

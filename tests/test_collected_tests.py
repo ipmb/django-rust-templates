@@ -215,7 +215,25 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # `def test_`, and none of them moves this count. Measured by discovery:
 # `git diff tests/` since `a2bd289` adds exactly three `def test_` bodies and
 # removes none.
-PINNED = 440
+#
+# 440 → 442 is the scope correction, a **net two** in one file, and it is a net
+# because one row *left*. `test_milestone_ownership.py` gains **three** —
+# `test_the_engines_remaining_work_is_one_module` (the correction as a count,
+# with the control that the subtraction bites),
+# `test_the_declared_names_are_the_excluded_ones` (membership against
+# `_shim.NOT_THE_ENGINE`, reasons here) and
+# `test_the_declared_names_are_real_modules_the_meter_drops` (per name, so a
+# failure names the module) — and **loses one**:
+# `test_the_undecided_names_are_the_target_and_carry_their_reason` asserted
+# `UNDECIDED == {"autoreload", "context_processors"}`, which was the best answer
+# while the target was zero and is not the question any more; its subject moved
+# to `NOT_THE_ENGINE` and its assertions to the rows above. Two other rows were
+# *renamed* (`test_the_meter_is_the_owners_plus_the_undecided` →
+# `..._the_claimed_minus_the_taken_minus_the_declined`, and the partition row's
+# bucket list), which moves no count. Measured by discovery:
+# `git diff tests/` since `2761a88` is `+3/-1` rows in that one file, so
+# 440 + 3 - 1 = 442.
+PINNED = 442
 
 
 def collected() -> unittest.TestSuite:

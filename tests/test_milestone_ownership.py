@@ -18,10 +18,11 @@ from django_rust_templates import _shim
 from django_rust_templates._shim import NAMESPACE_ROOTS
 from tests.milestone_ownership import (
     INTERPOSED,
+    NOT_THE_ENGINE,
     OWNERS,
-    UNDECIDED,
+    claimed,
     interposed,
-    owned,
+    pending,
     spec_milestones,
 )
 
@@ -98,9 +99,14 @@ class OwnershipTableTests(unittest.TestCase):
         three of. A name in a bucket that is not in the tree is a row about
         nothing — `origin`, as M10's row had it, and as this row would have
         caught.
+
+        Three buckets since the scope correction, and the third is the new
+        direction: a name can now be settled by being declared *not* the engine,
+        which is `NOT_THE_ENGINE` below. The equality is what makes the partition
+        complete — a name leaving `OWNERS` must arrive in one of the other two.
         """
         self.assertEqual(
-            set(OWNERS) | set(UNDECIDED) | interposed(),
+            set(OWNERS) | set(NOT_THE_ENGINE) | interposed(),
             the_universe(),
         )
 
@@ -110,22 +116,86 @@ class OwnershipTableTests(unittest.TestCase):
         It is also the specific mistake this milestone makes possible: a task
         that interposes a module and forgets to move it out of `OWNERS` leaves
         the meter and the table disagreeing, and
-        `test_the_meter_is_the_owners_plus_the_undecided` would then fail with
+        `test_the_meter_is_the_claimed_minus_the_taken` would then fail with
         the arithmetic rather than the reason.
+
+        The second pair is the new one and it is the scope correction's own
+        failure mode: a name that is both promised to a milestone and declared
+        not the engine is a table answering one question two ways, and the
+        `pending` row below would silently read one of them.
         """
         self.assertEqual(set(OWNERS) & interposed(), set())
-        self.assertEqual(set(UNDECIDED) & interposed(), set())
-        self.assertEqual(set(OWNERS) & set(UNDECIDED), set())
+        self.assertEqual(set(NOT_THE_ENGINE) & interposed(), set())
+        self.assertEqual(set(OWNERS) & set(NOT_THE_ENGINE), set())
 
-    def test_the_meter_is_the_owners_plus_the_undecided(self):
+    def test_the_meter_is_the_claimed_minus_the_taken_minus_the_declined(self):
         """The progress number and the table, as two sets with this between them.
 
         `unshimmed()` is the count every milestone is accepted on. If it can
         drift from the table, the table is decoration — and if the table can
         drift from it, the next reader plans against a schedule that is wrong.
         Both scopes, since M12: `the_meter()` is the two counts in one spelling.
+
+        **Two subtractions, since the scope correction, and the second is what
+        the correction added.** A name leaves the meter by being taken *or* by
+        being declared not the engine, so the meter is `claimed() - interposed()`
+        further minus `NOT_THE_ENGINE` — which is `pending()`, the engine's
+        remaining work. Both are asserted: the first is the count a milestone is
+        accepted on, and the second is the same sentence with the declared set
+        left in, so the subtraction is visible in the row rather than derived
+        from it.
         """
-        self.assertEqual(the_meter(), owned() - interposed())
+        self.assertEqual(the_meter(), pending())
+        self.assertEqual(claimed() - interposed(), pending() | set(NOT_THE_ENGINE))
+
+    def test_the_engines_remaining_work_is_one_module(self):
+        """The scope correction as a count, which is what the user asked for.
+
+        `pending()` is `OWNERS` minus what is taken — the engine's remaining
+        work — and `unshimmed()` over the *first* scope has to be exactly that,
+        because the second scope's names are in `INTERPOSED` and the declared
+        ones are subtracted. The meter half is written as a set equality against
+        the table rather than against a literal, so the two cannot disagree; the
+        literal half is `{"library"}` below, because *that* is the claim the
+        correction makes and a row that only compared the tables would be green
+        with the scope statement quietly reversed.
+
+        **The vacuity control is drawn from this population rather than from the
+        universe.** An empty `NOT_THE_ENGINE` would satisfy the meter equality
+        trivially *and* leave the engine's remaining work at the eleven this
+        correction removed, so the row says the subtraction bites: the declared
+        set is non-empty, and the meter is the bare file-ownership count minus
+        exactly it. Measured, not argued — `NOT_THE_ENGINE` is what strict mode
+        reads, so an empty set here would not merely be a wrong number.
+        """
+        _shim.install()
+        self.assertEqual(suffixes(_shim.unshimmed(TARGET), TARGET), pending(TARGET))
+        self.assertEqual(pending(TARGET), {"library"})
+        self.assertEqual(pending(TEMPLATETAGS), set())
+        self.assertGreater(len(NOT_THE_ENGINE), 0, "nothing is declared out of scope")
+        owned_by_django = set(_shim.django_modules(TARGET)) - _shim._our_modules_in(TARGET)
+        self.assertEqual(
+            suffixes(_shim.unshimmed(TARGET), TARGET),
+            owned_by_django - set(NOT_THE_ENGINE),
+        )
+
+    def test_the_declared_names_are_the_excluded_ones(self):
+        """The membership lives in the shim; the reasons live here.
+
+        One set, two files, and the reason is not symmetry: strict mode needs to
+        subtract it at *runtime*, and `_shim` must not import test code — the
+        same split `SHADOWING` (membership, derived from the files on disk) has
+        against `INTERPOSED` (attribution). A name that leaves the meter in
+        `_shim` without its reason being revisited here would otherwise be a
+        silent widening of the scope this table exists to fix.
+
+        The reasons are asserted only for being non-stubs — the prose is
+        reviewed, not measured — and the length check is deliberately weak.
+        """
+        self.assertEqual(set(NOT_THE_ENGINE), set(_shim.NOT_THE_ENGINE))
+        for name, reason in sorted(NOT_THE_ENGINE.items()):
+            with self.subTest(name=name):
+                self.assertGreater(len(reason), 80, f"{name}'s reason is a stub")
 
     def test_interposed_is_the_shadowing_table(self):
         """`INTERPOSED` adds the milestone attribution and no new membership.
@@ -157,25 +227,28 @@ class OwnershipTableTests(unittest.TestCase):
             with self.subTest(label=label):
                 self.assertIn(label, defined)
 
-    def test_the_undecided_names_are_the_target_and_carry_their_reason(self):
-        """§2's end state, as a set with a reason per name.
+    def test_the_declared_names_are_real_modules_the_meter_drops(self):
+        """Per name, so a failure names the module instead of printing two sets.
 
-        The spec states the target as *zero* in two places (§10.1 and §10.3's
-        M14 row), and §2 measured that no row reaches zero without interposing
-        glue §6 forbids. So the end state M14 is held to is the `UNDECIDED` set,
-        and this row pins which names are in it — the assertion is what makes
-        "M14's by default" unavailable, and the reason field is what makes the
-        set arguable rather than silent.
-        `test_the_meter_is_the_owners_plus_the_undecided` is what gives it
-        force: these are the only two names this table declines to own.
+        The partition row covers membership in one equality over three buckets;
+        this one says it ten times and adds the direction that is specific to
+        this bucket: a declared name is still a module Django's package defines —
+        the `origin` failure of M10's row, in the bucket that is easiest to widen
+        by accident — *and* it is one the meter no longer reports. The second
+        half is the scope correction itself, asserted name by name, which no
+        other row does.
 
-        The length check is a weak guard and is written as one: it refuses a
-        placeholder, and the prose is reviewed rather than measured.
+        Both halves read the shim's own answers, so neither can be satisfied by
+        editing this table; and the count assertion keeps the loop from being
+        vacuously true over an empty bucket.
         """
-        self.assertEqual(set(UNDECIDED), {"autoreload", "context_processors"})
-        for name, reason in sorted(UNDECIDED.items()):
+        self.assertGreater(len(NOT_THE_ENGINE), 0, "nothing is declared out of scope")
+        universe = {f"{TARGET}.{name}" for name in _shim.django_modules(TARGET)}
+        reported = set(_shim.unshimmed(TARGET))
+        for name in sorted(NOT_THE_ENGINE):
             with self.subTest(name=name):
-                self.assertGreater(len(reason), 80, f"{name}'s reason is a stub")
+                self.assertIn(f"{TARGET}.{name}", universe)
+                self.assertNotIn(f"{TARGET}.{name}", reported)
 
 
 if __name__ == "__main__":

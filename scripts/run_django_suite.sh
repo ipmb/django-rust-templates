@@ -57,7 +57,9 @@ if "_impl" not in module_file:
     )
 
 print(
-    f"engine installed; {len(_shim.unshimmed())} module(s) still served by Django",
+    f"engine installed; {len(_shim.unshimmed())} engine module(s) still served by "
+    f"Django ({len(_shim.NOT_THE_ENGINE)} more of django.template are declared "
+    "not the engine)",
     file=sys.stderr,
 )
 PY

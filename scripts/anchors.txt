@@ -823,6 +823,8 @@ test_parser.py:49	tests/template_tests/test_parser.py	49	-	<Lexer template_strin
 test_parser.py:207	tests/template_tests/test_parser.py	207	-	FilterExpression(f"0|default:{num}", p).resolve({})	-
 .django/tests/template_tests/test_parser.py:207	tests/template_tests/test_parser.py	207	-	FilterExpression(f"0|default:{num}", p).resolve({})	-
 test_partials.py:171	tests/template_tests/test_partials.py	171	-	def test_template_without_extra_data_attribute(self):	-
+test_response.py:141	tests/template_tests/test_response.py	141	-	def test_using(self):	-
+test_response.py:296	tests/template_tests/test_response.py	296	-	def test_using(self):	-
 tests/template_tests/tests.py:12-13	tests/template_tests/tests.py	12	13	if TYPE_CHECKING:	type AnnotatedKwarg = str
 .django/tests/template_tests/tests.py:114-123	tests/template_tests/tests.py	114	123	assertRaises(RuntimeError)	-
 tests.py:148-155	tests/template_tests/tests.py	148	155	def test_compile_tag_extra_data(self):	self.assertEqual(t.extra_data["extra_data"], "CUSTOM_DATA")

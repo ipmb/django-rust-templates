@@ -45,5 +45,10 @@ def installed() -> bool:
 
 
 def unshimmed() -> list[str]:
-    """Modules under ``django.template`` still served by Django's own code."""
+    """Modules of *the engine* under ``django.template`` still Django's own code.
+
+    Not every module under ``django.template``: the ones §3 declares are not the
+    engine — the backend contract, the loading facade, responses and the two
+    pieces of glue — are subtracted, because they will never be ours.
+    """
     return _shim.unshimmed()

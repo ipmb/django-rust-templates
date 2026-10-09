@@ -97,6 +97,44 @@ NAMESPACE_ROOTS = {
 }
 NAMESPACES = tuple(NAMESPACE_ROOTS)
 
+# Modules under `django.template` that are **not the template engine**, and are
+# therefore Django's for good rather than ours to take.
+#
+# The correction this records: `django.template` is the package the engine
+# happens to live in, not the engine. Everything here is either a framework
+# adapter around the engine — the pluggable-backend contract (`backends`), the
+# settings-mediated facade `loader`, the view-layer `response` — or glue over
+# objects that are already ours (`autoreload`, `context_processors`, and
+# `backends.django`, whose body is `Engine(...)` construction from `OPTIONS`).
+# §3 declines the backend contract outright, and `backends.jinja2` is its
+# non-Django implementation: the five jinja2-backend skips in §2's baseline are
+# that decline, measured.
+#
+# **The membership lives here and the reasons live in
+# `tests/milestone_ownership.py`** — strict mode needs the set at runtime and
+# `_shim` must not import test code, which is the split `SHADOWING` (membership,
+# derived from the files on disk) already has against `INTERPOSED` (attribution).
+# `test_the_declared_names_are_the_excluded_ones` asserts the two agree, so a
+# name cannot leave the meter here without its reason being revisited there.
+#
+# Keyed by dotted suffix — the spelling `django_modules(scope)` returns and the
+# one the ownership table uses — so the subtraction in `unshimmed` needs no
+# conversion and there is no second spelling to drift.
+NOT_THE_ENGINE = frozenset(
+    {
+        "autoreload",
+        "backends",
+        "backends.base",
+        "backends.django",
+        "backends.dummy",
+        "backends.jinja2",
+        "backends.utils",
+        "context_processors",
+        "loader",
+        "response",
+    }
+)
+
 _IMPL_DIR = Path(__file__).parent / "_impl"
 _IMPL_INIT = _IMPL_DIR / "__init__.py"
 
@@ -604,8 +642,8 @@ def install(strict: bool = False) -> None:
         remaining = unshimmed()
         if remaining:
             raise ShimError(
-                "strict mode: still served by Django's own code: "
-                + ", ".join(remaining)
+                "strict mode: the engine is not wholly ours, and these modules "
+                "are still served by Django's own code: " + ", ".join(remaining)
             )
 
 
@@ -654,13 +692,21 @@ def installed() -> bool:
 
 
 def unshimmed(scope: str = TARGET) -> list[str]:
-    """Modules under ``scope`` still served by Django's own code.
+    """Modules under ``scope`` still served by Django's own code *that are ours to take*.
 
-    This is the project's progress meter: at ``scope="django.template"`` it is
-    empty exactly when every module under ``django.template`` is provided by this
-    package, and it has been 11 since M12 began. ``scope="django.templatetags"``
-    is the same count over the other population, starting at Django's five
-    libraries.
+    This is the project's progress meter, and since the scope correction it
+    counts progress toward **the engine** rather than toward the package the
+    engine lives in: :data:`NOT_THE_ENGINE` is subtracted, so at
+    ``scope="django.template"`` it is empty exactly when the engine is wholly
+    ours — M14's end state, which was unreachable while the count included the
+    ten adapters §3 declines. ``scope="django.templatetags"`` is the same count
+    over the other population, starting at Django's five libraries.
+
+    What the subtraction costs is the literal reading of the name: a declared
+    module *is* still served by Django's own code and is no longer named here.
+    The two questions are one set apart — ``django_modules(scope) - ours`` — and
+    a caller that wants file ownership rather than progress should ask that,
+    which is what `test_shim`'s partial-package row now does.
 
     **One implementation over two populations, not two functions.**
     ``unshimmed_templatetags()`` would be a second spelling of one count, and two
@@ -675,7 +721,14 @@ def unshimmed(scope: str = TARGET) -> list[str]:
         raise ShimError("not installed; call install() first")
 
     ours = _our_modules_in(scope)
-    return sorted(f"{scope}.{name}" for name in django_modules(scope) - ours)
+    # ``NOT_THE_ENGINE`` is keyed for ``django.template`` and subtracted from
+    # whatever scope was asked for: a scoped set that cannot intersect it loses
+    # nothing, and the alternative — testing the scope here — would make the
+    # count over the second population depend on a comparison this function is
+    # not about. A scope-relative exclusion would instead need a second spelling
+    # of the same names, which is the drift this function's docstring warns of.
+    remaining = django_modules(scope) - ours - NOT_THE_ENGINE
+    return sorted(f"{scope}.{name}" for name in remaining)
 
 
 def _our_modules_in(scope: str) -> set[str]:

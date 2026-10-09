@@ -18,6 +18,14 @@ failure it has always been — which is why M12's row below names all five even
 though `cache` and `static` were the only two transcribed by Task 3, and those
 two have already moved out of `OWNERS` and into `INTERPOSED`.
 
+**A third bucket since the scope correction: names that are not the engine.**
+``unshimmed()`` now subtracts `_shim.NOT_THE_ENGINE`, so the meter counts the
+engine rather than the package the engine lives in: ten of `django.template`'s
+26 modules are Django's for good. That is what makes M14's end state reachable at
+all, and it is why this bucket is the one place in this file where a name is
+recorded in order to be taken *off* the schedule rather than onto it — its
+membership is the shim's (strict mode reads it) and its reasons are here.
+
 Keys are ``_impl``-relative, the spelling :func:`_shim.dotted_suffix` produces
 from a file path and the one ``SHADOWING``, ``DECLARED`` and ``COMPARED_PATH``
 all use. That is *not* the meter's spelling — the meter answers in full dotted
@@ -72,46 +80,124 @@ OWNERS = {
     # `test_no_name_is_both_owned_and_taken` exists to force. M12's row also
     # retires nothing from the 11 the first scope is counted at.
     #
-    # §10.3's M13 row — partials, `library`, `backends`, `response` — plus
-    # `loader`, which the row does not name and which §2 had to decide: the
-    # singular `django.template.loader` is the *public facade* (`get_template`,
-    # `select_template`, `render_to_string`), it reaches templates through
-    # settings, and its only importer inside the template package is
-    # `response.py`, which M13 owns. That is §6's framework-coupling test,
-    # applied by hand, and it is stated here rather than left for the next
-    # reader to resolve to whichever spelling they thought of first.
-    "loader": "M13",
+    # §10.3's M13 row, **as corrected**: partials and `library`. The row used to
+    # read "partials, `library`, `backends`, `response`" and this bucket used to
+    # hold nine names; eight of them moved to `NOT_THE_ENGINE` below, and the
+    # ninth (`loader`) went with them. `library` is what is left, and it is the
+    # engine's own rather than an adapter: `Library`, `register`, `simple_tag`,
+    # `inclusion_tag` and `parse_bits` are what `{% load %}` compiles a
+    # third-party tag library *with*. That is the line this table now draws, and
+    # `_shim.NOT_THE_ENGINE` is where the other side of it is recorded.
     "library": "M13",
-    "backends": "M13",
-    "backends.base": "M13",
-    "backends.django": "M13",
-    "backends.dummy": "M13",
-    "backends.jinja2": "M13",
-    "backends.utils": "M13",
-    "response": "M13",
 }
 
-# Names no milestone has agreed to take, each with the reason it is not simply
-# assigned to M14. `.review/m10-recon.md` §2: "undecided, not M14's by default"
-# — the reading that they are M14's rests on the premise that zero is the right
-# end state, and both of these argue against it.
-UNDECIDED = {
+# Names no milestone will take, because they are **not the template engine** —
+# Django's for good rather than ours, which is what separates this bucket from
+# `OWNERS` above it. They still count in the meter's universe and still appear in
+# `_shim.NOT_THE_ENGINE`; what they do not do is appear in `unshimmed()`.
+#
+# **The decision is the user's, taken 2026-10-09**, and it is why this bucket is
+# not called `UNDECIDED` any more: *"You don't need to rewrite all of
+# `django.template`. I see the various backends listed in your TODO. You are just
+# focused on the Django template engine."* Before it this bucket held two names
+# and `.review/m10-recon.md` §2 called them "undecided, not M14's by default" —
+# the bucket was a question, and M14 could not be reached while a question sat in
+# the meter. It is an answer now.
+#
+# The test that decides every one of them is §6's vendoring policy, applied the
+# way `autoreload` was: *"with nothing of ours to get right, there is also
+# nothing for a test to falsify."* Each reason below names which side of the
+# boundary it is on — an adapter around the engine, or glue over objects the
+# engine already hands back — because the reason is the part a reviewer attacks.
+NOT_THE_ENGINE = {
+    "loader": (
+        "66 lines and four functions at 6.0.9, and every body is the same "
+        "delegation: `engines.all()` or `engines[using]`, then "
+        "`engine.get_template(name)`, then `template.render(context, request)`. "
+        "Both halves are ours already — `engine` was M10's, `Template.render` is "
+        "M9's and M11's — so the facade hands its caller *our* objects and defines "
+        "no template machinery of its own. That is §6's test, and the one input "
+        "it handles by itself is `select_template`'s string check, which is "
+        "argument shaping over `get_template`. **The closest call in this "
+        "bucket**, and therefore the one written out: it is the API a project "
+        "calls, and it stays Django's precisely because calling it already runs "
+        "our engine. The falsifier is a behaviour the engine does not expose."
+    ),
+    "response": (
+        "The view-layer object. `TemplateResponse` and `SimpleTemplateResponse` "
+        "own HTTP semantics — status and `Content-Type` negotiation, post-render "
+        "hooks, and the pickling for the cache — and reach a template only through "
+        "`loader` above. Nothing in the engine imports it; it is Django's view "
+        "layer reaching down into the template package, not the engine reaching "
+        "up into the view layer, which is why the direction of the import is the "
+        "whole argument and not a detail."
+    ),
+    "backends": (
+        "The pluggable-backend registry: `BACKENDS`, per-backend `OPTIONS`, and "
+        "the `engine` cache. It is the seam a *project* configures, and the engine "
+        "it constructs is `django.template.engine.Engine`, which is ours since "
+        "M10. §3 declines the contract this module implements, so owning the "
+        "registry would mean owning a protocol whose other implementation — "
+        "`backends.jinja2` below — we deliberately do not provide. The acceptance "
+        "suite reaches it only from `test_response.py`'s two `test_using` rows "
+        "(`test_response.py:141`, `test_response.py:296`, `def test_using(self):` "
+        "at each), and those are two of §2's five structural skips."
+    ),
+    "backends.base": (
+        "`BaseEngine` and `Template`: the protocol every backend implements, "
+        "including the `Template` wrapper that exists so a backend can return "
+        "something which is not `django.template.base.Template`. Implementing it "
+        "for one backend is a wrapper around our own `Engine` — the shape §6's "
+        "vendoring policy exists to refuse."
+    ),
+    "backends.django": (
+        "`DjangoTemplates`, the backend that wraps the engine we already own: "
+        "`Engine(...)` built from the `OPTIONS` dict, plus a `Template` wrapper "
+        "around `django.template.base.Template`. Its body is settings plumbing "
+        "between §3's declined contract and M10's engine, and the plumbing is the "
+        "part that would have to be re-derived from Django's settings semantics "
+        "rather than from template semantics."
+    ),
+    "backends.dummy": (
+        "The no-op backend, which exists so a project can configure a template "
+        "backend that renders nothing. It defines no template machinery — its "
+        "`Template` is a string wrapper — and it is the one member of this bucket "
+        "the acceptance suite never reaches at all: `template_tests` is the whole "
+        "label set, and the dummy backend's rows live in `template_backends`."
+    ),
+    "backends.jinja2": (
+        "§3's standing non-goal, which has been written in one line there since "
+        "the spec's first draft and is measured here: a second, non-Django "
+        "implementation of the same contract. The five jinja2-backend skips in "
+        "§2's baseline are this decision, not an environment problem — they skip "
+        "because Jinja2 is deliberately not installed, and §2 refuses to let a "
+        "sixth appear."
+    ),
+    "backends.utils": (
+        "The backend protocol's argument normalisation: resolving an engine name "
+        "to a backend and building the `OPTIONS` dict it is constructed with. "
+        "Helpers for the contract above, imported by it and by nothing in the "
+        "engine."
+    ),
+    "context_processors": (
+        "Reached by import string from `_builtin_context_processors` "
+        "(`django/template/context.py:5`), not by a module-level import, so "
+        "interposing `context` does not pull it in and nothing in the engine "
+        "depends on its identity — Django's own `Engine` looks the string up from "
+        "settings. Unlike `autoreload` it does have behaviour of its own "
+        "(`csrf`, `debug`, `request`, `auth`), and that is the point: every one "
+        "of them takes a *request* and returns context for a response, so it is "
+        "view-layer machinery that the engine merely names."
+    ),
     "autoreload": (
         "`autoreload.py` consumes objects that become ours (`from django.template "
         "import engines`, and `DjangoTemplates` from `django.template.backends."
         "django`) and defines no template machinery of its own: two signal "
         "receivers and a directory walk. Interposing it would be copying glue, "
         "which is what §6's vendoring policy exists to refuse — with nothing of "
-        "ours to get right, there is also nothing for a test to falsify."
-    ),
-    "context_processors": (
-        "Reached by import string from `_builtin_context_processors` "
-        "(`django/template/context.py:5`), not by a module-level import, so "
-        "interposing `context` does not pull it in and nothing in the engine "
-        "depends on its identity — Django's own `Engine` looks it up from the "
-        "settings string. Unlike `autoreload` it does have behaviour of its own "
-        "(`csrf`, `debug`, `request`, `auth`), so it is a real candidate rather "
-        "than a leaf, and nothing in this milestone decides it."
+        "ours to get right, there is also nothing for a test to falsify. Its rows "
+        "in the acceptance suite, `test_autoreloader.py`, are Django's and stay "
+        "green either way."
     ),
 }
 
@@ -181,13 +267,34 @@ def interposed(scope: str | None = None) -> set:
     return {name for name in names if scope_of(name) == scope}
 
 
-def owned(scope: str | None = None) -> set:
-    """Every name a milestone has agreed to take, taken or not.
+def claimed(scope: str | None = None) -> set:
+    """Every name a bucket files, in either of the two directions it can go.
 
-    The union of the two pending-and-taken buckets, as :func:`interposed` is for
-    the taken one, and scope-filtered the same way and for the same reason.
+    The union of the milestone bucket (`OWNERS`, taken or not) and the
+    not-the-engine bucket, as :func:`interposed` is for the taken one — and
+    scope-filtered the same way and for the same reason. Both directions are in
+    one function because the meter's identity needs exactly this union: a name in
+    either bucket is *settled*, so it is out of ``unshimmed()`` whether it is out
+    because a milestone took it or because §3 declines it.
+
+    :func:`pending` is the other question — what a milestone still owes — and the
+    two differ by precisely `NOT_THE_ENGINE`.
     """
-    names = set(OWNERS) | set(UNDECIDED)
+    names = set(OWNERS) | set(NOT_THE_ENGINE)
+    if scope is None:
+        return names
+    return {name for name in names if scope_of(name) == scope}
+
+
+def pending(scope: str | None = None) -> set:
+    """Every name a milestone has agreed to take and has not taken yet.
+
+    The engine's remaining work, and the set ``unshimmed()`` reports over the
+    first scope — one name (`library`) since the scope correction. It is written
+    as a subtraction of the *other* table rather than as a literal, because a
+    literal here would be a second account of M13's row.
+    """
+    names = set(OWNERS) - interposed()
     if scope is None:
         return names
     return {name for name in names if scope_of(name) == scope}

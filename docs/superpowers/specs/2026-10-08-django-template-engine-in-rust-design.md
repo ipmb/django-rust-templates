@@ -70,6 +70,22 @@ Any *new* skip appearing later is a regression, and is treated as a failure.
 - Optimising for speed. This is a **compatibility-first** build; performance is a
   possible later phase, not an acceptance criterion.
 - Reimplementing the Jinja2 backend.
+- **Reimplementing `django.template`'s adapters. `django.template` is the package
+  the engine lives in, not the engine.** Ten of its 26 modules are framework
+  plumbing rather than template machinery, and they stay Django's for good: the
+  pluggable-backend contract (`backends`, `backends.base`, `backends.django`,
+  `backends.dummy`, `backends.jinja2`, `backends.utils` — the bullet above is its
+  non-Django implementation), the settings-mediated loading facade `loader`, the
+  view-layer `response`, and the two pieces of glue over objects the engine
+  already hands back (`autoreload`, `context_processors`). The decision is the
+  user's, taken 2026-10-09: *"You don't need to rewrite all of `django.template`
+  … You are just focused on the Django template engine."* It is recorded as
+  `_shim.NOT_THE_ENGINE` with a reason per name in `tests/milestone_ownership.py`,
+  and the meter subtracts it — so **`unshimmed()` counts the engine**, which is
+  what makes §10.1's and M14's *empty* reachable at all. `loader` is the closest
+  call of the ten and the one worth arguing about: it is the API a project calls,
+  and it is Django's because calling it already runs our engine (66 lines, four
+  bodies, each one delegation into `engine.get_template` and `Template.render`).
 - Reimplementing Django outside `django.template` (ORM, views, forms). We depend
   on the real Django for everything else.
 
@@ -689,8 +705,12 @@ nothing. That is the right trade (a static comparison has no import side effects
 which matters for a meter callable anywhere), but the count is therefore an
 upper bound on progress, and the behavioural check that matters is the
 differential harness (§9), not the meter. `strict=True` failing when a fallback
-is active is deliberately unusable until M14; what fails early and loudly is the
-*shim not being installed*, which is the condition that is always wrong.
+is active is deliberately unusable until M14; and since the scope correction *a
+fallback* means an **engine** module — §3's ten adapters are subtracted from the
+meter rather than reported as fallbacks, because strict mode reads the meter and
+would otherwise refuse to run this package on any Django project at all. What
+fails early and loudly is the *shim not being installed*, which is the condition
+that is always wrong.
 
 `django.test` itself renders templates (`assertTemplateUsed`, response
 rendering), so the shim must satisfy framework-level use, not only
@@ -750,7 +770,9 @@ So the project runs **engine-first**:
 - A module is **interposed** only when it is complete. At that point its Django
   tests become real signal rather than noise.
 - The Django suite runs throughout, in both modes. The acceptance gate is §2,
-  reached when `unshimmed()` is empty and strict mode is clean.
+  reached when `unshimmed()` is empty — every module of the engine ours, with
+  §3's ten adapters subtracted from the count rather than left in it — and
+  strict mode is clean.
 
 `unshimmed()` therefore measures *integration* progress, while the differential
 corpus measures *engine* progress. Both matter; neither alone is the project's
@@ -807,11 +829,28 @@ the highest-risk milestone, and §5.5 is where the answer to it lives.
 | M10 | Interpose `context`, `engine`, `utils`, `loaders` | ✅ **four modules, not the five this row named, and the fifth does not exist**: there is no `origin` module at 6.0.9 — `Origin` is a class in `base.py`, which M9 owns — so the milestone moved **nine** meter entries (`utils`, `context`, `engine`, and the six files under `loaders/`) and `unshimmed()` is **23 → 14**. The gate is consequently `test_context` (25 rows), `test_engine` (10) and `test_loaders` (21), all three now exercising our modules; `test_origin` (3) is **M9's gate rather than this milestone's**, because the class it exercises arrived with `base.py`. The project-side case-sensitivity test §2 schedules landed as `tests/test_loader_case_sensitivity.py` — three rows that run on every platform, because upstream's row is guarded by `os.path.normcase`, which is the identity function here and is evaluated before any file is opened, so a case-sensitive volume would not recover it, and there is no folded branch to port: the loader is `safe_join(template_dir, template_name)`. **The milestone repairs the schedule's own accounting rather than only the tree**: `tests/milestone_ownership.py` is the partition these rows never were — every remaining name mapped to the milestone that takes it — with `tests/test_milestone_ownership.py` asserting both directions against `unshimmed()` and against the shadowing table, and the two names it declines to own (`autoreload`, `context_processors`) are recorded as the §2 goal question below rather than assigned to M14 by default. **Four latent instrument defects were found and are fixed rather than survived — two on the way, two in the close-out review of the compared-path instrument's own guard**: the undeclared-file clause walked `_impl` with a non-recursive glob and keyed files by basename, both invisible only while the tree was flat, and `loaders/` is the first subpackage — `loaders/base.py` keyed as `base.py` and was checked against a *different* transcription's declared regions; and the compared-path instrument wrapped only `inspect.isfunction`, so `FilterExpression.args_check` — a `staticmethod`, called 85 times over the parity corpus — was uncounted, which moved `base.py`'s measured reach 28 → 29 functions with its span unchanged. The close-out review then found the same defect one level up twice: `residue`, the check written to catch an unhandled member kind, filtered by `_is_ours` — which asks the very table whose incompleteness it exists to detect — and so stayed silent for exactly the shape it was written for, fixed by reporting unless *positively* foreign; and `_innermost`'s `__wrapped__` walk was unconditional, so a `functools.wraps` wrapper we wrote around a foreign function walked *out* of the file and dropped an owned, executed function from the compared path, with `span_of`'s `getsourcelines` (which unwraps) recording 72-92 of `<frozen posixpath>` as that member's own lines while the guard, asking about the wrapper's file, agreed with itself. Both fixes are one condition each. Counts at close: `scripts/check.sh` green, the suite at `Ran 1547 tests … OK (skipped=6)`, the unit suite at **370** (367 when the milestone closed, plus the three rows the close-out review added to `tests/test_compared_path_instrument.py`), and `unshimmed()` at **14** |
 | M11 | Interpose `defaulttags`, `defaultfilters`, `loader_tags` | ✅ **three files — the largest transcription milestone so far (3,053 lines, 29 classes, 89 module-level defs) — and the one that closes M4's "acceptance blind spot"**: the **454** `filter_tests` rows were green against *Django's* filter bodies and now run Rust's, because `FilterExpression.resolve` decides **per filter, at render time, by the identity of the handle**. Not by name: `{% load %}`'s `self.filters.update(lib.filters)` (`base.py:670`) rebinds a name to a caller's callable, which is why `_impl/parser.py:669` resolves the handle `find_filter` returned instead of looking the name up again. Not at parse time: a per-filter "is built-in" bit in the descriptor is a second account of a fact `resolve` can read directly, and it goes stale the moment a `{% load %}` appears after the expression was compiled. The arm **replaces** upstream's loop for that filter rather than wrapping it, because `_native.filter` performs all four of upstream's steps — `expects_localtime`, `@stringfilter`'s coercion, the `autoescape` keyword, `mark_safe` — inside itself, so falling through would coerce and `mark_safe` a second time, and the second `mark_safe` is invisible (idempotent on `SafeString`). The predicate is an inverted map (`host.django_own_filters()`) whose cache is keyed on the **registry object**, not on emptiness, because a map built from a replaced registry is stale in the one way nothing notices: all 57 filters fall through to the Python loop and the whole suite stays green. **The 25 built-in tags are unchanged in ownership** — Rust has compiled them since M7, and these three files moving the *registry's* owner and the *node classes'* owner is what makes `syntax_tests`' tag rows and `test_url` real signal — `test_url` being **moved here from M12 by the M5 plan's Scope section**, on the measurement that it uses only `{% url %}` and `{% autoescape %}` with no `{% load %}`, and imports `URLNode` from `django.template.defaulttags` by name. `unshimmed()` **14 → 11**; the unit suite at **389**; `scripts/check.sh` green with `Ran 1547 tests … OK (skipped=6)`. **M7's vacuity reason for `test_include_cache` expires here, and the row was re-read by breaking the behaviour rather than by inference**: with `IncludeNode.render`'s cache bypassed in `_impl/loader_tags.py`, Django's own row (`syntax_tests/test_include.py:371-397`) fails `'000000000' != '012345678'` and `tests/test_inheritance_gate.py`'s counter row fails with it; before the interposition the first could not move at all. Both instruments stay, and which is which is now stated: Django's row is the *end-to-end* one, the gate's counter row is the *direct-entry* one, and the gate's node-count row is the one thing the pair cannot see. **The plan's own counts did not survive measurement, in the shape this project keeps finding**: "the 26 `do_*` bodies are Rust-compiled" quotes the count of module-level functions (26) as if it were the registry (`defaulttags` registers 24, of which **20** are Rust's), and Step 2 expected four host-side tags where the parse corpus executes **44** functions — the same 26 being right for two different questions is what the Task 3 amendment records |
 | M12 | `i18n`, `l10n`, `static`, `tz`, `cache` libraries | `syntax_tests/i18n/*`, `test_cache` |
-| M13 | Partials, `library`, `backends`, `response` | `test_partials`, `test_response` |
-| M14 | `unshimmed()` empty under strict mode | full suite green with no fallback |
+| M13 | Partials and `library` — the extension API a `{% load %}`ed tag library is compiled with | `test_partials`, `test_library` |
+| M14 | `unshimmed()` empty over the engine — every name it still reports is one §3 declares not the engine | full suite green with no fallback |
 | M15 | Hardening | §2 met with margin |
 
 Each milestone ends with its stated check green and one commit.
+
+**M13's and M14's rows were corrected on 2026-10-09, by the user, and the
+correction is the reason M14 has an end state at all.** They read "Partials,
+`library`, `backends`, `response`" and "`unshimmed()` empty under strict mode",
+which made the project's target the whole of `django.template` — a package whose
+ten adapters (§3) are framework plumbing, and which would have had to be copied,
+against §6's vendoring policy, for the meter to reach the zero the M14 row
+demanded. The user's words: *"You don't need to rewrite all of `django.template`
+… You are just focused on the Django template engine."* M13 therefore keeps
+`library` (the extension API `{% load %}` compiles a tag library with, which is
+machinery) and drops `backends`, the five `backends.*` files, `response` and
+`loader`; M14 keeps *empty* and changes the population it is empty over. The
+membership is `_shim.NOT_THE_ENGINE`, the reasons are in
+`tests/milestone_ownership.py`, and `tests/test_milestone_ownership.py` asserts
+the two agree — so the exclusion is a declared set with rows under it rather than
+a number someone remembered, and `unshimmed()` is **1** in the commit that made
+the correction (the one being `library`).
 
 **The vacuity rule, and every gate above is read through it.** A gate that names
 a `.django/tests/` module is only a gate for the milestone that *interposes* the

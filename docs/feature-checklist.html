@@ -123,6 +123,8 @@
     line-height: 1.1;
   }
   .stat .cap { font-size: 12.5px; color: var(--muted); display: block; margin-top: 6px; }
+  /* Emphasis in a caption is weight of ink, not slope — the file's own idiom. */
+  .stat .cap em { font-style: normal; color: var(--fg); }
   .stat.is-done .num { color: var(--done); }
   .stat.is-open .num { color: var(--wip); }
 
@@ -189,7 +191,7 @@
   }
   .open > li.todo { border-left-color: var(--todo); }
   .open > li.done { border-left-color: var(--done); }
-  .open > li.undecided { border-left-style: dashed; border-left-color: var(--todo); }
+  .open > li.not-engine { border-left-style: dashed; border-left-color: var(--line); }
   .open .name {
     font-family: var(--font-mono);
     font-size: 13px;
@@ -213,7 +215,7 @@
   .pill.done { color: var(--done); background: var(--done-bg); }
   .pill.wip { color: var(--wip); background: var(--wip-bg); }
   .pill.todo { color: var(--todo); background: var(--todo-bg); }
-  .pill.undecided { color: var(--todo); background: transparent; border: 1px dashed var(--todo); }
+  .pill.not-engine { color: var(--muted); background: var(--sunk); }
 
   .legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 0 22px; font-size: 13px; color: var(--muted); }
   .legend span { display: flex; align-items: center; gap: 7px; }
@@ -294,8 +296,8 @@
       <span class="cap">built-in tags implemented in Rust</span>
     </div>
     <div class="stat is-open">
-      <span class="num">11</span>
-      <span class="cap">modules of <code>django.template</code> still Django's own code</span>
+      <span class="num">1</span>
+      <span class="cap">module of the template <em>engine</em> still Django's own code — <code>library</code>. Ten more of <code>django.template</code> are adapters Django keeps for good</span>
     </div>
     <div class="stat is-done">
       <span class="num">0 / 5</span>
@@ -309,14 +311,23 @@
       <span><i class="pill done">Done</i> Rust does the work</span>
       <span><i class="pill wip">In progress</i> Rust parses it, Django's code runs it</span>
       <span><i class="pill todo">To do</i> still entirely Django's</span>
-      <span><i class="pill undecided">Undecided</i> not yet assigned</span>
+      <span><i class="pill not-engine">Not the engine</i> Django's for good — an adapter around the engine, not the engine</span>
     </div>
     <p class="sub">
       Rust's parser drives every template, including the tags and libraries it does not
       implement: for those it hands the tag's arguments back to Django's own Python compile
       function. So a feature can work today, and appear in this page as not done, without
-      contradiction. The honest measure of "ported" is the last number above — how many
-      modules of <code>django.template</code> still execute Django's code.
+      contradiction. The honest measure of "ported" is the module count below — how much of
+      the template <em>engine</em> still executes Django's code.
+    </p>
+    <p class="sub">
+      That count is over the engine, and it is smaller than the package it lives in.
+      <code>django.template</code> holds the engine plus ten adapters — the loading facade,
+      the backend registry and its five modules, template responses, context processors and
+      the dev-server reloader. They are not the engine, they are not ours to rewrite, and
+      they never will be: each one either wraps objects the engine already hands back or
+      belongs to Django's view layer. They are marked <b>Not the engine</b> throughout, and
+      they are subtracted from the meter rather than counted against it.
     </p>
   </section>
 
@@ -435,7 +446,9 @@
     <h2>Tag and filter registration <span class="pill todo">To do</span></h2>
     <p class="sub">
       What makes a template language extensible: the classes and decorators a project or a
-      third-party app uses to add its own tags and filters.
+      third-party app uses to add its own tags and filters. This is the engine's last module
+      — <code>library</code> — and it is the engine's own rather than an adapter:
+      <code>{% load %}</code> compiles a third-party tag library <em>with</em> it.
     </p>
     <ul class="open">
       <li class="todo">
@@ -450,38 +463,43 @@
   </section>
 
   <section>
-    <h2>Public template API <span class="pill todo">To do</span></h2>
-    <p class="sub">The surface a Django project touches — the part "drop-in replacement" is judged by at the application level.</p>
+    <h2>Public template API <span class="pill not-engine">Not the engine</span></h2>
+    <p class="sub">
+      The surface a Django project touches — the part "drop-in replacement" is judged by at
+      the application level. Every item here is an adapter the engine sits inside: it hands
+      the caller objects Rust already produces, and defines no template machinery of its own.
+      These stay Django's, which is why they no longer appear in the to-do count.
+    </p>
     <ul class="open">
-      <li class="todo">
+      <li class="not-engine">
         <span class="name">Template loading facade<span>render_to_string, get_template, select_template</span></span>
-        <span class="why">The public entry points reached through settings. They reach templates through the engine Rust already provides, so the work here is the wrapper.</span>
+        <span class="why">Sixty-six lines and four functions, and every body is the same delegation: pick an engine, <code>get_template(name)</code>, <code>render(context, request)</code>. Both halves are already Rust's, so calling this facade already runs the port. <em>It reads as ours at the application level for exactly that reason.</em></span>
       </li>
-      <li class="todo">
+      <li class="not-engine">
         <span class="name">Backends<span>DjangoTemplates, Jinja2, Dummy</span></span>
-        <span class="why">The <code>BACKENDS</code> setting, per-backend <code>OPTIONS</code>, and the <code>Template</code> wrapper a backend returns. Where a project's own configuration is honoured.</span>
+        <span class="why">The <code>BACKENDS</code> setting, per-backend <code>OPTIONS</code>, and the <code>Template</code> wrapper a backend returns. A protocol with a second implementation we deliberately do not provide — owning the registry would mean owning Jinja2's backend too. The suite reaches it from two rows only.</span>
       </li>
-      <li class="todo">
+      <li class="not-engine">
         <span class="name">Responses<span>TemplateResponse, SimpleTemplateResponse, render()</span></span>
-        <span class="why">The view-layer objects, including their caching and post-render hooks.</span>
+        <span class="why">The view-layer objects, including their caching and post-render hooks. HTTP semantics — status, <code>Content-Type</code> negotiation, pickling — that reach a template only through the loading facade above. Nothing in the engine imports this module; the import runs the other way.</span>
       </li>
-      <li class="undecided">
+      <li class="not-engine">
         <span class="name">Context processors<span>csrf, debug, request, auth</span></span>
-        <span class="why">Reached by import string from settings, not by import from the engine, so nothing in the engine depends on their identity. Real behaviour of their own, so a real candidate — nothing has decided it.</span>
+        <span class="why">Reached by import string from settings, not by import from the engine, so nothing in the engine depends on their identity. Every one takes a <em>request</em> and returns context for a response — view-layer machinery the engine merely names.</span>
       </li>
-      <li class="undecided">
+      <li class="not-engine">
         <span class="name">Template autoreload<span>dev-server template reloading</span></span>
-        <span class="why">Two signal receivers and a directory walk around objects that are already ours. Taking it would mean copying glue with no template machinery to get right.</span>
+        <span class="why">Two signal receivers and a directory walk around objects that are already ours. Taking it would mean copying glue with no template machinery to get right — with nothing of ours to get right, there is also nothing for a test to falsify.</span>
       </li>
     </ul>
   </section>
 
   <section>
-    <h2>Where Django's code is still running <span class="count">11 modules</span></h2>
+    <h2>Where Django's code is still running <span class="count">1 module</span></h2>
     <p class="sub">
       The number that moves when a feature really lands. Each module named here is still
       Django's, and the acceptance suite would pass with it in place — which is exactly why
-      it is tracked.
+      it is tracked. One module of the engine is left.
     </p>
     <div class="tablewrap">
       <table>
@@ -490,16 +508,6 @@
         </thead>
         <tbody>
           <tr><td class="mod">library</td><td>Tag and filter registration</td><td><i class="pill todo">To do</i></td></tr>
-          <tr><td class="mod">loader</td><td>Public loading facade</td><td><i class="pill todo">To do</i></td></tr>
-          <tr><td class="mod">response</td><td>Template responses</td><td><i class="pill todo">To do</i></td></tr>
-          <tr><td class="mod">backends</td><td>Backend registry</td><td><i class="pill todo">To do</i></td></tr>
-          <tr><td class="mod">backends.base</td><td>Backend base class</td><td><i class="pill todo">To do</i></td></tr>
-          <tr><td class="mod">backends.django</td><td>The Django backend</td><td><i class="pill todo">To do</i></td></tr>
-          <tr><td class="mod">backends.dummy</td><td>The no-op backend</td><td><i class="pill todo">To do</i></td></tr>
-          <tr><td class="mod">backends.jinja2</td><td>The Jinja2 backend</td><td><i class="pill todo">To do</i></td></tr>
-          <tr><td class="mod">backends.utils</td><td>Backend helpers</td><td><i class="pill todo">To do</i></td></tr>
-          <tr><td class="mod">context_processors</td><td>Built-in context processors</td><td><i class="pill undecided">Undecided</i></td></tr>
-          <tr><td class="mod">autoreload</td><td>Dev-server reloading</td><td><i class="pill undecided">Undecided</i></td></tr>
         </tbody>
       </table>
     </div>
@@ -511,12 +519,43 @@
     </p>
     <p class="sub" style="margin-top:16px">
       Django's five template-tag libraries are tracked as a <b>second scope</b> beside the
-      eleven modules above — <code>django.templatetags.cache</code>, <code>.i18n</code>,
+      module above — <code>django.templatetags.cache</code>, <code>.i18n</code>,
       <code>.l10n</code>, <code>.static</code> and <code>.tz</code>, the eighteen registered
       tags and the nine filters that go with them. That scope is <b>empty</b>: no module under
       <code>django.templatetags</code> is still served by Django, so the meter that counts it
-      reads zero while the eleven above are what remains of <code>django.template</code>.
+      reads zero while <code>library</code> above is what remains of the engine.
     </p>
+  </section>
+
+  <section>
+    <h2>Not the engine <span class="pill not-engine">Not the engine</span></h2>
+    <p class="sub">
+      Ten more modules of <code>django.template</code> are Django's own code and always will
+      be. They are adapters <em>around</em> the engine rather than the engine: each one either
+      wraps objects Rust already hands back, or belongs to Django's view layer, which reaches
+      down into the template package rather than the other way round. They are subtracted from
+      the meter rather than counted against it, and listed here so that anyone reading the
+      module count can see where the other ten went.
+    </p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Module of <code>django.template</code></th><th>What it does</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="mod">loader</td><td>Public loading facade</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">response</td><td>Template responses</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">backends</td><td>Backend registry</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">backends.base</td><td>Backend base class</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">backends.django</td><td>The Django backend</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">backends.dummy</td><td>The no-op backend</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">backends.jinja2</td><td>The Jinja2 backend</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">backends.utils</td><td>Backend helpers</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">context_processors</td><td>Built-in context processors</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">autoreload</td><td>Dev-server reloading</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <section>
