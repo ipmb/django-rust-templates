@@ -94,10 +94,10 @@ and such an entry passes `--check`, passes `--update`, survives any later line
 move inside the span, and verifies nothing: the name occurs in the span by
 construction, so the comparison cannot fail. It is *quoted*, so it counts in the
 cited total and `0 failures` presents it as verified, which no unquoted row can
-claim. Measured on 2026-10-09: 30 of the 400 entries carry a single identifier
-where a line of source was meant. The repair is not a tool change but the rule
-that the snippet be authored from the sentence's own claim in the same edit that
-names the file.
+claim. `--check` counts them separately (`name-only`), because a number written
+here goes stale the moment the manifest moves and a number in output cannot.
+The repair is not a tool change but the rule that the snippet be authored from
+the sentence's own claim in the same edit that names the file.
 
 **Every limit above is a limit of the per-file policy, which has no terminating
 condition of its own.** Naming is done a file at a time, and the file is visited
@@ -105,20 +105,26 @@ because it holds shorthand; an unquoted entry in a file that never held any is
 therefore never requoted, and `unmigrated: 0` — the number the migration is
 tracked by — says nothing about it. So `--check` counts those entries separately:
 an unquoted row is *stranded* when every file citing it is already
-shorthand-free. Measured on 2026-10-09: 78 of the 164 unquoted entries, most of
-them in `host.rs`. They are not failures and `--frozen` does not fail on them;
+shorthand-free. They are not failures and `--frozen` does not fail on them;
 they are the part of the backlog the migration's own progress metric cannot see.
 
 **Two of those limits select for the same anchors, and the largest is not a limit
-of this tool at all.** Unquoted entries — measured 164 of the 400 on 2026-10-09 —
-are not a random half: an entry is unquoted exactly when its cited line is
-unremarkable (a blank, a bare delimiter, or a range spanning a whole function),
-which is the population the loose range above selects for too, so the residual
-risk is concentrated rather than spread. And **prose that cites nothing cannot be
-anchored at all**: a wrong statement about Django with no `name.py:N` beside it is
-invisible to every mode here, which is how this task's misquoted bodies and its
-one function name that exists nowhere in the checkout survived four rounds of
-checking it. A green `--check` is a statement about the entries that carry a
+of this tool at all.** Unquoted entries are not a random half: an entry is
+unquoted exactly when its cited line is unremarkable (a blank, a bare delimiter,
+or a range spanning a whole function), which is the population the loose range
+above selects for too, so the residual risk is concentrated rather than spread —
+**and it has a shape.** `_check_entry` with a `None` snippet tests one thing, that
+the line exists, so an unquoted row is blind *specifically to the wrong-file
+class*: any file long enough has the line. Measured as an experiment rather than
+argued — a row naming `library.py` when the claim is `tag_27584.py` returns zero
+failures unquoted and one failure once the same row carries the source text. That
+is the defect class with the most instances in this project (the filename
+inheritances), and it is the one class an unquoted row cannot catch. And **prose
+that cites nothing cannot be anchored at all**: a wrong statement about Django
+with no `name.py:N` beside it is invisible to every mode here, which is how this
+task's misquoted bodies and its one function name that exists nowhere in the
+checkout survived four rounds of checking it. A green `--check` is a statement
+about the entries that carry a
 claim, not about our prose.
 
 **A row the tree no longer cites is not checked at all**, and that direction is
@@ -141,6 +147,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CHECKOUT = ROOT / ".django"
 MANIFEST_PATH = ROOT / "scripts" / "anchors.txt"
+
+# The second base. `CHECKOUT` is Django's Python; this is our own tree, and the
+# two are the populations `--update` separates. Ours is mostly Rust, but it is
+# not only Rust — `python/django_rust_templates/` and the files in `OUR_OWN` are
+# cited the same way — so a row is classified by *which base its path resolves
+# under*, not by its extension.
+CRATES = ROOT / "crates"
 
 # Ambiguous basenames, with how many of each the checkout holds. A bare
 # basename for one of these cannot resolve, so the manifest names the path
@@ -175,10 +188,22 @@ _INDEX_CACHE = {}
 
 # Two forms, because the tree writes both: a bare basename (`` `base.py:615` ``)
 # and a qualified path (`` `django/template/base.py:615` ``,
-# `` `_impl/parser.py:210` ``). A qualified path resolves against the four bases
+# `` `_impl/parser.py:210` ``). A qualified path resolves against the bases
 # `resolve` documents; a bare basename resolves through the same function's
 # basename rules.
-ANCHOR_RE = re.compile(r"`([a-zA-Z_0-9/]+\.py):(\d+)(?:-(\d+))?`")
+#
+# **The path class widened, and that is the second base.** Ours cites our own
+# Rust as well as Django's Python, and before this the whole `.rs` corpus was
+# outside the pattern — `crates/template-*` was dropped by the missing hyphen,
+# and a bare `:N` following a `.rs` path was re-attributed to the nearest
+# preceding `.py` anchor, which is how five filename-inheritance mis-attributions
+# got into the tree. `-` is for `template-core`, `.` is for `foo.rs` **and** for
+# the seven citations written with the `.django/` checkout prefix (a leading dot
+# the old class could not match, in the `.py` population this tool claimed to
+# cover completely). Measured before writing it: 952 matches against the 914 the
+# old pattern saw, 26 new distinct — 19 `.rs` and 7 `.django/`-prefixed — every
+# one a real citation and nothing that is not one.
+ANCHOR_RE = re.compile(r"`([a-zA-Z_0-9/.\-]+\.(?:py|rs)):(\d+)(?:-(\d+))?`")
 
 # The third form — a bare `` `:N` `` meaning "the file this comment is about" —
 # is matched only to be *rejected*. A tool cannot resolve it without guessing
@@ -240,6 +265,11 @@ _DATED_REVIEW_RE = re.compile(r"^(m\d+|round-\d+)(-\S+)?\.md$")
 
 _SPAN_RE = re.compile(r"`([^`\n]+)`")
 
+# A snippet that is the subject's own name — `slugify`, `center` — occurs in the
+# span by construction, so the comparison cannot fail. Counted, because the
+# header describes the class and a number stored in a docstring goes stale.
+_NAME_ONLY_RE = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
+
 
 def _index(base):
     """`(basenames, relative paths)` under `base`, walked once and cached.
@@ -295,6 +325,15 @@ def resolve(name, checkout=None, manifest=None):
     ambiguous and zero is a missing file. `manifest` carries the explicit paths
     the author already decided, consulted before the search, because the
     decision belongs in a reviewable file rather than in a heuristic.
+
+    **A bare `.rs` basename searches ours, never the checkout** — nothing under
+    `.django/` is Rust, so the basename cannot be Django's and the search needs
+    no preference rule. Uniqueness is still required: `host.rs` names two files
+    under `crates/`, and an ambiguity is an error rather than a guess, which is
+    why those citations carry a suffix path. **The base makes a *named* path
+    checkable; it never makes an unnamed one optional** — a bare `:N` is
+    `SHORTHAND_RE`'s business and stays a failure under `--frozen` whatever a
+    base could resolve it to.
     """
     checkout = CHECKOUT if checkout is None else checkout
     explicit = (manifest or {}).get(name) if "/" not in name else None
@@ -320,6 +359,19 @@ def resolve(name, checkout=None, manifest=None):
         raise SystemExit(
             f"anchor names `{name}`, which is no file under {checkout} and no "
             f"path suffix under {ROOT}"
+        )
+    if name.endswith(".rs"):
+        names, _ = _index(CRATES)
+        hits = names.get(name, [])
+        if len(hits) == 1:
+            return CRATES / hits[0]
+        if not hits:
+            raise SystemExit(f"anchor names `{name}`, which is not under {CRATES}")
+        raise SystemExit(
+            f"anchor names `{name}`, which is ambiguous under {CRATES} "
+            f"({len(hits)} candidates):\n  "
+            + "\n  ".join(sorted(hits))
+            + "\nGive the path explicitly in scripts/anchors.txt."
         )
     if name in OUR_OWN:
         candidate = ROOT / name
@@ -410,6 +462,7 @@ def check(checkout=None, tree=None, manifest=None, frozen=False, report=None):
     failures = []
     shorthand = []
     unquoted = set()
+    name_only = set()
     cited = set()
     citers = {}
     shorthand_free = set()
@@ -429,6 +482,8 @@ def check(checkout=None, tree=None, manifest=None, frozen=False, report=None):
                 continue
             if entry[2] is None:
                 unquoted.add(anchor)
+            elif _NAME_ONLY_RE.fullmatch(entry[2]):
+                name_only.add(anchor)
             failures.extend(_check_entry(path, anchor, match, entry, checkout))
         for match in here:
             shorthand.append(f"{path}: `{match.group(0).strip('`')}` names no file")
@@ -458,6 +513,13 @@ def check(checkout=None, tree=None, manifest=None, frozen=False, report=None):
                 f"remaining shorthand, so no naming pass will requote them "
                 f"(--frozen does not fail on these)"
             )
+
+    if name_only:
+        report(
+            f"name-only: {len(name_only)} entr(ies) quote a bare identifier where "
+            f"a line of source was meant — its span contains it by construction, "
+            f"so the comparison cannot fail (not a failure)"
+        )
 
     if shorthand:
         # Reported either way, failed on only under `--frozen`: the guard lands
@@ -779,7 +841,19 @@ def _seed_snippet(text, match, path, checkout):
     return None
 
 
-def update(manifest=None, checkout=None, report=None):
+def _base_of(named, checkout):
+    """Which of the two bases a row's path lives in: `"django"` or `"crates"`.
+
+    By the *resolved* path, not by the spelling: `.django/django/utils/text.py`
+    and `django/utils/text.py` are the same row's home, and `_impl/parser.py`
+    resolves under `OWN_PACKAGE`, which is ours. A path under neither base would
+    have failed `resolve` already.
+    """
+    path = resolve(named, checkout=checkout)
+    return "django" if path.is_relative_to(checkout) else "crates"
+
+
+def update(manifest=None, checkout=None, report=None, base="?"):
     """Move the entries whose claim is *outside* their cited span, and no others.
 
     The second half of "the snippet is the claim and the number is derived from
@@ -791,14 +865,19 @@ def update(manifest=None, checkout=None, report=None):
     running: an entry whose snippet sits inside its span but not on its first
     line is *green* — `_check_entry` accepts the snippet anywhere in the span —
     and rewriting its number to `hits[0]` moved the manifest off the tree's
-    number, failing `--check` on the entry it had just "repaired". Measured on
-    the committed manifest of 2026-10-09: it would have moved **63** entries, of
-    which **61 were correct anchors** (`base.py:198-200` quotes
-    `parser.parse()`, which is at 199) and the other two were the stale rows the
-    tree no longer cites — so every single move it would have made was either a
-    corruption or a row that should have been pruned. Now it moves only a claim
-    that is outside its span, which is the one case where the number is genuinely
-    wrong.
+    number, failing `--check` on the entry it had just "repaired". Now it moves
+    only a claim that is outside its span, which is the one case where the number
+    is genuinely wrong.
+
+    **`base` decides which tree may move, and the bare form writes nothing.**
+    `--update=django` and `--update=crates` write; plain `--update` reports what
+    each would move and saves neither. The two are one command because the same
+    message means opposite things: a **Django** row off its span means "the pin
+    moved or the citation was wrong", which is an investigation, while a
+    **crates** row off its span means "our file changed under the citation",
+    which is routine. A command that applied the routine repair to the first
+    case would silently ratify a wrong claim about Django, so there is no bare
+    form that touches a number in either tree.
 
     An entry whose snippet is `-` records no claim, so there is nothing to derive
     a number from and it is skipped. A move is never a silent success either: the
@@ -809,9 +888,14 @@ def update(manifest=None, checkout=None, report=None):
     checkout = CHECKOUT if checkout is None else checkout
     manifest = MANIFEST if manifest is None else manifest
     report = print if report is None else report
-    changed = 0
-    for anchor, (named, line, snippet, end_snippet) in list(manifest.items()):
+    dry = base in (None, "?")
+    updated = dict(manifest)
+    moves = {"django": [], "crates": []}
+    for anchor, (named, line, snippet, end_snippet) in manifest.items():
         if snippet is None:
+            continue
+        which = _base_of(named, checkout)
+        if not dry and which != base:
             continue
         path = resolve(named, checkout=checkout)
         lines = path.read_text().splitlines()
@@ -826,11 +910,22 @@ def update(manifest=None, checkout=None, report=None):
             report(f"`{anchor}`: {snippet!r} is at {hits} in {named}; pick one by hand")
             continue
         if hits[0] != line:
-            report(f"`{anchor}`: {line} → {hits[0]} (outside the cited span)")
-            manifest[anchor] = (named, hits[0], snippet, end_snippet)
-            changed += 1
-    report(f"{changed} entr(ies) moved; their spans now disagree with the cited number")
-    return manifest
+            moves[which].append((anchor, line, hits[0]))
+            if not dry:
+                report(f"`{anchor}`: {line} → {hits[0]} (outside the cited span)")
+                updated[anchor] = (named, hits[0], snippet, end_snippet)
+    if dry:
+        for label, note in (
+            ("django", "the pin moved or the citation was wrong — investigate"),
+            ("crates", "our file changed under the citation — routine"),
+        ):
+            report(f"{label}: {len(moves[label])} row(s) whose claim is outside its span ({note})")
+            for anchor, was, now in moves[label]:
+                report(f"  `{anchor}`: {was} -> {now}")
+        report("nothing written; give a base, --update=django or --update=crates")
+        return updated
+    report(f"{len(moves[base])} entr(ies) moved; their spans now disagree with the cited number")
+    return updated
 
 
 # The ambiguous basenames above, resolved once each rather than 176 times in the
@@ -859,7 +954,15 @@ def main(argv=None):
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--check", action="store_true", help="gate: exit 1 on drift")
     group.add_argument("--triage", action="store_true", help="print the suspicion list")
-    group.add_argument("--update", action="store_true", help="derive cited numbers")
+    group.add_argument(
+        "--update",
+        nargs="?",
+        const="?",
+        default=None,
+        metavar="BASE",
+        help="derive cited numbers for one base: --update=django or --update=crates; "
+        "bare --update reports both and writes neither",
+    )
     group.add_argument(
         "--seed", action="store_true", help="fill missing entries from the prose"
     )
@@ -875,8 +978,13 @@ def main(argv=None):
 
     if args.triage:
         triage()
-    elif args.update:
-        save_manifest(update())
+    elif args.update is not None:
+        # The bare form is the dry run: it prints what each base would move and
+        # saves nothing, so a routine repair can never be applied to a Django row
+        # by accident.
+        updated = update(base=args.update)
+        if args.update != "?":
+            save_manifest(updated)
     elif args.seed:
         save_manifest(seed(manifest=MANIFEST))
     elif args.prune:

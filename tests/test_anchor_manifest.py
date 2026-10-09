@@ -54,6 +54,19 @@ def cited(name, number):
     return "`%s`" % anchor(name, number)
 
 
+def shorthand(number):
+    """`` `:N` `` — a citation of whichever file the prose last named.
+
+    The third spelling, and the one the migration is unfinished on: a bare
+    line number whose referent is the nearest preceding citation. Built here
+    rather than written literally for the same reason as the other two — a
+    backticked `:N` in this file's own text is itself a shorthand, and the
+    frozen gate fails on those. So a literal here would be a guard that
+    cannot pass its own gate.
+    """
+    return "`:%d`" % number
+
+
 class AnchorManifestTests(unittest.TestCase):
     def setUp(self):
         # Every test that calls `check` restores the real manifest afterwards,
@@ -129,6 +142,11 @@ class AnchorManifestTests(unittest.TestCase):
         `self.filters.update(lib.filters)`, which is on 670 — written without
         backticks, because a backtick is what makes an anchor a claim about Django
         and this is a mention of one.
+
+        `base="django"` is named because the bare form is a dry run: a command
+        that applies the routine repair to a Django row by accident would ratify
+        a wrong claim about Django, so `--update` with no base reports and writes
+        nothing (see `test_the_bare_update_reports_both_bases_and_writes_neither`).
         """
         key = anchor("base.py", "669-670")
         manifest = {
@@ -136,7 +154,10 @@ class AnchorManifestTests(unittest.TestCase):
         }
         seen = []
         updated = anchor_manifest.update(
-            manifest=manifest, checkout=DJANGO_CHECKOUT, report=seen.append
+            manifest=manifest,
+            checkout=DJANGO_CHECKOUT,
+            report=seen.append,
+            base="django",
         )
         self.assertEqual(updated[key][1], 669, "an in-span claim is left where it is")
         self.assertNotIn("→", " ".join(seen), "and it is not reported as moved")
@@ -154,7 +175,10 @@ class AnchorManifestTests(unittest.TestCase):
         }
         seen = []
         updated = anchor_manifest.update(
-            manifest=manifest, checkout=DJANGO_CHECKOUT, report=seen.append
+            manifest=manifest,
+            checkout=DJANGO_CHECKOUT,
+            report=seen.append,
+            base="django",
         )
         self.assertEqual(updated[key][1], 670, "moved to where the claim actually is")
         self.assertIn("→", " ".join(seen), "and the move is reported")
@@ -164,6 +188,49 @@ class AnchorManifestTests(unittest.TestCase):
                 tree=self.tree_with(cited("base.py", "660-668")),
                 manifest=updated,
             )
+
+    def test_the_bare_update_reports_both_bases_and_writes_neither(self):
+        """The two bases mean opposite things when a row is off its span, so the
+        bare form cannot act on either: a **django** row off its span means the
+        pin moved or the citation was wrong — an investigation — while a
+        **crates** row off its span means our file changed under the citation,
+        which is routine. One command applying the routine repair would silently
+        ratify a wrong claim about Django, so the bare form reports the two groups
+        and touches neither.
+
+        The count is printed per base rather than as one total because the two are
+        not the same finding: on the live manifest both are **0** — measured right
+        after the second base's rows were minted, 542 of 542 cited — and a single
+        total would read as "the manifest is settled" the moment the routine half
+        was empty and the Django half was not.
+        """
+        django = anchor("base.py", "660-668")
+        crates = anchor("center.rs", "1")
+        manifest = {
+            django: (
+                "django/template/base.py",
+                660,
+                "self.filters.update(lib.filters)",
+                None,
+            ),
+            # `arg.unwrap_or(Value::None)` is on center.rs:86; the row cites 1, so
+            # its claim is outside its span — the crates case.
+            crates: (
+                "crates/template-core/src/filters/center.rs",
+                1,
+                "arg.unwrap_or(Value::None)",
+                None,
+            ),
+        }
+        seen = []
+        updated = anchor_manifest.update(
+            manifest=manifest, checkout=DJANGO_CHECKOUT, report=seen.append
+        )
+        self.assertEqual(updated, manifest, "the bare form writes nothing")
+        report = " ".join(seen)
+        self.assertIn("django: 1 row(s)", report)
+        self.assertIn("crates: 1 row(s)", report)
+        self.assertIn("nothing written", report)
 
     def test_a_row_the_tree_stops_citing_is_counted_and_fatal_only_when_frozen(self):
         """The one defect `check` cannot see by construction: it walks the tree
@@ -225,6 +292,94 @@ class AnchorManifestTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             anchor_manifest.resolve("base.py", manifest={})
 
+    def test_a_rust_basename_resolves_under_crates(self):
+        """The second base's rule, and the one that makes a bare center.rs:86 a
+        citation at all: `.rs` names are searched under `crates/`, **never** in
+        the checkout, because nothing under `.django/` is Rust. The direction that
+        matters is the failure one — a checkout search would resolve an `.rs`
+        name to nothing and the whole second base would report "no such file"
+        rather than drift.
+        """
+        self.assertEqual(
+            anchor_manifest.resolve("center.rs"),
+            anchor_manifest.CRATES / "template-core" / "src" / "filters" / "center.rs",
+        )
+
+    def test_a_rust_basename_that_is_not_unique_is_refused(self):
+        """`host.rs` names two files, `filters/host.rs` and `parser/host.rs`, and
+        the same rule as `base.py` applies: ambiguity is an error, not a guess.
+
+        Measured when the second base opened: 26 `.rs` basenames are cited and
+        this is the only one that is not unique, which is why the manifest's
+        `filters/host.rs` rows carry the parent directory and resolve.
+        """
+        with self.assertRaises(SystemExit):
+            anchor_manifest.resolve("host.rs")
+        self.assertEqual(
+            anchor_manifest.resolve("filters/host.rs"),
+            anchor_manifest.CRATES / "template-core" / "src" / "filters" / "host.rs",
+        )
+
+    def test_the_scanner_reads_the_four_shapes_the_widening_added(self):
+        """Three characters are the whole widening: `-` for the two crate
+        directories, `.` for the `.django/`-prefixed citations, and `(?:py|rs)`
+        for Rust. Measured when it was set: 952 occurrences against the
+        committed scanner's 914, 26 distinct anchors new — 19 `.rs` and 7
+        `.django/`-prefixed, every one a real citation that had been read as
+        prose, and every one now carrying a row. The `.django/`-prefixed
+        spelling is the one that could not be checked at all, because the
+        directory it names is the checkout itself.
+        """
+        for spelling in (
+            "center.rs:86",
+            "crates/template-core/src/filters/cut.rs:34",
+            "template-py/src/filters.rs:1587-1589",
+            ".django/django/utils/text.py:313-344",
+        ):
+            with self.subTest(spelling=spelling):
+                self.assertIsNotNone(
+                    anchor_manifest.ANCHOR_RE.fullmatch("`%s`" % spelling),
+                    "the widened pattern must read this as a citation",
+                )
+        self.assertEqual(
+            anchor_manifest.resolve(".django/django/utils/text.py"),
+            DJANGO_CHECKOUT / "django" / "utils" / "text.py",
+        )
+
+    def test_frozen_fails_on_a_bare_shorthand_inside_a_rust_file(self):
+        """The shorthand half of the second base, tied to the widening by the
+        **occurrence count** rather than by the failure.
+
+        Pre-widening the pattern was `.py`-only, so this fixture's full anchor was
+        not an anchor: the non-frozen run reported 0 occurrences while the
+        shorthand was still collected, and the frozen failure would have looked
+        identical for the wrong reason. Asserting the count asserts that the
+        fixture is being read by the wider scanner.
+        """
+        anchor_manifest.MANIFEST = {
+            anchor("center.rs", 86): (
+                "crates/template-core/src/filters/center.rs",
+                86,
+                "arg.unwrap_or(Value::None)",
+                None,
+            )
+        }
+        tree = [
+            (
+                "crates/template-core/src/filters/center.rs",
+                "// %s, and the same file again as %s.\n"
+                % (cited("center.rs", 86), shorthand(90)),
+            )
+        ]
+        seen = []
+        anchor_manifest.check(checkout=DJANGO_CHECKOUT, tree=tree, report=seen.append)
+        self.assertIn("1 anchor occurrence(s) checked", " ".join(seen))
+        self.assertIn("unmigrated: 1 shorthand", " ".join(seen))
+        with self.assertRaises(SystemExit):
+            anchor_manifest.check(
+                checkout=DJANGO_CHECKOUT, tree=tree, frozen=True, report=seen.append
+            )
+
     def test_the_two_anchors_that_were_wrong_twice_are_pinned(self):
         """base.py:518-519 and base.py:522-523 were reported wrong, repaired to
         517-518/521-522, and were correct all along. Named here so the
@@ -267,7 +422,7 @@ class AnchorManifestTests(unittest.TestCase):
         """The one citation that named a file **not in this tree**, replaced by
         the claim that can be checked.
 
-        `pyo3-0.29.3/src/marker.rs:414` pointed into the vendored PyO3 source,
+        pyo3-0.29.3/src/marker.rs:414 pointed into the vendored PyO3 source,
         which is under the cargo registry and not in the repo: no base resolves
         it, so no manifest row could have made it pass and `--check` would fail
         on it the moment `.rs` became an anchor — and if it were exempted, the

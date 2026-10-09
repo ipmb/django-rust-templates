@@ -1,3 +1,22 @@
+center.rs:86	crates/template-core/src/filters/center.rs	86	-	arg.unwrap_or(Value::None)	-
+center.rs:90	crates/template-core/src/filters/center.rs	90	-	text.starts_with('-')	-
+get_digit.rs:108	crates/template-core/src/filters/get_digit.rs	108	-	text.chars().rev().nth(index)	-
+get_digit.rs:153	crates/template-core/src/filters/get_digit.rs	153	-	fn invalid_literal(c: char) -> Error {	-
+filters/host.rs:519-526	crates/template-core/src/filters/host.rs	519	526	-	-
+filters/host.rs:576-739	crates/template-core/src/filters/host.rs	576	739	-	-
+linebreaks.rs:130	crates/template-core/src/filters/linebreaks.rs	130	-	call.autoescape && !call.host.is_safe(&value)	-
+slugify.rs:99	crates/template-core/src/filters/slugify.rs	99	-	pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {	-
+wordwrap.rs:73	crates/template-core/src/filters/wordwrap.rs	73	-	unwrap_or(Value::None)	-
+error.rs:292-293	crates/template-core/src/parser/error.rs	292	293	str.replace	-
+parser/mod.rs:267	crates/template-core/src/parser/mod.rs	267	-	NodeDesc::new("VariableNode")	-
+parser/mod.rs:369-373	crates/template-core/src/parser/mod.rs	369	373	token.or_else	-
+crates/template-core/src/parser/mod.rs:429	crates/template-core/src/parser/mod.rs	429	-	pub fn extend_nodelist(	-
+tags/mod.rs:180	crates/template-core/src/parser/tags/mod.rs	180	-	Ok(NodeDesc::with_nodelist(	-
+url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
+with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
+filters.rs:69-71	crates/template-py/src/filters.rs	69	71	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
+crates/template-py/src/filters.rs:871	crates/template-py/src/filters.rs	871	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
+template-py/src/filters.rs:1587-1589	crates/template-py/src/filters.rs	1587	1589	Some(host.classify(&args.get_item(0)?)?)	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-
@@ -437,6 +456,7 @@ dateformat.py:42	django/utils/dateformat.py	42	-	-	-
 dateformat.py:44-48	django/utils/dateformat.py	44	48	TypeError	-
 dateformat.py:326-329	django/utils/dateformat.py	326	329	-	-
 dateformat.py:332-335	django/utils/dateformat.py	332	335	-	-
+.django/django/utils/encoding.py:107-135	django/utils/encoding.py	107	135	isinstance(iri, Promise)	-
 formats.py:113	django/utils/formats.py	113	-	str(format_type)	-
 formats.py:147-157	django/utils/formats.py	147	157	-	-
 formats.py:155-157	django/utils/formats.py	155	157	-	-
@@ -489,9 +509,11 @@ django/utils/text.py:282	django/utils/text.py	282	-	-	-
 text.py:308-310	django/utils/text.py	308	310	def normalize_newlines(text):	return re_newlines.sub("\n", str(text))
 text.py:313-344	django/utils/text.py	313	344	-	-
 text.py:313	django/utils/text.py	313	-	@keep_lazy_text	-
+.django/django/utils/text.py:313-344	django/utils/text.py	313	344	return "".join(char2number.get(c, c) for c in phone.lower())	-
 text.py:344	django/utils/text.py	344	-	phone.lower()	-
 django/utils/text.py:423	django/utils/text.py	423	-	def smart_split(text):	-
 django/utils/text.py:443-460	django/utils/text.py	443	460	-	-
+.django/django/utils/text.py:463-481	django/utils/text.py	463	481	return re.sub(r"[-\s]+", "-", value).strip("-_")	-
 text.py:471-481	django/utils/text.py	471	481	str(value)	-
 text.py:473-476	django/utils/text.py	473	476	-	-
 text.py:480	django/utils/text.py	480	-	-	-
@@ -510,7 +532,11 @@ i18n/test_blocktranslate.py:881	tests/template_tests/syntax_tests/i18n/test_bloc
 tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py:16	tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py	16	-	-	-
 bad_tag.py:6-8	tests/template_tests/templatetags/bad_tag.py	6	8	badtag	-
 custom.py:396-399	tests/template_tests/templatetags/custom.py	396	399	parser.extra_data["extra_data"]	-
+.django/tests/template_tests/templatetags/custom.py:396-399	tests/template_tests/templatetags/custom.py	396	399	parser.extra_data["extra_data"] = "CUSTOM_DATA"	-
 tag_27584.py:8-9	tests/template_tests/templatetags/tag_27584.py	8	9	delete_first_token	-
 tag_27584.py:13-15	tests/template_tests/templatetags/tag_27584.py	13	15	class BadNode(template.Node):	raise template.TemplateSyntaxError("error")
 test_parser.py:36	tests/template_tests/test_parser.py	36	-	-	-
+.django/tests/template_tests/tests.py:114-123	tests/template_tests/tests.py	114	123	assertRaises(RuntimeError)	-
 tests.py:148-155	tests/template_tests/tests.py	148	155	def test_compile_tag_extra_data(self):	self.assertEqual(t.extra_data["extra_data"], "CUSTOM_DATA")
+.django/tests/template_tests/tests.py:148-155	tests/template_tests/tests.py	148	155	-	-
+.django/tests/utils_tests/test_html.py:204-217	tests/utils_tests/test_html.py	204	217	-	-
