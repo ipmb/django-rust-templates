@@ -170,7 +170,50 @@ commit**, which reddens the build before such a citation lands.
 
 `d81abb3`'s sentence "One was never correct." is therefore **superseded** and is
 corrected forward here rather than by rewriting three landed commits: the class,
-not the instance, is what belongs in the record.
+not the instance, is what belongs in the record. **The sentence now has no
+instance of the class it names.** The reviewer measured the rest of that commit's
+nine claims at each claim's own citing commit and found one stale at birth
+(`host.py`'s `392-418`, above) and one **copy of it**:
+`tests/test_parser_parity.py`'s same span, written a commit later at `6242cbc`,
+after the tree had already moved. A transcription of an already-stale number is
+the agreement shape again — one reader's number copied into a second file, with
+the source stale rather than wrong. `:304`, in the same sentence, is the same
+story — at `52f1cb1^` the three `extend_nodelist` call sites are 218, 252 and
+304; at `52f1cb1` they are 237, 271 and **341**.
+
+### The rule, which outlives the tally
+
+**Into a pinned tree, a wrong citation is a misreading. Into a moving tree, a
+wrong citation is elapsed time.** The first half is a proof rather than a
+measurement: `.django/` at 6.0.9 does not move, so a wrong Django number
+*cannot* be drift — it is a reading that never pointed at the claim, or a
+boundary drawn wrong. The second half is what the reviewer found by measuring
+each `.rs` claim at the commit that wrote it: all five were correct when
+written, against the post-edit file, with the file's stat checked to rule the
+third class in or out.
+
+Two failure modes, two remedies: **care and re-reading** for the first, a
+**snapshot comparison** for the second — and one tool catches both, because both
+reduce to "does the text still sit at the number". It also retro-justifies
+`--update`'s base split structurally rather than by risk: `--update=django` is
+rare because misreadings are rare *after* a careful pass, `--update=crates` is
+routine because time passes regardless of care.
+
+**The tally is deliberately not published.** The same reviewer who produced the
+classification also produced the reason to distrust it: the count came out five
+in one reading and six in another, and one instance (`error.rs:160-165` →
+`292-293`) is **two corrections in one** — the move, +132, and a narrowing from
+six lines to two. Only the move is provenance; the narrowing is a boundary
+judgement that rode along, and counting them together credits the span work to
+drift. The rule above does not depend on the classification, which is the
+argument for publishing it and not the counts.
+
+**And the class that survives is narrower than "misreading".** Across the `.rs`
+set, not one is an author reading a line wrongly; the one that looked like it,
+`striptags.rs`'s `:248`, had the **right line and too narrow a span** — a
+boundary error, not a provenance one. The scope matters: this is true of
+citations into a tree that moves, and emphatically not of the Django set, where
+the naming passes found genuine misreadings in quantity.
 
 ## Four holes, one shape — and a fifth class the tool cannot see
 

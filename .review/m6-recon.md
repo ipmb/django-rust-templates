@@ -1185,3 +1185,48 @@ The lesson the pair teaches is narrower than "re-measure": the census is a
 **prior**, and `.review/m6-verification-order.md` and this file are records of a
 date. A record that says a defect is open has to be re-measured before it is
 copied into a summary, because nothing in a document ages itself.
+
+### The `.rs` set classified per instance, and the rule that replaces the tally
+
+The reviewer measured every claim in `d81abb3`'s nine-claim set at *the commit
+that wrote it*, against the post-edit file, with the file's stat checked to rule
+the third class in or out. I verified the two halves I could from this tree: the
+five drift targets hold what the claims say at HEAD (`parser/mod.rs:267` =
+`NodeDesc::new("VariableNode")`, `tags/mod.rs:180-181` = `NodeDesc::with_nodelist(`
+/ `"StandinBlockNode",`, `with.rs:82`, `url.rs:83`, and `error.rs:292-293`
+containing `str.replace`), and the citing commits do not touch the files they
+cite (`c8c9091`'s stat is `tests/test_filter_rebinding.py` only; `cc8ca88`'s does
+not include `parser/error.rs` in any line).
+
+| claim | written at | at its citing commit | class |
+|---|---|---|---|
+| `parser/mod.rs:186` → 267 | `ae5ef19` | `186` = `let node = NodeDesc::new("VariableNode").attr(` | drift, +81 |
+| `tags/mod.rs:182` → 180 | `ae5ef19` | `182` = `Ok(NodeDesc::with_nodelist(` | drift, **−2** |
+| `with.rs:79` → 82 | `c8c9091` | `79` = `.attr("extra_context", AttrValue::Map(extra_context)))` | drift, +3 |
+| `url.rs:81` → 83 | `c8c9091` | `81` = `.attr("kwargs", AttrValue::Map(kwargs))` | drift, +2 |
+| `error.rs:160-165` → 292-293 | `cc8ca88` | `160-165` = the doc block now at 292-293 | drift, +132, **and a narrowing 6 lines → 2** |
+| `host.py`'s `parser/mod.rs:392-418` | `52f1cb1` | correct at `52f1cb1^`, moved to 429 by that same commit | **stale at birth** |
+| `test_parser_parity.py`'s same span | `6242cbc` | already wrong; `6242cbc` does not touch `parser/mod.rs` | **a copy of a stale number** |
+| `test_parser_parity.py`'s `:304` → 341 | `6242cbc` | call sites are 218/252/304 at `52f1cb1^`, 237/271/341 at `52f1cb1` | **a copy, same commit** |
+| `striptags.rs`'s `:248` | — | 248 is `fn host_error` and **right**; the span was too narrow | **boundary error, not provenance** |
+
+`error.rs` is two corrections in one and the tally should say so: only the move
+is provenance, and counting the narrowing with it credits the span work to
+drift. That, plus a count that came out five in one reading and six in another,
+is why **no per-class tally is published** — the actionable result is a rule, and
+the rule does not depend on the classification:
+
+> **Into a pinned tree, a wrong citation is a misreading. Into a moving tree, a
+> wrong citation is elapsed time.**
+
+The first half is a proof: `.django/` at 6.0.9 does not move, so a wrong Django
+number cannot be drift. The second is the measurement above — five of five
+correct when written. It also explains `--update`'s base split structurally
+rather than by risk: `--update=django` is rare because misreadings are rare
+after a careful pass, `--update=crates` is routine because time passes
+regardless of care.
+
+**Scope, stated because the sentence would otherwise travel.** "Not one is a
+misreading" is true of the `.rs` set — citations into a tree that moves — and
+**not** of the Django set, where the naming passes found genuine misreadings in
+quantity. The contrast is the finding; the tally is not.
