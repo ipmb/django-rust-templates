@@ -28,6 +28,14 @@ NodeList.render calls: 9630
 distinct tests that rendered at least once: 964
 ```
 
+**964 is a lower bound, not a count.** Interposition happens per module at
+startup, so every `NodeList` is ours, including ones `test_nodelist.py`
+constructs directly — the reviewer's point, and it errs the safe way for a
+milestone number whose only job is "how much does this put at risk". A test that
+reached our render path without calling `NodeList.render` would make the true
+figure higher, never lower. Labelled because the next reader will subtract from
+it.
+
 62.3% of the suite. That is `setup_test_environment`
 (`django/test/utils.py:108-114`) setting `Template._render =
 instrumented_test_render`, whose body is a signal send and then
@@ -57,6 +65,44 @@ three call sites wearing one label — `base.py:204` (compile time), `base.py:31
 (the `PartialTemplate` delegation) and `base.py:1063` (the render-time
 protocol). The breakdown is printed rather than only the wanted figure, so the
 conflation cannot recur silently.
+
+**And the repair had the same defect one level in** — the reviewer's catch, then
+measured. `base.py:310-312` is a *delegation*:
+
+```python
+def get_exception_info(self, exception, token):          # PartialTemplate
+    template = self.origin.loader.get_template(self.origin.template_name)
+    return template.get_exception_info(exception, token)
+```
+
+so one partial-template annotation produces two frames: an outer one attributed
+to `compile_nodelist` or `render_annotated`, and an inner one attributed to
+`get_exception_info`. Counting *frames* is not counting *annotations*. Measured
+by `.review/m9-measurements/m9_measure_partial_annotation_nesting.py`:
+
+```
+total frames: 430
+of which nested inside an annotating frame: 4
+distinct annotations (frames minus nested): 426
+```
+
+**426 annotations over 430 frames.** The reviewer predicted 424, assuming all six
+`:312` frames nested; four do. The other two are
+
+```
+get_exception_info <- test_partial_template_get_exception_info_delegation <- …
+```
+
+— the pinned suite already has a row that calls the delegation **directly**, so
+those two are annotations in their own right, reached from neither seam. The
+first run of that measurement used a 25-frame window and reported the two as
+"no annotating frame", which is the shape of a window too small rather than a
+fact; it was widened to 200 before the number was believed.
+
+The figures this milestone argues from survive the correction unaltered — **340
+compile-seam annotations** (no nesting there) and **84 render-seam outer
+annotations** (four of which delegate inward). What changed is the total, 430 →
+426, and the reason to prefer annotation counts to frame counts.
 
 **Why this matters for M9's acceptance.** The milestone's headline evidence is
 `Ran 1547 tests … OK (skipped=6)` from `scripts/run_django_suite.sh`, with the
@@ -211,6 +257,22 @@ Ten exceptions through `render_annotated`, five of which annotated. That ratio
 guard), and only the frame whose `context.render_context.template.origin` matches
 attaches `template_debug` — the other five frames pass the exception on
 untouched.
+
+**But the ratio cannot discriminate depth, and a row built on it would be
+vacuous.** The reviewer's sharpening: if Rust attaches at the *wrong* node the
+ratio stays 5, because the `hasattr` guard admits exactly one annotation per
+propagating chain. A port that annotates five wrong nodes passes "five frames
+annotate" identically. **The `(start, end)` pairs are the assertion; the ratio is
+context.** M9's annotation rows therefore assert the pairs, not the count.
+
+A third thing, adjacent, from the reviewer: `django/template/backends/django.py:120-121`
+**copies** `template_debug` onto a re-raised exception at the backend boundary.
+It is not a second annotator (this protocol's only render-time writer is
+`render_annotated`, confirmed by enumerating every writer in `django/`), but it
+is a second path by which an annotated exception reaches a test — and being a
+copy it is transparent, so a backend-level assertion can tell *present* from
+*absent* and can never tell *correct* from *incorrect*. Any backend-level
+`template_debug` row is a presence test whatever it looks like.
 
 Case 4 is the one that reaches §5.2's actual obligation. Source:
 
