@@ -36,9 +36,14 @@ step "python anchor manifest"
 # and needs only `.django/`, and its value is in catching a citation written in
 # the commit being written rather than one discovered a commit late.
 #
-# Plain `--check` here, not `--frozen`: the shorthand (`:518`, naming no file) is
-# still present. Step 5 of M6 flips this to `--check --frozen` once it is gone.
-"$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_python_anchors.py" --check
+# `--check --frozen`, which the migration has now earned: `unmigrated` reached 0
+# when the last three bare `:N` citations were named, so the two things `--frozen`
+# adds — a shorthand, and a row the tree no longer cites — can now only come from
+# an edit being written, which is what a gate is for. The 104 unquoted rows are
+# *not* failed on: an unquoted row records no claim to falsify, and the ones left
+# are cited only from files that never held a shorthand, so no naming pass will
+# come back for them.
+"$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_python_anchors.py" --check --frozen
 
 step "differential harness"
 "$PROJECT_ROOT/.venv/bin/python" "$HERE/differential.py"

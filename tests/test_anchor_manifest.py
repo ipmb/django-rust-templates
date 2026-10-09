@@ -380,6 +380,25 @@ class AnchorManifestTests(unittest.TestCase):
                 checkout=DJANGO_CHECKOUT, tree=tree, frozen=True, report=seen.append
             )
 
+    def test_the_gate_asks_the_checker_for_frozen(self):
+        """`--frozen` is only a gate if something passes it, and the flip is one
+        line of a shell script — a claim no test reads, which is the defect this
+        whole tool exists for. So the invocation is asserted here, as the text it
+        is.
+
+        Asserted as one argument list rather than as the flag occurring somewhere
+        in the file: a script that passed `--frozen` to `--triage` would satisfy
+        the weaker reading.
+        """
+        script = (PROJECT_ROOT / "scripts" / "check.sh").read_text()
+        invocations = [
+            line
+            for line in script.splitlines()
+            if "check_python_anchors.py" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(invocations), 1, invocations)
+        self.assertIn("--check --frozen", invocations[0])
+
     def test_the_two_anchors_that_were_wrong_twice_are_pinned(self):
         """base.py:518-519 and base.py:522-523 were reported wrong, repaired to
         517-518/521-522, and were correct all along. Named here so the
