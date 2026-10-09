@@ -320,13 +320,26 @@ and make shadow nodes genuinely renderable in Python.** Concretely:
   `NodeList.render` iterates top-level shadow nodes in Python, and each one's
   `render` is one FFI entry that renders the whole subtree beneath it.
 - Rust renders interior subtrees from its own compiled form and does **not**
-  call back into Python `NodeList.render` for shadow-nodelist children. The
-  boundary is exactly where Django's own `parser.parse()` was called from
-  Python: below it, Rust; at it, a `render_foreign_node` call that goes through
-  that node's `render_annotated`.
+  call back into Python `NodeList.render` for **shadow-nodelist** children. The
+  boundary is **per node, not per subtree**: every node is either Rust-owned
+  (constructed by Rust for a built-in tag) or Python-owned (constructed by
+  Python — a user or custom tag, a `simple_block_tag`, or one of our ported
+  `loader_tags` classes). A Rust-owned node's `render` delegates to Rust; a
+  Python-owned node is never rendered inline by Rust, it is handed to the host
+  through `render_foreign_node`, which goes through that node's
+  `render_annotated`.
 
-The cost is one FFI hop per top-level node per render. This is a
-**compatibility-first** build (§3), so that is the right trade.
+This is what makes the mixed case work in both directions. A Python custom tag
+compiled via `parser.parse()` owns a shadow nodelist, and its `render` reaches
+Rust through Django's own `NodeList.render`. Symmetrically, a Rust-owned
+`{% for %}` whose body contains `{% include %}` hands that Python node to the
+host rather than rendering it inline — so `IncludeNode.render` calling
+`template.render(context)` re-enters Python mid-Rust, which is correct and
+intended rather than a leak.
+
+Cost is one FFI hop **per node entered from Python**. For a Rust-owned spine
+that is one hop per top-level node; where Python-owned nodes nest, it is one per
+level. This is a **compatibility-first** build (§3), so that is the right trade.
 
 Consequence for planning: **M9 is the highest-risk step in the project** — the
 point where the whole suite flips at once — and §10.3 must budget for it
