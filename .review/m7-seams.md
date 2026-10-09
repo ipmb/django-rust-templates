@@ -86,6 +86,41 @@ literals walked and tokenized) and **one** reached in the pinned suite —
 `test_blocktranslate.py::test_with_block`, where the host raises first.
 (`m7_measure_nesting.py`, `m7_measure_nest2.py`.)
 
+**The fork needs four conditions, not one, and the record is only honest with all
+four named.** Found by the reviewer, who also corrected its own earlier account
+of the last one:
+
+1. **a `{% block %}` compiled by Django** — i.e. inside the body of a
+   block-level tag the *host* compiles;
+2. **that host node's class declaring its nodelist**, or `get_nodes_by_type`'s
+   walk never reaches the block at all — `Node.child_nodelists` is `("nodelist",)`
+   (`base.py:1035`), while `SimpleNode` overrides it to `()` (`library.py:316`)
+   and `SimpleBlockNode` stores `self.nodelist` (`library.py:337`) under that
+   empty tuple, so Django's walk does not descend into it;
+3. **a same-named `{% block %}` compiled by Rust**, which is what makes the
+   duplicate cross the two counters instead of one;
+4. **the host not raising first** — the condition `test_with_block` fails.
+
+With **n = 1** in the suite, conditions (3) and (4) are not separable *by the
+suite*: "the host raises first" and "no pairing exists in the corpus" are two
+accounts of one datum. The mechanism claim — that they are genuinely different
+reasons — is a claim about Django's control flow and is measured in
+`test_blocktranslate.py`, not in the corpus's count.
+
+**The near-miss is worth recording because the condition holding it shut is the
+most movable of the four.** `{% partialdef %}` has exactly the shape that would
+open the fork: `PartialDefNode(Node)` (`defaulttags.py:413`) declares no
+`child_nodelists`, so it inherits `("nodelist",)`, and it stores `self.nodelist`
+(`:417`) — so condition (2) is satisfied where `SimpleBlockNode` fails it. What
+holds the fork shut today is that a `{% partialdef %}` never reaches either
+compiler: `partialdef` is a **stub**, and the engine raises
+`UnimplementedTag: 'partialdef' is a built-in tag this engine does not implement
+yet (M13)` at the token — measured through the wire detector, which is a
+different mechanism from "Rust compiles the body into Rust's counter". M13's
+partials work is where that changes, in either direction: implement it in Rust or
+move it to the host, and (1), (2) and (4) are all satisfiable by built-ins,
+leaving only the duplicate name of (3) between the tree and the fork.
+
 **What the fork costs is one refusal, and the refusal is load-bearing — this is
 the part a "one message wide" reading understates.** `ExtendsNode.__init__` keys
 `self.blocks` by name over *materialised* nodes, which both parsers produce, and
@@ -129,6 +164,26 @@ identity clause reads "not Django's" for every name and the split above reports
 0/27 instead of 25/2. That is a property of the measurement, not of the seam —
 but it is exactly the kind of thing that makes a re-run disagree with its own
 record.
+
+**And the audit this milestone actually ran, over all seven plans.** Finding the
+M5 plan's `pytest` invocation unrunnable (`.venv/bin/python -m pytest` raises
+`ModuleNotFoundError`) raised the obvious question, so the sweep was extended:
+**36 script references across the seven plans, every fenced block and every
+`Run:` line, resolved against the tree as it stands.** Two were unrunnable as
+written and both are now corrected —
+
+- the M5 plan's `pytest tests/test_ref_table.py -v` (no `pytest` in this venv);
+- **the M3 plan's `python scripts/progress.py`, a script that has never existed**
+  — `git log --diff-filter=AD -- scripts/progress.py` returns nothing. The meter
+  it meant is `_shim.unshimmed()`, printed by every `check.sh` run as "N
+  module(s) still served by Django", and the M3 plan now prints it directly.
+
+The second is the reason the sweep went past `Run:` lines: it sits inside a
+fenced block, where no `Run:`-only audit would have looked. Everything else —
+every `cargo`, `maturin`, `./scripts/check.sh`, `scripts/differential.py` and
+`.venv/bin/python -m unittest` invocation — resolves. A dated plan that ships an
+unrunnable command is the defect the preserved-scripts rule exists for, applied
+backwards in time.
 
 ## The re-run, at close-out
 

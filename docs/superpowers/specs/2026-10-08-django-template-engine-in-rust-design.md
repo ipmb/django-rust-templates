@@ -794,6 +794,17 @@ M7 is the worked example and the reason the rule is stated rather than assumed:
 because `loader_tags` interposition is M11's. The obligation is discharged in
 `tests/`, against our engine, by copying the row's *shape*.
 
+**Scope, and it is a limit rather than a caveat.** This rule decides one thing:
+whether a gate names a module a *later* milestone interposes. A row naming no
+`.django` module is **out of scope** — the rule does not pronounce on it, and
+"not vacuous" is not a verdict it is entitled to return. The second question, the
+one this rule cannot answer, is whether the gate's *instrument* can see the
+defect it is for: a parity corpus comparing our engine with stock Django is blind
+to a defect both sides share, because they call the same helpers. M8's gate is
+the first row of that kind — escaping and the object protocol are exactly where
+both engines call `conditional_escape`, `SafeData` and `Promise` — so its row
+reads out of scope here and owes that second question an answer of its own.
+
 This is the question a reader at the next milestone should be able to answer
 without re-reading a plan, and it is why the rule lives here beside the table
 rather than in prose about M7.

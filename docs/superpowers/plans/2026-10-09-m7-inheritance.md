@@ -792,16 +792,23 @@ parser_error_corpus.ERRORS    91       95      100      106
 ORIGIN_ERRORS                  —        —        2        3
 ```
 
-**The sentence at `:219-221` that predicts this shape is wrong in one clause.**
-It says the "deliberately absent" count "becomes two, then one, then none";
-measured, it is **four, then three, then two**, and the test it names,
-`the_five_python_owned_builtins_are_not_rust_compile_functions`, was the *pre-M7*
-name and was renamed in step at each of the three commits above. The likely
-reading is that "two, then one, then none" is `loader_tags`' own three names
-retiring (3 → 2 → 1 → 0), written into the sentence about the absent-count — the
-shape this plan has caught four times, a right answer to a different question.
-As written it is false of the thing it is attached to, so it is corrected here
-rather than left to read as a live claim.
+**The sentence at `:219-221` that predicts this shape is wrong in one clause, and
+the correction is a sequence rather than an endpoint.** It says the "deliberately
+absent" count "becomes two, then one, then none". Measured against the absent
+list — five names at the start (`block`, `extends`, `include`, `load`,
+`querystring`) — it is **5 → 4 → 3 → 2** as the three land, one per commit. The
+three words it does carry are `loader_tags`' own names retiring, **3 → 2 → 1 →
+0**, whose tail is exactly "two, then one, then none". Both readings fit the
+three words; they separate on the *first* term, which is five and not three, and
+that is why the sequence is written out here and an endpoint would not have been
+enough — the two sequences overlap in value and differ in length, four terms
+against three, and only the length tells them apart. The test name the sentence
+cites, `the_five_python_owned_builtins_are_not_rust_compile_functions`, was the
+*pre-M7* name and was renamed in step at each of the three commits above
+(`the_four_…`, `the_three_…`, `the_two_…`). As written the clause is false of the
+thing it is attached to, so it is corrected here rather than left to read as a
+live claim — a right answer to a different question, the shape this plan has now
+caught five times.
 
 **Where the truth lives, because a dated document can only say that much:**
 `tests/test_tag_inventory.py:270` and `:277` hold `PYTHON_OWNED` and the literal,

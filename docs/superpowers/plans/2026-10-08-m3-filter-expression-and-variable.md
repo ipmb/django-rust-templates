@@ -6085,8 +6085,16 @@ maturin develop
 python -m unittest discover -s tests -v
 python scripts/differential.py; echo "exit=$?"
 scripts/check.sh; echo "exit=$?"
-python scripts/progress.py
+python -c "from django_rust_templates import _shim; print('unshimmed:', len(_shim.unshimmed()))"
 ```
+
+**The last line was corrected at M7's close-out.** The draft said
+`python scripts/progress.py`, and **no such script has ever existed** — `git log
+--diff-filter=AD -- scripts/progress.py` returns nothing. The meter is
+`_shim.unshimmed()`, printed on every `check.sh` run as "N module(s) still served
+by Django"; the line above prints it directly. The same audit over all seven
+plans (36 script references, every fenced block and every `Run:` line) found this
+one and the M5 plan's `pytest` — both unrunnable as written.
 
 Expected: every exit 0; the suite at `Ran 1547 tests … OK (skipped=6)`; the progress meter **unchanged at 25 modules still Django's** — M3, like M2, adds engine code that nothing in the suite's path imports yet (§10.1: engine progress and integration progress move independently, and the meter measures the second).
 
