@@ -137,3 +137,25 @@ class FilterRebindingTests(unittest.TestCase):
             f"{expression.filters[0][0]!r} ({rebound!r} is what a late lookup "
             "returns) instead of the function bound at base.py:771",
         )
+
+    def test_the_descriptors_own_table_wins_over_a_passed_resolver(self):
+        """A handle indexes *its* table; a second table is not an alternative.
+
+        The dangerous version of getting this wrong is silent and of the same
+        shape as the bug this module is about: a `resolve_ref` from a different
+        parse resolves the handle to a **valid function that is the wrong one**,
+        with no error anywhere. So the table the descriptor arrived with is the
+        one that is used, whatever else the caller passed.
+        """
+        bound = defaultfilters.register.filters["upper"]
+        parser = parser_for("x|upper")
+        desc = _native.parse_filter_expression("x|upper", _MATERIALISER.check_filter(parser))
+
+        def decoy(index):
+            # A *plausible* function, not an error: the failure this pins is a
+            # valid function taken from the wrong table, which nothing loud
+            # would catch — the wrong filter, rendering wrong output.
+            return lambda value: "decoy-%d-%s" % (index, value)
+
+        expression = _MATERIALISER._materialise_filter_expression(desc, parser, decoy)
+        self.assertIs(expression.filters[0][0], bound)

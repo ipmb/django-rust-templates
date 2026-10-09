@@ -484,10 +484,16 @@ def _materialise_filter_expression(desc, parser=None, resolve_ref=None):
             "materialising a FilterExpression needs the Parser that owns the "
             "filter registry; none was passed"
         )
-    if resolve_ref is None and getattr(desc, "refs", None) is not None:
-        # A descriptor from `parse_filter_expression`, which owns a table of its
-        # own and hands it over attached to the desc. The whole-template path
-        # passes `resolve_ref` explicitly, from the parse's own table.
+    if desc.refs is not None:
+        # A descriptor from `parse_filter_expression` owns the table its handles
+        # index into, and that table travels attached to it. It **wins over any
+        # `resolve_ref` the caller passed**: a handle is an index, and an index
+        # is meaningful only against its own table, so resolving these handles
+        # against a different parse's table returns a valid function that is the
+        # *wrong* one — silently, which is the shape of the late-lookup bug this
+        # function exists to kill. The whole-template path never builds such a
+        # descriptor (`AttrValue::FilterExpr` sends `refs=None`), so its
+        # `resolve_ref` still resolves every other reference in the tree.
         resolve_ref = desc.refs.__getitem__
 
     expression = FilterExpression.__new__(FilterExpression)
