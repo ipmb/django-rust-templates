@@ -1,4 +1,4 @@
-//! `{% if %}` — `defaulttags.do_if` (`defaulttags.py:932-1021`).
+//! `{% if %}` — `defaulttags.do_if` (`defaulttags.py:932-1020`).
 //!
 //! The tag is small; what makes it M5's largest is that its condition is a
 //! **parse tree Python has to hold**. `do_if` runs

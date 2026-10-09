@@ -207,7 +207,7 @@ defaulttags.py:921	django/template/defaulttags.py	921	-	class TemplateIfParser(I
 defaulttags.py:922	django/template/defaulttags.py	922	-	error_class = TemplateSyntaxError	-
 defaulttags.py:928-929	django/template/defaulttags.py	928	929	TemplateLiteral(self.template_parser.compile_filter(value), value)	-
 defaulttags.py:929	django/template/defaulttags.py	929	-	return TemplateLiteral(self.template_parser.compile_filter(value), value)	-
-defaulttags.py:932-1021	django/template/defaulttags.py	932	1021	@register.tag("if")	-
+defaulttags.py:932-1020	django/template/defaulttags.py	932	1020	@register.tag("if")	return IfNode(conditions_nodelists)
 defaulttags.py:993	django/template/defaulttags.py	993	-	condition = TemplateIfParser(parser, bits).parse()	-
 defaulttags.py:993-995	django/template/defaulttags.py	993	995	condition = TemplateIfParser(parser, bits).parse()	conditions_nodelists = [(condition, nodelist)]
 defaulttags.py:995	django/template/defaulttags.py	995	-	-	-
