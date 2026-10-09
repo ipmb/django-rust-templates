@@ -156,7 +156,7 @@ pins all of this by name.
 - It does not interpose `defaultfilters`, `defaulttags` or `base` (M11, M9).
 - It does not implement the escape **protocol** beyond what the filters need.
   `Promise`, `__html__`, and `is_safe` on arbitrary objects are M8's; M4 adds
-  `conditional_escape` because `escape`, `force_escape`, `escapeseq` and `join`
+  `conditional_escape` because `escape`, `escapeseq`, `join` and `unordered_list`
   cannot exist without it, and §D4 says so as the milestone's one deviation.
 - It does not port `pprint.pformat`, `unicodedata.normalize`,
   `textwrap.TextWrapper`, `HTMLParser` or `json.dumps`. §D2 names which filters
@@ -456,10 +456,16 @@ for.
 So M4 adds **no** `escape` module and reaches into M8 for nothing: it calls
 `FilterHost::conditional_escape` and gets back a `Value`. §10.3's M8 row is
 unchanged, and the `Promise`/`__html__`/`SafeText` protocol remains M8's to
-implement on the Python side where it already lives. Eight filters depend on this
-call — `escape`, `force_escape`, `escapeseq`, `join`, `unordered_list`,
-`linenumbers`, `linebreaks`, `linebreaksbr` — which is why it is one host method
-rather than a Rust helper duplicated eight times.
+implement on the Python side where it already lives. **Four** filters depend on
+this call — `escape` (`:461`), `escapeseq` (`:471`), `join` (`:616`) and
+`unordered_list` (`:692`), which is what a grep of `defaultfilters.py` on the
+pinned tree returns — which is why it is one host method rather than a Rust
+helper duplicated four times. The four *other* filters an earlier revision of
+this paragraph listed — `force_escape`, `linenumbers`, `linebreaks`,
+`linebreaksbr` — call the **unconditional** `escape` (`:482`, `:243`, and
+`html.py:175`, `:507`), which is a fixed five-replacement table and therefore
+Rust's `html_escape.rs`; the two halves are the sharpest illustration in M4 of
+the distinction, and this paragraph had them on the wrong side of it.
 
 The one thing M4 *does* still own here is `escape` and `escapejs` themselves:
 `html.escape` is a fixed five-replacement table and `escapejs` a fixed ~30-entry
@@ -1164,7 +1170,7 @@ plausible-sounding review is exactly where an unmeasured claim propagates:
 | 2 | `dictsort`, `dictsortreversed` | `:558-573` subscripts with a **string** key (`value = value[part]`) before falling back to `getattr`, across five exception classes; `get_index(i64)` cannot, and `sorted(value, key=…)` over `Opaque` is inexpressible | `sort_by_property` (one method, not two) |
 | 3 | `iriencode` | `:225-227` — the body is literally `return iri_to_uri(value)`, and no such method existed despite the filter being in the derived 18 | `iri_to_uri` |
 | 4 | the four `Truncator` filters | `Truncator.chars` calls `unicodedata.combining` per character (`text.py:220`) so combining marks do not count toward the length; answering that in Rust needs a third Unicode table | `truncate`, whole — better than the `unicode_combining` method the review offered, because it removes the table *and* the `gettext` marker question in one move |
-| 5 | `escape`, `force_escape`, `escapeseq`, `join`, `unordered_list`, `linenumbers`, `linebreaks`, `linebreaksbr` | `conditional_escape` (`html.py:115-127`) branches on `isinstance(text, Promise)` and `hasattr(text, "__html__")`, neither of which is `is_safe` — its own docstring says the convention is shared with `markupsafe`, which implements `__html__` **without being `SafeData`** | `conditional_escape`, whole (see §D4) |
+| 5 | `escape`, `escapeseq`, `join`, `unordered_list` | `conditional_escape` (`html.py:115-127`) branches on `isinstance(text, Promise)` and `hasattr(text, "__html__")`, neither of which is `is_safe` — its own docstring says the convention is shared with `markupsafe`, which implements `__html__` **without being `SafeData`** | `conditional_escape`, whole (see §D4) |
 | 6 | `unordered_list` | `:695-706` tests `isinstance(next_item, (list, tuple, types.GeneratorType))` and then `iter()`, to decide whether an element nests; a tuple and a generator both reach Rust as `Opaque`, and `iter_values` cannot see a generator without consuming the branch it is being asked about. Both halves are in the suite (`test_unordered_list.py:141` whole-value generator, `:150` element generator that must nest) | `as_nested_sequence` (one method, not a predicate plus an iteration) |
 
 The fifth is the one that changes a milestone boundary, and it changes it in the
@@ -1174,6 +1180,18 @@ branches are Python-protocol questions. §D4 now says so. The sixth arrived in t
 second review round, after the trait was otherwise settled, and it is the one that
 would have produced a **silently wrong template** rather than a failure: an
 `unordered_list` without it renders a nested list flat.
+
+**Row 5's filter list was wrong until Task 8 wave B, and the correction is a
+count rather than a name.** It named eight filters; grepping the import and the
+call sites in `defaultfilters.py` on `.django` @ 6.0.9 finds **four**:
+`escape:461`, `escapeseq:471`, `join:616`, `unordered_list:692`. The other four
+call the **unconditional** `escape` instead — `force_escape:482`,
+`linebreaksbr:507`, `linenumbers:243`, and `html.py:175` inside `linebreaks` —
+which is Rust's, not the host's, so they need `html_escape.rs` and never touch
+this method. What the row is *about* is unchanged: `conditional_escape` is still
+a host protocol and still the milestone's one deviation. The count had drifted
+because it was the kind of number nothing checks — the same defect `STILL_STUBBED`
+carried — and the fix is the four call sites rather than a new total.
 
 **And the trait is now walked against all 57, not five.** The second round
 re-checked the remaining filters for anything needing a method an agent cannot
@@ -1220,7 +1238,7 @@ a yes hiding behind a no, and it took an AST walk rather than a reading to see i
 *The group split.* Left as 8/8/9/10/12/6/4. The review's own point is that
 sizing is downstream of the surface: three of the five gaps landed in the
 escaping group, but they landed on the *trait*, and with `conditional_escape`
-whole that group is eight calls to one host method rather than a group with
+whole that group is four calls to one host method rather than a group with
 missing plumbing. Re-derive after Task 2 lands, not now.
 
 **Declared environment.** `template-core` at this point has `lexer`, `parser`
@@ -3077,23 +3095,52 @@ which is the raw-token defect this corpus has already been fixed for once.
   table, which is why the derivation says pure and why an earlier revision of this
   plan wrongly had it as a host method. The absent flag is why it sits in this
   group rather than being assumed safe like its neighbours.
-- `striptags` (`:528-538`) — `django.utils.html.strip_tags`, host — genuinely so,
-  being `HTMLParser`-based with a depth limit that raises `SuspiciousOperation`
-  (`html.py:238-272`); the corpus should carry a nested-tag case.
+- `striptags` (`:528-538`) — `django.utils.html.strip_tags` (`html.py:210-226`,
+  and not `:238-272`, which an earlier revision cited and which is
+  `smart_urlquote`), host — genuinely so, being `HTMLParser`-based
+  (`convert_charrefs=False`, so entities are re-emitted verbatim rather than
+  decoded). Rust's body is `FilterHost::strip_tags` and nothing else, and the
+  method is `Result<String, Error>` because the depth guard raises: past
+  `MAX_STRIP_TAGS_DEPTH = 50` (`html.py:44`) it is a `SuspiciousOperation` with an
+  empty message. Measured, that guard counts **tag-removal iterations**, not
+  nesting, so the corpus's nested-tag case is the one that must *not* raise:
+  `"<d>" * 50 + "x" + "</d>" * 50` is `'x'` (one `_strip_once` removes every
+  balanced tag at once), while the three shapes
+  `.django/tests/utils_tests/test_html.py:204-217` uses — `"<" * 51 + "a>" * 51`,
+  `">" + "<a" * 501`, `"<a" * 50 + "a" * 950` — all raise.
 - `linebreaks` (`:485-495`), `linebreaksbr` (`:497-509`) — `needs_autoescape`;
-  both branch on `autoescape` and use `linebreaks` from `django.utils.html`.
-- `linenumbers` (`:230-245`) — `needs_autoescape`, `is_safe=True`, `escape=autoescape`,
-  and it emits `<span>` markup around lines. Rust, over the host's
-  `conditional_escape` and Rust's `escape`; the `autoescape=False` branch changes
-  the output shape.
-- `iriencode` (`:223-228`) — **the entire body is one call**:
-  `return iri_to_uri(value)`. Rust owns the `try/except TypeError` → `""` wrapper
-  and nothing else; the work is `FilterHost::iri_to_uri`. This filter is the
-  clearest case in M4 of why the trait had to be derived rather than written from
-  a reading — it was in the 18 from the start, and it had no method.
+  both branch on `autoescape` and use `linebreaks` from `django.utils.html`,
+  whose two escaping branches are `escape` (Rust's, `html_escape.rs`).
+- `linenumbers` (`:230-245`) — `needs_autoescape`, `is_safe=True`, and **Rust
+  owns the whole body**: `value.split("\n")` with no `normalize_newlines`,
+  `width = len(str(len(lines)))` digits zero-padded into `"%0<width>d. %s"`, and
+  `escape(line)` — the *unconditional* one, so Rust's `html_escape.rs`, never the
+  host's `conditional_escape` — on each line when autoescape is on and the value
+  is not `SafeData`. An earlier revision of this bullet said the body ran over
+  the host's `conditional_escape`, that it "emits `<span>` markup around lines",
+  and that the `autoescape=False` branch "changes the output shape": all three
+  are wrong on the pinned tree. Measured, the only difference between the
+  branches is whether each line is escaped — `"\n".join(f"line {i}" for i in
+  range(1, 13))` renders `'01. line 1\n…\n12. line 12'` under **both**, with no
+  `<span>` anywhere.
+- `iriencode` (`:223-228`) — **the entire body is one call**, and Rust's body is
+  that call and nothing else: the work is `FilterHost::iri_to_uri`. An earlier
+  revision had Rust owning a `try/except TypeError` → `""` wrapper around it, and
+  the pinned 6.0.9 body has no `try` at all — `iri_to_uri` does not raise
+  `TypeError` on a `str`, and `@stringfilter` has already coerced the input. This
+  filter is the clearest case in M4 of why the trait had to be derived rather
+  than written from a reading — it was in the 18 from the start, and it had no
+  method.
 - `urlencode` (`:365-380`) — `arg=None` means `safe=None` means Django's default
   safe set; then `quote(value, safe=safe)`. Host for `quote`, Rust for the
-  `safe`-set selection.
+  `safe`-set selection — which is three cases rather than two, and they are
+  measured: the absent argument and an explicit `None` both select `"/"`, a `str`
+  selects itself (`""` escapes everything), and `quote` **iterates** anything else
+  so every other value raises `TypeError` — `'int' object is not iterable` for a
+  scalar and `'<' not supported between instances of 'str' and 'int'` for
+  anything iterable, whatever its contents (`bytes` is the exception and is
+  decoded, which no trait method can do). The message therefore names the
+  argument's *type*, which is why this filter's rows carry both shapes.
 
 **Three of these twelve — `linebreaks`, `linebreaksbr`, `linenumbers` — can never
 be given an argument, and no row of theirs may carry one.** They are three of the
