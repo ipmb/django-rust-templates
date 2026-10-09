@@ -299,7 +299,7 @@ checks the checkers propagates to everything it checks — so they come first, a
 | `tests/test_anchor_manifest.py:416` | `shadows == {}` (`OUR_OWN` basenames under `.django/`) | a positive `rglob` hit, proving the denominator is non-empty |
 | `tests/test_materialise.py:1223` | `dead == set()` over `NODE_CLASSES` | a fabricated class name in the subtraction, shown to land in `dead` |
 | `tests/test_materialise.py:1219` | `missing == set()` over `tag_emitted_class_names()` | same shape; the stripper row at `:1207` guards only `TEST_ONLY_CLASSES` |
-| `tests/test_filter_inventory.py:1238` | neither flag on any of the 66 filters | a positive `hasattr` on a tag-side object, proving the loop can see one |
+| `tests/test_filter_inventory.py:1238` | neither flag on any of the 57 in `REGISTERED` (Django's builtin registry) | the same `hasattr`, on the same object, for an attribute that *is* there |
 | `tests/test_pyunicode_case_parity.py:91` | `not hasattr(_native, "python_lower")` | `hasattr(_native, "python_upper")` — one line, same instrument |
 | `tests/test_filter_parity.py:430` | `stubs == set()` | **already documented as vacuous by construction** (`.review/m4-summary.md:386-389`); do not "fix" — it is the deliberate-edit signal |
 
