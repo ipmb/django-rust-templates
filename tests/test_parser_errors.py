@@ -114,11 +114,12 @@ def compile_function_mentions(tag, name):
     Located through Django's own registry and then read out of the pinned source
     by line, **not** by a `do_<tag>` naming guess — the convention does not hold,
     and the guess failed on exactly the two tags that would have hidden it:
-    `cycle` (`defaulttags.py:612`) and `url` (`:1515`) are top-level functions
-    under their own names with no `do_` prefix, so guessing would have reported
-    "raises nothing" for both and quietly widened the exempt set from one tag to
-    three. That is this project's recurring shape — a plausible convention
-    standing in for a measurement — and it is why the lookup is by registry.
+    `cycle` (`defaulttags.py:612`) and `url` (`defaulttags.py:1515`) are
+    top-level functions under their own names with no `do_` prefix, so guessing
+    would have reported "raises nothing" for both and quietly widened the exempt
+    set from one tag to three. That is this project's recurring shape — a
+    plausible convention standing in for a measurement — and it is why the lookup
+    is by registry.
 
     The AST rather than a substring search, so the name has to appear as an
     identifier: `TemplateSyntaxError` in a comment or a docstring is not a raise,
