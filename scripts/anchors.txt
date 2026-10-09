@@ -655,7 +655,7 @@ python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_i
 _impl/parser.py:501	python/django_rust_templates/_impl/parser.py	501	-	func = parser.find_filter(name)	-
 _impl/parser.py:602	python/django_rust_templates/_impl/parser.py	602	-	func = resolve_ref(handle.index)	-
 _shim.py:75	python/django_rust_templates/_shim.py	75	-	TARGET = "django.template"	-
-_shim.py:408	python/django_rust_templates/_shim.py	408	-	if installed():	-
+_shim.py:521	python/django_rust_templates/_shim.py	521	-	if installed():	-
 python/django_rust_templates/host.py:327	python/django_rust_templates/host.py	327	-	func is not self._django_tags.get(command)	-
 python/django_rust_templates/host.py:413	python/django_rust_templates/host.py	413	-	self.last_error = error	-
 tests/parity_target.py:62	tests/parity_target.py	62	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
@@ -663,10 +663,13 @@ tests/parity_target.py:170	tests/parity_target.py	170	-	So this is the replaceme
 filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-
 test_unordered_list.py:143	tests/template_tests/filter_tests/test_unordered_list.py	143	-	unordered_list(item_generator()),	-
 test_unordered_list.py:148	tests/template_tests/filter_tests/test_unordered_list.py	148	-	def test_nested_generators(self):	-
+i18n/test_blocktranslate.py:9	tests/template_tests/syntax_tests/i18n/test_blocktranslate.py	9	-	from django.templatetags.i18n import BlockTranslateNode	-
 i18n/test_blocktranslate.py:881	tests/template_tests/syntax_tests/i18n/test_blocktranslate.py	881	-	-	-
+i18n/test_translate.py:7	tests/template_tests/syntax_tests/i18n/test_translate.py	7	-	from django.templatetags.l10n import LocalizeNode	-
 tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py:16	tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py	16	-	-	-
 syntax_tests/test_for.py:334	tests/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 syntax_tests/test_include.py:371-397	tests/template_tests/syntax_tests/test_include.py	371	397	def test_include_cache(self):	-
+syntax_tests/test_static.py:5	tests/template_tests/syntax_tests/test_static.py	5	-	from django.templatetags.static import StaticNode	-
 bad_tag.py:6-8	tests/template_tests/templatetags/bad_tag.py	6	8	badtag	-
 custom.py:386-393	tests/template_tests/templatetags/custom.py	386	393	self.count = count + 1	-
 custom.py:396-399	tests/template_tests/templatetags/custom.py	396	399	parser.extra_data["extra_data"]	-

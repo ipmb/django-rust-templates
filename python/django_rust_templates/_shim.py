@@ -74,6 +74,29 @@ from pathlib import Path
 
 TARGET = "django.template"
 
+# The namespaces this package serves, and where each one's files live under
+# `_impl`. The values are `_impl`-relative subdirectories, `""` for a namespace
+# served from the root.
+#
+# **The asymmetry is deliberate.** `django.template` is flat (`_impl/base.py`),
+# because M9 built it that way and re-keying it under `_impl/template/` for
+# symmetry would move every key in `SHADOWING`, `DECLARED`, `COMPARED_PATH` and
+# the anchor manifest, and every recorded line span with them.
+# `django.templatetags` is a subdirectory, because `loaders/` taught this tree
+# that a key must carry its subdirectory — `loaders/base.py`, not `base.py` — and
+# M10 Task 6 paid for learning it after the fact. A stated wart is cheaper than a
+# tidy re-key.
+#
+# `django.templatetags` is **forced rather than chosen**: the suite's own
+# `test_static.py`, `test_translate.py` and `test_blocktranslate.py` import a node
+# class out of a library by name, so those imports take Django's class unless the
+# namespace is served. See `tests/test_shim.py::NamespaceTests`.
+NAMESPACE_ROOTS = {
+    "django.template": "",
+    "django.templatetags": "templatetags",
+}
+NAMESPACES = tuple(NAMESPACE_ROOTS)
+
 _IMPL_DIR = Path(__file__).parent / "_impl"
 _IMPL_INIT = _IMPL_DIR / "__init__.py"
 
@@ -125,8 +148,8 @@ SHADOWING = {
 }
 
 
-def _django_template_dirs() -> list[str]:
-    """Django's own template directories, from wherever they are knowable.
+def _django_dirs(namespace: str = TARGET) -> list[str]:
+    """Django's own directories for one namespace, from wherever they are knowable.
 
     The installed finder is preferred, because it holds the paths captured at
     :func:`install` — asking it answers precisely the question the finder answers
@@ -134,31 +157,51 @@ def _django_template_dirs() -> list[str]:
     :func:`_real_search_paths`, which is what :func:`install` does itself.
     """
     if _installed_finder is not None:
-        return _installed_finder.real_paths
-    return _real_search_paths()
+        captured = _installed_finder.real_paths_by_namespace.get(namespace)
+        if captured is not None:
+            return captured
+    return _real_search_paths(namespace)
 
 
 def shadowing_files() -> list[str]:
     """``_impl`` files whose name the pinned checkout also defines.
 
     The question is the finder's own — *would this file be served under a name
-    Django already has?* — asked of the filesystem against Django's template
-    directories, so it stays true as modules are added rather than being a
-    second, hand-maintained list that can disagree (the failure
+    Django already has?* — asked of the filesystem against Django's directories,
+    so it stays true as modules are added rather than being a second,
+    hand-maintained list that can disagree (the failure
     ``.review/m10-recon.md`` §2 found in the milestone table).
 
+    **Asked per namespace, with the root stripped.** ``_impl/templatetags/i18n.py``
+    is served as ``django.templatetags.i18n``, so the name Django must be asked
+    about is ``i18n.py`` under ``django/templatetags/`` — comparing the whole
+    ``_impl``-relative path against every namespace's directory would look for
+    ``django/template/templatetags/i18n.py`` and report no clash for a file that
+    plainly is one.
+
     Paths are relative to ``_impl`` and posix-style, so a subpackage reports
-    ``loaders/__init__.py``. ``__pycache__`` is skipped: it holds no module
-    anyone wrote.
+    ``loaders/__init__.py`` and a library ``templatetags/i18n.py``. ``__pycache__``
+    is skipped: it holds no module anyone wrote.
     """
-    real_paths = _django_template_dirs()
     clashes = []
-    for path in sorted(_IMPL_DIR.rglob("*.py")):
-        relative = path.relative_to(_IMPL_DIR)
-        if "__pycache__" in relative.parts:
+    for namespace, root in NAMESPACE_ROOTS.items():
+        subtree = _IMPL_DIR / root if root else _IMPL_DIR
+        if not subtree.is_dir():  # pragma: no cover - defensive
             continue
-        if any(Path(real).joinpath(relative).is_file() for real in real_paths):
-            clashes.append(relative.as_posix())
+        real_paths = _django_dirs(namespace)
+        other_roots = [
+            other for name, other in NAMESPACE_ROOTS.items() if other and name != namespace
+        ]
+        for path in sorted(subtree.rglob("*.py")):
+            inner = path.relative_to(subtree)
+            if "__pycache__" in inner.parts:
+                continue
+            # A file under another namespace's root belongs to that namespace.
+            inside = inner.as_posix()
+            if any(inside == r or inside.startswith(r + "/") for r in other_roots):
+                continue
+            if any(Path(real).joinpath(inner).is_file() for real in real_paths):
+                clashes.append(path.relative_to(_IMPL_DIR).as_posix())
     return clashes
 
 
@@ -167,17 +210,24 @@ class ShimError(RuntimeError):
 
 
 class _ShimFinder(importlib.abc.MetaPathFinder):
-    def __init__(self, real_paths: list[str]) -> None:
-        self.real_paths = real_paths
+    def __init__(self, real_paths_by_namespace: dict[str, list[str]]) -> None:
+        # Per namespace, because `_real_subdirs` needs the *right* one: a
+        # `django.templatetags` package must fall back to Django's
+        # `templatetags/`, and falling back to its `template/` would make every
+        # submodule look absent.
+        self.real_paths_by_namespace = real_paths_by_namespace
 
     def find_spec(self, fullname, path=None, target=None):
-        relative = _relative_name(fullname)
-        if relative is None:
+        matched = _match_namespace(fullname)
+        if matched is None:
             return None
+        if _is_foreign_package(fullname):
+            return None
+        relative = _relative_name(fullname)
         if relative == "" and not _IMPL_INIT.is_file():
             raise ShimError(f"expected implementation package at {_IMPL_INIT}")
 
-        base = _IMPL_DIR if not relative else _IMPL_DIR.joinpath(*relative.split("."))
+        base = _IMPL_DIR if not relative else _IMPL_DIR.joinpath(*relative.split("/"))
 
         # A package we provide needs its own search path — ours first, Django's
         # second. Returning a spec without one would leave the package with
@@ -193,7 +243,9 @@ class _ShimFinder(importlib.abc.MetaPathFinder):
                 loader=importlib.machinery.SourceFileLoader(fullname, str(init)),
                 submodule_search_locations=[
                     str(base),
-                    *_real_subdirs(relative, self.real_paths),
+                    *_real_subdirs(
+                        relative, self.real_paths_by_namespace[matched[0]]
+                    ),
                 ],
             )
 
@@ -210,22 +262,57 @@ class _ShimFinder(importlib.abc.MetaPathFinder):
         return None
 
 
-def _relative_name(fullname: str) -> str | None:
-    """``django.template.loaders`` → ``loaders``; the package itself → ``""``.
+def _match_namespace(fullname: str) -> tuple[str, str] | None:
+    """``(namespace, dotted suffix)`` for a name in one of ours, else ``None``.
 
-    Returns ``None`` for anything outside the ``django.template`` namespace,
-    which is everything this finder must leave alone.
+    **Longest namespace first, and it is load-bearing rather than tidy.**
+    ``django.templatetags.i18n`` also starts with ``django.template``, so a
+    first-match walk in table order resolves it as the ``template`` namespace
+    with the suffix ``tags.i18n`` — a path that does not exist, silently, and
+    the finder then declines a module it was supposed to serve.
     """
-    if fullname == TARGET:
-        return ""
-    if fullname.startswith(TARGET + "."):
-        return fullname[len(TARGET) + 1:]
+    for namespace in sorted(NAMESPACES, key=len, reverse=True):
+        if fullname == namespace:
+            return namespace, ""
+        if fullname.startswith(namespace + "."):
+            return namespace, fullname[len(namespace) + 1 :]
     return None
+
+
+def _relative_name(fullname: str) -> str | None:
+    """``_impl``-relative posix path for a name we serve, else ``None``.
+
+    ``django.template`` → ``""`` (the package itself); ``django.template.base``
+    → ``base``; ``django.template.loaders.base`` → ``loaders/base``;
+    ``django.templatetags`` → ``templatetags``; ``django.templatetags.i18n`` →
+    ``templatetags/i18n``.
+
+    **No ``.py``, because the name cannot say which it is.** ``loaders`` is a
+    package and ``loaders.base`` is a module, and the dotted name does not
+    distinguish them, so the extension is the filesystem's answer — given in
+    ``find_spec`` and ``_served``, which try ``__init__.py`` first and then
+    ``.py``. This function stays a pure translation of the name.
+
+    The spelling is the same one every per-file table in this tree uses
+    (``SHADOWING``'s keys, the anchor manifest, ``check_transcriptions``), which
+    is why it is a posix path here rather than the dotted suffix it used to be:
+    one spelling of "an ``_impl``-relative path" is what keeps ``loaders/base.py``
+    from becoming ``loaders.base.py`` in one of the two derivations.
+    """
+    matched = _match_namespace(fullname)
+    if matched is None:
+        return None
+    namespace, suffix = matched
+    root = NAMESPACE_ROOTS[namespace]
+    if not suffix:
+        return root
+    relative = suffix.replace(".", "/")
+    return f"{root}/{relative}" if root else relative
 
 
 def _real_subdirs(relative: str, real_paths: list[str]) -> list[str]:
     """Django's own directories corresponding to one of our packages."""
-    parts = relative.split(".") if relative else []
+    parts = relative.split("/") if relative else []
     return [
         str(candidate)
         for real_path in real_paths
@@ -233,8 +320,8 @@ def _real_subdirs(relative: str, real_paths: list[str]) -> list[str]:
     ]
 
 
-def _real_search_paths() -> list[str]:
-    """Search paths of Django's own template package.
+def _real_search_paths(namespace: str) -> list[str]:
+    """Search paths of one of Django's own packages.
 
     Uses ``find_spec`` rather than ``import_module``: the spec carries
     ``submodule_search_locations`` without executing the package, so nothing is
@@ -243,19 +330,43 @@ def _real_search_paths() -> list[str]:
     stale reference to a package we then discard.
     """
     try:
-        spec = importlib.util.find_spec(TARGET)
+        spec = importlib.util.find_spec(namespace)
     except (ImportError, ValueError) as exc:  # pragma: no cover - hard dependency
-        raise ShimError(f"cannot locate {TARGET}: {exc}") from exc
+        raise ShimError(f"cannot locate {namespace}: {exc}") from exc
 
     if spec is None:  # pragma: no cover - Django is a hard dependency
-        raise ShimError(f"cannot locate {TARGET}")
+        raise ShimError(f"cannot locate {namespace}")
 
     paths = [str(p) for p in (spec.submodule_search_locations or [])]
     if not paths:
-        raise ShimError(f"{TARGET} has no search locations; is it a package?")
+        raise ShimError(f"{namespace} has no search locations; is it a package?")
     if str(_IMPL_DIR) in paths:
         raise ShimError("already shimmed; uninstall before reinstalling")
     return paths
+
+
+def _is_foreign_package(fullname: str) -> bool:
+    """Is ``fullname`` the namespace package itself, for a namespace we share?
+
+    ``django.templatetags`` is Django's package and we serve only files inside
+    it: serving the package would interpose ``__init__.py`` for no reason and
+    give it a ``__path__`` of ours, so a library we do not provide would resolve
+    against ``_impl`` and be declined there rather than found in Django's tree.
+
+    ``django.template`` is deliberately *not* this case — its root is ``""``,
+    meaning ``_impl/__init__.py`` is that package and is ours to serve.
+
+    A predicate rather than the same condition written into ``find_spec`` and
+    ``_served``, because those two are required to agree about which names are
+    ours and a condition written twice is how they stop agreeing — the failure
+    ``_served``'s own docstring names.
+    """
+    matched = _match_namespace(fullname)
+    return (
+        matched is not None
+        and matched[1] == ""
+        and bool(NAMESPACE_ROOTS[matched[0]])
+    )
 
 
 def _served(fullname: str) -> bool:
@@ -267,10 +378,12 @@ def _served(fullname: str) -> bool:
     ``sys.modules`` entries are ours — a package we provide is an
     ``__init__.py``, anything else a ``.py``.
     """
+    if _is_foreign_package(fullname):
+        return False
     relative = _relative_name(fullname)
     if relative is None:
         return False
-    base = _IMPL_DIR if not relative else _IMPL_DIR.joinpath(*relative.split("."))
+    base = _IMPL_DIR if not relative else _IMPL_DIR.joinpath(*relative.split("/"))
     return (base / "__init__.py").is_file() or base.with_suffix(".py").is_file()
 
 
@@ -408,10 +521,14 @@ def install(strict: bool = False) -> None:
     if installed():
         return
 
-    # Capture Django's own paths before we take the name over.
-    real_paths = _real_search_paths()
+    # Capture Django's own paths before we take the name over — per namespace,
+    # because a `django.templatetags` package must fall back to Django's
+    # `templatetags/` and not to its `template/`.
+    real_paths_by_namespace = {
+        namespace: _real_search_paths(namespace) for namespace in NAMESPACES
+    }
 
-    finder = _ShimFinder(real_paths)
+    finder = _ShimFinder(real_paths_by_namespace)
     sys.meta_path.insert(0, finder)
     _installed_finder = finder
 
@@ -501,11 +618,19 @@ def installed() -> bool:
     return any(isinstance(f, _ShimFinder) for f in sys.meta_path)
 
 
-def unshimmed() -> list[str]:
-    """Modules under ``django.template`` still served by Django's own code.
+def unshimmed(scope: str = TARGET) -> list[str]:
+    """Modules under ``scope`` still served by Django's own code.
 
-    This is the project's progress meter: it is empty exactly when every module
-    under ``django.template`` is provided by this package.
+    This is the project's progress meter: at ``scope="django.template"`` it is
+    empty exactly when every module under ``django.template`` is provided by this
+    package, and it has been 11 since M12 began. ``scope="django.templatetags"``
+    is the same count over the other population, starting at Django's five
+    libraries.
+
+    **One implementation over two populations, not two functions.**
+    ``unshimmed_templatetags()`` would be a second spelling of one count, and two
+    spellings drift — the failure this tree has hit three times (D3′, the vacuity
+    reasons, M10's ``origin`` row). The second name is the scope argument.
 
     Computed by comparing the two source trees rather than by importing, so it
     has no side effects — importing Django's template modules can require
@@ -514,28 +639,56 @@ def unshimmed() -> list[str]:
     if not installed():
         raise ShimError("not installed; call install() first")
 
-    ours = _dotted_module_names(_IMPL_DIR)
-    return sorted(f"{TARGET}.{name}" for name in django_modules() - ours)
+    ours = _our_modules_in(scope)
+    return sorted(f"{scope}.{name}" for name in django_modules(scope) - ours)
 
 
-def django_modules() -> set[str]:
-    """Every name Django's own template package defines.
+def _our_modules_in(scope: str) -> set[str]:
+    """Dotted suffixes of our files for one namespace, ``_impl``-relative.
+
+    The namespace's root is what makes this more than one call: our
+    ``django.templatetags`` files live under ``_impl/templatetags/`` while our
+    ``django.template`` files are flat in ``_impl/``, and the two are compared
+    against Django's directories for the *same* namespace.
+    """
+    return _dotted_module_names(_impl_root(scope))
+
+
+def _impl_root(scope: str) -> Path:
+    """Where one namespace's files live under ``_impl``.
+
+    An unknown scope is refused rather than silently compared against ``_impl``:
+    a typo would otherwise report the whole of Django's namespace as missing,
+    which reads as progress in reverse and sends the reader to the wrong tree.
+    """
+    try:
+        root = NAMESPACE_ROOTS[scope]
+    except KeyError:
+        raise ShimError(
+            f"{scope!r} is not a namespace this package serves; "
+            f"expected one of {sorted(NAMESPACE_ROOTS)}"
+        ) from None
+    return _IMPL_DIR / root if root else _IMPL_DIR
+
+
+def django_modules(scope: str = TARGET) -> set[str]:
+    """Every name Django's own package at ``scope`` defines.
 
     The universe both the meter and the ownership table are counted over — 26
-    names at 6.0.9. Read from Django's directories rather than from a list here,
-    because the failure it exists to catch is a name nobody thought about:
-    `autoreload`, `context_processors` and `loader` were absent from every
-    milestone row precisely because no list mentioned them
-    (`.review/m10-recon.md` §2).
+    names at 6.0.9 for ``django.template``, 5 for ``django.templatetags``. Read
+    from Django's directories rather than from a list here, because the failure
+    it exists to catch is a name nobody thought about: ``autoreload``,
+    ``context_processors`` and ``loader`` were absent from every milestone row
+    precisely because no list mentioned them (``.review/m10-recon.md`` §2).
 
     Callable before ``install()``, which is what lets
     `tests/test_milestone_ownership.py` state the partition without depending on
-    the order the suite happens to install the shim in: `_django_template_dirs`
+    the order the suite happens to install the shim in: `_django_dirs`
     falls back to `_real_search_paths`, which is the same set of paths the finder
     captures at install.
     """
     names: set[str] = set()
-    for real_path in _django_template_dirs():
+    for real_path in _django_dirs(scope):
         names |= _dotted_module_names(Path(real_path))
     return names
 

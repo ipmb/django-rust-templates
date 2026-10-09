@@ -104,7 +104,16 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # hold (`_rust_owned` ⊆ `django_own_tags()`) was asserted in a docstring and
 # nowhere else, and the docstring's version of it was false in both halves — so
 # this is the delta that turns a sentence into a check.
-PINNED = 392
+#
+# 392 → 397 is M12 Task 1, `test_shim.py::NamespaceTests`, **five** rows, and the
+# delta is again measured rather than read off the failure: `git diff tests/`
+# shows `+5` rows in one file and nothing else, and 392 + 5 = 397. Those five are
+# the new namespace's mapping, the extension the name cannot decide, the meter's
+# second scope, a library we do not provide still resolving as Django's, and the
+# namespace package itself being declined. The fourth is Review Focus 3's row and
+# the fifth guards a refusal that is deliberate rather than a side effect of no
+# `__init__.py` existing.
+PINNED = 397
 
 
 def collected() -> unittest.TestSuite:

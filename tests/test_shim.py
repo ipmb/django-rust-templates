@@ -312,7 +312,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
 
         The cache-drop below is not incidental. The row writes a module and
         expects the finder to see it, but ``install()`` returns early when the
-        shim is already installed (``_shim.py:408``), and a session-start install
+        shim is already installed (``_shim.py:521``), and a session-start install
         (which ``check.sh`` now does, so every test module binds the same
         classes) means the shim *is* already installed by the time this row
         runs. A ``django.template.backends`` cached earlier in the session then
@@ -491,6 +491,121 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         _shim.uninstall()
         with self.assertRaises(_shim.ShimError):
             _shim.install(strict=True)
+
+
+class NamespaceTests(unittest.TestCase):
+    """M12 Task 1: the shim serves a second namespace, and the meter gains a scope.
+
+    ``django.templatetags`` is that namespace, and it is **forced rather than
+    chosen**: three of the suite's own modules import a node class out of a
+    library by name — ``from django.templatetags.static import StaticNode``
+    (``syntax_tests/test_static.py:5``), ``from django.templatetags.l10n import
+    LocalizeNode`` (``i18n/test_translate.py:7``), ``from
+    django.templatetags.i18n import BlockTranslateNode``
+    (``i18n/test_blocktranslate.py:9``) — so unless the namespace
+    is served, those imports take Django's classes however the modules themselves
+    are interposed, and a node built by our parser fails an ``assertIsInstance``
+    against them.
+
+    **The two namespaces map into ``_impl`` differently, and that is a fact to
+    state rather than a wart to smooth over.** ``django.template`` is flat
+    because M9 built it that way, and re-keying it under ``_impl/template/``
+    would move every key in ``SHADOWING``, ``DECLARED``, ``COMPARED_PATH`` and
+    the anchor manifest with their recorded line spans. ``django.templatetags``
+    is a subdirectory because the unit of interposition is the path — a key
+    carries its subdirectory, ``loaders/base.py`` and not ``base.py``, which M10
+    paid to learn.
+
+    ``tearDown`` restores the state it found, per the contract above.
+    """
+
+    def setUp(self):
+        self._installed_at_setup = _shim.installed()
+
+    def tearDown(self):
+        if self._installed_at_setup and not _shim.installed():
+            _shim.install()
+        elif not self._installed_at_setup and _shim.installed():
+            _shim.uninstall()
+
+    def test_the_two_namespaces_map_into_impl_differently(self):
+        self.assertEqual(_shim.TARGET, _shim.NAMESPACES[0])
+        self.assertEqual(_shim._relative_name("django.template"), "")
+        self.assertEqual(_shim._relative_name("django.template.base"), "base")
+        self.assertEqual(
+            _shim._relative_name("django.template.loaders.base"), "loaders/base"
+        )
+        self.assertEqual(_shim._relative_name("django.templatetags"), "templatetags")
+        self.assertEqual(
+            _shim._relative_name("django.templatetags.i18n"), "templatetags/i18n"
+        )
+        self.assertIsNone(_shim._relative_name("django.utils.translation"))
+        # A name that only *looks* like the other namespace's prefix. Without
+        # longest-first matching this resolves as `template` + `tags.i18n`.
+        self.assertIsNone(_shim._relative_name("django.templateish"))
+
+    def test_the_path_carries_no_extension_because_the_name_cannot_say_which(self):
+        """``loaders`` is a package and ``loaders.base`` is not, and the dotted
+        name does not distinguish them.
+
+        So the extension is the *filesystem's* answer, given in ``find_spec``
+        and ``_served`` (which try ``__init__.py`` first, then ``.py``), and this
+        function stays a pure translation of the name.
+        """
+        self.assertEqual(_shim._relative_name("django.template.loaders"), "loaders")
+        self.assertEqual(
+            _shim._relative_name("django.template.loaders.base"), "loaders/base"
+        )
+
+    def test_the_meter_keeps_its_meaning_and_gains_a_second_population(self):
+        """``unshimmed()`` is unchanged, and the second count is the same function.
+
+        Not a second function: two implementations of one count drift, which is
+        the failure this tree has hit three times (D3', the vacuity reasons,
+        M10's ``origin`` row). The scope argument is the second population.
+        """
+        _shim.install()
+        self.assertEqual(_shim.unshimmed(), _shim.unshimmed(scope="django.template"))
+        self.assertEqual(len(_shim.unshimmed()), 11)
+        self.assertEqual(
+            sorted(_shim.unshimmed(scope="django.templatetags")),
+            [
+                "django.templatetags.cache",
+                "django.templatetags.i18n",
+                "django.templatetags.l10n",
+                "django.templatetags.static",
+                "django.templatetags.tz",
+            ],
+        )
+
+    def test_serving_a_namespace_does_not_claim_the_whole_of_it(self):
+        """Review Focus 3: a library we do not provide must still resolve as Django's.
+
+        ``_impl/templatetags/`` does not exist yet, so the row asserts the
+        *mechanism* — the finder names the path and declines it because no file
+        is there. It stays meaningful afterwards for every name the five
+        libraries do not cover, and it is what would catch a finder that claimed
+        the namespace rather than the files it actually has.
+        """
+        _shim.install()
+        self.assertEqual(
+            _shim._relative_name("django.templatetags.notalibrary"),
+            "templatetags/notalibrary",
+        )
+        self.assertFalse(_shim._served("django.templatetags.notalibrary"))
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("django.templatetags.notalibrary")
+
+    def test_the_namespace_package_itself_is_not_served(self):
+        """``django.templatetags`` is Django's package; only its members are ours.
+
+        Serving the package would interpose ``__init__.py`` for no reason and
+        give it a ``__path__`` of ours, so the finder must decline the name
+        while accepting the modules beneath it.
+        """
+        _shim.install()
+        self.assertFalse(_shim._served("django.templatetags"))
+        self.assertIs(importlib.import_module("django.templatetags"), sys.modules["django.templatetags"])
 
 
 if __name__ == "__main__":
