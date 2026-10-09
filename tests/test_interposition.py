@@ -1694,6 +1694,74 @@ class FilterRoutingTests(unittest.TestCase):
         self.assertIs(host.django_own_filters().get(original["lower"]), "lower")
 
 
+class TagPredicateCoverageTests(unittest.TestCase):
+    """M12 Task 0b: Rust-owned must be a subset of the tag predicate.
+
+    `has_tag` answers a Rust-owned name with
+    `func is not self._django_tags.get(command)`
+    (`python/django_rust_templates/host.py:327`), so the merge
+    `django_own_tags()` returns is not decoration — it is the *other side of the
+    comparison*. A name in `_rust_owned` that the merge does not carry has
+    nothing to be compared against, `func is not None` is True, and the escape
+    resolves the wrong way: the host compiles a tag Rust owns, silently, with
+    the whole 1547 green.
+
+    **This row exists because the sentence that explains the predicate denied
+    it.** `django_own_tags()`'s docstring asserted *"the 25 Rust-owned names are
+    exactly the union of these two tables"*, and both halves were false at
+    6.0.9: the count is 23, and the relation is containment. That is not a
+    cosmetic correction — under a claimed *equality*, widening the merge looks
+    self-maintaining, so a reader concludes the predicate keeps itself honest
+    and the inversion M12 exists to repair reads as impossible. The docstring is
+    corrected in the same commit as this row.
+
+    Nothing in the tree related the two sets before this. The claim lived only
+    in the docstring, which nothing re-reads.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _shim.install()
+        from django_rust_templates import host as host_module
+        from django_rust_templates.render import parser_for
+
+        cls.host = host_module.ShellHost(parser_for(""))
+        cls.own = host_module.django_own_tags()
+
+    def assert_covers(self, rust_owned, own):
+        missing = sorted(rust_owned - set(own))
+        self.assertFalse(
+            missing,
+            f"Rust-owned names the tag predicate does not carry: {missing}. "
+            f"`has_tag` decides these with `func is not _django_tags.get(command)`, "
+            f"so a name missing from the merge has nothing to compare against and "
+            f"the escape resolves the wrong way — silently, with the suite green.",
+        )
+
+    def test_every_rust_owned_name_is_in_the_tag_predicate(self):
+        """Read off a real ``ShellHost``, not recomputed from ``_native``.
+
+        Recomputing `set(builtin_tag_names_including_stubs()) - set(...)` here
+        would be a second account of the set the predicate actually uses, and a
+        row that agrees with its own copy of the rule is the failure this whole
+        file is about.
+        """
+        self.assert_covers(self.host._rust_owned, self.own)
+
+    def test_that_row_would_catch_a_name_the_predicate_lacks(self):
+        """The control the row above cannot be read without.
+
+        A containment assertion over a set that happens to satisfy it is green
+        on arrival and proves nothing until it has been shown to fail. `trans` is
+        not an arbitrary stand-in: it is the first name M12 adds to Rust's
+        registry, so this stages that milestone's own failure mode one task
+        early — and if the widening Task 2 performs were ever undone, this is the
+        row that reddens rather than the 1547 staying green.
+        """
+        with self.assertRaises(AssertionError):
+            self.assert_covers(self.host._rust_owned | {"trans"}, self.own)
+
+
 class DefaultTagsInterpositionTests(unittest.TestCase):
     """M11 Task 3: ``defaulttags`` is ours, and the tag-rebinding escape with it.
 

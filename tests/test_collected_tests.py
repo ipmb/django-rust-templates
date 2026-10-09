@@ -98,7 +98,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # pin's own comment calls the worse one. The fix is the two-method contract in
 # that class; the row is what makes it checkable, and it fails on the old code
 # and on an unconditional install at teardown alike.
-PINNED = 390
+#
+# 390 → 392 is M12 Task 0b, `TagPredicateCoverageTests`, **two** rows: the
+# containment itself and the control that shows it can fail. The invariant they
+# hold (`_rust_owned` ⊆ `django_own_tags()`) was asserted in a docstring and
+# nowhere else, and the docstring's version of it was false in both halves — so
+# this is the delta that turns a sentence into a check.
+PINNED = 392
 
 
 def collected() -> unittest.TestSuite:

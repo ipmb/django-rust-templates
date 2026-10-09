@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `django.templatetags.{i18n, l10n, static, tz, cache}` resolve to modules this project provides, their 18 registered tags are compiled by Rust, and their 9 filters run Rust bodies — so the 140 gate rows that have run Django's code since M1 run ours.
+**Goal:** `django.templatetags.{i18n, l10n, static, tz, cache}` resolve to modules this project provides, their 18 registered tags are compiled by Rust, and their 9 filters run Rust bodies — so the gate rows that have run Django's code since M1 run ours: **140 from the five libraries' tag corpus**, plus **`syntax_tests/i18n/test_filters.py`'s 3 rows**, which assert four of the nine filters by exact output under a `translation.override`. **The 140 counts tag rows only**, and treating it as the milestone's whole gate population is a mistake this plan made in its first draft — see Task 7.
 
 **Architecture:** The M9-M11 shape, one namespace over. The five modules are transcribed into `_impl/templatetags/` with declared regions; the shim's namespace mapping grows from one root to an explicit table; `ShellHost.django_own_tags()`/`django_own_filters()` are widened to the five modules so the identity escape in `has_tag`/`resolve` keeps meaning "is this callable still the library's own"; Rust gains 18 tag compile functions emitting `NodeDesc`s and 9 filter bodies, and `_impl/parser.py`'s `NODE_CLASSES` gains the 15 classes.
 
@@ -52,6 +52,63 @@ Five input classes the spec implies and no task's tests exercise directly, most 
 ### Task 0: Recon (done)
 
 `.review/m12-recon.md` and both instruments are committed. Headline measured: **18 `theirs/theirs`**, 9 filters `ours=False`; **1155 lines, 16 classes, 15 `Node` subclasses, 26 module defs**; registry **18 tags + 9 filters**; gates **140 rows**.
+
+---
+
+### Task 0b: the predicate's stated invariant becomes a row
+
+**Files:**
+- Modify: `python/django_rust_templates/host.py` (docstring only)
+- Test: `tests/test_interposition.py`
+
+**Proposed by the reviewer against the recon, and measured here before adopting.** `django_own_tags()`'s docstring ends *"Measured: the 25 Rust-owned names are exactly the union of these two tables."* Neither half holds at 6.0.9:
+
+- **The count is 23, not 25** — the sentence predates `_rust_owned` subtracting the two stubs (`host.py:303-305`).
+- **The relation is containment, never equality.** Measured: `rust - django` is `[]`, `django - rust` is `['load', 'partial', 'partialdef', 'querystring']`. Those four are carried by the merge without being Rust's, because `has_tag` answers them at `host.py:315` — *before* the merge is consulted.
+
+**This is not hygiene, and it argues against Task 2.** Under a claimed equality the widening looks self-maintaining: if the two sets must be equal, then putting `trans` into Rust's registry obviously forces the merge to widen, and a reader concludes the predicate maintains itself. Under the true containment nothing forces it — which is the inversion Task 2 exists to repair. **The sentence that explains the predicate argues against this plan's central finding**, and it is the most-repeated defect in this project in its purest form: a measurement written when the instrument was designed, which nothing re-reads. `host.py` has carried the wrong number through five milestones.
+
+**And nothing guards it.** No row anywhere relates Rust's registry to `django_own_tags()`; the claim lives only in that docstring. The guard is what makes Task 2's widening load-bearing rather than decorative.
+
+- [ ] **Step 1: Write the failing test** — `TagPredicateCoverageTests` in `tests/test_interposition.py`, beside `FilterRoutingTests`:
+
+```python
+class TagPredicateCoverageTests(unittest.TestCase):
+    """Rust-owned ⊆ the tag predicate, or `has_tag`'s escape inverts."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.host = host_module.ShellHost(render.parser_for("", _hosting_engine()))
+        cls.own = host_module.django_own_tags()
+
+    def assert_covers(self, rust_owned, own):
+        missing = sorted(rust_owned - set(own))
+        self.assertFalse(
+            missing,
+            f"Rust-owned names the tag predicate does not carry: {missing}. "
+            f"`has_tag` answers these with `func is not _django_tags.get(command)`, "
+            f"so a name missing from the merge has nothing to be compared against "
+            f"and the escape resolves the wrong way — silently, with the suite green.",
+        )
+
+    def test_every_rust_owned_name_is_in_the_tag_predicate(self):
+        # Read off a real ShellHost rather than recomputed from `_native`:
+        # recomputing would be a second account of the set the predicate uses.
+        self.assert_covers(self.host._rust_owned, self.own)
+
+    def test_that_row_would_catch_a_name_the_predicate_lacks(self):
+        # The control the row above cannot be read without. `trans` is not
+        # arbitrary — it is the first name this milestone adds to Rust's
+        # registry, so this is the failure Task 2's ordering exists to prevent,
+        # staged one task early.
+        with self.assertRaises(AssertionError):
+            self.assert_covers(self.host._rust_owned | {"trans"}, self.own)
+```
+
+- [ ] **Step 2: Run and watch it fail** — `bash scripts/run_unit_tests.sh tests.test_interposition.TagPredicateCoverageTests`. Both rows error on the missing helper.
+- [ ] **Step 3: Correct the docstring** — 23, containment, the four names, and *where* they are answered.
+- [ ] **Step 4: Run** — both rows green; `bash scripts/run_unit_tests.sh`.
+- [ ] **Step 5: Commit.**
 
 ---
 
@@ -152,6 +209,14 @@ class NamespaceTests(unittest.TestCase):
 - Consumes: Task 1's namespace table.
 
 **This task is the one the recon's §3 exists for.** Adding the names to Rust's registry *without* widening `django_own_tags()` changes nothing, silently: `_django_tags.get("trans")` is `None`, so `has_tag`'s escape inverts and the tag goes to the host exactly as before, with the 1547 green. The order is: widen the predicate first, prove the tags still route to the host, then port the bodies.
+
+**Why the bodies stay in this milestone, against the reviewer's proposal to split them out.** The reviewer asked for M12 to be transcription only — five files made ours, zero Rust bodies, the widening and the bodies deferred to the milestone that ships the first one — on the grounds that M4 shipped Rust filter bodies seven milestones ahead of the routing that reached them. Both halves of that are answered here rather than waved off:
+
+- **The M4 defect is a shape this plan cannot take.** M4's state was *bodies with no routing*. Here the routing lands first (this task) and the bodies only afterwards, so at no commit in M12 does a Rust body exist that the predicate cannot reach — and the last commit of every library task is the one that turns its routing on. A milestone that passes through the bad state only by being interrupted mid-task is not the same risk as one that opens in it.
+- **Splitting would make M12 the only milestone in this tree shaped that way.** M11 is the nearest precedent and is exactly the shape kept here: Task 1 *loader_tags is our module* (transcription alone, because M7 had already ported those bodies), Task 2 **built-in filters reach Rust** (transcription *and* the `FilterExpression.resolve` routing that turns 454 rows from Django's to ours), Task 3 *defaulttags is our module*. M9 and M10 combine the same two. A "transcription-only" M12 would be a new kind of milestone, invented at the end of the sequence, to avoid a risk the ordering already removes.
+- **What the reviewer was right about is Task 0b**, and it is adopted: the predicate's stated invariant was false and unguarded, and it argued against this task. That correction is what makes the widening provably necessary rather than merely plausible.
+
+The reviewer's other consequence — that the nine filters are therefore not a separate decision because the unit of transcription is the file — is also adopted, and it is why Task 7 is scoped as **Rust bodies only**. The five files are fully transcribed by Tasks 3-6; a per-file table (`DECLARED`, `SHADOWING`, `COMPARED_PATH`, the anchors) cannot express a half-transcribed file, so "tags now, filters later" was never the choice it looked like.
 
 - [ ] **Step 1: Write the failing test** — `LibraryTagPredicateTests` in `tests/test_interposition.py`:
 
@@ -292,6 +357,12 @@ The 4 filters (`language_name`, `language_name_local`, `language_name_translated
 
 **Interfaces:**
 - Produces: `django_own_filters()` covering the five libraries' `register.filters`; nine Rust bodies; nine names in the Rust filter registry.
+
+**Task 7 means Rust bodies, and only Rust bodies.** The nine filters' *transcription* is not this task's work and cannot be separated from Tasks 3-6: the five files are interposed whole, and no version of interposing `django.templatetags.i18n` leaves its four filters as Django's. This task writes the nine `crates/template-core/src/filters/*.rs` bodies and the `django_own_filters()` widening that routes to them.
+
+**The gate coverage this task buys was mis-stated in the plan's first draft, and the correction is the reason it is a task rather than a footnote.** The draft argued the nine filters could be cut because *"the 140 gate rows are all tags, so the filters buy no gate coverage"*. Measured: they do. `template_tests/syntax_tests/i18n/test_filters.py` is 3 rows in the 1547, and its first two assert `language_name`, `language_name_local`, `language_bidi` and `language_name_translated` by exact output — `"Hungarian Magyar False Hungarian"`, and `"Hungarian Magyar False maďarsky"` under `translation.override("cs")` — so four of the nine are gate-covered and the routing must be right for the suite to stay green. The 140 figure was a count of **tag** rows answering a question about **filters**: two right numbers to two different questions, which is the family this project has paid for five times.
+
+The remaining five — `localize`, `unlocalize`, `localtime`, `utc`, `timezone` — have no row in the 1547 (measured: `unlocalize` occurs once in `tests/i18n/`, outside the suite; the other four appear nowhere). They are ported because the file is the unit of transcription, not because the gate weighs them.
 
 The nine, measured from the pinned files rather than from the census's total: `language_name`, `language_name_translated`, `language_name_local`, `language_bidi` (`i18n.py:293,298,304,309`); `localize`, `unlocalize` (`l10n.py:8,16`); `localtime`, `utc` (`tz.py:20,30`) and `timezone`, which is `do_timezone` under a registered alias (`tz.py:37`).
 

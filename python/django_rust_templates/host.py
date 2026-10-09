@@ -81,10 +81,31 @@ def django_own_tags():
     The list was not merely redundant, it was **wrong in the direction that does
     not fail loudly**: it was consulted *before* identity, so a `{% load %}`ed
     library registering `block` lost (measured: the parser's `block` *is* the
-    loaded callable, and `has_tag` returned `False`). `load`/`querystring` are
-    the two names still not here; they are answered by Rust's registry not
-    containing them, and by nothing else. Measured: the 25 Rust-owned names are
-    exactly the union of these two tables.
+    loaded callable, and `has_tag` returned `False`).
+
+    **Rust's registry is a subset of this table, never equal to it, and this
+    paragraph said "exactly the union" until M12 measured it.** Measured against
+    `.django` @ 6.0.9: the union of these two tables is **27** names, Rust's
+    registry is **23**, and `rust - django` is `[]`. Containment is the only
+    direction that has to hold, because the clause below compares against this
+    table — and a Rust-owned name missing from it would put `None` on the right
+    of an `is not`, so the escape resolves the wrong way and the host compiles a
+    tag Rust owns, silently, with the suite green.
+
+    The four names here that Rust does not own — `load`, `querystring`,
+    `partial`, `partialdef` — never reach that comparison: `load` and
+    `querystring` because Rust's registry has no `do_load`/`do_querystring`, and
+    the two stubs because `_rust_owned` subtracts `builtin_tag_stub_names()`.
+    All four are answered by `has_tag`'s early return, before this table is
+    consulted at all.
+
+    The old sentence was wrong in both halves and had been for five milestones,
+    and it was wrong in the direction that **hides** this: read as an equality,
+    widening this table looks self-maintaining, so adding a library's tag names
+    to Rust's registry appears to require widening it, when nothing forces that
+    — the tag then stays Django's with every row green.
+    `TagPredicateCoverageTests` in `tests/test_interposition.py` holds the
+    containment now, and was added with this correction.
     """
     return {**_defaulttags.register.tags, **_loader_tags.register.tags}
 
