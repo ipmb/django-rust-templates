@@ -260,23 +260,35 @@ does not subtract across them**; the subtraction is below and is the reader's to
 | `{% blocktranslate count c=r.count %}` | 13.664 | 12.828 | **+0.836** |
 | an empty `{% for %}` body | 0.256 | 0.252 | **+0.004** |
 
-Weighted by the realistic page (50 rows: 1 name, 1 floatformat, 1 blocktranslate, plus
-the surrounding `{% for %}`), the deltas sum to ≈ 439 µs against the measured
-`realistic/render` gap of 1637.2 − 1211.5 = **425.7 µs**, i.e. the decomposition accounts
-for the whole gap within 3%.
+Weighted by the units `realistic/render` actually uses — one `{{ row.name }}`, one
+`{{ row.value|floatformat:2 }}` and one `{% blocktranslate %}` per row, over 50 rows,
+with the base template's single `{% translate %}` (5.093 − 5.119 = −0.026) —
 
-**Two rows are controls and they are the most informative rows in the table.**
+```
+50 x (0.595 + 5.356 + 0.836) + (-0.026)  =  339.3 us
+```
+
+against the measured `realistic/render` gap of 1637.2 − 1211.5 = **425.7 µs**. **The
+decomposition accounts for 80% of the gap, not all of it.** The ~86 µs it does not
+explain is the `{% extends %}`/`BlockNode` machinery and the text nodes, which this
+probe does not decompose; it is left as an unattributed remainder rather than assigned a
+cause the probe did not measure. (`var.nested` and `filter.upper` are in the table
+because they are the two filters the *other* workloads and the arm analysis need; the
+page uses neither, so neither is in the sum.)
+
+**Three rows are controls, and they are the most informative rows in the table.**
 
 * `{% translate "Report" %}` is **at parity** (−0.026 µs, inside noise), and the
   *reason* is worth stating because the intuitive one is wrong. Walking the tree
   (`Engine.from_string("{% load i18n %}{% translate … %}").nodelist`) shows the node
   class is `django.templatetags.i18n.TranslateNode` — Django's own class, from a module
   the shim does **not** serve (the meter's `django.templatetags` scope is empty, so all
-  five libraries are stock). The node is neither compiled nor rendered by Rust; it is
-  stock Python running against our transcribed `base.py`, and the only frame that
-  differs from the control is `Node.render_annotated`. **Parity here says the
+  five libraries are stock). Rust's parser reads the token and names that class in the
+  descriptor, but the node is materialised *as* `TranslateNode` and its `render` is
+  Django's own Python body running against our transcribed `base.py`. The only frame
+  that differs from the stock control is `Node.render_annotated`. **Parity here says the
   transcribed node and nodelist machinery costs nothing measurable** — it is the
-  cleanest possible control for that claim.
+  cleanest control in the table for that claim.
 * `{% blocktranslate %}` — the same stock node class — is **+0.836 µs**, and the
   difference between the two tags is one thing: `blocktranslate`'s `count` argument is
   a `FilterExpression`, resolved once per loop iteration. +0.836 against
@@ -288,12 +300,14 @@ for the whole gap within 3%.
   This retires the intuitive-but-wrong remedy ("the walk is Python, so port the walk")
   as the explanation for the *measured* gap; §6.3 says what it would still buy.
 
-**Put together, the whole gap is two operations.** Every row above is explained by
-`FilterExpression.resolve`'s routing decision (1.404 µs, §6.2) and
-`Variable._resolve_lookup`'s extra hop (+0.595 µs, `_native.resolve` plus the `".".join`).
-The tree walk, the node classes, the i18n tags, the context stack and the output buffer
-are all at parity. That is a much narrower finding than the ratio alone suggests, and it
-is the reason §6.3's arithmetic is as short as it is.
+**Put together, four fifths of the gap is two operations.** Of the 80% the sum above
+attributes, everything is `FilterExpression.resolve`'s routing decision (1.404 µs,
+§6.2) and `Variable._resolve_lookup`'s extra hop (+0.595 µs, `_native.resolve` plus the
+`".".join`). The tree walk, the node classes, the i18n tags, the context stack and the
+output buffer are all at parity — that is the *negative* result, and it is the one that
+matters, because it retires the remedy the ratio most invites. That is a much narrower
+finding than the ratio alone suggests, and it is the reason §6.3's arithmetic is as
+short as it is.
 
 ### 6.2 The filter arm, in pieces
 
@@ -315,7 +329,7 @@ of module objects on every application, plus `_library_module`'s `sys.modules.ge
 `importlib.import_module` fallback (`importlib.import_module` measured 0.274 µs against
 the `sys.modules` hit at 0.046), plus the six-way identity check.
 
-**This is the mechanism for `{{ r.name|upper }}`'s +2.100 µs almost exactly**:
+**This is the mechanism for `{{ r.name|upper }}`'s +2.100 µs, to within 5%**:
 1.404 (arm) + 0.595 (`{{ r.name }}`'s own resolve delta) = 1.999, against 2.100 measured.
 The upper filter's own Rust body is 0.216 µs and is not the problem — the Python
 decision that *reaches* it is 6.5× the crossing.
@@ -415,10 +429,32 @@ radius and keeps the failure mode.
 
 ## 9. Gate state at close
 
-`bash scripts/check.sh` (full run, not `--fast`): exit **0**, `all checks passed`.
-The acceptance run under `scripts/run_django_suite.sh` — the one label this project's
-suite is, `template_tests` — reports `Ran 1547 tests … OK (skipped=6)`. Unit suite
-**487**. `cargo test` **787** (unchanged: no Rust in this milestone). Anchors 1472
-occurrences / 867 of 867 cited / 0 failures. Differential harness: 48 cases identical.
-`unshimmed()` `[]` in both scopes. Byte-identity across the two engines holds for all
-four benchmark workloads.
+`bash scripts/check.sh` — the **full** run, not `--fast` — on the tree of commit
+`6cf4db9`, verbatim tail:
+
+```
+=== differential harness ===
+differential: 48 cases, identical (stock vs shim-installed)
+
+=== generated files are current ===
+pyregex_word_ranges.txt is current: 771 ranges, 142940 code points
+crates/template-core/src/pyunicode/case.rs is current (28 upper entries)
+
+=== django template_tests (shim installed) ===
+checkout pinned and unmodified
+verifying the Rust engine is installed...
+engine installed; unshimmed() is [] over django.template, django.templatetags (10 more of django.template are declared not the engine)
+OK (skipped=6) after 1547 tests, and the six declared skips by identity (scripts/run_django_suite.sh)
+
+all checks passed
+```
+
+Exit status **0** (`$?` read from the script's own exit, not from a pipeline — the
+project's rule that a status after a pipe is the pipe's). The acceptance run under
+`scripts/run_django_suite.sh` — the one label this project's suite is, `template_tests`
+— reports `Ran 1547 tests … OK (skipped=6)`, and this milestone's whole point is that
+that number says nothing about speed. Unit suite **487**, `cargo test` **787** (unchanged:
+no Rust in this milestone), anchors 1472 occurrences / 867 of 867 cited / 0 failures,
+the differential harness 48 cases identical, `unshimmed()` `[]` in both scopes, and the
+checkout pinned and unmodified. Byte-identity across the two engines holds for all four
+benchmark workloads.
