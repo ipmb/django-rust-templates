@@ -713,9 +713,9 @@ def _decode_condition(condition, resolve_ref=None):
     own class.
 
     ``OPERATORS[key]()`` rather than a class kept on the wire, because that is
-    exactly what ``IfParser.translate_token`` does (``smartif.py:166-172``) — one
+    exactly what ``IfParser.translate_token`` does (``smartif.py:179-185``) — one
     instance per occurrence, whose ``id`` was set by the module-level loop
-    (``smartif.py:117-118``). ``first``/``second`` are then assigned, which is
+    (``smartif.py:115-116``). ``first``/``second`` are then assigned, which is
     what ``led`` and ``nud`` do (``:54-56``, ``:81-83``), and the assignment rather
     than a constructor is deliberate: ``Operator`` is built inside a closure in
     ``infix``/``prefix`` and its signature is not part of anything we may rely on.

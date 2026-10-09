@@ -213,7 +213,7 @@ pub enum AttrValue {
     ///
     /// The operators are named rather than rebuilt from Python's table by index:
     /// `smartif.OPERATORS[key]` is the class and `translate_token` instantiates
-    /// it per occurrence (`smartif.py:166-172`), so a key plus two children is
+    /// it per occurrence (`smartif.py:179-185`), so a key plus two children is
     /// everything the materialiser needs — and an *index* into `OPERATORS` would
     /// be a second, order-dependent way to say the same thing.
     ///
@@ -255,7 +255,7 @@ pub enum IfConditionDesc {
     ///
     /// `text` is `TemplateLiteral.text`, which `display()` returns
     /// (`defaulttags.py:914-915`). The message that reads it — `"Unused '%s' at
-    /// end of if expression."` (`smartif.py:181`) — is raised in Rust, so the
+    /// end of if expression."` (`smartif.py:200`) — is raised in Rust, so the
     /// text is carried for the materialised object's own sake: it is what
     /// `display()` returns, and a `TemplateLiteral` without it would raise
     /// `AttributeError` the first time anything asked.

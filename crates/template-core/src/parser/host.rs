@@ -204,7 +204,7 @@ pub trait Host {
     /// `token` is one **merged** bit, not the whole condition: `smartif`'s
     /// `merge_tokens` has already folded `is not` and `not in`, and an operator
     /// bit never reaches here — `TemplateIfParser.translate_token` tries
-    /// `OPERATORS[token]` first (`smartif.py:166-172`) and only falls through to
+    /// `OPERATORS[token]` first (`smartif.py:179-185`) and only falls through to
     /// `create_var` for the rest. So the call sequence is exactly Django's, left
     /// to right and before the operator algorithm runs, which is what makes a
     /// bad filter in a *later* operand beat an operator error. Measured:
