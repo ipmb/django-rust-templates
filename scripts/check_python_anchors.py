@@ -77,8 +77,30 @@ span is 1007-1018. Both ends looked right, the anchor *is* a range, the tool
 a function looks much like the next. It is in the past tense here because it was
 read and repaired, not because anything below this line would have caught it.
 
+**A snippet that is the subject's own name is a second sub-case, and the one that
+looks most like verification.** Where the prose quotes no code, `--seed` falls
+back to the name the sentence is about — `urlizetrunc`, `center`, `striptags` —
+and such an entry passes `--check`, passes `--update`, survives any later line
+move inside the span, and verifies nothing: the name occurs in the span by
+construction, so the comparison cannot fail. It is *quoted*, so it counts in the
+cited total and `0 failures` presents it as verified, which no unquoted row can
+claim. Measured on 2026-10-09: 30 of the 400 entries carry a single identifier
+where a line of source was meant. The repair is not a tool change but the rule
+that the snippet be authored from the sentence's own claim in the same edit that
+names the file.
+
+**Every limit above is a limit of the per-file policy, which has no terminating
+condition of its own.** Naming is done a file at a time, and the file is visited
+because it holds shorthand; an unquoted entry in a file that never held any is
+therefore never requoted, and `unmigrated: 0` — the number the migration is
+tracked by — says nothing about it. So `--check` counts those entries separately:
+an unquoted row is *stranded* when every file citing it is already
+shorthand-free. Measured on 2026-10-09: 78 of the 164 unquoted entries, most of
+them in `host.rs`. They are not failures and `--frozen` does not fail on them;
+they are the part of the backlog the migration's own progress metric cannot see.
+
 **Two of those limits select for the same anchors, and the largest is not a limit
-of this tool at all.** Unquoted entries — measured 184 of the 349 on 2026-10-09 —
+of this tool at all.** Unquoted entries — measured 164 of the 400 on 2026-10-09 —
 are not a random half: an entry is unquoted exactly when its cited line is
 unremarkable (a blank, a bare delimiter, or a range spanning a whole function),
 which is the population the loose range above selects for too, so the residual
@@ -379,12 +401,18 @@ def check(checkout=None, tree=None, manifest=None, frozen=False, report=None):
     shorthand = []
     unquoted = set()
     cited = set()
+    citers = {}
+    shorthand_free = set()
     occurrences = 0
     for path, text in tree:
+        here = [match for match in SHORTHAND_RE.finditer(text)]
+        if not here:
+            shorthand_free.add(path)
         for match in ANCHOR_RE.finditer(text):
             occurrences += 1
             anchor = match.group(0).strip("`")
             cited.add(anchor)
+            citers.setdefault(anchor, set()).add(path)
             entry = manifest.get(anchor)
             if entry is None:
                 failures.append(f"{path}: `{anchor}` has no entry in scripts/anchors.txt")
@@ -392,10 +420,18 @@ def check(checkout=None, tree=None, manifest=None, frozen=False, report=None):
             if entry[2] is None:
                 unquoted.add(anchor)
             failures.extend(_check_entry(path, anchor, match, entry, checkout))
-        for match in SHORTHAND_RE.finditer(text):
+        for match in here:
             shorthand.append(f"{path}: `{match.group(0).strip('`')}` names no file")
 
     dead = sorted(set(manifest) - cited)
+
+    # An unquoted entry is requoted by the naming pass over the file that cites
+    # it, so one whose citing files are *all* already shorthand-free is one no
+    # pass will revisit: the migration can end without it, and `unmigrated: 0`
+    # is then not the same statement as "every row records a claim". Counted
+    # separately for that reason, by citation rather than by file, because the
+    # per-file policy is what terminates.
+    stranded = sorted(a for a in unquoted if citers.get(a, set()) <= shorthand_free)
 
     if unquoted:
         # An entry with no snippet is *unverified*, not a failure: `--seed`
@@ -406,6 +442,12 @@ def check(checkout=None, tree=None, manifest=None, frozen=False, report=None):
             f"unquoted: {len(unquoted)} entr(ies) record no source text, so only "
             f"the line number is checked (not a failure)"
         )
+        if stranded:
+            report(
+                f"  {len(stranded)} of them are cited only from files with no "
+                f"remaining shorthand, so no naming pass will requote them "
+                f"(--frozen does not fail on these)"
+            )
 
     if shorthand:
         # Reported either way, failed on only under `--frozen`: the guard lands
