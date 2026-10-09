@@ -2,7 +2,7 @@
 //!
 //! # `as` is read from the end, before anything is compiled
 //!
-//! `if len(bits) >= 2 and bits[-2] == "as"` (`:799`). Two consequences that a
+//! `if len(bits) >= 2 and bits[-2] == "as"` (`:801`). Two consequences that a
 //! port written from the documentation gets wrong, both measured on the pinned
 //! tree:
 //!
@@ -11,7 +11,7 @@
 //!   variables — `{% firstof a as v w %}` is four variables named `a`, `as`,
 //!   `v`, `w`.
 //! - `{% firstof as v %}` is valid and has `asvar == "v"` with *no* variables:
-//!   the argument-count check at `:797-798` runs on `bits` **before** the `as`
+//!   the argument-count check at `:798` runs on `bits` **before** the `as`
 //!   is stripped, so `['as', 'v']` is two arguments and then becomes none.
 //!
 //! # The attribute is `variables`, the Python attribute is `vars`
@@ -41,7 +41,7 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
     }
 
     // `asvar` is emitted even when it is absent, as `AttrValue::None`:
-    // Django always passes the second positional (`:805`), so `__init__` always
+    // Django always passes the second positional (`:804`), so `__init__` always
     // sets the attribute, and `describe` compares `vars(node)`.
     let asvar = if bits.len() >= 2 && bits[bits.len() - 2] == "as" {
         let name = bits[bits.len() - 1].clone();
