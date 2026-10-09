@@ -32,12 +32,33 @@ fails with::
     ImportError: cannot import name 'Engine' from 'django.template.engine'
 
 The error names Django, not the shim, which is why the rule is stated here:
-**no ``_impl`` file may take the name of a real ``django.template`` module.**
-The shell modules that only need Rust and the real Django live outside
-``_impl`` entirely (``django_rust_templates/render.py``), and the ones that
-must be inside are named for what Django does not have (``parser.py``, whose
-sibling ``django/template/parser.py`` does not exist at 6.0.9 — if it ever
-appears, that name starts shadowing too).
+**a file under ``_impl`` may take a real module's name only when it implements
+that module — any other file must be named for something Django does not have.**
+
+The prohibition is on *what the file is*, not on the name, and the first draft
+of this paragraph got that wrong. It read "no ``_impl`` file may take the name
+of a real ``django.template`` module", which the tree already contradicted four
+times on the day it was written: ``__init__.py``, ``base.py`` and ``smartif.py``
+each wear a real module's name *because interposing that module is the whole
+mechanism*, and ``exceptions.py`` (M0 bootstrap) wears one as our own
+implementation of it. Under the literal rule the entire shipped mechanism was a
+defect.
+
+So the set is declared rather than prohibited. :data:`SHADOWING` names every
+``_impl`` file whose name collides with a module of the pinned checkout, and
+``tests/test_interposition.py`` asserts that the files on disk are exactly its
+keys. A new collision then costs one deliberate, reviewable line; an accidental
+one — the ``render.py``-at-``engine.py`` case — is a test failure in the commit
+that causes it, rather than an ``ImportError`` that blames Django three files
+away. The table's ``kind`` is checked against each file's own ``# TRANSCRIBED:``
+marker, so it cannot rot into a second, disagreeing account of which files are
+transcriptions; ``scripts/check_transcriptions.py`` owns that question.
+
+The shell modules that only need Rust and the real Django live outside ``_impl``
+entirely (``django_rust_templates/render.py``), and the ones that must be inside
+are named for what Django does not have (``parser.py``, whose sibling
+``django/template/parser.py`` does not exist at 6.0.9 — if it ever appears, that
+name starts shadowing too, and :func:`shadowing_files` will say so).
 """
 
 from __future__ import annotations
@@ -55,6 +76,66 @@ _IMPL_DIR = Path(__file__).parent / "_impl"
 _IMPL_INIT = _IMPL_DIR / "__init__.py"
 
 _installed_finder: "_ShimFinder | None" = None
+
+# The `_impl` files whose name is also the name of a module in the pinned
+# checkout — every one of them an interposition, and this table is the record
+# that each was meant. Keyed by path relative to `_impl`; the value is how the
+# file came to exist:
+#
+#     "transcribed"  copied from Django's module of the same name and differing
+#                    only where it declares, carrying a `# TRANSCRIBED:` marker
+#     "fresh"        written from scratch, implementing the same module
+#
+# The kind is not free text. `tests/test_interposition.py` checks each one
+# against the file's own marker, so "transcribed" without a marker — or "fresh"
+# with one — is a failure, and this table cannot drift into a second account of
+# which files are transcriptions. It is also deliberately *not* a list of every
+# `_impl` file: `parser.py` is absent because no `django/template/parser.py`
+# exists to collide with, and a file that collides without being listed here is
+# exactly what the table exists to catch.
+SHADOWING = {
+    "__init__.py": "transcribed",
+    "base.py": "transcribed",
+    "exceptions.py": "fresh",
+    "smartif.py": "transcribed",
+}
+
+
+def _django_template_dirs() -> list[str]:
+    """Django's own template directories, from wherever they are knowable.
+
+    The installed finder is preferred, because it holds the paths captured at
+    :func:`install` — asking it answers precisely the question the finder answers
+    when it resolves a name. Before installation there is no finder, so ask
+    :func:`_real_search_paths`, which is what :func:`install` does itself.
+    """
+    if _installed_finder is not None:
+        return _installed_finder.real_paths
+    return _real_search_paths()
+
+
+def shadowing_files() -> list[str]:
+    """``_impl`` files whose name the pinned checkout also defines.
+
+    The question is the finder's own — *would this file be served under a name
+    Django already has?* — asked of the filesystem against Django's template
+    directories, so it stays true as modules are added rather than being a
+    second, hand-maintained list that can disagree (the failure
+    ``.review/m10-recon.md`` §2 found in the milestone table).
+
+    Paths are relative to ``_impl`` and posix-style, so a subpackage reports
+    ``loaders/__init__.py``. ``__pycache__`` is skipped: it holds no module
+    anyone wrote.
+    """
+    real_paths = _django_template_dirs()
+    clashes = []
+    for path in sorted(_IMPL_DIR.rglob("*.py")):
+        relative = path.relative_to(_IMPL_DIR)
+        if "__pycache__" in relative.parts:
+            continue
+        if any(Path(real).joinpath(relative).is_file() for real in real_paths):
+            clashes.append(relative.as_posix())
+    return clashes
 
 
 class ShimError(RuntimeError):

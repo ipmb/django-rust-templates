@@ -371,6 +371,59 @@ class InterpositionTests(unittest.TestCase):
                     self.assertEqual(measured[label], pinned[label])
 
 
+class ShadowingTests(unittest.TestCase):
+    """Which ``_impl`` files wear a real module's name, and that each was meant.
+
+    ``_shim.py``'s docstring states the rule — a file under ``_impl`` may take a
+    real module's name only when it implements that module — and the rule as
+    first written forbade the mechanism itself: four shipped files broke it on
+    the day it was written, because interposing a module *is* taking its name
+    (``.review/m10-recon.md`` §6). :data:`_shim.SHADOWING` replaces the
+    prohibition with a declaration, and these rows are what make the declaration
+    binding rather than decorative.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _shim.install()
+
+    def test_the_shadowing_files_are_the_declared_ones(self):
+        """Set equality, and both directions are the point.
+
+        A file on disk that is not declared is the ``render.py``-at-``engine.py``
+        accident: it shadows a real module for Django's internal imports as much
+        as for ours, and nothing else in the tree notices — the ``ImportError``
+        that eventually fires names Django, three files from the cause. A
+        declared key with no file is the opposite error, a claim about nothing
+        that the next reader would take for a measurement.
+        """
+        self.assertEqual(_shim.shadowing_files(), sorted(_shim.SHADOWING))
+
+    def test_each_kind_is_the_transcription_guards_own_answer(self):
+        """``kind`` is compared, not trusted.
+
+        It is the one column here that could rot into a second, disagreeing
+        account of which files are transcriptions — the account
+        ``scripts/check_transcriptions.py`` already owns and already checks
+        against each file's marker. So the two are compared directly:
+        ``transcribed`` must be a name that guard declares, ``fresh`` must not.
+        Comparing against ``DECLARED`` rather than re-reading the marker keeps
+        one spelling of that question in the tree.
+        """
+        import scripts.check_transcriptions as guard
+
+        for name, kind in sorted(_shim.SHADOWING.items()):
+            with self.subTest(name=name):
+                self.assertIn(kind, ("transcribed", "fresh"))
+                self.assertEqual(
+                    kind == "transcribed",
+                    name in guard.DECLARED,
+                    f"{name} is declared {kind!r} in SHADOWING, but "
+                    f"check_transcriptions.py says "
+                    f"{'transcribed' if name in guard.DECLARED else 'not transcribed'}",
+                )
+
+
 class ResolverDelegationTests(unittest.TestCase):
     """Task 5: ``Variable._resolve_lookup`` is Rust's, handler included.
 

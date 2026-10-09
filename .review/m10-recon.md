@@ -296,13 +296,28 @@ the quantifier: **the prohibition is on a file that is not that module's
 implementation taking its name**, and the interposition itself is exactly the
 case the rule must permit.
 
-M10 makes this load-bearing rather than academic: it adds `context.py`,
+M10 would make this load-bearing rather than academic — it adds `context.py`,
 `engine.py`, `utils.py` and the `loaders/` package, all under real module names,
 and `_impl/__init__.py` imports `Engine` from `.engine` and `EngineHandler` from
-`.utils` — so the first thing M10's plan must state is which of those are
-*interpositions* (permitted) and which would be shell code under a real name
-(forbidden). The docstring should be corrected to say the second thing, and the
-correction is M10's, because M10 is where the rule stops being a curiosity.
+`.utils` — so the plan must state which of those are *interpositions* (permitted)
+and which would be shell code under a real name (forbidden).
+
+**Done ahead of M10 rather than inside it** (the reviewer's call, and the right
+one — the correction is not M10's business and M10 should inherit an artifact
+rather than build one). `_shim.py` now states the rule as *a file may take a
+real module's name only when it implements that module*, and declares the set
+in `SHADOWING` — `transcribed` or `fresh` per file, checked against
+`check_transcriptions.DECLARED` by `tests/test_interposition.py`, which also
+asserts the set of colliding files on disk equals the table's keys. So M10's
+duty is four rows in an existing table, and an accidental collision is now a
+test failure in the commit that causes it instead of an `ImportError` naming
+Django three files from the cause.
+
+One number moved and must not be silently inherited: the unit suite is now
+**317**, not the 315 §10.3's M9 row reports, because the guard is two rows. The
+M9 row keeps 315 — it is that milestone's close-out against `6ff127d`, and
+rewriting it would falsify what M9 measured — so **M10's row has to state its
+own unit count** rather than repeating the one above it.
 
 ## 7. What this recon has not done
 
