@@ -15,18 +15,23 @@
 
 pub mod desc;
 pub mod error;
+pub mod filter_expr;
 pub mod host;
 pub mod registry;
 pub mod tags;
 pub mod variable;
 
-pub use desc::{AttrValue, NodeDesc, NodeListDesc, NodeRef, TokenDesc, VariableDesc, TEXT_NODE};
+pub use desc::{
+    AttrValue, FilterCall, FilterExprDesc, FilterVar, NodeDesc, NodeListDesc, NodeRef, TokenDesc,
+    VariableDesc, TEXT_NODE,
+};
 pub use error::{Error, ErrorKind};
 pub use host::{Host, NoHost};
 pub use registry::CompileFn;
 
 use std::collections::HashMap;
 
+use crate::parser::filter_expr::parse_filter_expression;
 use crate::pyunicode;
 use crate::text::get_text_list;
 use crate::token::{Token, TokenType};
@@ -158,18 +163,27 @@ impl<'a> Parser<'a> {
                             Error::syntax(format!("Empty variable tag on line {}", token.lineno)),
                         ));
                     }
-                    // `self.compile_filter(token.contents)` is M3's. Reaching a
-                    // variable before then is a real gap, and it is reported
-                    // rather than papered over: a placeholder descriptor would
-                    // materialise into a node that renders nothing, which is
-                    // exactly the "passes a shallow test, wrong forever"
-                    // outcome the ownership split exists to avoid.
-                    return Err(self.error(
-                        &token,
-                        Error::unimplemented(
-                            "variable compilation needs FilterExpression, which arrives in M3",
-                        ),
-                    ));
+                    // `self.compile_filter(token.contents)`, which is
+                    // `FilterExpression(contents, self)`. The filter *names* are
+                    // validated through the host at the point in
+                    // `FilterExpression.__init__`'s loop where Django validates
+                    // them; `VariableNode.__init__`'s parameter is named
+                    // `filter_expression` (`base.py:1139`) and the materialiser
+                    // constructs by keyword, so the name is contract.
+                    //
+                    // The error goes through `self.error` because Django wraps
+                    // this call in `except TemplateSyntaxError as e: raise
+                    // self.error(token, e)` (`base.py:549-551`), and a
+                    // filter-check failure is one of those — it is a Python
+                    // exception from `find_filter`. `error()` sets the token only
+                    // when there is none, so the innermost one still wins.
+                    let expression = parse_filter_expression(&token.contents, self.host)
+                        .map_err(|error| self.error(&token, error))?;
+                    let node = NodeDesc::new("VariableNode").attr(
+                        "filter_expression",
+                        AttrValue::FilterExpr(Box::new(expression)),
+                    );
+                    self.extend_nodelist(&mut nodelist, node, &token)?;
                 }
                 TokenType::Block => {
                     // The raw first word, not `split_contents()`: `{% 'a b' %}`
@@ -354,6 +368,11 @@ mod tests {
         parse(source).expect_err("expected a parse failure")
     }
 
+    /// Parse `source` which must succeed.
+    fn parse_ok(source: &str) -> NodeListDesc {
+        parse(source).unwrap_or_else(|error| panic!("{source:?} failed: {error:?}"))
+    }
+
     /// The `s` of every `TextNode`, in order.
     fn texts(nodelist: &NodeListDesc) -> Vec<String> {
         let mut out = Vec::new();
@@ -480,14 +499,34 @@ mod tests {
     }
 
     #[test]
-    fn a_variable_reports_the_m3_gap_rather_than_dropping_it() {
-        let error = failure("{{ x }}");
-        assert!(
-            matches!(error.kind, ErrorKind::Unimplemented(_)),
-            "expected Unimplemented, got {:?}",
+    fn a_variable_now_parses_and_the_m3_gap_is_closed() {
+        // M2's arm returned `Unimplemented` here, which the shell turned into a
+        // fallback to Django's own parse. This is the test that had to change
+        // when it stopped: no `Unimplemented` reaches a `{{ … }}` any more, so a
+        // harness scoring our agreement with Django never sees a variable
+        // bucketed as "not built yet".
+        let nodelist = parse_ok("{{ x }}");
+        assert_eq!(nodelist.nodes[0].class_name, "VariableNode");
+        // `VariableNode.__init__(self, filter_expression)` — the parameter name
+        // is the materialiser's keyword, so it is pinned here rather than left to
+        // the FFI test.
+        assert!(matches!(
+            nodelist.nodes[0].attrs.as_slice(),
+            [(name, AttrValue::FilterExpr(_))] if name == "filter_expression",
+        ));
+    }
+
+    #[test]
+    fn a_variable_that_django_rejects_is_rejected_here_too() {
+        // The error travels out of `Parser::parse` rather than only out of
+        // `parse_filter_expression`, and it keeps the token — `error()` attaches
+        // it once, innermost first.
+        let error = failure("{{ a+b }}");
+        assert_eq!(
             error.kind,
+            ErrorKind::Syntax("Invalid character ('+') in variable name: 'a+b'".to_string()),
         );
-        assert_eq!(error.token.unwrap().lineno, 1);
+        assert_eq!(error.token.unwrap().contents, "a+b");
     }
 
     #[test]

@@ -102,6 +102,16 @@ pub enum AttrValue {
     /// `literal` slot and only a filter argument or a `{% with %}` target is a
     /// `Variable` at all.
     Variable(Box<VariableDesc>),
+    /// A `FilterExpression` — the `{{ … }}` in a `VariableNode`.
+    ///
+    /// **Boxed, and the box is load-bearing**, for the reason
+    /// [`AttrValue::Variable`]'s is: the cycle is
+    /// `AttrValue → FilterExprDesc → FilterVar → AttrValue`, so an unboxed
+    /// variant is an infinitely sized type (`E0072`). Boxed on the variant rather
+    /// than inside `FilterVar` because a `FilterVar` is the *common* shape — every
+    /// `{{ … }}` has a variable part and every filter call has arguments, while
+    /// only a `{{ … }}` node is a `FilterExpression` attribute at all.
+    FilterExpr(Box<FilterExprDesc>),
     /// A list of values — `IfNode.conditions_nodelists`, `ForNode.loopvars`,
     /// `FilterExpression`'s filter arguments.
     ///
@@ -166,6 +176,70 @@ pub struct VariableDesc {
     /// marker around something that unescapes has a literal and no lookups,
     /// while one around anything else keeps its lookups and gains the flag.
     pub translate: bool,
+}
+
+/// One of a `FilterExpression`'s operands: its variable part, or one argument.
+///
+/// Django's own tuple — `(lookup, value)`, `base.py:758-761` for an argument and
+/// `:745-756` for the variable part. `lookup` is read at **render** time, where
+/// `if not lookup: arg_vals.append(mark_safe(arg))` (`base.py:806-807`) decides
+/// between a constant that is already a value and a variable to resolve against
+/// the context, so it is not decorative.
+///
+/// **The value is always an [`AttrValue::Variable`], in both branches.** That
+/// looks like it makes the flag redundant and it does not:
+///
+/// - `(true, Variable)` is Django's `(True, Variable(var_arg))` — the `Variable`
+///   itself, resolved per render;
+/// - `(false, Variable)` is Django's `(False, Variable(constant).resolve({}))` —
+///   the descriptor carries the `Variable` and the **materialiser** performs the
+///   `resolve({})`.
+///
+/// The second is not a shortcut around an emulation, it is the only faithful
+/// form. `Variable.resolve` for a `_("…")`-marked literal returns
+/// `gettext_lazy(msgid)` (`base.py:932-939`) — a *lazy proxy*, not a string — and
+/// `django/tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py:16`
+/// asserts `Template("{{ _('Yes') }}").render(...) == "Oui"` on exactly that
+/// object. A descriptor carrying the resolved value has no way to hold one, so a
+/// `{{ _("literal") }}` built from it renders untranslated and fails that test.
+/// Rust cannot construct the proxy either, so the resolve has to happen in
+/// Python, where Django's own line is.
+///
+/// A named alias rather than an inline tuple because `clippy::type_complexity`
+/// has already bitten this project twice.
+pub type FilterVar = (bool, AttrValue);
+
+/// One `|name:arg` of a `FilterExpression`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FilterCall {
+    /// The filter's name. **A name, never a handle.** The function is Python's
+    /// and `FilterExpression.args_check` inspects its signature
+    /// (`base.py:822-833`), so no Rust type can carry one — and the shell will
+    /// look it up again at materialisation, which is where Django's own
+    /// `filters.append((filter_func, args))` (`base.py:773`) keeps it.
+    pub name: String,
+    /// At most one, because `filter_re`'s argument group allows zero or one
+    /// (`base.py:703-712`). A `Vec` rather than an `Option` because it *is*
+    /// Django's list, and a future Django that allowed more would otherwise need
+    /// a wire change.
+    pub args: Vec<FilterVar>,
+}
+
+/// A `FilterExpression` as it crosses the wire (`base.py:722-775`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FilterExprDesc {
+    /// `FilterExpression.token` — the `{{ … }}` contents as they arrived.
+    pub token: String,
+    /// `FilterExpression.var`, **before materialisation**.
+    ///
+    /// Django does not carry `is_var` on the wire and neither does this: it
+    /// computes `is_var = isinstance(var_obj, Variable)` (`base.py:777`) from the
+    /// *materialised* object, and the shell recomputes it the same way. The flag
+    /// here is `lookup`, which happens to agree with `is_var` for the variable
+    /// part and is a different question for an argument.
+    pub var: FilterVar,
+    /// `FilterExpression.filters`, in source order.
+    pub filters: Vec<FilterCall>,
 }
 
 /// A compiled nodelist: Django's `NodeList` as far as a parse can observe it.
@@ -403,5 +477,39 @@ mod tests {
         assert_eq!(entries.len(), 3, "both `a` entries survive Rust");
         assert_eq!(entries[0].0, "a");
         assert_eq!(entries[2].0, "a");
+    }
+
+    #[test]
+    fn a_filter_expressions_operands_are_variables_and_a_lookup_flag() {
+        // The shape the materialiser reads: every operand is
+        // `AttrValue::Variable`, in both the `lookup` and the constant branch,
+        // and only the flag differs. Pinned because a variant that flattened the
+        // constant to its *value* would look tidier and would lose
+        // `{{ _("literal") }}` — the value is a `gettext_lazy` proxy that Rust
+        // cannot build. See `FilterVar`'s doc.
+        let variable = |name: &str| {
+            AttrValue::Variable(Box::new(VariableDesc {
+                var: name.to_string(),
+                literal: None,
+                lookups: Some(vec![name.to_string()]),
+                translate: false,
+            }))
+        };
+        let expr = AttrValue::FilterExpr(Box::new(FilterExprDesc {
+            token: "x|default:y".to_string(),
+            var: (true, variable("x")),
+            filters: vec![FilterCall {
+                name: "default".to_string(),
+                args: vec![(true, variable("y"))],
+            }],
+        }));
+
+        let AttrValue::FilterExpr(expr) = &expr else {
+            unreachable!()
+        };
+        assert!(expr.var.0, "a bare name is a lookup");
+        assert!(matches!(expr.var.1, AttrValue::Variable(_)));
+        assert_eq!(expr.filters[0].name, "default");
+        assert_eq!(expr.filters[0].args.len(), 1, "at most one, and here one");
     }
 }

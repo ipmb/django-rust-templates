@@ -315,14 +315,58 @@ class ShapeTests(unittest.TestCase):
         self.assertTrue(ours[0].nodelist.contains_nontext)
         self.assertFalse(ours[1].nodelist.contains_nontext)
 
-    def test_a_variable_is_reported_rather_than_dropped(self):
-        # The M3 gap, asserted from the shell's side: a variable must be loud,
-        # because a silently-empty node would render wrong output rather than
-        # fail.
+    def test_a_variable_now_parses_where_it_used_to_be_reported(self):
+        """M2's `test_a_variable_is_reported_rather_than_dropped`, inverted.
+
+        At M2 the `{{ … }}` arm of `Parser::parse` returned `Unimplemented`, and
+        the assertion was that it was loud. M3's Task 5 supplies the arm, so the
+        premise is gone and the assertion inverts: `{{ x }}` yields a
+        `VariableNode` carrying a `filter_expression`, and it is the same node
+        Django builds.
+
+        Asserted on the **wire descriptor** — `_native.parse` returns
+        `(nodes, contains_nontext)` and each node is
+        `(class_name, attrs, nodelists, token)` — rather than through
+        `ours_parse`. Materialising a `VariableNode` needs
+        `NODE_CLASSES["VariableNode"]`, which is Task 6's deliverable, and
+        reaching for it here would make this task's test depend on the next
+        one's. The class name is compared against `type(...).__name__` on
+        Django's side so it is still Django's name and not a transcription.
+        """
+        nodes, contains_nontext = _native.parse("a{{ x }}b")
+        theirs = django_parse("a{{ x }}b")
+        self.assertEqual(
+            [desc[0] for desc in nodes],
+            [node.__class__.__name__ for node in theirs],
+        )
+        self.assertTrue(contains_nontext)
+
+        class_name, attrs, nodelists, token = nodes[1]
+        self.assertEqual(class_name, "VariableNode")
+        self.assertEqual(nodelists, ())
+        self.assertEqual(token[1], "x")
+        expression = dict(attrs)["filter_expression"]
+        self.assertEqual(expression.token, "x")
+        self.assertEqual(expression.token, theirs[1].filter_expression.token)
+        self.assertEqual(expression.filters, [])
+        self.assertEqual(expression.var[0], True)
+
+    def test_a_variable_that_django_rejects_is_rejected_here_too(self):
+        """The character rule, reached through `Parser.parse`.
+
+        `tests/test_filter_expr_parity.py` pins this message against Django's own
+        over a generated corpus, but it drives `parse_filter_expression` directly;
+        what is only observable here is that the error survives the `{{ … }}`
+        arm of `Parser.parse` — which wraps the call in `self.error(token, e)`
+        (`base.py:549-551`) — with the **token attached**.
+        """
         with self.assertRaises(_native.ParseError) as caught:
-            _native.parse("a{{ x }}b")
-        self.assertIn("M3", str(caught.exception))
-        self.assertEqual(caught.exception.token[2], 1)
+            _native.parse("{{ a+b }}")
+        self.assertEqual(
+            str(caught.exception),
+            "Invalid character ('+') in variable name: 'a+b'",
+        )
+        self.assertEqual(caught.exception.token[1], "a+b")
 
     def test_an_unimplemented_tag_is_its_own_kind_at_the_ffi(self):
         """`Unimplemented` is not just a `ParseError` with a different message.

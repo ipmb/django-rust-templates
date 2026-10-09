@@ -11,8 +11,10 @@ use pyo3::types::{PyDict, PyList, PyTuple};
 // Aliased to keep the call site readable: `CoreLexer` names the crate's lexer,
 // as opposed to anything Python-side that might later be called a lexer.
 use template_core::lexer::Lexer as CoreLexer;
-use template_core::parser::desc::{AttrValue, NodeDesc, NodeListDesc, TokenDesc, VariableDesc};
-use template_core::parser::{Error, ErrorKind, NoHost, Parser as CoreParser};
+use template_core::parser::desc::{
+    AttrValue, FilterExprDesc, FilterVar, NodeDesc, NodeListDesc, TokenDesc, VariableDesc,
+};
+use template_core::parser::{Error, ErrorKind, Host, NoHost, Parser as CoreParser};
 use template_core::token::{Token, TokenType};
 
 /// Every built-in tag command Rust owns a compile function for, ascending.
@@ -263,6 +265,7 @@ fn attr_value_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
         AttrValue::None => py.None(),
         AttrValue::Ref(r) => Py::new(py, NodeRef::new(r.0))?.into_any(),
         AttrValue::Variable(v) => variable_desc_to_py(py, v)?,
+        AttrValue::FilterExpr(expr) => filter_expr_desc_to_py(py, expr)?,
         AttrValue::List(items) => {
             let items: Vec<Py<PyAny>> = items
                 .iter()
@@ -355,6 +358,83 @@ fn pair_to_py(py: Python<'_>, name: &str, value: Py<PyAny>) -> PyResult<Py<PyAny
             .into_any()
             .unbind(),
     )
+}
+
+/// A `FilterVar` as a 2-tuple — Django's own `(lookup, value)`.
+///
+/// The `bool` is `lookup`, and the shell reads it when it decides whether to
+/// `resolve` the `Variable` now or keep it for the context; see `FilterVar`'s
+/// doc for why the value is a `Variable` on both sides of the flag.
+fn filter_var_to_py(py: Python<'_>, var: &FilterVar) -> PyResult<Py<PyAny>> {
+    let (lookup, value) = var;
+    Ok(PyTuple::new(
+        py,
+        [
+            (*lookup).into_pyobject(py)?.to_owned().into_any().unbind(),
+            attr_value_to_py(py, value)?,
+        ],
+    )?
+    .into_any()
+    .unbind())
+}
+
+/// A `FilterExpression` as it crosses the wire.
+///
+/// Three readable attributes, and the shapes are Django's with the filter
+/// *function* replaced by its name: `filters` is a list of `(name, args)` pairs,
+/// each `args` a list of `(lookup, Variable)` pairs — Django's
+/// `filters.append((filter_func, args))` (`base.py:773`) with the lookup left to
+/// the shell, which is the only side that can do it.
+#[pyclass(frozen)]
+#[derive(Debug)]
+pub struct FilterExpr {
+    /// `FilterExpression.token`.
+    #[pyo3(get)]
+    pub token: String,
+    /// `FilterExpression.var` **before materialisation**, as `(lookup, Variable)`.
+    #[pyo3(get)]
+    pub var: Py<PyAny>,
+    /// `FilterExpression.filters`, as `[(name, [(lookup, Variable), …]), …]`.
+    #[pyo3(get)]
+    pub filters: Py<PyAny>,
+}
+
+#[pymethods]
+impl FilterExpr {
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "<FilterExpr {:?} var={} filters={}>",
+            self.token,
+            self.var.bind(py).repr()?,
+            self.filters.bind(py).repr()?,
+        ))
+    }
+}
+
+/// A [`FilterExprDesc`] as Python sees it.
+pub fn filter_expr_desc_to_py(py: Python<'_>, desc: &FilterExprDesc) -> PyResult<Py<PyAny>> {
+    let filters = desc
+        .filters
+        .iter()
+        .map(|call| {
+            let args: Vec<Py<PyAny>> = call
+                .args
+                .iter()
+                .map(|arg| filter_var_to_py(py, arg))
+                .collect::<PyResult<_>>()?;
+            pair_to_py(py, &call.name, PyList::new(py, args)?.into_any().unbind())
+        })
+        .collect::<PyResult<Vec<Py<PyAny>>>>()?;
+
+    Ok(Py::new(
+        py,
+        FilterExpr {
+            token: desc.token.clone(),
+            var: filter_var_to_py(py, &desc.var)?,
+            filters: PyList::new(py, filters)?.into_any().unbind(),
+        },
+    )?
+    .into_any())
 }
 
 fn node_desc_to_py(py: Python<'_>, desc: &NodeDesc) -> PyResult<Py<PyAny>> {
@@ -473,6 +553,87 @@ fn parse_variable(py: Python<'_>, raw: &str) -> PyResult<Py<PyAny>> {
     }
 }
 
+/// The argument part of a Python exception, and nothing else.
+///
+/// `str(e)`, not `repr(e)` and not `PyErr`'s own `Display` — which pyo3 defines
+/// as `"TemplateSyntaxError: Invalid filter: 'nope'"`, type name included. The
+/// shell re-raises `TemplateSyntaxError` with exactly this text, so a prefix
+/// would be visible in `str(exception)` and in every `assertRaisesMessage`.
+///
+/// The exception **object** is dropped here and only its message survives, which
+/// is the loss `ErrorKind::Host`'s doc records: `_culprit_node` and
+/// `__traceback__` live on the object (§5.2), and M4 replaces this function with
+/// one that carries identity instead of text.
+fn python_error_message(py: Python<'_>, error: &PyErr) -> String {
+    match error.value(py).str() {
+        Ok(text) => text.to_string_lossy().into_owned(),
+        // Unreachable for a `TemplateSyntaxError`, whose `str()` is the message
+        // it was built with. A host callable that broke this would fail in code
+        // we do not own, so the failure is reported rather than panicked on.
+        Err(_) => "<exception str() failed>".to_string(),
+    }
+}
+
+/// The [`Host`] that puts Django's filter checks where Django calls them.
+///
+/// `has_tag` is `false` and `call_tag` panics, exactly as in [`NoHost`], and for
+/// the same reason: `_native.parse` does not dispatch block tags yet, and this
+/// host is built only for `parse_filter_expression`, whose token is a `{{ … }}`
+/// body and so is never a block tag.
+struct FilterCheckHost<'py> {
+    /// The shell's `(name, arg_count) -> None` callable — Task 6's
+    /// `parser.find_filter(name)` followed by
+    /// `FilterExpression.args_check(name, func, [None] * arg_count)`, which is
+    /// the pair Django calls at `base.py:771-772`. `None` accepts every name,
+    /// which is what the Rust-only tests and the parity corpus's "no host"
+    /// rows use.
+    check_filter: Option<Bound<'py, PyAny>>,
+}
+
+impl Host for FilterCheckHost<'_> {
+    fn has_tag(&self, _command: &str) -> bool {
+        false
+    }
+
+    fn call_tag(&self, _command: &str, _token: &Token) -> Result<NodeDesc, Error> {
+        unreachable!("FilterCheckHost::call_tag is never reached: has_tag always returns false")
+    }
+
+    fn check_filter(&self, name: &str, arg_count: usize) -> Result<(), Error> {
+        let Some(check) = &self.check_filter else {
+            return Ok(());
+        };
+        match check.call1((name, arg_count)) {
+            Ok(_) => Ok(()),
+            // The callable raises Django's own exception, so its message is
+            // already Django's; flattening it is what `ErrorKind::Host` asks for
+            // at M2/M3.
+            Err(error) => Err(Error::host(python_error_message(check.py(), &error))),
+        }
+    }
+}
+
+/// `FilterExpression.__init__` for a token the caller already knows is one.
+///
+/// `check_filter` is the host half of the parse: Django calls `find_filter` and
+/// `args_check` *inside* the match loop (`base.py:771-772`), at a point no
+/// batched shell-side pass can reproduce — see `Host::check_filter`. `None`
+/// means "accept every filter name", which is what the Rust-side and
+/// descriptor-shape tests want.
+#[pyfunction]
+#[pyo3(signature = (token, check_filter = None))]
+fn parse_filter_expression(
+    py: Python<'_>,
+    token: &str,
+    check_filter: Option<Bound<'_, PyAny>>,
+) -> PyResult<Py<PyAny>> {
+    let host = FilterCheckHost { check_filter };
+    match template_core::parser::filter_expr::parse_filter_expression(token, &host) {
+        Ok(desc) => filter_expr_desc_to_py(py, &desc),
+        Err(error) => Err(parse_error(py, &error)?),
+    }
+}
+
 /// Parse `source` into a node descriptor tree.
 ///
 /// `debug` selects Django's `DebugLexer`, so token positions are recorded.
@@ -515,10 +676,12 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(lex, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(parse_variable, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_filter_expression, m)?)?;
     m.add_class::<NodeRef>()?;
     m.add_class::<NodeListRef>()?;
     m.add_class::<SafeStr>()?;
     m.add_class::<Variable>()?;
+    m.add_class::<FilterExpr>()?;
     m.add("ParseError", m.py().get_type::<ParseError>())?;
     m.add("UnimplementedTag", m.py().get_type::<UnimplementedTag>())?;
     Ok(())

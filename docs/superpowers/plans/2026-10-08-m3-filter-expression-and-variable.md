@@ -2666,6 +2666,57 @@ git commit -m "M3 task 5: filter_re and the FilterExpression parse loop"
 
 ---
 
+**Task 5 as implemented — five corrections, and the third is the one that would
+have failed a real acceptance test.**
+
+- **`parse_filter_expression` takes a `&dyn Host`.** The plan's signature is
+  `parse_filter_expression(token: &str)`, which cannot express the task's own
+  central fact: `FilterExpression.__init__` calls `parser.find_filter` and
+  `FilterExpression.args_check` **inside** its match loop (`base.py:771-772`), so
+  the two checks belong to Python and happen at a point in the iteration. A
+  signature without a host forces them into a second, batched pass, and no
+  batching reproduces the measured pair `x|does_not_exist||upper` → `Invalid
+  filter: 'does_not_exist'` against `x||does_not_exist` → `Could not parse some
+  characters`. `Host::check_filter` is the new defaulted method
+  (`Ok(())`), which is what keeps `cargo test -p template-core` runnable with no
+  Python in the process (§10.4); `NoHost` inherits it.
+- **`AttrValue::FilterExpr` is boxed** — `FilterExprDesc → FilterVar →
+  AttrValue → FilterExprDesc` is an infinite type, the same `E0072` Task 4 hit.
+  Boxed on the variant for the same reason as `AttrValue::Variable`.
+- **A `FilterVar`'s value is *always* an `AttrValue::Variable`, in both
+  branches** — the plan's Step 1 asserts `quoted.var.1 ==
+  AttrValue::SafeStr("x")`, i.e. that a constant operand is already resolved at
+  parse time, and that diverges from Django on a template the suite renders. A
+  constant operand is `Variable(constant).resolve({})` (`base.py:745-749`), and
+  for the `_("…")` marker that value is `gettext_lazy(msgid)` — a **lazy proxy**
+  (`base.py:932-939`; measured: `type(Variable('_("x")').resolve({})).__name__ ==
+  '__proxy__'`). Rust cannot build one, and
+  `django/tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py:16`
+  asserts `Template("{{ _('Yes') }}").render(Context({})) == "Oui"`, which only a
+  proxy can produce. So the wire carries the `Variable` plus Django's own
+  `lookup` flag, `false` meaning "the materialiser resolves this one with
+  `resolve({})`" — which is where Django resolves it too. The parity corpus keeps
+  this visible rather than incidental: a `_("…")` operand compares as the named
+  key `("lazy", …)`, and Task 6 is where `resolve({})` is actually called.
+- **`attr_value_to_py`'s `FilterExpr` arm is the whole of what `_native.parse`
+  needed.** No change to `Parser::parse` beyond replacing the `Unimplemented`
+  arm, which the plan already had as Step 4.
+- **The `extends` origin line numbers in the plan are wrong** — the read is at
+  `loader_tags.py:305` and `:361-363`, not `:308`. Recorded here because Task 7
+  works from the same section.
+
+**Two measurements this task added to the pattern's specification.** The
+`filter_name` position of `\w` is only observable when a token puts a divergent
+code point *in the name*, and no real filter is named `u²` — so a corpus of real
+filter names cannot see a wrong spelling there. `tests/test_filter_expr_parity.py`
+carries `x|u²`, `x|ú`, `x|²` and `x|́` for that reason, and each was
+observed failing when `filter_name` was spelled with a bare `\w` (giving
+`Invalid filter: 'u'` where Django gives `Invalid filter: 'u²'`). Likewise
+`x\x1c|upper` was observed failing when `\s` was used in place of
+`[{WS_CLASS}]`, and `²`/`á` when the `var_chars` position was.
+
+---
+
 ### Task 6: Materialise `Variable` and `FilterExpression` as Django's own objects
 
 **Files:**
