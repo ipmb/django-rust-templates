@@ -152,6 +152,10 @@ rather than only comparing the rows it is given.
 
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
+from uuid import UUID
+
 from django.utils.functional import lazy
 from django.utils.safestring import mark_safe
 
@@ -3750,6 +3754,311 @@ CASES: list[dict] = [
         "filter": "pprint",
         "value": LOUD_REPR(),
     },
+    # **`urlize` (`defaultfilters.py:382-386`) and `urlizetrunc` (`:389-400`).**
+    # The helper is `django.utils.html.urlize` — the host's — so the body is the
+    # seam call plus `mark_safe`, and the rows below are about what the body
+    # hands it. Two of them carry `settings` (`URLIZE_ASSUME_HTTPS`) and are
+    # therefore pinned with `expected`; see the module doc on why a settings row
+    # cannot be a comparison alone.
+    {
+        "name": "urlize/https-link",
+        "filter": "urlize",
+        "value": "see https://example.com/x now",
+    },
+    {
+        # `settings.URLIZE_ASSUME_HTTPS` chooses the protocol for a bare domain,
+        # and it is read *live* from `settings` inside `Urlizer.handle_word`
+        # (`html.py:363-366`) rather than cached — measured in one process, the
+        # two overrides below move the answer. `False` is `global_settings`'
+        # own value (`global_settings.py:676`) and the state the warning
+        # (`RemovedInDjango2028Warning`) is emitted under; the warning itself is
+        # not an answer and no row can carry it, so the *effect* is what these
+        # two pin.
+        "name": "urlize/www-bare-domain-default-http",
+        "filter": "urlize",
+        "value": "visit www.example.com please",
+        "settings": {"URLIZE_ASSUME_HTTPS": False},
+        "expected": (
+            'visit <a href="http://www.example.com" rel="nofollow">'
+            "www.example.com</a> please"
+        ),
+    },
+    {
+        "name": "urlize/www-bare-domain-assume-https",
+        "filter": "urlize",
+        "value": "visit www.example.com please",
+        "settings": {"URLIZE_ASSUME_HTTPS": True},
+        "expected": (
+            'visit <a href="https://www.example.com" rel="nofollow">'
+            "www.example.com</a> please"
+        ),
+    },
+    {
+        # A `mailto` link carries no `rel` — `Urlizer.handle_word` sets
+        # `nofollow_attr = ""` on the e-mail branch (`html.py:381`).
+        "name": "urlize/email",
+        "filter": "urlize",
+        "value": "mail me at a@b.com",
+    },
+    {
+        # The answer is the input: `Urlizer.__call__` joins the words back and
+        # nothing matched. A safe row too — the body's own `mark_safe`.
+        "name": "urlize/no-links",
+        "filter": "urlize",
+        "value": "no links here",
+    },
+    {
+        # The surrounding text is escaped, the link is not: escaping happens on
+        # `lead`/`trail`/`trimmed`, never on the `href`.
+        "name": "urlize/escapes-the-surrounding-text",
+        "filter": "urlize",
+        "value": "<b>bold</b> https://e.com",
+    },
+    {
+        # **The `safe_input` row.** `Urlizer.__call__` reads
+        # `safe_input = isinstance(text, SafeData)` (`html.py:314`), and with it
+        # the `<b>` is *not* escaped, where the row above escapes the same text.
+        # `mark_safe` at the *value* key, not `arg`: this is the filter's input.
+        #
+        # The seam takes `&str`, so the marker cannot cross it — the body
+        # collapses `autoescape and not safe_input` itself, exactly as Django's
+        # own `linebreaks` def does (`defaultfilters.py:486`) and as
+        # `linebreaks.rs` carries it. This row is what pins that collapse: a body
+        # handing the seam `call.autoescape` unchanged escapes here.
+        "name": "urlize/safe-input-is-not-escaped",
+        "filter": "urlize",
+        "value": mark_safe("<b>bold</b> https://e.com"),
+    },
+    {
+        # `needs_autoescape`: the flag is read off the `Context`, so this key is
+        # the only way to reach the other branch. It *depends* on the key —
+        # dropping it escapes the `<b>` on both engines — so the literal is
+        # pinned as well as the comparison.
+        "name": "urlize/autoescape-off-does-not-escape",
+        "filter": "urlize",
+        "value": "<b>bold</b> https://e.com",
+        "context": {"autoescape": False},
+        "expected": (
+            '<b>bold</b> <a href="https://e.com" rel="nofollow">https://e.com</a>'
+        ),
+    },
+    {
+        # `@stringfilter`: an `int` arrives already `str()`d, so there is no URL
+        # to find and the answer is the text of the value.
+        "name": "urlize/coerces-non-string",
+        "filter": "urlize",
+        "value": 5,
+    },
+    {
+        "name": "urlize/coerces-none",
+        "filter": "urlize",
+        "value": None,
+    },
+    # `urlizetrunc`, on a URL long enough to truncate at every limit below. The
+    # link is always `<a href="https://example.com/very/long/path"
+    # rel="nofollow">…</a>`; `trim_url` (`html.py:412-415`) is what decides the
+    # text between the tags.
+    {
+        "name": "urlizetrunc/truncates-at-five",
+        "filter": "urlizetrunc",
+        "value": "see https://example.com/very/long/path now",
+        "arg": 5,
+    },
+    {
+        # A quoted argument is a *constant* (`base.py:788-792`) and a `str`; the
+        # body's `int(limit)` is what turns it into the int the seam takes.
+        "name": "urlizetrunc/quoted-limit",
+        "filter": "urlizetrunc",
+        "value": "see https://example.com/very/long/path now",
+        "arg": "5",
+    },
+    {
+        # A **variable** argument: a bare name, resolved through the context as
+        # an `int`. `arg_variable` rather than `arg` because a template's `x|f:5`
+        # is already the bare-token constant case; this is the lookup.
+        "name": "urlizetrunc/variable-limit",
+        "filter": "urlizetrunc",
+        "value": "see https://example.com/very/long/path now",
+        "arg_variable": 5,
+    },
+    {
+        # `x[: max(0, limit - 1)]` is empty for `0`, so the link text is the
+        # ellipsis alone.
+        "name": "urlizetrunc/zero-limit",
+        "filter": "urlizetrunc",
+        "value": "see https://example.com/very/long/path now",
+        "arg": 0,
+    },
+    {
+        # **The row the `Option<usize>` seam could not carry** (the change
+        # `d74192e` landed): a negative limit is not rejected, clamped or
+        # sign-flipped — `len(x) <= -1` is false and `max(0, -2)` is `0`, so the
+        # answer is `'…'`, the same as `0`.
+        "name": "urlizetrunc/negative-limit",
+        "filter": "urlizetrunc",
+        "value": "see https://example.com/very/long/path now",
+        "arg": -1,
+    },
+    {
+        "name": "urlizetrunc/negative-limit-beyond-zero",
+        "filter": "urlizetrunc",
+        "value": "see https://example.com/very/long/path now",
+        "arg": -5,
+    },
+    {
+        # `max(0, 0)` and `max(0, 2)` are the boundary either side of the
+        # ellipsis: one character of the URL survives at `3`, none at `1`.
+        "name": "urlizetrunc/limit-one",
+        "filter": "urlizetrunc",
+        "value": "see https://example.com/very/long/path now",
+        "arg": 1,
+    },
+    {
+        "name": "urlizetrunc/limit-three",
+        "filter": "urlizetrunc",
+        "value": "see https://example.com/very/long/path now",
+        "arg": 3,
+    },
+    {
+        # `len(x) <= limit`, so no ellipsis and the whole URL.
+        "name": "urlizetrunc/limit-beyond-the-url",
+        "filter": "urlizetrunc",
+        "value": "see https://example.com/very/long/path now",
+        "arg": 1000,
+    },
+    {
+        # **A `Big` limit is not an overflow.** The seam rebuilds it through
+        # Python's own `int()` and `len(x) <= limit` holds, so it is
+        # indistinguishable from `1000` — and nothing in Rust decided it.
+        "name": "urlizetrunc/ten-to-the-twentyninth",
+        "filter": "urlizetrunc",
+        "value": "see https://example.com/very/long/path now",
+        "arg": 10**29,
+    },
+    {
+        # The `safe_input` collapse again, on the truncating call site: the
+        # surrounding `<b>` is *not* escaped because the value is safe, where a
+        # plain `str` would have it escaped.
+        "name": "urlizetrunc/safe-input-is-not-escaped",
+        "filter": "urlizetrunc",
+        "value": mark_safe("<b>bold</b> https://e.com"),
+        "arg": 5,
+    },
+    {
+        "name": "urlizetrunc/autoescape-off-does-not-escape",
+        "filter": "urlizetrunc",
+        "value": "<b>bold</b> https://e.com",
+        "arg": 5,
+        "context": {"autoescape": False},
+        "expected": (
+            '<b>bold</b> <a href="https://e.com" rel="nofollow">http…</a>'
+        ),
+    },
+    # **`json_script` (`defaultfilters.py:85-91`).** The body owns the
+    # `_json_script` assembly (`html.py:95-112`): `json_dumps` is the host's, and
+    # the three `_json_script_escapes` entries, the template choice and the
+    # `mark_safe` are Rust's. Every answer is a `SafeString`.
+    {
+        # The space after the colon is `json.dumps`' *default* separator
+        # (`", "`/`": "`), which an earlier revision of the seam got wrong —
+        # `ece8a3b`.
+        "name": "json_script/dict",
+        "filter": "json_script",
+        "value": {"a": 1},
+    },
+    {
+        "name": "json_script/list-with-id",
+        "filter": "json_script",
+        "value": [1, 2],
+        "arg": "i",
+    },
+    {
+        # **All three `_json_script_escapes` entries in one answer**, and the
+        # JSON's own `"` quoting *not* among them: the map has three entries.
+        "name": "json_script/escapes-the-payload",
+        "filter": "json_script",
+        "value": {"a": "<b>&c"},
+    },
+    {
+        # `json.dumps`' own quoting survives the `.translate` untouched — the
+        # backslashes are the encoder's, not the escapes'.
+        "name": "json_script/preserves-json-quoting",
+        "filter": "json_script",
+        "value": {"a": 'he said "hi"'},
+    },
+    {
+        # **`cls=DjangoJSONEncoder` is the whole reason these four rows exist.**
+        # A plain `json.dumps` raises `TypeError` on a `date`, a `Decimal` or a
+        # `UUID`; the encoder is what makes them strings. The defect `ece8a3b`
+        # found and no gate could see, because `json_script` was a stub and
+        # `json_dumps` had no other caller.
+        "name": "json_script/date",
+        "filter": "json_script",
+        "value": {"d": date(2026, 10, 8)},
+    },
+    {
+        # A string, and the trailing zero survives — `Decimal`'s `str`, not a
+        # float's `repr`.
+        "name": "json_script/decimal-keeps-trailing-zero",
+        "filter": "json_script",
+        "value": Decimal("1.50"),
+    },
+    {
+        "name": "json_script/uuid",
+        "filter": "json_script",
+        "value": UUID(int=0),
+    },
+    {
+        "name": "json_script/none",
+        "filter": "json_script",
+        "value": None,
+    },
+    {
+        # **`ensure_ascii` is `json.dumps`' own default and is neither set nor
+        # needed**: `é` becomes the `é` escape. (The brief's table for this
+        # row shows the character itself; measured on the pinned tree, the
+        # encoder escapes it. See the module doc.)
+        "name": "json_script/non-ascii-is-escaped",
+        "filter": "json_script",
+        "value": {"k": "é"},
+    },
+    {
+        # A constant `id` arrives `mark_safe`d from `resolve` (`base.py:788-792`),
+        # so `conditional_escape` leaves it alone: `a<b`, not `a&lt;b`. **This is
+        # the row that pins `conditional_escape` over `escape`.** A `str`
+        # argument is the only shape `filter_cases.py` renders as a quoted
+        # constant, which is why the constant and the variable form of this id
+        # are not the same row; the variable forms are refused by `arg_token`
+        # (see the module doc's note on the two unexpressible ones).
+        "name": "json_script/constant-id-is-not-escaped",
+        "filter": "json_script",
+        "value": [1, 2],
+        "arg": "a<b",
+    },
+    {
+        # A non-`str` id is not escaped either — it is `str()`ed by the format
+        # and spliced between the quotes.
+        "name": "json_script/int-id-is-stringified",
+        "filter": "json_script",
+        "value": [1, 2],
+        "arg": 7,
+    },
+    {
+        # **`if element_id:`, not `if element_id is not None:`** — a falsy id
+        # drops the attribute. `""` is a quoted constant, so it arrives
+        # `mark_safe`d and still falsy.
+        "name": "json_script/empty-id-drops-the-attribute",
+        "filter": "json_script",
+        "value": [1, 2],
+        "arg": "",
+    },
+    {
+        # The falsy id a `is not None` test would get wrong: `0` is an id.
+        "name": "json_script/zero-id-drops-the-attribute",
+        "filter": "json_script",
+        "value": [1, 2],
+        "arg": 0,
+    },
 ]
 
 
@@ -3797,7 +4106,7 @@ CASES: list[dict] = [
 # covers the same input would trade a check an agent can run for one it cannot.
 #
 # **The five `needs_autoescape` filters whose own second parameter is named
-# `autoescape` can never be given an argument, and the four rows at the foot of
+# `autoescape` can never be given an argument, and the five rows at the foot of
 # this list are that refusal.** They are `linebreaks`, `linebreaksbr`,
 # `linenumbers`, `unordered_list` and `urlize`. Django's loop calls
 # `func(obj, autoescape=..., *arg_vals)` (`base.py:813`), so the positional
@@ -3834,10 +4143,11 @@ CASES: list[dict] = [
 # rather than a body. The `autoescape` branches these filters *do* have are pinned
 # in `CASES` by the `context` key, which needs no argument.
 #
-# **`urlize` is the fifth and its row is not here yet, which is a stage rather
-# than a second decision.** Its body is still a stub, and a row whose body is a
-# stub reddens the gate without describing anything; the row lands with the body,
-# under Task 9, beside that task's other five filters.
+# **`urlize` was the fifth row's promise, and it is kept above.** Until Task 9
+# wave B this paragraph said the row "is not here yet … [it] lands with the body,
+# under Task 9" — a stage rather than a second decision, because a row whose body
+# is a stub reddens the gate without describing anything. The body has landed, so
+# the row is in the quintet above and there is nothing staged here any more.
 ERROR_CASES: list[dict] = [
     # --- cut: `str.replace`'s argument refusal, which no host performs -------
     {
@@ -4077,8 +4387,8 @@ ERROR_CASES: list[dict] = [
     },
     {
         # The other four name the registered name, because for them the two
-        # coincide — which is what makes this quartet a check on the pairing
-        # rather than four copies of one string.
+        # coincide — which is what makes this quintet a check on the pairing
+        # rather than five copies of one string.
         "name": "linebreaksbr/argument",
         "filter": "linebreaksbr",
         "value": "x",
@@ -4096,7 +4406,7 @@ ERROR_CASES: list[dict] = [
     },
     {
         # `unordered_list` was landed under Task 6 and answered an argument until
-        # this row's body change, which is why it is the one of the four whose
+        # this row's body change, which is why it is the one of the five whose
         # refusal is not part of a filter's first landing.
         "name": "unordered_list/argument",
         "filter": "unordered_list",
@@ -4104,6 +4414,18 @@ ERROR_CASES: list[dict] = [
         "arg": 5,
         "raises": "TypeError",
         "message": "unordered_list() got multiple values for argument 'autoescape'",
+    },
+    {
+        # **The fifth, landed with its body under Task 9 wave B.** Its registered
+        # name and its `def` name coincide, so it names `urlize` where
+        # `linebreaks` names `linebreaks_filter`. The preamble above carries the
+        # statement; this row is the measurement.
+        "name": "urlize/argument",
+        "filter": "urlize",
+        "value": "x",
+        "arg": 5,
+        "raises": "TypeError",
+        "message": "urlize() got multiple values for argument 'autoescape'",
     },
     # --- striptags (`strip_tags`, `html.py:210-232`) -------------------------
     {
@@ -4289,5 +4611,52 @@ ERROR_CASES: list[dict] = [
         "value": (1, 2),
         "raises": "AttributeError",
         "message": "'tuple' object has no attribute 'lower'",
+    },
+    # --- urlizetrunc: `int(limit)`, the body's first call and its own refusal -
+    #
+    # `defaultfilters.py:395` is `int(limit)` **before** the helper call, and the
+    # body does it first and with no `try` (`urlizetrunc.rs`, the `wordwrap`
+    # pattern). Both messages are CPython's on **both** sides — the class and the
+    # text both cross the seam out of the real `int` — so what these rows claim
+    # is that the body let the refusal escape *before reading the text*, which is
+    # the ordering the body's own test pins by class alone. The wording is
+    # pinned here because it is the only place it can be.
+    {
+        # `{{ x|urlizetrunc:None }}` — the explicit `None` token, which is a
+        # different call from the bare `{{ x|urlizetrunc }}` (a `TemplateSyntaxError`
+        # at parse time, from `args_check`) and the only way a body sees `None`.
+        "name": "urlizetrunc/none-argument",
+        "filter": "urlizetrunc",
+        "value": "see https://example.com/very/long/path now",
+        "arg": None,
+        "raises": "TypeError",
+        "message": (
+            "int() argument must be a string, a bytes-like object or a real "
+            "number, not 'NoneType'"
+        ),
+    },
+    {
+        # A quoted constant, so the argument arrives as `SafeString("abc")` —
+        # `int` accepts a `str` *subclass* and refuses its contents, which is why
+        # the message names the base-10 literal rather than a type.
+        "name": "urlizetrunc/non-numeric-string-argument",
+        "filter": "urlizetrunc",
+        "value": "see https://example.com/very/long/path now",
+        "arg": "abc",
+        "raises": "ValueError",
+        "message": "invalid literal for int() with base 10: 'abc'",
+    },
+    # --- json_script: `json.dumps`' refusal, before the id is looked at --------
+    {
+        # `html.py:103` is `json.dumps(value, cls=encoder or DjangoJSONEncoder)`
+        # and it is the body's **first** call, so this `TypeError` escapes before
+        # `element_id` is read — the ordering the body's own test pins by
+        # asserting the host was called exactly once. CPython's message on both
+        # sides, since the host makes Django's own call.
+        "name": "json_script/set-is-not-serializable",
+        "filter": "json_script",
+        "value": {1, 2},
+        "raises": "TypeError",
+        "message": "Object of type set is not JSON serializable",
     },
 ]

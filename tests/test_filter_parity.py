@@ -425,7 +425,7 @@ class FilterParityTests(unittest.TestCase):
         self.assertEqual(
             len(all_names), 57, "the registry itself is not Django's 57 filters"
         )
-        # 7: the 57 minus `lower` and `upper`, which Task 3 lands as the corpus's
+        # 4: the 57 minus `lower` and `upper`, which Task 3 lands as the corpus's
         # seed, minus Task 4's six — `capfirst`, `title`, `cut`, `addslashes`,
         # `make_list`, `wordcount` — minus Task 5's eight: `center`, `ljust`,
         # `rjust`, `truncatechars`, `truncatechars_html`, `truncatewords`,
@@ -440,14 +440,15 @@ class FilterParityTests(unittest.TestCase):
         # `escapejs` — and minus Task 8's second wave of six: `striptags`,
         # `linebreaks`, `linebreaksbr`, `linenumbers`, `iriencode`,
         # `urlencode` — and minus Task 9's wave A of three: `slugify`,
-        # `phone2numeric`, `pprint`. What 7 names now is the rest of Tasks 9 and
-        # 10: `json_script`, `urlize`, `urlizetrunc` and the four date and time
-        # filters. Each group's commit decreases this by its own size and adds
-        # its rows to tests/filter_cases.py — one number and one list, edited
-        # together, in the commit that does the work.
+        # `phone2numeric`, `pprint` — and minus Task 9's wave B of three:
+        # `json_script`, `urlize`, `urlizetrunc`. What 4 names now is the rest
+        # of Task 10: the four date and time filters. Each group's commit
+        # decreases this by its own size and adds its rows to
+        # tests/filter_cases.py — one number and one list, edited together, in
+        # the commit that does the work.
         self.assertEqual(
             len(stubs),
-            7,
+            4,
             f"the stub count moved: {len(stubs)} left, {sorted(stubs)}. If a "
             f"group landed, this number and tests/filter_cases.py both move with "
             f"it; if nothing landed, a body has been reverted or a registry row "

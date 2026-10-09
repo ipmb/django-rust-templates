@@ -662,23 +662,16 @@ mod tests {
     /// `add`, `divisibleby`, `get_digit`, `stringformat`; then `pluralize`,
     /// `yesno`, `default`, `default_if_none`; then `filesizeformat` and
     /// `floatformat`; Task 8 wave A's six — `escape`, `escapejs`,
-    /// `escapeseq`, `force_escape`, `safe`, `safeseq`; and Task 9 wave A's
-    /// three — `phone2numeric`, `pprint`, `slugify`. The wave numbering matches
+    /// `escapeseq`, `force_escape`, `safe`, `safeseq`; Task 9 wave A's
+    /// three — `phone2numeric`, `pprint`, `slugify`; and Task 9 wave B's
+    /// three — `json_script`, `urlize`, `urlizetrunc`. The wave numbering matches
     /// `tests/test_filter_parity.py`'s, which counts the same three.
     ///
     /// **Deliberately no count in this doc**: it said 26 while the array held 22,
     /// and a number in prose that nothing checks is a defect this project has
     /// paid for more than once. The array's length is the count, and the
     /// assertion below is what makes a stale entry fail rather than pass.
-    const STILL_STUBBED: [&str; 7] = [
-        "date",
-        "json_script",
-        "time",
-        "timesince",
-        "timeuntil",
-        "urlize",
-        "urlizetrunc",
-    ];
+    const STILL_STUBBED: [&str; 4] = ["date", "time", "timesince", "timeuntil"];
 
     #[test]
     fn the_registry_is_the_measured_57() {
@@ -820,7 +813,10 @@ mod tests {
                 // non-`Result` methods meets `NoFilterHost`'s `refused_panic`
                 // before it can return anything — `is_tuple` for `stringformat`
                 // (measured; `if isinstance(value, tuple)` is the source's first
-                // line), `mark_safe` for `safe`/`safeseq` (Task 8 wave A).
+                // line), `mark_safe` for `safe`/`safeseq` (Task 8 wave A), and
+                // `is_safe` for `linebreaks` and Task 9 wave B's `urlize` /
+                // `urlizetrunc` (`autoescape and not is_safe(value)` is evaluated
+                // before any `Result`-returning call).
                 // That is the designed refusal working and it is **not a stub**:
                 // a stub returns `unimplemented_filter` without touching the host
                 // at all. A panic is caught rather than propagated because this
