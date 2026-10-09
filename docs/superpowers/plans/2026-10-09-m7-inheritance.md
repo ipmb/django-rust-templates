@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (edition 2021, no Python in `template-core`), PyO3 0.29 in `template-py`, Python 3.14 shell, Django 6.0.9 pinned at `.django/`.
 
-**Spec:** `docs/superpowers/specs/2026-10-08-django-template-engine-in-rust-design.md` — read §5.2 (the seam), §5.5 (the shadow tree, and `test_include_cache`), §6 (ownership), §9 (the three test layers), §10.3 (the M7 row), §10.4 (the M7 obligation). This plan argues from the spec; where they disagree the spec wins and this plan is wrong. **One spec citation is a vintage and one spec claim is vacuous, and both are corrected here** (§D names them). Read `.review/m7-recon.md` before this file; it carries the measurements this plan's architecture rests on, and §D records where this plan corrects it.
+**Spec:** `docs/superpowers/specs/2026-10-08-django-template-engine-in-rust-design.md` — read §5.2 (the seam), §5.5 (the shadow tree, and `test_include_cache`), §6 (ownership), §9 (the three test layers), §10.3 (the M7 row), §10.4 (the M7 obligation). This plan argues from the spec; where they disagree the spec wins and this plan is wrong. **One spec citation is a vintage and one spec gate is vacuous, and both are corrected here**, alongside two findings about the spec itself that came out of the reviewer's round (§D names all six). Read `.review/m7-recon.md` before this file; it carries the measurements this plan's architecture rests on, and §D records where this plan corrects it.
 
 ## Global Constraints
 
@@ -138,13 +138,46 @@ their compile functions in Python. **Design B** — chosen — moves
 `BlockNode`/`ExtendsNode`/`IncludeNode` from Rust descriptors exactly as M2–M6
 materialise every other node.
 
-Design B is chosen because Design A does not remove the work, it relocates it:
-`do_extends` needs `parser.origin.template_name` and a walk over the parsed
-nodelist, `do_block` needs `parser.__loaded_blocks`, and neither of those is a
-value `NodeDesc` can carry — which is precisely the rule `registry.rs:19-34`
-already records for why the three were subtracted. Carrying all of that across
-the seam means growing the wire, in exchange for keeping the *compile* functions
-in a file that is not Rust's. Design B pays one predicate change instead.
+**The reason Design A loses is not that its data cannot be carried — it can.**
+The first version of this section argued that `parser.origin.template_name`,
+`parser.__loaded_blocks` and `nodelist.get_nodes_by_type` are not values a
+`NodeDesc` can carry, so Design A would have to grow the wire. The reviewer
+falsified that, and the falsification is correct: **under Design A nothing needs
+to cross**, because the host does the carrying. `ShellHost` holds one real Django
+`Parser` for the whole parse, so `do_block`'s `parser.__loaded_blocks`
+(`loader_tags.py:228-234`) persists across the template and `do_extends`'s
+`nodelist.get_nodes_by_type(BlockNode)` (`:94`, `:308`) runs on a nodelist the
+host parsed itself; `parser.origin.template_name` (`:305`) is the only gap, and
+it is one keyword argument — the one Task 2 threads anyway. The claim was true
+and did not bear on the choice, which is the shape of argument this project keeps
+having to unmake.
+
+**The reason that does carry it is M6's Review Focus item 1, made permanent.**
+A host tag's body is parsed by Django — `do_block` calls the *handle's*
+`parser.parse`, so every tag inside a `{% block %}` is compiled by Django's
+registry, not Rust's. Under Design A that is true of `block`, `extends` and
+`include` **forever**: they are host tags in M7 and stay host tags. So when the
+suite routes through our parser at M9, M7's inheritance tests would be comparing
+Django's `loader_tags` against Django's `loader_tags` for exactly the three tags
+M7 exists to implement — four milestones of inheritance work behind a label that
+claims the Rust engine ran. That is `scripts/differential.py:57-69`'s defect
+("`installed()` means the finder is up, not that Rust ran") and `check.sh:63`'s
+label and this plan's D4, in its fourth appearance, and it is the one class of
+defect this project has paid for most.
+
+Design B's price is one clause in `ShellHost.has_tag` (A2). Design A's price is
+that the milestone cannot be measured. **The measured size of what is at stake**
+— and the granularity matters, because a number here has already travelled
+wrongly: `unittest.TestLoader` over
+`template_tests.syntax_tests.{test_extends,test_include,test_block,test_blocktrans}`
+is **85 test cases**; over every file under `template_tests/` that mentions one
+of the three tags or `BlockNode`/`ExtendsNode` it is **373**, across 13 files;
+and the three tags *occur* **205** times under `template_tests/`. Three right
+answers to three questions; the reviewer's "176" matches none of them and is
+recorded here as unreproduced rather than adopted.
+
+Design B is chosen. It also shrinks M6's Review Focus item 1 by one tag: after
+Task 1, a `{% block %}` body is parsed by Rust, and its nested tags are Rust's.
 
 **Consequences, and each is a task's business:**
 
@@ -320,9 +353,10 @@ cache is keyed on. It does **not** pin that the template is materialised once
 
 ## D. Corrections this plan makes
 
-Four, each with the artifact it corrects and the measurement behind it. The
-first two correct `.review/m7-recon.md` (the recon precedes and is corrected by
-the plan, as M6's did); the other two correct derived artifacts.
+Six, each with the artifact it corrects and the measurement behind it. The first
+two correct `.review/m7-recon.md` (the recon precedes and is corrected by the
+plan, as M6's did); the rest correct derived artifacts, and D5/D6 came out of
+the reviewer's round on this plan.
 
 **D1 — the recon's §2 frames `must_be_first` on the outbound wire. It crosses
 inbound.** The 5-tuple `node_desc_to_py` emits (`lib.rs:871-915`, pinned by
@@ -350,6 +384,49 @@ written that gate is vacuous.** The `.django/` row runs on stock Django's parser
 The obligation is discharged in `tests/` against our engine (A6); the spec's
 claim about *what* the row proves is kept, and the instrument that can see it is
 named.
+
+**D5 — D4 is one instance of a class, and the class is swept, not fixed one at
+a time.** The reviewer's reading: §10.3 carries a gate per milestone, most
+naming `.django/tests/` modules, and the mechanical question is *"is the module
+whose behaviour this gate exercises interposed by this milestone?"* Swept, one
+pass over §10.3 against the interposition schedule it states:
+
+| Milestone | gate names | interposes at | exercised module interposed at | vacuous? |
+| --- | --- | --- | --- | --- |
+| M0–M6, M8 | `tests/` corpora, the differential harness, `.review/mN-seams.md` — **no `.django` module** | — | n/a | no |
+| **M7** | `test_include_cache` (`syntax_tests/test_include.py`) | none | **M11** (`loader_tags`) | **yes** |
+| M9 | `test_base`, `test_parser`, `test_nodelist`, `test_smartif` | `base`, `smartif` | M9 | no |
+| M10 | `test_context`, `test_engine`, `test_loaders`, `test_origin` | `context`, `engine`, `utils`, `loaders`, `origin` | M10 | no |
+| M11 | `syntax_tests`, `filter_tests`, `test_url` | `defaulttags`, `defaultfilters`, `loader_tags` | M11 | no |
+| M12 | `syntax_tests/i18n/*`, `test_cache` | `i18n`, `l10n`, `static`, `tz`, `cache` | M12 | no |
+| M13 | `test_partials`, `test_response` | partials, `library`, `backends`, `response` | M13 | no |
+| M14 | `unshimmed()` empty | all | M14 | no |
+
+**The sweep comes back with exactly one, and the rule that finds it is
+derivable**: a milestone's gate is vacuous iff it names a module a **later**
+milestone interposes. Every M9–M13 gate names modules its own milestone
+interposes (or an earlier one); M0–M6 and M8 name no `.django` module at all;
+M7 is the only row whose gate reaches forward. That is why it is one row and not
+a list — and why it should be re-run, not re-read, when §10.3 changes.
+
+**D6 — the anchor checker's scope excludes the spec by omission, not by rule.**
+`scripts/check_python_anchors.py:240-266` names `TREE_ROOTS = ["crates",
+"python", "tests"]` and explains, in `NOT_SCANNED_BECAUSE`, why
+`docs/superpowers/plans/` and `.review/` are out — both reasons being that those
+files are *dated records*, and that holding them current would destroy the
+distinction. **`docs/superpowers/specs/` is in neither**: the spec is a living
+document, it is §2's acceptance reference, and its anchors are not one of the two
+excluded classes. Measured with the checker's own pattern: the spec carries
+**36** anchors; `docs/superpowers/plans/` carries **331** and `.review/` **463**,
+all unchecked. So `parser/mod.rs:336` (D3) is not an unlucky number — it is one
+of a class the guard's own comment says should not exist by accident.
+
+This plan does not widen `TREE_ROOTS`: it is a harness change, it needs the 36
+rows verified one at a time rather than `--update`d (which "moves a number only
+when the snippet occurs nowhere in here" — the report's own warning that
+`--update` is the wrong direction for a wrong citation), and it belongs in its
+own commit with its own review. It is scheduled as the commit immediately after
+this plan revision and is recorded here so it is not rediscovered at M8.
 
 ---
 
@@ -1650,7 +1727,10 @@ in an earlier session.
 `test_include_cache` is named as the *shape* copied rather than the suite row
 that runs. §10.4's M7 paragraph: the `parser/mod.rs:336` citation becomes a
 symbol (`Parser::extend_nodelist`) rather than a line, per the project's
-pointer-not-snapshot rule. Record D1–D4 as corrections in the spec's own voice.
+pointer-not-snapshot rule. Record D1–D6 as corrections in the spec's own voice,
+and add §10.3's vacuity rule (D5) beside the table rather than as prose about
+M7: the next milestone's gate is checked by the rule, not by re-reading this
+plan.
 
 - [ ] **Step 3: Correct this plan's targets**
 
