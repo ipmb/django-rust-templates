@@ -15,7 +15,8 @@ and each inserts its own paths, because `-I` implies `-E`.
 | script | the claim it carries | where |
 |---|---|---|
 | `m7_measureA.py` | the two-clause host predicate, as a six-row matrix — `has_tag` per guard/registry/`loader_tags` combination, rows 1 and 6′ measured on the shipping `ShellHost` and the rest modelling Task 4's form | plan A2 |
-| `m7_measureB.py` | inbound `must_be_first`: Django's refusal and its message; the `{% block %}` end-tag forms; `render_string`'s signature | plan A4, RF1 |
+| `m7_measureB.py` | inbound `must_be_first`: Django's refusal and its message; the `{% block %}` end-tag forms; `render_string`'s signature; **can a `must_be_first` host node ever be *first*?** — no through a `{% load %}` (`contains_nontext` is sticky, `base.py:611-612`), yes as a builtin, with both engines agreeing row for row; and a host tag returning `object()`, where the raising and defaulting spellings of the read first differ | plan A4, Task 5, RF1 |
+| `m7_measure_half_fix.py` | Task 4's trap, re-measured: the un-widened `django_own_tags` table, **modelled** by rebinding the module global so the script is re-runnable against the shipping tree. The predicate says `True` for all three names; `{% extends "a" %}{% extends "b" %}` still raises with Django's own text (`do_extends` re-enters `parser.parse()`, `loader_tags.py:305`); and **0 of 106 error-corpus rows and 0 of 3 `ORIGIN_ERRORS` rows differ** — the half-fix is invisible to every message-comparing row, and the detector is the predicate | plan D8/D8′, Task 4 Step 8 |
 | `m7_measure_origin.py` | `Origin(UNKNOWN_SOURCE).template_name is None`; `construct_relative_path(None, …)` raises rather than parsing on | plan A3, RF2 |
 | `m7_measure_nesting.py` | A5's predicate: is any `{% block %}` nested inside a body Django parses? | plan A5 |
 | `m7_measure_nest2.py` | the same predicate for `{% extends %}`, and for a library returning an `ExtendsNode` subclass | plan RF3 |

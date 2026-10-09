@@ -1258,6 +1258,28 @@ impl Host for FilterCheckHost<'_> {
                 )))
             }
         };
+        // A4: the flag crosses **inbound**. This is the Python node the host's
+        // compile function just returned, and `must_be_first` is a class
+        // attribute every Django `Node` carries (`base.py:1031-1035`) which
+        // `extend_nodelist` reads unconditionally (`base.py:602`). M6 carried
+        // every other node field but this one, so a host tag returning a node
+        // class that sets it was *accepted* where Django refuses.
+        //
+        // **Raise rather than default `false`.** An object without the attribute
+        // is not a node, and defaulting would turn "the host returned the wrong
+        // thing" into "no ordering check needed" — silently accepting exactly
+        // the shape this read exists to refuse. The outbound 5-tuple
+        // (`node_desc_to_py`) is untouched: it is a descriptor-to-shell wire,
+        // and this flag never travels that way.
+        let must_be_first = node
+            .getattr("must_be_first")
+            .and_then(|flag| flag.extract::<bool>())
+            .map_err(|error| {
+                Error::internal(format!(
+                    "ShellHost.call_tag({command:?}) returned a node without a \
+                     bool `must_be_first`: {error}"
+                ))
+            })?;
         let left = match left.extract::<Vec<WireToken>>() {
             Ok(left) => left,
             Err(error) => {
@@ -1291,7 +1313,11 @@ impl Host for FilterCheckHost<'_> {
             refs.push(Some(node.unbind()));
             CoreNodeRef((refs.len() - 1) as u64)
         };
-        Ok((NodeDesc::host(handle), left))
+        // Read before `node.unbind()` above; set here, so the descriptor carries
+        // the host's own answer rather than this side's default.
+        let mut desc = NodeDesc::host(handle);
+        desc.must_be_first = must_be_first;
+        Ok((desc, left))
     }
 
     fn check_filter(&self, name: &str, arg_count: usize) -> Result<Option<CoreNodeRef>, Error> {

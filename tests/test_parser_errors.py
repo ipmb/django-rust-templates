@@ -114,13 +114,25 @@ def ours_failure(source, debug=False, origin_name=None):
     `origin_name` crosses as the **attribute** and not as an `Origin`
     (design A3): Rust holds `Option<String>`, `None` means the unknown origin,
     and the `Origin` object itself stays on this side. The two `Parser`s above
-    and below therefore agree on `template_name` and nothing else, which is all
-    `{% extends %}` reads.
+    and below are therefore built the same way, `Origin` included — which they
+    were not until M7's Task 5, and the difference was live: this one omitted
+    the fourth argument, so `parser.origin` was `None` where Django's was an
+    `Origin`, and `self.origin.template_name` (`base.py:603`, inside
+    `extend_nodelist`) raised `AttributeError: 'NoneType' object has no
+    attribute 'template_name'` for any host-compiled tag that reached
+    `extend_nodelist` with `must_be_first` set or that read `parser.origin`.
+
+    Nothing in the corpus reached it while `extends` and `include` are Rust's,
+    and that is what made it worth fixing rather than working around: the row
+    that first reaches it — any host tag reading `parser.origin`, which M13's
+    `{% partialdef %}` work could easily introduce — would have diverged for a
+    reason having nothing to do with the tag under test.
     """
     parser = Parser(
         lexer(source, debug).tokenize(),
         _ENGINE.template_libraries,
         _ENGINE.template_builtins,
+        Origin(UNKNOWN_SOURCE, origin_name),
     )
     try:
         _native.parse(

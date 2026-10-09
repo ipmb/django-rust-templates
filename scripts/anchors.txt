@@ -61,7 +61,10 @@ base.py:587-588	django/template/base.py	587	588	self.command_stack.pop()	-
 base.py:600-617	django/template/base.py	600	617	def extend_nodelist(self, nodelist, node, token):	-
 base.py:602-606	django/template/base.py	602	606	if node.must_be_first and nodelist.contains_nontext:	origin = "the template"
 base.py:602-612	django/template/base.py	602	612	-	-
+base.py:602	django/template/base.py	602	-	if node.must_be_first and nodelist.contains_nontext:	-
+base.py:603	django/template/base.py	603	-	if self.origin.template_name:	-
 base.py:611	django/template/base.py	611	-	-	-
+base.py:611-612	django/template/base.py	611	612	nodelist.contains_nontext = True	-
 base.py:615	django/template/base.py	615	-	node.token = token	-
 base.py:616	django/template/base.py	616	-	node.origin = self.origin	-
 base.py:619-630	django/template/base.py	619	630	def error(self, token, e):	return e
@@ -148,6 +151,7 @@ base.py:1016-1020	django/template/base.py	1016	1020	-	-
 base.py:1023	django/template/base.py	1023	-	getattr(e, "silent_variable_failure", False)	-
 base.py:1023-1024	django/template/base.py	1023	1024	if getattr(e, "silent_variable_failure", False):	current = context.template.engine.string_if_invalid
 base.py:1024	django/template/base.py	1024	-	current = context.template.engine.string_if_invalid	-
+base.py:1031-1035	django/template/base.py	1031	1035	must_be_first = False	-
 base.py:1035	django/template/base.py	1035	-	child_nodelists = ("nodelist",)	-
 base.py:1036	django/template/base.py	1036	-	-	-
 base.py:1044-1070	django/template/base.py	1044	1070	def render_annotated(self, context):	-
@@ -157,6 +161,7 @@ base.py:1060-1063	django/template/base.py	1060	1063	and context.render_context.t
 base.py:1060	django/template/base.py	1060	-	context.render_context.template.origin == e._culprit_node.origin	-
 base.py:1070-1082	django/template/base.py	1070	1082	nodes.extend(nodelist.get_nodes_by_type(nodetype))	-
 base.py:1079-1080	django/template/base.py	1079	1080	getattr(self, attr, None)	-
+base.py:1088	django/template/base.py	1088	-	contains_nontext = False	-
 base.py:1091	django/template/base.py	1091	-	SafeString("".join(	-
 base.py:1093-1098	django/template/base.py	1093	1098	"Return a list of all nodes of the given type"	-
 base.py:1113	django/template/base.py	1113	-	def render_annotated	-
@@ -456,6 +461,7 @@ engine.py:7	django/template/engine.py	7	-	from .base import Template	-
 engine.py:14-18	django/template/engine.py	14	18	"django.template.loader_tags",	-
 engine.py:15-16	django/template/engine.py	15	16	filters	-
 engine.py:63	django/template/engine.py	63	-	self.template_builtins = self.get_template_builtins(self.builtins)	-
+engine.py:120-121	django/template/engine.py	120	121	return [import_library(x) for x in builtins]	-
 engine.py:194	django/template/engine.py	194	-	-	-
 library.py:85	django/template/library.py	85	-	for attr in ("expects_localtime", "is_safe", "needs_autoescape"):	-
 library.py:211-212	django/template/library.py	211	212	delete_first_token	-
@@ -465,6 +471,7 @@ library.py:337	django/template/library.py	337	-	self.nodelist = nodelist	-
 library.py:388-473	django/template/library.py	388	473	def parse_bits(	return args, kwargs
 library.py:421	django/template/library.py	421	-	-	-
 library.py:454	django/template/library.py	454	-	parser.compile_filter	-
+library.py:476-491	django/template/library.py	476	491	module = import_module(name)	-
 loader_tags.py:63	django/template/loader_tags.py	63	-	block = type(self)(block.name, block.nodelist)	-
 loader_tags.py:87	django/template/loader_tags.py	87	-	-	-
 loader_tags.py:94	django/template/loader_tags.py	94	-	self.blocks = {n.name: n	-

@@ -521,12 +521,14 @@ cache is keyed on. It does **not** pin that the template is materialised once
 
 ## D. Corrections this plan makes
 
-Eight, each with the artifact it corrects and the measurement behind it. The first
+Nine, each with the artifact it corrects and the measurement behind it. The first
 two correct `.review/m7-recon.md` (the recon precedes and is corrected by the
 plan, as M6's did); D3–D6 correct derived artifacts, and D5/D6 came out of the
-reviewer's round on this plan; **D7 was written at Task 3's execution** and
-corrects this plan's own Task 3, **D8 at Task 4's**, and those two are the one
-place a plan's errors cost a run rather than a line of prose.
+reviewer's round on this plan; **D7 was written at Task 3's execution**, **D8 at
+Task 4's**, and **D9 at Task 5's**, correcting this plan's own tasks — the place
+a plan's errors cost a run rather than a line of prose. D8 carries a **D8′**, its
+own re-measurement after the reviewer showed its first number came from a
+harness artifact; that is the shape a correction should be able to take.
 
 **D1 — the recon's §2 frames `must_be_first` on the outbound wire. It crosses
 inbound.** The 5-tuple `node_desc_to_py` emits (`lib.rs:871-915`, pinned by
@@ -660,20 +662,73 @@ re-measures, and the seven rows this task would have added that way included two
 that were false.**
 
 **D8 — Task 4's Step 8 predicts the half-fix's second symptom wrongly, and the
-error is the interesting kind: the predicted symptom is *checkable* and the check
-is one line away from the thing it was supposed to exercise.** The plan said
+correction's own measurement came from a different file.** The plan said
 reverting `django_own_tags` to `dict(_defaulttags.register.tags)` leaves
 `{% extends "a" %}{% extends "b" %}` *not raising* (Django's duplicate scan
-skipped because Rust, not Django, compiles the tag). Measured: it still raises —
-`AttributeError: 'NoneType' object has no attribute 'template_name'` — and **six
-more corpus rows fail with the same text**. One cause: Rust's origin is a field
-on Rust's `Parser` (`Parser::origin_template_name`, Task 2), the host's `Parser`
-is built with `UNKNOWN_ORIGIN`, and Django's `do_extends`/`do_include` read
-`parser.origin.template_name` (`loader_tags.py:305`, `:362`) before reaching any
-rule of their own — including the duplicate scan. So the half-fix routes the tags
-to a host that cannot compile them at all, which is a *louder* cost than the
-predicted silent acceptance, and a reader who checks only the predicted row would
-have concluded the trap was imaginary. Step 8 now carries the measured table.
+skipped because Rust, not Django, compiles the tag). It still raises, with
+Django's own text.
+
+The first execution of Step 8 recorded a *different* symptom — seven corpus rows
+dying with `AttributeError: 'NoneType' object has no attribute 'template_name'` —
+and that symptom was an artifact of the harness, not a property of the half-fix:
+`tests/test_parser_errors.py::ours_failure` built its `Parser` without the
+`Origin` its `django_failure` sibling passes, so `parser.origin` was `None` where
+Django's was an `Origin`, and the misrouted `{% extends %}` reached
+`parser.origin.template_name` on the `None` one. **D8′ is the re-measurement
+after that one argument was added**, and it dissolves the recorded symptom
+entirely: 0 of 106 corpus rows differ, 0 of 3 `ORIGIN_ERRORS` rows differ, and
+the whole suite's only failures are the three subTests of the predicate row. The
+half-fix's only detector is the predicate itself.
+
+Two things are worth keeping from this, and neither is the predicted row.
+**First: a routing change under a seam that re-enters Django's own parse is
+invisible to every message-comparing corpus.** `do_extends` calls `parser.parse()`
+(`loader_tags.py:305`) before its duplicate scan (`:306-309`), so a misrouted
+`{% extends %}` runs the same code down a different path and reaches the same
+rule — the routing does not skip the check, it re-enters the parser that makes
+it. **Second: the harness defect is the better finding**, and it is M6's
+`parser_for` shape repeating — a `Parser` missing one constructor argument,
+invisible until a host-compiled tag reads what that argument supplies, and
+discovered through a tag that had nothing to do with it. The cost is latent and
+the corpus is green: the row that first reaches it — any host tag reading
+`parser.origin`, which M13's `{% partialdef %}` work could introduce — would
+diverge for a reason having nothing to do with the tag under test.
+
+The plan's prediction was checkable and wrong in the *interesting* way: it was
+one line above the check it meant to exercise, and so was the correction.
+
+**D9 — Task 5's own three false measurements, and a guard whose named mutation
+cannot fail.** The task's "declared environment" block carried two rows that are
+false on the pin and the mechanism to explain them away with:
+
+```text
+{% load mylib %}{% first_tag %}                     -> OK  'F'                  # false
+{% load mylib %}{% plain_tag %}text{% plain_tag %}  -> {% plain_tag %} must …   # false
+```
+
+`extend_nodelist` sets `nodelist.contains_nontext = True` the first time a
+non-`TextNode` is appended and never clears it (`base.py:611-612`, class default
+`:1088`), and `{% load %}` appends a `LoadNode` — so a *loaded* library's
+`must_be_first` tag is **never** accepted in first position, on either engine,
+and the accepted case needs a builtin registration instead. `{% plain_tag %}`
+sets no flag and its bare `Node.render` returns `None`, which is the `TypeError`
+the draft read as an ordering message. The draft's test could not pass either: it
+caught Django's `TemplateSyntaxError` for **our** side, where design decision 2
+makes `_native.ParseError` correct until M9's conversion. And Step 4's named
+mutation — `.map_err(...)?` → `.unwrap_or(false)` — is a **no-op**:
+`unwrap_or` returns the `Ok` value, so a node carrying the attribute answers the
+same either way, and the four rows stayed green under it. The two spellings
+differ only where the attribute is absent, so a third row (a tag returning
+`object()`) is what makes the guard observable, and the mutant's symptom surfaces
+in the materialiser — `AttributeError: 'object' object has no attribute 'token'`
+from `_impl/parser.py:271` — a file the bad tag never touched.
+
+The shape is D7's, and it is why this entry is here rather than in a comment: **a
+measurement block written into a plan is a claim nobody re-runs until the task
+runs it, and two of the three rows were authored rather than executed.** The
+guard is the second half and the sharper one — a mutation whose stated symptom is
+in another file measures nothing, and a plan that names it is asking the executor
+to confirm a prediction rather than to observe a difference.
 
 The two other measured facts are the asymmetry Step 6 turns on, and it **inverts**
 under the half-fix: `test_the_host_declines_every_name_rust_owns` fails
@@ -2078,26 +2133,51 @@ snippet in this plan is run — the quoting is what a reader will get wrong.)
 Run: `source scripts/env.sh && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m unittest discover -s tests -t . -p 'test_*.py' && .venv/bin/python -I scripts/check_python_anchors.py --check --frozen`
 Expected: all pass.
 
-**Corrected at execution time (D8).** The trap is real and the two symptoms are
-not the two this step predicted. Measured, reverting `django_own_tags` to
-`dict(_defaulttags.register.tags)`:
+**Corrected at execution time (D8), then re-measured (D8′).** The trap is real
+and *both* symptoms this step predicted were wrong — the recorded one because it
+came from a different file. Measured, reverting `django_own_tags` to
+`dict(_defaulttags.register.tags)` (`.review/m7-measurements/m7_measure_half_fix.py`,
+which models the half-fix by rebinding the module global and so is re-runnable
+against the shipping tree):
 
 | what | predicted here | measured |
 |---|---|---|
 | `test_the_host_declines_every_name_rust_owns` | fails | **fails** — `has_tag` returns `True` for all three names, so `block`/`extends`/`include` route to the host |
 | `test_a_loaded_library_still_shadows_a_built_in` | (unstated) | **passes** — the half-fix *is* the pre-M7 state for it, which is the asymmetry Step 6's ordering uses |
-| `{% extends "a" %}{% extends "b" %}` | "stops raising" | **still raises** — `AttributeError: 'NoneType' object has no attribute 'template_name'` |
-| the rest of the error corpus | (unstated) | **6 more rows fail, same `AttributeError`** |
+| `{% extends "a" %}{% extends "b" %}` | "stops raising" | **still raises, with Django's own text** — `'extends' cannot appear more than once in the same template` |
+| the rest of the error corpus | (unstated) | **0 of 106 rows differ, and 0 of 3 of `ORIGIN_ERRORS`** |
+| the whole suite | (unstated) | **256 tests, 3 failures** — the three subTests of the row above, and nothing else |
 
-The second symptom is one cause, not two: Rust's origin lives on Rust's
-`Parser` (`Parser::origin_template_name`), and the host's `Parser` is built with
-`UNKNOWN_ORIGIN`, so `do_extends`/`do_include` die on `parser.origin.template_name`
-(`loader_tags.py:305`, `:362`) *before* any rule they own is reached — including
-the duplicate scan this step named. So the half-fix does not "accept" anything
-silently; it makes seven rows report Django's own `AttributeError` text. That is
-a *stronger* cost than predicted, and the reason it is worth writing down is that
-the predicted version was checkable and wrong: the duplicate row fails for a
-reason one line above the check it was supposed to exercise.
+**The first measurement of this step reported seven corpus rows dying with
+`AttributeError: 'NoneType' object has no attribute 'template_name'`, and that
+was a harness artifact.** `tests/test_parser_errors.py::ours_failure` built its
+`Parser` with three arguments where its `django_failure` sibling passes a fourth,
+`Origin(UNKNOWN_SOURCE, origin_name)` — and `Parser.__init__` stores `origin`
+verbatim (`base.py:524`), so `parser.origin` was `None` on our side and an
+`Origin` on Django's. Under the half-fix, `{% extends %}` routes to the host,
+Django's `do_extends` runs on *that* `Parser`, and `parser.origin.template_name`
+is the raise. Nothing in the corpus reached it while `extends` and `include` are
+Rust's, which is why five commits of M7 passed over it. One argument fixes it
+(committed with this correction), and with it fixed the corpus is green under the
+half-fix: no row sees the half-fix at all.
+
+**Why the predicted symptom cannot happen by that route.** `do_extends` calls
+`parser.parse()` itself (`loader_tags.py:305`) and scans what it returns for an
+`ExtendsNode` (`:306-309`). `ShellHost.call_tag` hands the host's `Parser` the
+remaining tokens, so that inner parse runs Django's own tag table and compiles
+the second `{% extends %}` into the nodelist the outer scan then finds. The
+duplicate rule is not skipped by the routing — the routing *reaches* it. The
+prediction assumed Rust's outer loop was the only thing that could have compiled
+the second tag, and under a seam that re-enters Django's own `parse` it is not.
+
+So the half-fix's only detector is the predicate, which is the row above and the
+whole of Step 6's argument — and the generalisation is worth more than the row:
+**a routing change under a seam that re-enters Django's parse is invisible to
+every message-comparing corpus, because the misrouted tag runs the same code down
+a different path.** The second generalisation is the harness one, and it is M6's
+`parser_for` shape repeating: a harness `Parser` missing one constructor argument
+is invisible until a host-compiled tag reads the thing that argument supplies,
+and the first place a reader looks is the tag.
 
 - [ ] **Step 9: Commit**
 
@@ -2132,72 +2212,78 @@ required before the Python test. The behaviour is measured, not assumed
 (`.review/m7-measurements/m7_measureB.py`, on the pinned tree):
 
 ```text
-{% load mylib %}{% first_tag %}                     -> OK  'F'
+{% load mylib %}{% first_tag %}                     -> {% first_tag %} must be the first tag in the template.
 text{% load mylib %}{% first_tag %}                 -> {% first_tag %} must be the first tag in the template.
-{% load mylib %}{% plain_tag %}text{% plain_tag %}  -> {% plain_tag %} must be the first tag in the template.
+{% load mylib %}{% bad_tag %}   (returns object())  -> AttributeError: 'object' object has no attribute 'must_be_first'
 ```
 
-Note the second row fails on the `{% load %}`'s account: `{% load %}` is itself a
-block tag, so `contains_nontext` is already true before the `text` is reached.
-The message names the tag, not the offending node's position.
+**Two rows of the draft block were false, and the explanation with them (D9).**
+The draft had `{% load mylib %}{% first_tag %}` rendering `'F'` and
+`{% load mylib %}{% plain_tag %}text{% plain_tag %}` raising a must-be-first
+message. Both are wrong on the pin, and the cause is one mechanism:
+`extend_nodelist` sets `nodelist.contains_nontext = True` the first time a
+non-`TextNode` is appended and **never clears it** (`base.py:611-612`, the class
+default at `:1088`) — and `{% load %}` appends a `LoadNode`. So a *loaded*
+library's `must_be_first` tag can never be first, on either engine; the leading
+`text` in the second row is a `TextNode` and flips nothing, so that row fails on
+the load's account alone. `{% plain_tag %}` sets no flag at all and its bare
+`Node.render` returns `None`, which is the `TypeError` the draft mistook for an
+ordering message. The accepted case therefore needs the tag registered as a
+**builtin**, which reaches the parser through `Parser.__init__`'s merge with no
+node of its own; measured, `engine.template_builtins.append(lib)` is
+`OPTIONS["builtins"]` with the module indirection removed (`get_template_builtins`
+only runs `import_library` over that list, `engine.py:120-121`).
+
+**Corrected at execution time (D9).** The test as drafted cannot pass, in three
+places, and each is a different kind of wrong:
+
+| the draft | why it cannot pass | what shipped |
+|---|---|---|
+| `assertRaises(TemplateSyntaxError)` for **our** side | `_native` raises its own `ParseError` and the shell converts it at M9 (design decision 2, `tests/test_parser_errors.py:274-283`) | `assertRaises(_native.ParseError)`, with the **message** compared against stock's `TemplateSyntaxError` — which is the whole of what the row is about |
+| the accepted row, `{% load mylib %}{% first_tag %}` | Django itself refuses it: `{% load %}` appends a `LoadNode` and `contains_nontext` is sticky | a second engine, the library appended to `template_builtins`, so the tag is genuinely first |
+| `{% load mylib %}` in a *refused* row | fine — but for the load's reason, not the text's | kept, with the comment naming the load |
+
+The refused row also gained a third test the draft did not have, and it is the
+one that makes the guard observable — see Step 4.
 
 - [ ] **Step 1: Write the failing test**
 
-In `tests/test_inheritance_gate.py`:
+In `tests/test_inheritance_gate.py` — the shipped form, which is longer than the
+draft above because two of the draft's three rows were false:
 
 ```python
 class MustBeFirstGateTests(unittest.TestCase):
-    """A4: the flag crosses inbound, off the Python node the host built."""
+    def _library(self):
+        # `first_tag` returns a Node with must_be_first = True; `bad_tag` returns
+        # something that is not a node at all, for Step 4's row.
+        …
 
-    def _engine(self):
-        from django.template import Engine, Library
-        from django.template.base import Node
-
-        class FirstNode(Node):
-            must_be_first = True
-
-            def render(self, context):
-                return "F"
-
-        lib = Library()
-
-        @lib.tag("first_tag")
-        def do_first(parser, token):
-            return FirstNode()
-
+    def _engine(self, builtin=False):
         engine = Engine()
-        engine.template_libraries["mylib"] = lib
+        lib = self._library()
+        if builtin:
+            engine.template_builtins.append(lib)
+        else:
+            engine.template_libraries["mylib"] = lib
         return engine
 
     def test_a_host_node_that_must_be_first_is_refused_after_text(self):
-        from django.template import Context, TemplateSyntaxError
-
-        from django_rust_templates.render import render_string
-
-        engine = self._engine()
-        source = "text{% load mylib %}{% first_tag %}"
-
-        with self.assertRaises(TemplateSyntaxError) as ours:
-            render_string(source, {}, engine)
-        # The stock side, in the same row — the pattern this project has needed
-        # three times (scripts/differential.py:57-69 is the record).
+        with self.assertRaises(_native.ParseError) as ours:
+            render_string("text{% load mylib %}{% first_tag %}", {}, self._engine())
         with self.assertRaises(TemplateSyntaxError) as stock:
-            engine.from_string(source).render(Context({}))
+            self._engine().from_string(…).render(Context({}))
         self.assertEqual(str(ours.exception), str(stock.exception))
-        self.assertEqual(
-            str(ours.exception),
-            "{% first_tag %} must be the first tag in the template.",
-        )
+        self.assertEqual(str(ours.exception), "{% first_tag %} must be the first tag in the template.")
 
     def test_a_host_node_that_must_be_first_is_accepted_first(self):
-        from django_rust_templates.render import render_string
-
-        self.assertEqual(render_string("{% load mylib %}{% first_tag %}", {}, self._engine()), "F")
+        # Builtin engine; position is the only variable between the two rows.
+        self.assertEqual(render_string("{% first_tag %}", {}, self._engine(builtin=True)), "F")
+        # and the same engine refuses the second of two
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `source scripts/env.sh && maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m pytest tests/test_inheritance_gate.py -k must_be_first -q`
+Run: `source scripts/env.sh && maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m unittest tests.test_inheritance_gate -v`
 Expected: FAIL — the refused case renders `'textF'` instead of raising, because
 `NodeDesc.must_be_first` is `false` for a host descriptor.
 
@@ -2238,12 +2324,27 @@ and where the descriptor is built (`:1289-1294`):
 
 - [ ] **Step 4: Run the test, then the gates**
 
-Run: `source scripts/env.sh && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m pytest tests/ -q`
+Run: `source scripts/env.sh && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m unittest discover -s tests -t . -p 'test_*.py'`
 Expected: PASS; no other test changes.
 
-Observe the guard: change `.map_err(...)?` to `.unwrap_or(false)` and confirm
-Step 1's first test fails again — that is the difference between the two
-spellings, and it is the whole of A4.
+**Corrected at execution time (D9): the mutation this step names is a no-op.**
+`unwrap_or(false)` returns the `Ok` value when the call succeeds, so a node that
+*carries* `must_be_first = True` answers `true` under both spellings — and the
+refusal test cannot see the difference. Measured: with `.map_err(...)?` swapped
+for `.unwrap_or(false)` the four rows stayed green.
+
+The two spellings differ only where the attribute is **absent**, so the shipped
+file has a third row that supplies one: a `bad_tag` returning `object()`.
+
+| spelling | `{% load mylib %}{% bad_tag %}` | the refusal rows |
+|---|---|---|
+| `.map_err(...)?` (shipped) | `ParseError: ShellHost.call_tag("bad_tag") returned a node without a bool \`must_be_first\`: AttributeError: …` | green |
+| `.unwrap_or(false)` (mutant) | silently accepted at the seam; dies later in the materialiser as `AttributeError: 'object' object has no attribute 'token'` (`_impl/parser.py:271`) | **green** |
+
+So the guard's justification — "raise rather than default `false`" — is
+observable, but only through the row that supplies a non-node, and the mutant's
+symptom lands in a file the author of the bad tag never touched. The plan
+believed the refusal row carried the difference; it carries nothing of it.
 
 - [ ] **Step 5: Commit**
 
