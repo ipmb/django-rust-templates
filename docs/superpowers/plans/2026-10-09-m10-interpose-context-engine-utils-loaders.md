@@ -52,7 +52,7 @@ Each line is a failure mode this milestone can ship while every count stays gree
 | `tests/transcription_equivalence.py` | **Create (Task 2).** `EQUIVALENCE` and `TemplateExceptionsEquivalenceTests`, the stated warrant for the one `fresh` file. |
 | `tests/test_interposition.py` | **Modify (Tasks 3–7).** A `ModuleInterpositionTests` class: per module, resolution, identity against the pinned copy, and reach through `tests/compared_path.instrumented`. `ShadowingTests` gains the `fresh` clause (Task 2). |
 | `tests/parity_target.py` | **Modify (Task 6).** Key `DECLARED`/`COMPARED_PATH` by `_impl`-relative path, not by basename. |
-| `tests/test_shim.py` | **Modify (Tasks 3–7).** The meter count moves 23 → 22 → 21 → 20 → 14; the partial-subpackage row's subject moves to `django.template.backends` (Task 6). |
+| `tests/test_shim.py` | **Modify (Tasks 3–7).** The meter count moves 23 → 22 → 21 → 20 → 14; the partial-subpackage row moves its subject to `django.template.backends` **and** its cleanup to create-if-missing / remove-only-what-it-wrote (Task 6). |
 | `scripts/anchors.txt` | **Modify (Task 1).** One row for the `context_processors` citation. |
 | `tests/test_loader_case_sensitivity.py` | **Create (Task 8).** §2's coverage hole, closed project-side. |
 | `.review/m9-measurements/m9_measure_parse_path.py` | **Modify (Task 3).** Takes module arguments so it is the single re-measurement instrument for every `COMPARED_PATH` entry, M10's included. |
@@ -464,6 +464,8 @@ git commit -m "M10: the ownership table, asserted against the meter in both dire
 ### Task 2: The criterion and its teeth
 
 The reviewer's replacement for the 5/4 transcribed/fresh split: **transcribe unless you can state the equivalence as a row**. Nine of the nine M10 files are transcriptions, so this rule lands before them, and its teeth are the one `fresh` file the tree already has — `_impl/exceptions.py`, written from scratch at M0, whose equivalence has been a reviewer's judgement rather than an instrument for nine milestones.
+
+**What the rule is, stated so a reader does not over-trust it.** It is a *toll*, not a proof. An equivalence row over the published surface — names, MRO, construction shapes, list identity, `args`, pickle — is stronger than nothing and weaker than a diff, and no arrangement of rows makes a `fresh` file falsifiable the way `scripts/check_transcriptions.py` falsifies a transcription. What makes the rule work is the **cost curve**, not the strength of any one row: writing that equivalence is cheap for a 44-line module of two exception classes and expensive for `context.py`'s dict-stack protocol, and an author discovers which while writing it. So the rule makes `fresh` cost something where `fresh` is the lazy answer, and stays out of the way where `fresh` is the right answer. The reviewer's phrasing is the one to keep in mind: *a forcing function that makes `fresh` expensive where `fresh` is wrong, and an equivalence row where `fresh` is cheap.*
 
 **Files:**
 - Create: `tests/pinned_module.py`
@@ -1425,27 +1427,60 @@ def key_of(source: Path) -> str:
 
 and replace the four `source.name` uses with `key = key_of(source)` (computed once, after the `is_relative_to(IMPL_DIR)` assertion, and used in the marker assertion, the `DECLARED` assertion, `declared_regions()` and the `COMPARED_PATH.get()`).
 
-- [ ] **Step 3: Re-pick the partial-subpackage subject.**
+- [ ] **Step 3: Re-pick the partial-subpackage subject — and fix why it expired.**
 
-`tests/test_shim.py::test_a_partial_subpackage_still_falls_back_for_its_siblings` uses `django.template.loaders`, asserts the directory does **not** exist, and `shutil.rmtree`s it in `finally` — which Task 7 makes destructive to committed work. Re-point it at `django.template.backends`, which is a package with siblings under `_impl`'s shadow and is owned by M13:
+`tests/test_shim.py::test_a_partial_subpackage_still_falls_back_for_its_siblings` uses `django.template.loaders`, asserts the directory does **not** exist, and `shutil.rmtree`s it in `finally` — which Task 7 makes destructive to committed work.
+
+**The re-pick alone is not the fix, and the review is where that was established.** `django/template/` has exactly **two** subpackages: `backends` and `loaders`. The row needs a subpackage that is real in Django and not yet ours, so after Task 7 takes `loaders` there is one candidate left, and M13 takes it — moving the subject to `backends` buys three milestones and then the same commit-deleting failure arrives at M13, where whoever hits it will not have this plan. **The expiry is in the cleanup, not in the name**: the row asserts its subject is absent and removes it unconditionally, so it can only run in a world where the subject does not exist, and it destroys evidence on the day that stops being true.
+
+So do both. Re-pick to `django.template.backends` (correct for M10 — it is M13's, as far from the frontier as the tree allows), and make the cleanup **create-if-missing and remove-only-what-it-created**:
 
 ```python
         package_dir = (
             PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "backends"
         )
+        # **Record what was here before writing anything.** The first version of
+        # this row asserted the directory did not exist and removed it in
+        # `finally`, which is a row that can only run while its subject is
+        # absent — so it went from a test to a deletion the day M13 gave
+        # `_impl/backends/` a transcription, and the failure would have looked
+        # like a broken fallback rather than a test cleaning up after itself.
+        # Whether or not the subject exists is now the row's input rather than
+        # its premise: the probe files are ours to remove, and the directory is
+        # ours to remove only if we made it.
+        created_package_dir = not package_dir.exists()
+        package_dir.mkdir(parents=True, exist_ok=True)
+        init = package_dir / "__init__.py"
+        had_init = init.exists()
+        try:
+            if not had_init:
+                init.write_text(MARKER)
+            ...  # the row's existing probe files and assertions, unchanged —
+                 # read them in `tests/test_shim.py` and keep them verbatim;
+                 # only the name of the subject changes
+        finally:
+            if not had_init:
+                init.unlink(missing_ok=True)
+            for probe in ("filesystem.py",):  # every probe file this row writes
+                (package_dir / probe).unlink(missing_ok=True)
+            if created_package_dir:
+                shutil.rmtree(package_dir, ignore_errors=True)
 ```
-and the two sibling/module names in the body (`django.template.backends`, `django.template.backends.django`) plus the two meter assertions. Update the row's docstring paragraph that justifies the subject:
+
+and update the row's docstring paragraph that justifies the subject:
 
 ```
         ``django.template.backends`` and ``django.template.backends.django`` are
         the subjects because they are a package with siblings and are owned by
         M13 (§10.3), not by the milestone being worked. The subject used to be
         `loaders`, chosen as "as far from the interposition frontier as the tree
-        allows" — which expired at M10, and expired *dangerously*: the row
-        asserted the directory did not exist and removed it in `finally`, so on
-        the day M10 created it the row would have deleted a committed
-        transcription. The re-pick is part of M10 for that reason, and the next
-        person should re-pick it deliberately rather than by bisecting a failure.
+        allows" — which expired at M10. The re-pick alone would have expired
+        again at M13, because `django/template/` has only two subpackages, so the
+        cleanup is the part that matters: the row now records what it found,
+        writes only files that were not there, and removes only what it wrote.
+        It has no expiry left, and a future milestone can change the subject
+        freely without first checking whether it is about to delete someone's
+        work.
 ```
 
 - [ ] **Step 4: Run the guard's teeth against a tree that should fail it.**
@@ -1811,6 +1846,8 @@ Expected: six `wrote … (N lines)` lines, then `… matches the generator` for 
     ),
 ```
 and the same shape for the other four with `((2, 3), None, …)`. **Check each one against the guard rather than against this plan**: run `python -I scripts/check_transcriptions.py` and let it tell you which side the marker landed on — that is the measurement, and a region that covers nothing is a failure with a message naming the file.
+
+**The premise the +2 arithmetic rests on, stated because it is invisible in the table.** Every `COMPARED_PATH` span for these nine is upstream's line number plus two, and that is true only because each transcription inserts its marker and nothing else — **none of these nine rewrites its module docstring**, unlike `_impl/__init__.py`, which does. A file that both inserted a marker and edited its docstring would shift its spans by two *plus* the docstring delta, and a uniform +2 would then be wrong for every function in it while the table looked like every other row. So: when registering each file, confirm with `python -I scripts/gen_impl_transcription.py --check` (and by eye, for the first one) that the only diff at the top of the file is the marker and its blank line. If a docstring ever does need rewriting, the span arithmetic is re-derived for that file rather than copied.
 
 `_shim.SHADOWING` gains six rows, all `"transcribed"`. `tests/milestone_ownership.py` moves all six names:
 

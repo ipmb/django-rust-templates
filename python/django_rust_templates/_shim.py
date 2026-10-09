@@ -50,9 +50,11 @@ So the set is declared rather than prohibited. :data:`SHADOWING` names every
 keys. A new collision then costs one deliberate, reviewable line; an accidental
 one — the ``render.py``-at-``engine.py`` case — is a test failure in the commit
 that causes it, rather than an ``ImportError`` that blames Django three files
-away. The table's ``kind`` is checked against each file's own ``# TRANSCRIBED:``
-marker, so it cannot rot into a second, disagreeing account of which files are
-transcriptions; ``scripts/check_transcriptions.py`` owns that question.
+away. The table's ``kind`` is checked against the guard that owns each kind's
+question — ``scripts/check_transcriptions.py`` for a transcription's diff against
+the pin, ``tests/transcription_equivalence.py`` for a fresh file's stated
+equivalence — so it cannot rot into a second, disagreeing account of which files
+are transcriptions.
 
 The shell modules that only need Rust and the real Django live outside ``_impl``
 entirely (``django_rust_templates/render.py``), and the ones that must be inside
@@ -93,6 +95,16 @@ _installed_finder: "_ShimFinder | None" = None
 # `_impl` file: `parser.py` is absent because no `django/template/parser.py`
 # exists to collide with, and a file that collides without being listed here is
 # exactly what the table exists to catch.
+#
+# **The two kinds carry different obligations, and both are checked.** A
+# `transcribed` file is falsified by `scripts/check_transcriptions.py`: the diff
+# against the pin is its instrument. A `fresh` file has no diff of its own, so
+# its instrument is a stated equivalence —
+# `tests/transcription_equivalence.py`'s `EQUIVALENCE` — and
+# `ShadowingTests.test_each_kind_is_the_transcription_guards_own_answer` refuses
+# a `fresh` name that is missing from it. Without that second clause `fresh` is
+# the free option: changing one word here would move a file out of every guard in
+# the tree with everything green, which is M9's finding 3 one level up.
 SHADOWING = {
     "__init__.py": "transcribed",
     "base.py": "transcribed",

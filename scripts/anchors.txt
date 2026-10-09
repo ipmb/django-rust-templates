@@ -1,3 +1,5 @@
+_shim.py:75	python/django_rust_templates/_shim.py	75	-	TARGET = "django.template"	-
+_shim.py:396	python/django_rust_templates/_shim.py	396	-	if installed():	-
 center.rs:86	crates/template-core/src/filters/center.rs	86	-	arg.unwrap_or(Value::None)	-
 center.rs:90	crates/template-core/src/filters/center.rs	90	-	text.starts_with('-')	-
 get_digit.rs:108	crates/template-core/src/filters/get_digit.rs	108	-	text.chars().rev().nth(index)	-
@@ -209,6 +211,7 @@ base.py:1194	django/template/base.py	1194	-	-	-
 base.py:1200	django/template/base.py	1200	-	-	-
 base.py:1202	django/template/base.py	1202	-	kwargs[key] = parser.compile_filter(value)	-
 base.py:1203-1206	django/template/base.py	1203	1206	-	-
+django/template/context.py:5	django/template/context.py	5	-	_builtin_context_processors = ("django.template.context_processors.csrf",)	-
 defaultfilters.py:6	django/template/defaultfilters.py	6	-	from decimal import ROUND_HALF_UP, Context, Decimal, InvalidOperation, getcontext	-
 defaultfilters.py:14	django/template/defaultfilters.py	14	-	-	-
 defaultfilters.py:38-52	django/template/defaultfilters.py	38	52	def stringfilter(func):	return _dec
@@ -649,8 +652,6 @@ timesince.py:138-143	django/utils/timesince.py	138	143	timeuntil	-
 timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)
 python/django_rust_templates/_impl/base.py:1161	python/django_rust_templates/_impl/base.py	1161	-	-	-
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
-_shim.py:73	python/django_rust_templates/_shim.py	73	-	TARGET = "django.template"	-
-_shim.py:384	python/django_rust_templates/_shim.py	384	-	if installed():	-
 python/django_rust_templates/host.py:243	python/django_rust_templates/host.py	243	-	-	-
 tests/parity_target.py:41	tests/parity_target.py	41	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
 tests/parity_target.py:147	tests/parity_target.py	147	-	So this is the replacement Python side	-
@@ -681,4 +682,3 @@ tests/test_host_tags.py:32-37	tests/test_host_tags.py	32	37	PROJECT_ROOT = Path(
 test_render_parity.py:533	tests/test_render_parity.py	533	-	def test_a_silent_variable_failure_is_substituted(self):	-
 test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
 .django/tests/utils_tests/test_html.py:204-217	tests/utils_tests/test_html.py	204	217	-	-
-django/template/context.py:5	django/template/context.py	5	-	_builtin_context_processors = ("django.template.context_processors.csrf",)	-

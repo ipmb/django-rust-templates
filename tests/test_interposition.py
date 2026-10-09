@@ -400,27 +400,60 @@ class ShadowingTests(unittest.TestCase):
         self.assertEqual(_shim.shadowing_files(), sorted(_shim.SHADOWING))
 
     def test_each_kind_is_the_transcription_guards_own_answer(self):
-        """``kind`` is compared, not trusted.
+        """``kind`` is compared, not trusted — and each kind has its own warrant.
 
         It is the one column here that could rot into a second, disagreeing
         account of which files are transcriptions — the account
         ``scripts/check_transcriptions.py`` already owns and already checks
-        against each file's marker. So the two are compared directly:
-        ``transcribed`` must be a name that guard declares, ``fresh`` must not.
-        Comparing against ``DECLARED`` rather than re-reading the marker keeps
-        one spelling of that question in the tree.
+        against each file's marker. So the two are compared directly, and the
+        comparison now has two arms because the two kinds carry different
+        obligations:
+
+        * ``transcribed`` must be a name that guard declares. The **diff against
+          the pin** is the warrant, and it is the only instrument that falsifies
+          a transcription (M9's finding 3: a verbatim copy and a wrongly
+          transcribed file both keep all 1547 tests green).
+        * ``fresh`` must be a name ``tests/transcription_equivalence.py`` states
+          an equivalence for. A fresh file has no diff of its own, so nothing in
+          the transcription guard can see it, and the suite cannot see it
+          either — for the same reason. Without this arm ``fresh`` is the free
+          option: changing one word in the table above would move a file out of
+          every guard in the tree with everything green.
+
+        The class is required to have rows rather than merely to be named,
+        because an empty test case is how a warrant becomes a gesture.
         """
+        import importlib
+
         import scripts.check_transcriptions as guard
+
+        from tests import transcription_equivalence as equivalence
 
         for name, kind in sorted(_shim.SHADOWING.items()):
             with self.subTest(name=name):
                 self.assertIn(kind, ("transcribed", "fresh"))
-                self.assertEqual(
-                    kind == "transcribed",
-                    name in guard.DECLARED,
-                    f"{name} is declared {kind!r} in SHADOWING, but "
-                    f"check_transcriptions.py says "
-                    f"{'transcribed' if name in guard.DECLARED else 'not transcribed'}",
+                if kind == "transcribed":
+                    self.assertIn(
+                        name,
+                        guard.DECLARED,
+                        f"{name} is declared 'transcribed' in SHADOWING but "
+                        "check_transcriptions.py does not declare it, so "
+                        "nothing reads its diff against the pin",
+                    )
+                    continue
+                self.assertIn(
+                    name,
+                    equivalence.EQUIVALENCE,
+                    f"{name} is declared 'fresh' in SHADOWING but states no "
+                    "equivalence in tests/transcription_equivalence.py, so "
+                    "nothing in this tree can falsify it — transcribe it "
+                    "instead, or state the equivalence as rows",
+                )
+                module_name, class_name = equivalence.EQUIVALENCE[name]
+                case = getattr(importlib.import_module(module_name), class_name)
+                rows = [a for a in dir(case) if a.startswith("test_")]
+                self.assertGreater(
+                    len(rows), 0, f"{module_name}.{class_name} has no rows"
                 )
 
 

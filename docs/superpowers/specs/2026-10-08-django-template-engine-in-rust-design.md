@@ -436,7 +436,7 @@ mapping, `get_nodes_by_type` results, and the `must_be_first` ordering rule.
 not deferred.** An earlier draft of this section said Rust owns "all built-in tags
 and filters" and M4's plan then assumed seven filter bodies would come home to
 Rust at M10. Both were wrong, in the same way: **M10's `utils` is
-`django/template/utils.py` (the `EngineHandler` module), because `_shim.py:73`
+`django/template/utils.py` (the `EngineHandler` module), because `_shim.py:75`
 sets `TARGET = "django.template"` and the finder takes over exactly one
 namespace.** `django.utils.dateformat`, `django.utils.formats`,
 `django.utils.html`, `django.utils.text`, `django.utils.timesince` and
