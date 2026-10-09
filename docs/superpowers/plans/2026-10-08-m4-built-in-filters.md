@@ -1661,6 +1661,33 @@ longest body in M4 — is dispatched as its **own unit inside Task 7 and reviewe
 alone**, which is what "worth its own review round within the group" below means
 concretely.
 
+### Why the fan-out is serial, and why Task 4 goes first
+
+**Integration is serial anyway.** Every group ends in the same three central
+steps — Step 8's `maturin develop`, the corpus rows, the one commit — and those
+edit files no agent owns (`filters/mod.rs`, `tests/filter_cases.py`,
+`tests/test_filter_inventory.py`). Dispatching seven groups at once would not
+parallelise them; it would only move the serialisation to the point where the
+orchestrator is reconciling seven half-written registries at the same time, with
+no group's corpus rows yet proving the shape the next group is asked to follow.
+
+**Task 4 is a pilot.** It is the first dispatch under §D7, so part of its job is
+finding out what the contract forgot — which is why Step 7 asks for two reports
+rather than one. What the first group's report says the contract got wrong is
+cheap to fix after one group and expensive after seven, and it is only fixable at
+all while the rest are still undispatched. That is the reason this fan-out is not
+a fan-out, and it is the one that survives someone later asking why.
+
+Two mechanical facts also decide it, recorded because they would bite anyone who
+later reasons that the work is parallel so the dispatch should be:
+
+- `.django/` is gitignored, so an `isolation: "worktree"` copy does not contain
+  the pinned 6.0.9 checkout every group's Step 1 measures against — worktree
+  isolation makes a group's first step impossible, not merely inconvenient.
+- In one shared tree, a compile error in one agent's half-written module fails
+  every other agent's `cargo test -p template-core`, since Rust compiles a crate
+  as a unit; parallel agents cannot all run their own Step 3.
+
 ### The shared task shape
 
 - [ ] **Step 1: Measure.** For each filter in the group, run
@@ -1685,6 +1712,16 @@ concretely.
   --all-targets -- -D warnings`.** Both green.
 - [ ] **Step 7: Report back** — files written, guards observed failing, and any
   `FilterHost` operation found missing (**stop; do not add it**, §D7).
+
+  Two reports are required, and both exist because the plan's own doc comments
+  name a Django call site per trait method while nothing yet names a *caller*:
+
+  * **every trait method each body actually calls**, filter by filter. The 35
+    doc comments say why each method exists; the agents' reports are the other
+    half, and the pair is what says at close-out whether any method is a second
+    `repr` — written once, uncalled, unpinned, and frozen by §10.4.
+  * **every operation the group needed and did not find.** A "no" is a result
+    here and must be said out loud, not left as silence.
 - [ ] **Step 8: Central**: `maturin develop`, paste the group's rows into
   `tests/filter_cases.py`, shrink the stub assertion in
   `tests/test_filter_inventory.py`, run `bash scripts/check.sh`, commit.
@@ -1728,9 +1765,29 @@ entirely the host's.
   failures came from.
 - `cut` (`:441-450`) — `@stringfilter`, `is_safe` **absent**. Body carries three
   measured subtleties: `arg` is **not** coerced by `str()` (only `value` is, by
-  the wrapper), `str.replace` of an empty `arg` raises `ValueError` — measured,
-  and it escapes — and the result is `mark_safe`d only when the *pre-replacement*
-  value was `SafeData` **and** `arg != ";"`.
+  the wrapper) — and the reason is now measured rather than stylistic, because a
+  non-`str` `arg` raises **TypeError** out of `str.replace` and it escapes, so a
+  body that coerced `arg` would turn Django's `TypeError` into an answer; an
+  empty `arg` is a **no-op**, `"AbC".replace("", "")` being `"AbC"`; and the
+  result is `mark_safe`d only when the *pre-replacement* value was `SafeData`
+  **and** `arg != ";"`.
+
+  **Correction, measured against the pinned 6.0.9 source.** An earlier revision
+  of this bullet said `str.replace` of an empty `arg` raises `ValueError`. It
+  does not: `cut("AbC", "")` returns `"AbC"` for a plain `str`, a `SafeString`
+  and a `__proxy__` alike, and sweeping eight value shapes against six `arg`s
+  (`"AbC", "", mark_safe("AbC"), __proxy__, 5, None, ["a"]` ×
+  `"", ";", "b", 0, None, "''"`) produces no `ValueError` at all — the only
+  escaping exception is `TypeError` for a non-`str` `arg`. That claim was a
+  prediction nobody had run, which is the failure mode Step 1 exists to catch,
+  and it is left visible here because a body written to satisfy it would carry a
+  branch no input can reach.
+
+  The `TypeError` is **not** a corpus row: `test_filter_parity.py`'s `assert_same`
+  compares `(type, value)` and safety, with no exception path, so the harness
+  cannot express an answer that is a `raise`. It is recorded here as a body
+  requirement instead — do not coerce `arg` — and whether the corpus should grow
+  an expected-exception key is a question this pilot raised, not one it settled.
 
   **This is the filter that reads the coerced value's safety**, so it is the one
   whose corpus rows close the wrapper's coercion half (§D3): `cut`'s rows must
