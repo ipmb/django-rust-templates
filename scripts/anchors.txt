@@ -201,6 +201,7 @@ defaultfilters.py:860-891	django/template/defaultfilters.py	860	891	yesno	-
 defaultfilters.py:879	django/template/defaultfilters.py	879	-	bits = arg.split(",")	-
 defaultfilters.py:899-939	django/template/defaultfilters.py	899	939	filesizeformat	-
 defaultfilters.py:905-907	django/template/defaultfilters.py	905	907	bytes_ = int(bytes_)	-
+defaultfilters.py:906	django/template/defaultfilters.py	906	-	bytes_ = int(bytes_)	-
 defaultfilters.py:908	django/template/defaultfilters.py	908	-	value = ngettext("%(size)d byte", "%(size)d bytes", 0) % {"size": 0}	-
 defaultfilters.py:911-912	django/template/defaultfilters.py	911	912	formats.number_format(round(value, 1), 1)	-
 defaultfilters.py:912	django/template/defaultfilters.py	912	-	formats.number_format(round(value, 1), 1)	-

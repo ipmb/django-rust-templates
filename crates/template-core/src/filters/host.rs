@@ -766,8 +766,9 @@ pub trait FilterHost {
     ///
     /// **It takes the `int`, not the `Value`, and that is the whole reason it is
     /// a seam rather than a Rust expression.** `filesizeformat` calls `int()`
-    /// **once** at `:905`; the body needs the result before this call to choose
-    /// its branch (`bytes_ < KB`) and to compute the sign (`negative = bytes_ < 0`).
+    /// **once** (`defaultfilters.py:906`), and the body needs the result before
+    /// this call to choose its branch (`bytes_ < KB`) and to compute the sign
+    /// (`negative = bytes_ < 0`).
     /// A `&Value` signature would make the body convert, then the method convert
     /// again — two calls, which for an object whose `__int__` has side effects is
     /// two answers. Taking the `IntValue` puts the method at the division alone,
