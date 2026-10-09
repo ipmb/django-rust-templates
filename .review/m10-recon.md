@@ -52,24 +52,71 @@ so its history cannot date the change, and the 6.0 release notes do not mention
 it. The correction should say what is measured (*absent at 6.0.9; `Origin` lives
 in `base.py`*) and not guess at when.
 
-## 2. The meter arithmetic: nine entries, not five
+## 2. The meter arithmetic: the row does not partition the meter
 
 `unshimmed()` counts names, and a package contributes one name per module under
-it. M10's real target set, read off the closed tree's list:
+it, so *module* and *meter entry* are two different counting units. §10.3's rows
+use the first and the progress number uses the second.
 
-| module | meter names retired |
-| --- | --- |
-| `context` | `django.template.context` (1) |
-| `engine` | `django.template.engine` (1) |
-| `utils` | `django.template.utils` (1) |
-| `loaders` | `django.template.loaders`, `.loaders.base`, `.loaders.filesystem`, `.loaders.app_directories`, `.loaders.cached`, `.loaders.locmem` (6) |
-| ~~`origin`~~ | **0 — not a name in the tree** |
+For M10 the difference is 5 → 9: `context`, `engine` and `utils` are one name
+each, `loaders` is six (`loaders` itself plus `base`, `filesystem`,
+`app_directories`, `cached`, `locmem`), and `origin` is **zero**, because §1. So
+M10 takes the meter **23 → 14**.
 
-So M10 takes the meter **23 → 14**, not 23 → 18, and the row's five names are
-nine meter entries. This is the meter-scope lesson from
-`define-the-metric-before-comparing-counts` applied before the fact: *module* and
-*meter entry* are two different counting units, and the table uses the first
-while the progress number uses the second.
+**But the row sits one character from a second name, and it does not say which
+it meant.** `unshimmed()` lists `django.template.loaders` (the package, six
+names) *and* `django.template.loader` — the singular **public facade**:
+`get_template`, `select_template`, `render_to_string`, `_engine_list`, which
+delegate to `engines.all()`/`engines[using]` and exist to accumulate the
+`TemplateDoesNotExist` chain. §10.3's M10 row says `loaders`, plural. If it
+meant the package only, `loader` is unowned and M10 is 23 → 14; if it meant
+both, M10 is 23 → 13.
+
+The evidence for which: `loader` is framework-coupled in exactly the sense §6
+gives for keeping a module in Python — it reaches templates through `engines`,
+i.e. through settings — and its only importer *inside the template package* is
+`response.py`, which M13 owns (`forms/renderers.py` and
+`contrib/admin/templatetags/admin_list.py` import it from outside). **So
+`loader` belongs with M13 and M10 is 23 → 14** — but that is a judgement the row
+should state, not leave the next reader to resolve to whichever they thought of
+first.
+
+### The rows do not partition the meter at all — three names have no owner
+
+That judgement is worth checking for the whole meter rather than for the one
+name the reviewer happened to notice. Mapping all 23 names in `unshimmed()`
+against §10.3's rows:
+
+| owner row | meter names | count |
+| --- | --- | --- |
+| M10 | `context`, `engine`, `utils`, `loaders` + 5 submodules | 9 |
+| M11 | `defaulttags`, `defaultfilters`, `loader_tags` | 3 |
+| M12 | *(none)* | 0 |
+| M13 | `library`, `backends` + 5, `response` | 8 |
+| **no row at all** | **`autoreload`, `context_processors`, `loader`** | **3** |
+| | | **23** |
+
+M12 is zero rather than omitted from the count: `i18n`, `l10n`, `static`, `tz`
+and `cache` are `django/templatetags/*` libraries, outside the `django.template`
+namespace the meter covers, so that milestone moves tag *bodies* and retires no
+meter entry.
+
+**The three unowned names are verified, not eyeballed**: `autoreload`,
+`context_processors` and `loader` appear nowhere in §10.3's rows or in §10.4's
+obligations — and `context_processors` appears **nowhere in the spec at all**
+(0 matches). `autoreload` has one mention, in the substitution section, and it is
+about `from . import autoreload` registering signal receivers, not about who
+interposes it.
+
+Since M14 is "`unshimmed()` empty", those three are M14's by default, which
+makes M14 carry three unplanned interpositions — including `context_processors`,
+the module that reads the *project's* settings for CSRF and request processors,
+which is framework-coupled in §6's sense and is the kind of thing a milestone
+table exists to schedule. This is the `origin` defect generalized: not one wrong
+name, but **the rows and the meter being two different sets with nobody
+asserting they are equal**. The fix is the same shape in both cases — make the
+mapping explicit and checkable — and it is the same artifact the reviewer
+proposed for the `_impl` naming rule (§6).
 
 `utils` here is `django/template/utils.py` — the `EngineHandler` module — **not
 `django.utils.*`**. §3 of the spec already carries this warning explicitly
@@ -107,6 +154,62 @@ trusting a prose citation. What *has* been verified directly is noted inline.
   finder needs to serve the subpackage with our directory first and Django's
   second (`_shim.py`'s `find_spec`, the "package we provide needs its own search
   path" branch), and an empty file is a faithful transcription of an empty file.
+
+## 3a. The blast radius, measured — 1232 of the 1547, and distributed nothing like the module names
+
+Instrument: `.review/m10-measurements/m10_measure_module_blast_radius.py`, run
+the way the suite is run (`python -I …`, paths inserted by the script because
+`-I` drops `PYTHONPATH`). It wraps every function *defined in* each target
+module — labelled `Class.method`, not `method`, because `__init__` is four
+classes in `context` and six in `loaders` and one label over several call sites
+is precisely M9's finding 3 — and attributes each call to the running test.
+
+| module | tests that reached it | calls |
+| --- | --- | --- |
+| `context` | **984** | 95,051 |
+| `engine` | **1166** | 41,987 |
+| `loaders.cached` | 1038 | 25,249 |
+| `loaders.locmem` | 974 | 10,854 |
+| `loaders.base` | 1053 | 10,282 |
+| `loaders.filesystem` | **85** | 676 |
+| `utils` | **46** | 164 |
+| `loaders.app_directories` | **34** | 58 |
+| **any of the four** | **1232** (79.6%) | — |
+
+**The headline is the last row: interposing these four modules puts 1232 of the
+1547 tests on code we own** — the §10.1 premise, measured, and the same shape as
+M9's `NodeList.render` (a seam that is nearly the whole suite rather than a
+feature's worth of tests).
+
+Two things about the table are traps, and both are scope statements rather than
+corrections:
+
+1. **`loaders.base`'s 1053 counts *inherited* methods, so it is not "1053 tests
+   use the base loader".** The label is the module where the function is
+   *defined*, not the loader a test configured: `Loader.get_template` and
+   `Loader.__init__` are called through `locmem`, `cached` and `filesystem`
+   instances. Read it as "the base loader's code runs for 1053 tests", which is
+   true and is not the same claim as the row's neighbour.
+2. **The suite's dominant loader is `locmem`, and the file loader is nearly
+   untouched — the opposite of what the module list suggests.**
+   `tests/template_tests/utils.py:36-40` gives every `@setup` engine a
+   `cached.Loader` whose inner loader is `locmem.Loader` carrying the test's
+   inline templates; that is why `locmem` is on 974 tests and
+   `filesystem` on 85 while `app_directories` — the loader a real project leans
+   on — is on 34. So "M10 makes the suite exercise our file loading" is false,
+   and a plan that sized `loaders` by the file loader would size the wrong
+   thing.
+
+`utils` being the *narrowest* module (46 tests, 164 calls) is worth recording
+next to §6's decision to keep it in Python for framework coupling: it is the
+smallest thing M10 owns and the least exercised, which is an argument for
+owning it without ceremony rather than for ceremony.
+
+What this does **not** show: it is a pre-interposition measurement, so it sizes
+the path a future interposition sits on, not the effect of interposing (the
+script prints that caveat on stderr). Nor does it answer the vacuity question —
+`check_transcriptions.py` does that — and it cannot show that any of these tests
+would *fail* if our module were wrong, only that they run through it.
 
 ## 4. The vacuity question M9 bequeathed, applied to M10
 
