@@ -128,9 +128,17 @@ pub struct PendingFailure;
 
 /// What the resolver needs from a context, supplied by the host.
 ///
-/// Nine methods, one per predicate Django actually evaluates. That count is the
-/// point: collapsing any two of them merges two of Django's arms, and the
-/// merged behaviour is wrong in a case this milestone measured.
+/// Eleven methods, and the split is the point. **Seven are one per predicate
+/// Django actually evaluates**, and collapsing any two of them merges two of
+/// Django's arms, which is wrong in a case this milestone measured. Three more
+/// are the callable arm's outcomes — `call_arm`, `call` and `string_if_invalid`
+/// — which are not predicates but the three things Django's arm can do to the
+/// value. The last is `node`, the handle the loop ended on.
+///
+/// The count is written down because it went stale: M8 added `call` and
+/// `string_if_invalid` in Tasks 1 and 2 and this line still said "nine" until
+/// the close-out read it, which is the same failure as a name in a code block
+/// that outlives its referent.
 ///
 /// There is no `repr` here, and its absence is a decision: Django formats the
 /// missing-key message lazily in `VariableDoesNotExist.__str__`, so the host

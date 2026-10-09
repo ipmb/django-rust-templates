@@ -21,8 +21,8 @@ parser/mod.rs:434-439	crates/template-core/src/parser/mod.rs	434	439	token.or_el
 crates/template-core/src/parser/mod.rs:496	crates/template-core/src/parser/mod.rs	496	-	pub fn extend_nodelist(	-
 parser/mod.rs:502	crates/template-core/src/parser/mod.rs	502	-	if node.must_be_first && nodelist.contains_nontext {	-
 resolve.rs:28	crates/template-core/src/parser/resolve.rs	28	-	pub enum Step {	-
-parser/resolve.rs:139	crates/template-core/src/parser/resolve.rs	139	-	pub trait LookupTarget {	-
-resolve.rs:236	crates/template-core/src/parser/resolve.rs	236	-	pub enum LookupOutcome {	-
+parser/resolve.rs:147	crates/template-core/src/parser/resolve.rs	147	-	pub trait LookupTarget {	-
+resolve.rs:244	crates/template-core/src/parser/resolve.rs	244	-	pub enum LookupOutcome {	-
 extends.rs:71	crates/template-core/src/parser/tags/extends.rs	71	-	if !nodelist.get_nodes_by_type("ExtendsNode").is_empty() {	-
 tags/mod.rs:183	crates/template-core/src/parser/tags/mod.rs	183	-	Ok(NodeDesc::with_nodelist(	-
 parser/tags/mod.rs:198	crates/template-core/src/parser/tags/mod.rs	198	-	fn standin_first	-
@@ -173,7 +173,7 @@ base.py:1024	django/template/base.py	1024	-	current = context.template.engine.st
 base.py:1031-1035	django/template/base.py	1031	1035	must_be_first = False	-
 base.py:1035	django/template/base.py	1035	-	child_nodelists = ("nodelist",)	-
 base.py:1036	django/template/base.py	1036	-	-	-
-base.py:1044-1070	django/template/base.py	1044	1070	def render_annotated(self, context):	-
+base.py:1044-1068	django/template/base.py	1044	1068	def render_annotated(self, context):	raise
 base.py:1054	django/template/base.py	1054	-	if context.template.engine.debug:	-
 base.py:1058-1062	django/template/base.py	1058	1062	if (	e.template_debug = (
 base.py:1060-1063	django/template/base.py	1060	1063	and context.render_context.template.origin == e._culprit_node.origin	context.render_context.template.get_exception_info(
@@ -573,7 +573,6 @@ html.py:103-105	django/utils/html.py	103	105	json.dumps(value, cls=encoder or Dj
 html.py:106-110	django/utils/html.py	106	110	-	-
 django/utils/html.py:115-127	django/utils/html.py	115	127	isinstance(text, Promise)	-
 html.py:115-127	django/utils/html.py	115	127	def conditional_escape(text):	return escape(text)
-html.py:115-126	django/utils/html.py	115	126	-	-
 html.py:124-125	django/utils/html.py	124	125	if hasattr(text, "__html__"):	return text.__html__()
 html.py:130-140	django/utils/html.py	130	140	-	-
 html.py:140	django/utils/html.py	140	-	-	-

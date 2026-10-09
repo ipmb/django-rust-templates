@@ -152,7 +152,7 @@ propagates like a copied citation.
 
 | trait | where | what it is |
 |---|---|---|
-| `LookupTarget` | `parser/resolve.rs:139` | one resolved value, and the per-bit cascade Django's `_resolve_lookup` runs against it |
+| `LookupTarget` | `parser/resolve.rs:147` | one resolved value, and the per-bit cascade Django's `_resolve_lookup` runs against it |
 | `Host` | `parser/host.rs:22` | the parser's callbacks — `has_tag`, `call_tag`, and a **defaulted** `check_filter` |
 | `FilterHost` | `filters/host.rs:195` | the Python value protocol a filter body needs: `to_str`, `to_int`, `to_float`, `len`, `iter_values`, `get_index`, `get_slice`, `add_values`, … |
 | `FilterFlags` | `filters/mod.rs:118` | the three per-filter attributes Django reads when calling a filter (`base.py:805-820`); `library.py:85` propagates all three, so they cross the seam |
@@ -165,7 +165,7 @@ propagates like a copied citation.
 | `ValueResolver::resolve_bit` | — | **retired** |
 | `ValueResolver::force_promise` | — | **retired** |
 | `ValueResolver::is_safe`, `is_callable`, `call` | `LookupTarget::call_arm`, plus the host's value protocol | **replaced**; `call_arm` folds Django's `callable`, `do_not_call_in_templates` and `alters_data` into one round trip, because only the host can read the flags |
-| `LookupError` | `Step` (`resolve.rs:28`) + `LookupOutcome` (`resolve.rs:236`) | **split**; a per-bit verdict and a whole-path verdict are different lifetimes |
+| `LookupError` | `Step` (`resolve.rs:28`) + `LookupOutcome` (`resolve.rs:244`) | **split**; a per-bit verdict and a whole-path verdict are different lifetimes |
 | `ExtensionHost` | `Host` + `FilterHost` | **split**; the tag half and the value half have no method in common |
 | `ExtensionHost::call_tag` | `Host::call_tag` | **real**, in service |
 | `ExtensionHost::filter_flags` | `_native.filter_flags` (`template-py/src/lib.rs:119`) | **real**, but a free function: `template-core` never reads a flag, the binding does |
@@ -190,7 +190,7 @@ the annotation beside it.
   that **no forcing site is on the resolve path**, which is what is checked; the
   evidence is that the sites Django does have are both on the render path —
   `render_value_in_context` (`base.py:1123-1136`, whose conversion test is
-  `issubclass(type(value), str)`) and `conditional_escape` (`html.py:115-126`,
+  `issubclass(type(value), str)`) and `conditional_escape` (`html.py:115-127`,
   reached by `|escape`) — and the resolver's contract is to hand the object back
   **unforced**, which is what `Variable.resolve` (`base.py:924-940`) does. A
   third site elsewhere would not change that. Kept that way by a gate at the
@@ -212,7 +212,7 @@ ways: a retired seam is work that was designed away, and an open obligation is
 work still owed. A reader who meets the second where the first belongs stops.
 
 - **`annotate_exception`** is **owed at M9.** It is Django's
-  `Node.render_annotated` protocol (`base.py:1044-1070`): on any render-time
+  `Node.render_annotated` protocol (`base.py:1044-1068`): on any render-time
   exception with `engine.debug`, attach `_culprit_node` — innermost node wins —
   and then attach `template_debug` only at the frame whose
   `context.render_context.template.origin` matches the culprit's. That is stateful
