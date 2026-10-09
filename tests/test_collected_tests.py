@@ -125,13 +125,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # the second does not, because it measures the registries rather than the table.
 #
 # 403 → 404 is the M12 review's `_our_modules_in` finding, **one** row in
-# `test_shim.py::NamespaceTests`: a namespace that maps to `_impl` itself walks
+# `test_shim.py::NamespaceTests`: a namespace that maps to `engine` itself walks
 # the other namespace's files too. The row stages the tree, so it fails on the
 # unfixed function today rather than only after Task 5 creates
-# `_impl/templatetags/`. `git diff tests/` is `+1` row, one file, no removals.
+# `engine/templatetags/`. `git diff tests/` is `+1` row, one file, no removals.
 #
 # 404 → 408 is M12 Task 4, **four** rows across two files: two in
-# `test_interposition.py::TzInterpositionTests` (the module resolves to `_impl`,
+# `test_interposition.py::TzInterpositionTests` (the module resolves to `engine`,
 # and each of the three tags compiles to our node class — one row, three
 # subtests) and two in `test_materialise.py` (the three tz node classes are
 # registered and are ours; the `BlockTranslateNode` refusal is live until Task
@@ -148,7 +148,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # tests/` since `f89a9d4` is `+2` rows in one file, no removals.
 #
 # 410 → 414 is M12 Task 5, **four** rows in two files: three in
-# `test_interposition.py::L10nInterpositionTests` (the module resolves to `_impl`;
+# `test_interposition.py::L10nInterpositionTests` (the module resolves to `engine`;
 # the tag and its three accepted forms compile to our `LocalizeNode`; and the two
 # filters resolve to our module — one row, the `localize`/`unlocalize` subtests)
 # and one in `test_materialise.py` (`LocalizeNode` is registered and is ours).
@@ -158,7 +158,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 #
 # 414 → 426 is M12 Task 6a, **twelve** rows in three files:
 # `test_interposition.py::I18nInterpositionTests` contributes **eleven** (the
-# module resolves to `_impl`; the eight names compile to our seven classes; the
+# module resolves to `engine`; the eight names compile to our seven classes; the
 # `as var` and `noop` render branches; the six refusal messages; `{% language %}`'s
 # argument and body; and four rows for the argument scan's branches — the
 # duplicate check, the `context` value set, the unvalidated `as` name, and the

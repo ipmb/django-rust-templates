@@ -46,12 +46,12 @@ from django_rust_templates import _native  # noqa: E402
 from tests.parity_target import assert_target_is_not_rust_owned  # noqa: E402
 
 # Loaded from its file for the reason `tests/test_materialise.py` spells out:
-# `_impl/__init__.py` is the shim's `django.template` and imports its own
-# siblings, so importing the `_impl` *package* by name executes that file and
+# `engine/__init__.py` is the shim's `django.template` and imports its own
+# siblings, so importing the `engine` *package* by name executes that file and
 # fails for want of `engine`.
 _MATERIALISER_SPEC = importlib.util.spec_from_file_location(
-    "django_rust_templates._impl.parser",
-    PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "parser.py",
+    "django_rust_templates.engine.parser",
+    PROJECT_ROOT / "python" / "django_rust_templates" / "engine" / "parser.py",
 )
 materialiser = importlib.util.module_from_spec(_MATERIALISER_SPEC)
 sys.modules[_MATERIALISER_SPEC.name] = materialiser
@@ -418,7 +418,7 @@ class FilterExpressionParityTests(unittest.TestCase):
     def test_the_comparison_target_is_not_rust_owned(self):
         """Restated at M9: three targets, one claim, asserted where it bites.
 
-        See `tests/parity_target.py`. The `assertNotIn("_impl", source)` this
+        See `tests/parity_target.py`. The `assertNotIn("engine", source)` this
         replaces stopped holding the moment `base` became ours, and it was never
         quite the claim anyway — what matters is that the code each target
         executes is upstream's, which is asserted per target.

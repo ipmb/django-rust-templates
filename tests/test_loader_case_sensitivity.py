@@ -18,7 +18,7 @@ evaluated before any file is opened. And there is no folded branch to port —
 So this module reproduces the *question* the guarded row asks — does joining a
 name onto a configured directory fold case? — rather than a behaviour that does
 not exist, and it runs on every platform. That matters because the loader it
-exercises is code we own from M10 (`_impl/loaders/filesystem.py`), and because
+exercises is code we own from M10 (`engine/loaders/filesystem.py`), and because
 the no-edit rule means the upstream row can never be unskipped by us.
 
 The two rows are deliberately different in kind: the first is pure path
@@ -48,7 +48,7 @@ class CaseSensitivityTests(unittest.TestCase):
         import importlib
 
         filesystem = importlib.import_module("django.template.loaders.filesystem")
-        self.assertIn("_impl", filesystem.__file__, filesystem.__file__)
+        self.assertIn("engine", filesystem.__file__, filesystem.__file__)
 
     def test_djangos_row_holds_without_its_platform_guard(self):
         """Django's assertions, against our loader, on this platform.

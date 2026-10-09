@@ -228,9 +228,9 @@ def load_libraries(parser, libraries):
 
     `import_library` hands back `importlib.import_module(name).register`, so the
     callable Django's loop runs is the same object `{% load %}` would put in the
-    parser — under the shim that is the `_impl/templatetags/*.py` transcription,
+    parser — under the shim that is the `engine/templatetags/*.py` transcription,
     which is upstream's text (warranted by `tests/parity_target.py`, the same way
-    `_impl/defaultfilters.py` is).
+    `engine/defaultfilters.py` is).
     """
     if not libraries:
         return
@@ -282,7 +282,7 @@ def django_answer(
 
     **The `FilterExpression` is the *pinned* one, and M11 Task 2 is why.** This
     docstring's claim was "the parse and the arity check are Django's" and the
-    import made it true for free: `_impl/base.py` was upstream's text, so the
+    import made it true for free: `engine/base.py` was upstream's text, so the
     live name *was* upstream's `resolve`. Task 2 puts a built-in filter's arm on
     Rust inside that method, so the live name is now a *delegating* `resolve` and
     this harness would be comparing Rust against Rust — and passing — for every

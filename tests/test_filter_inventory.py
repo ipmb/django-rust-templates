@@ -1058,7 +1058,7 @@ class FilterInventoryTests(unittest.TestCase):
         upstream, and it opens the gap this row closes. The interposition made
         "the source the pin names" and "the registry the engine dispatches
         through" two different objects for the first time — the file under
-        `_impl/` is still exactly the pin plus a marker, so the two *should*
+        `engine/` is still exactly the pin plus a marker, so the two *should*
         agree, but nothing in this module would have noticed if the shim's
         registration were broken, since every read above now goes to the pin.
 
@@ -1085,7 +1085,7 @@ class FilterInventoryTests(unittest.TestCase):
         _shim.install()
 
         live = importlib.import_module("django.template.defaultfilters")
-        self.assertIn("_impl", live.__file__, live.__file__)
+        self.assertIn("engine", live.__file__, live.__file__)
         self.assertEqual(
             set(live.register.filters), set(defaultfilters.register.filters)
         )

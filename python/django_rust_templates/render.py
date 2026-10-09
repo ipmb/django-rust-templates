@@ -7,30 +7,30 @@ Rust parses; Python owns the node tree (§6, §5.5). Materialising a
 for ``Engine().template_builtins``, which is a *host callback* and therefore M6's.
 So the caller supplies it.
 
-**This module is not under ``_impl``, and that is a correction to the plan.**
-The plan put it at ``python/django_rust_templates/_impl/engine.py``. That path is
+**This module is not under ``engine``, and that is a correction to the plan.**
+The plan put it at ``python/django_rust_templates/engine/engine.py``. That path is
 a defect, and it was measured rather than reasoned about: ``_shim``'s finder
-serves *any* ``_impl/<name>.py`` as ``django.template.<name>``, so a file named
-``engine.py`` there is what ``_impl/__init__.py``'s ``from .engine import
+serves *any* ``engine/<name>.py`` as ``django.template.<name>``, so a file named
+``engine.py`` there is what ``engine/__init__.py``'s ``from .engine import
 Engine`` resolves to once the shim is installed, and installing it then fails
 with::
 
     ImportError: cannot import name 'Engine' from 'django.template.engine'
-    (/Users/…/python/django_rust_templates/_impl/engine.py)
+    (/Users/…/python/django_rust_templates/engine/engine.py)
 
-``_impl/parser.py`` gets away with the same trick only because Django has no
-``template/parser.py`` to shadow — which is why the rule is "no ``_impl`` file
-may take the name of a real ``django.template`` module", not "``_impl`` is
+``engine/parser.py`` gets away with the same trick only because Django has no
+``template/parser.py`` to shadow — which is why the rule is "no ``engine`` file
+may take the name of a real ``django.template`` module", not "``engine`` is
 closed". ``django_rust_templates.render`` breaks nothing: it is outside the
 shimmed package entirely.
 
 **``materialiser()`` loads its module from a file, and that is not laziness
-either.** ``_impl/__init__.py`` is the shim's ``django.template`` and imports its
+either.** ``engine/__init__.py`` is the shim's ``django.template`` and imports its
 own siblings (``from .engine import Engine``), so ``import
-django_rust_templates._impl.parser`` executes that file and fails for want of
+django_rust_templates.engine.parser`` executes that file and fails for want of
 ``engine``::
 
-    ModuleNotFoundError: No module named 'django_rust_templates._impl.engine'
+    ModuleNotFoundError: No module named 'django_rust_templates.engine.engine'
 
 Under the shim the name ``django.template.parser`` *would* resolve, so the lookup
 is tried first and the file is the fallback. That ordering makes M9 a no-op here:
@@ -84,10 +84,10 @@ __all__ = (
 # crosses the seam.
 UNKNOWN_ORIGIN = Origin(UNKNOWN_SOURCE)
 
-# `django_rust_templates._impl.parser`, as a file. Resolved from this module's
+# `django_rust_templates.engine.parser`, as a file. Resolved from this module's
 # own location rather than from the working directory, so importing this from
 # anywhere finds the same file.
-_MATERIALISER_PATH = Path(__file__).resolve().parent / "_impl" / "parser.py"
+_MATERIALISER_PATH = Path(__file__).resolve().parent / "engine" / "parser.py"
 
 _CACHED = None
 
@@ -120,8 +120,8 @@ def materialiser():
 
     # The name is the one the tests already use for it. It is deliberately not
     # registered as a submodule of a package that would be imported: the loader
-    # does not touch `django_rust_templates._impl`, which is the whole point.
-    name = "django_rust_templates._impl.parser"
+    # does not touch `django_rust_templates.engine`, which is the whole point.
+    name = "django_rust_templates.engine.parser"
     spec = importlib.util.spec_from_file_location(name, _MATERIALISER_PATH)
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
@@ -323,7 +323,7 @@ def parse_template(source, engine=None, origin=UNKNOWN_ORIGIN):
     `{% load %}` puts there.
 
     `extra_data` is **not** set here. It belongs to
-    `_impl/parser.py::template_for`, which owns the whole attribute list because
+    `engine/parser.py::template_for`, which owns the whole attribute list because
     a `Template` built by `__new__` never runs `Template.__init__`'s
     `self.extra_data = parser.extra_data` (`base.py:198-200`); the parser reaches
     it as an argument. Setting it in two places is how the two would drift.

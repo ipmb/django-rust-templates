@@ -1,6 +1,6 @@
 """The pinned checkout's copy of a module we have interposed.
 
-A transcription under ``_impl`` wears a real module's name, so
+A transcription under ``engine`` wears a real module's name, so
 ``importlib.import_module("django.template.context")`` cannot reach Django's file
 — that is the whole point of the shim. The only way to hold both objects at once
 is to read and execute the pinned file directly, and that is what this does.
@@ -40,7 +40,7 @@ CHECKOUT = PROJECT_ROOT / ".django"
 def load_pinned(relative: str):
     """The module at ``.django/django/template/<relative>``, executed fresh.
 
-    ``relative`` is ``_impl``-relative and posix: ``context.py``,
+    ``relative`` is ``engine``-relative and posix: ``context.py``,
     ``loaders/base.py``.
     """
     path = CHECKOUT / "django" / "template" / relative

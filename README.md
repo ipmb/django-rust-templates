@@ -25,8 +25,22 @@ From a clone, `pip install .` works too.
 
 ## Use
 
-Installing changes nothing until `install()` is called, and that call has to
-come before `django.template` is imported: the substitution serves modules by
+**The intended interface is the stock one — name this backend in `TEMPLATES`,
+the way any third-party template backend is configured. It is not implemented
+yet.** Today the engine is a *substitution for `django.template`* rather than a
+backend, and it is switched on by calling `install()` before Django is imported.
+
+The two are not interchangeable, and the reason is worth stating because it is
+what the next milestone is about: Django imports a backend class lazily, after
+`django.setup()` has already imported all 20 of the `django.template` and
+`django.templatetags` modules — so a backend cannot be the point at which the
+engine is activated. Until the engine can stand on its own without the finder,
+pointing `TEMPLATES` at it gets you stock Django's parser. That work is specified
+in `docs/superpowers/specs/2026-10-09-rust-template-backend-design.md` §2 and §7.
+
+Until then, the route that works:
+
+Call `install()` before Django is imported — the substitution serves modules by
 name, so a module that already took a binding from Django keeps it.
 
 **The rule is: before `django.setup()` runs, in whatever process starts Django.**

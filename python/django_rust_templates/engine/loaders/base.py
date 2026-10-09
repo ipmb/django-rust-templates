@@ -1,6 +1,6 @@
 # TRANSCRIBED: django/template/loaders/base.py (Django 6.0.9)
 
-from django.template import Template, TemplateDoesNotExist
+from .. import Template, TemplateDoesNotExist
 
 
 class Loader:

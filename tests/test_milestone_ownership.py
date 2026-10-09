@@ -47,11 +47,11 @@ def suffixes(names, scope=TARGET) -> set:
 
 
 def table_spelling(names, scope) -> set:
-    """A scope's suffixes, in the ``_impl``-relative spelling the tables use.
+    """A scope's suffixes, in the ``engine``-relative spelling the tables use.
 
     The two scopes differ and that is the whole of it: `django.template`'s root
     is `""`, so `base` is already the key, while `django.templatetags`'s files
-    live under `_impl/templatetags/` and its keys carry that prefix — the same
+    live under `engine/templatetags/` and its keys carry that prefix — the same
     relation `dotted_suffix` inverts from a path. Derived from
     `NAMESPACE_ROOTS` rather than a literal, so the prefix cannot drift from the
     root the shim actually serves.
@@ -75,7 +75,7 @@ def the_meter() -> set:
     the second scope's names sat in a bucket the meter never reached.
 
     The meter answers in *full dotted names* (`django.templatetags.tz`), so the
-    scope prefix comes off first and the `_impl`-relative root goes on — two
+    scope prefix comes off first and the `engine`-relative root goes on — two
     steps, because the two spellings differ in exactly that way and skipping
     either is how `templatetags.django.templatetags.tz` gets built.
     """

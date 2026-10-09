@@ -287,7 +287,7 @@ class TagInventoryTests(unittest.TestCase):
         ):
             with self.subTest(module=name):
                 live = importlib.import_module(name)
-                self.assertIn("_impl", live.__file__, live.__file__)
+                self.assertIn("engine", live.__file__, live.__file__)
                 self.assertEqual(set(live.register.tags), set(pinned.register.tags))
 
 

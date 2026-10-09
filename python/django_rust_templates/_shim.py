@@ -4,7 +4,7 @@ How it works
 ------------
 
 A ``MetaPathFinder`` takes over the single name ``django.template`` and loads
-``django_rust_templates/_impl/__init__.py`` in its place, with a ``__path__``
+``django_rust_templates/engine/__init__.py`` in its place, with a ``__path__``
 that searches our implementations *first* and the real Django template directory
 *second*.
 
@@ -18,25 +18,25 @@ A meta-path finder rather than ``sys.modules`` assignment, because Django's own
 internals import these modules by path, and dict assignment does not intercept
 submodule imports.
 
-A naming constraint on ``_impl``
+A naming constraint on ``engine``
 --------------------------------
 
-Because the finder serves **any** ``_impl/<name>.py`` as ``django.template.
+Because the finder serves **any** ``engine/<name>.py`` as ``django.template.
 <name>``, a file placed there under the name of a real Django module shadows it
 — for Django's internal imports as much as for anyone else's. Measured, and it
-is not hypothetical: putting the shell's ``render.py`` at ``_impl/engine.py``
-(tempting, since it builds an ``Engine``) makes ``_impl/__init__.py``'s own
+is not hypothetical: putting the shell's ``render.py`` at ``engine/engine.py``
+(tempting, since it builds an ``Engine``) makes ``engine/__init__.py``'s own
 ``from .engine import Engine`` resolve to that file, and ``install()`` then
 fails with::
 
     ImportError: cannot import name 'Engine' from 'django.template.engine'
 
 The error names Django, not the shim, which is why the rule is stated here:
-**a file under ``_impl`` may take a real module's name only when it implements
+**a file under ``engine`` may take a real module's name only when it implements
 that module — any other file must be named for something Django does not have.**
 
 The prohibition is on *what the file is*, not on the name, and the first draft
-of this paragraph got that wrong. It read "no ``_impl`` file may take the name
+of this paragraph got that wrong. It read "no ``engine`` file may take the name
 of a real ``django.template`` module", which the tree already contradicted four
 times on the day it was written: ``__init__.py``, ``base.py`` and ``smartif.py``
 each wear a real module's name *because interposing that module is the whole
@@ -45,7 +45,7 @@ implementation of it. Under the literal rule the entire shipped mechanism was a
 defect.
 
 So the set is declared rather than prohibited. :data:`SHADOWING` names every
-``_impl`` file whose name collides with a module of the pinned checkout, and
+``engine`` file whose name collides with a module of the pinned checkout, and
 ``tests/test_interposition.py`` asserts that the files on disk are exactly its
 keys. A new collision then costs one deliberate, reviewable line; an accidental
 one — the ``render.py``-at-``engine.py`` case — is a test failure in the commit
@@ -56,7 +56,7 @@ the pin, ``tests/test_transcription_equivalence.py`` for a fresh file's stated
 equivalence — so it cannot rot into a second, disagreeing account of which files
 are transcriptions.
 
-The shell modules that only need Rust and the real Django live outside ``_impl``
+The shell modules that only need Rust and the real Django live outside ``engine``
 entirely (``django_rust_templates/render.py``), and the ones that must be inside
 are named for what Django does not have (``parser.py``, whose sibling
 ``django/template/parser.py`` does not exist at 6.0.9 — if it ever appears, that
@@ -88,11 +88,11 @@ TARGET = "django.template"
 TRANSCRIBED_DJANGO = (6, 0, 9)
 
 # The namespaces this package serves, and where each one's files live under
-# `_impl`. The values are `_impl`-relative subdirectories, `""` for a namespace
+# `engine`. The values are `engine`-relative subdirectories, `""` for a namespace
 # served from the root.
 #
-# **The asymmetry is deliberate.** `django.template` is flat (`_impl/base.py`),
-# because M9 built it that way and re-keying it under `_impl/template/` for
+# **The asymmetry is deliberate.** `django.template` is flat (`engine/base.py`),
+# because M9 built it that way and re-keying it under `engine/template/` for
 # symmetry would move every key in `SHADOWING`, `DECLARED`, `COMPARED_PATH` and
 # the anchor manifest, and every recorded line span with them.
 # `django.templatetags` is a subdirectory, because `loaders/` taught this tree
@@ -148,14 +148,14 @@ NOT_THE_ENGINE = frozenset(
     }
 )
 
-_IMPL_DIR = Path(__file__).parent / "_impl"
+_IMPL_DIR = Path(__file__).parent / "engine"
 _IMPL_INIT = _IMPL_DIR / "__init__.py"
 
 _installed_finder: "_ShimFinder | None" = None
 
-# The `_impl` files whose name is also the name of a module in the pinned
+# The `engine` files whose name is also the name of a module in the pinned
 # checkout — every one of them an interposition, and this table is the record
-# that each was meant. Keyed by path relative to `_impl`; the value is how the
+# that each was meant. Keyed by path relative to `engine`; the value is how the
 # file came to exist:
 #
 #     "transcribed"  copied from Django's module of the same name and differing
@@ -166,7 +166,7 @@ _installed_finder: "_ShimFinder | None" = None
 # against the file's own marker, so "transcribed" without a marker — or "fresh"
 # with one — is a failure, and this table cannot drift into a second account of
 # which files are transcriptions. It is also deliberately *not* a list of every
-# `_impl` file: `parser.py` is absent because no `django/template/parser.py`
+# `engine` file: `parser.py` is absent because no `django/template/parser.py`
 # exists to collide with, and a file that collides without being listed here is
 # exactly what the table exists to catch.
 #
@@ -220,7 +220,7 @@ SHADOWING = {
     # omission.** The plan called for one. `_is_foreign_package` declines
     # `django.templatetags` — the package — on purpose: we serve only files
     # *inside* it, so a library we do not provide keeps resolving against
-    # Django's tree. A `_impl/templatetags/__init__.py` would therefore never be
+    # Django's tree. A `engine/templatetags/__init__.py` would therefore never be
     # served by the finder, while `shadowing_files()` would still report it and
     # `test_the_shadowing_files_are_the_declared_ones` would compare it against
     # `django.templatetags` — a name the milestone table must not call
@@ -251,7 +251,7 @@ def _django_dirs(namespace: str = TARGET) -> list[str]:
 
 
 def shadowing_files() -> list[str]:
-    """``_impl`` files whose name the pinned checkout also defines.
+    """``engine`` files whose name the pinned checkout also defines.
 
     The question is the finder's own — *would this file be served under a name
     Django already has?* — asked of the filesystem against Django's directories,
@@ -259,19 +259,19 @@ def shadowing_files() -> list[str]:
     hand-maintained list that can disagree (the failure
     ``.review/m10-recon.md`` §2 found in the milestone table).
 
-    **Asked per namespace, with the root stripped.** ``_impl/templatetags/i18n.py``
+    **Asked per namespace, with the root stripped.** ``engine/templatetags/i18n.py``
     is served as ``django.templatetags.i18n``, so the name Django must be asked
     about is ``i18n.py`` under ``django/templatetags/`` — comparing the whole
-    ``_impl``-relative path against every namespace's directory would look for
+    ``engine``-relative path against every namespace's directory would look for
     ``django/template/templatetags/i18n.py`` and report no clash for a file that
     plainly is one.
 
-    Paths are relative to ``_impl`` and posix-style, so a subpackage reports
+    Paths are relative to ``engine`` and posix-style, so a subpackage reports
     ``loaders/__init__.py`` and a library ``templatetags/i18n.py``. ``__pycache__``
     is skipped: it holds no module anyone wrote.
 
     **Sorted across namespaces, not just within one.** The walk is per namespace
-    and there are two of them, so the concatenation is *not* in `_impl`-relative
+    and there are two of them, so the concatenation is *not* in `engine`-relative
     order once a file lives under ``templatetags/`` — ``templatetags/cache.py``
     sorts before ``utils.py`` while the second namespace is walked last.
     Callers treat the answer as a set (`test_the_shadowing_files_are_the_declared_ones`
@@ -327,7 +327,7 @@ class _ShimFinder(importlib.abc.MetaPathFinder):
         # A package we provide needs its own search path — ours first, Django's
         # second. Returning a spec without one would leave the package with
         # `__path__ == [our directory]` only, so the first time a half-finished
-        # subpackage exists (say `_impl/loaders/__init__.py`), every sibling
+        # subpackage exists (say `engine/loaders/__init__.py`), every sibling
         # (`django.template.loaders.filesystem`) stops resolving entirely. The
         # fallback has to be reapplied at every level, not just the top.
         init = base / "__init__.py"
@@ -375,7 +375,7 @@ def _match_namespace(fullname: str) -> tuple[str, str] | None:
 
 
 def _relative_name(fullname: str) -> str | None:
-    """``_impl``-relative posix path for a name we serve, else ``None``.
+    """``engine``-relative posix path for a name we serve, else ``None``.
 
     ``django.template`` → ``""`` (the package itself); ``django.template.base``
     → ``base``; ``django.template.loaders.base`` → ``loaders/base``;
@@ -391,7 +391,7 @@ def _relative_name(fullname: str) -> str | None:
     The spelling is the same one every per-file table in this tree uses
     (``SHADOWING``'s keys, the anchor manifest, ``check_transcriptions``), which
     is why it is a posix path here rather than the dotted suffix it used to be:
-    one spelling of "an ``_impl``-relative path" is what keeps ``loaders/base.py``
+    one spelling of "an ``engine``-relative path" is what keeps ``loaders/base.py``
     from becoming ``loaders.base.py`` in one of the two derivations.
     """
     matched = _match_namespace(fullname)
@@ -446,10 +446,10 @@ def _is_foreign_package(fullname: str) -> bool:
     ``django.templatetags`` is Django's package and we serve only files inside
     it: serving the package would interpose ``__init__.py`` for no reason and
     give it a ``__path__`` of ours, so a library we do not provide would resolve
-    against ``_impl`` and be declined there rather than found in Django's tree.
+    against ``engine`` and be declined there rather than found in Django's tree.
 
     ``django.template`` is deliberately *not* this case — its root is ``""``,
-    meaning ``_impl/__init__.py`` is that package and is ours to serve.
+    meaning ``engine/__init__.py`` is that package and is ours to serve.
 
     A predicate rather than the same condition written into ``find_spec`` and
     ``_served``, because those two are required to agree about which names are
@@ -465,7 +465,7 @@ def _is_foreign_package(fullname: str) -> bool:
 
 
 def _served(fullname: str) -> bool:
-    """Would the finder serve ``fullname`` from ``_impl``?
+    """Would the finder serve ``fullname`` from ``engine``?
 
     Asked of the filesystem rather than of the finder, because the callers run
     while the finder is not installed. It has to answer exactly what
@@ -483,7 +483,7 @@ def _served(fullname: str) -> bool:
 
 
 def _is_ours(module) -> bool:
-    """Was ``module`` executed from ``_impl``?"""
+    """Was ``module`` executed from ``engine``?"""
     return str(getattr(module, "__file__", "") or "").startswith(str(_IMPL_DIR))
 
 
@@ -883,16 +883,16 @@ def unshimmed(scope: str = TARGET) -> list[str]:
 
 
 def _our_modules_in(scope: str) -> set[str]:
-    """Dotted suffixes of our files for one namespace, ``_impl``-relative.
+    """Dotted suffixes of our files for one namespace, ``engine``-relative.
 
     The namespace's root is what makes this more than one call: our
-    ``django.templatetags`` files live under ``_impl/templatetags/`` while our
-    ``django.template`` files are flat in ``_impl/``, and the two are compared
+    ``django.templatetags`` files live under ``engine/templatetags/`` while our
+    ``django.template`` files are flat in ``engine/``, and the two are compared
     against Django's directories for the *same* namespace.
 
     **A namespace's files are not everything under its root.** ``django.template``
-    maps to ``_impl`` itself, so the bare walk also answers for
-    ``django.templatetags`` — from the commit that creates ``_impl/templatetags/``,
+    maps to ``engine`` itself, so the bare walk also answers for
+    ``django.templatetags`` — from the commit that creates ``engine/templatetags/``,
     ``templatetags.i18n`` would be reported as ours for ``django.template``.
     Harmless where this is used today, because ``unshimmed`` subtracts and extra
     names on the right of a subtraction change nothing — which is exactly why it
@@ -918,9 +918,9 @@ def _our_modules_in(scope: str) -> set[str]:
 
 
 def _impl_root(scope: str) -> Path:
-    """Where one namespace's files live under ``_impl``.
+    """Where one namespace's files live under ``engine``.
 
-    An unknown scope is refused rather than silently compared against ``_impl``:
+    An unknown scope is refused rather than silently compared against ``engine``:
     a typo would otherwise report the whole of Django's namespace as missing,
     which reads as progress in reverse and sends the reader to the wrong tree.
     """
@@ -957,7 +957,7 @@ def django_modules(scope: str = TARGET) -> set[str]:
 
 
 def dotted_suffix(relative: str) -> str:
-    """``_impl``-relative posix path → the dotted suffix it is served under.
+    """``engine``-relative posix path → the dotted suffix it is served under.
 
     ``base.py`` → ``base``; ``loaders/__init__.py`` → ``loaders``;
     ``loaders/base.py`` → ``loaders.base``; ``__init__.py`` → ``""``, the

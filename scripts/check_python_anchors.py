@@ -10,7 +10,7 @@ afterwards found five more defects, in files nobody had re-read. So neither
 **The propagation case is why the manifest is keyed by snippet rather than by
 site.** smartif.py:166-172 is the `is not`/`not in` fold; `translate_token`,
 the thing three of our comments claim it is, is at `:179-185`. That one wrong
-number had been copied into `_impl/parser.py:716`, `host.rs:207` and
+number had been copied into `engine/parser.py:716`, `host.rs:207` and
 `desc.rs:216` — Rust and Python, three files, one defect — and the same review
 that found the first of them found none of the other two. A per-site fix moves
 three numbers and learns nothing; a snippet-keyed entry makes the wrong number
@@ -211,8 +211,8 @@ AMBIGUOUS = {
 }
 
 # Our own package, which is the third base a qualified anchor may be relative
-# to: `_impl/parser.py:716` is a spelling our prose uses throughout and means
-# `python/django_rust_templates/_impl/parser.py`.
+# to: `engine/parser.py:716` is a spelling our prose uses throughout and means
+# `python/django_rust_templates/engine/parser.py`.
 OWN_PACKAGE = ROOT / "python" / "django_rust_templates"
 
 # Directories a suffix search must not walk. `.django` is here because the
@@ -227,7 +227,7 @@ _INDEX_CACHE = {}
 
 # Two forms, because the tree writes both: a bare basename (`` `base.py:615` ``)
 # and a qualified path (`` `django/template/base.py:615` ``,
-# `` `_impl/parser.py:210` ``). A qualified path resolves against the bases
+# `` `engine/parser.py:210` ``). A qualified path resolves against the bases
 # `resolve` documents; a bare basename resolves through the same function's
 # basename rules.
 #
@@ -291,7 +291,7 @@ NOT_SCANNED_BECAUSE = {
         "Same class, and for one reason beyond churn: a review record is "
         "evidence about a date. The reviewer's next report on a wrong anchor "
         "quotes our wrong anchor *verbatim* — smartif.py:166-172 at "
-        "`_impl/parser.py:716` was reported exactly that way — so scanning this "
+        "`engine/parser.py:716` was reported exactly that way — so scanning this "
         "directory would fail the build on the reviewer's accurate quotation of "
         "our own defect, and the only way to make it green is to falsify the "
         "finding. Every file here is dated by construction (round-N, "
@@ -905,7 +905,7 @@ def _base_of(named, checkout):
     """Which of the two bases a row's path lives in: `"django"` or `"crates"`.
 
     By the *resolved* path, not by the spelling: `.django/django/utils/text.py`
-    and `django/utils/text.py` are the same row's home, and `_impl/parser.py`
+    and `django/utils/text.py` are the same row's home, and `engine/parser.py`
     resolves under `OWN_PACKAGE`, which is ours. A path under neither base would
     have failed `resolve` already.
     """

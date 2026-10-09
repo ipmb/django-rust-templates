@@ -26,7 +26,7 @@ all, and it is why this bucket is the one place in this file where a name is
 recorded in order to be taken *off* the schedule rather than onto it — its
 membership is the shim's (strict mode reads it) and its reasons are here.
 
-Keys are ``_impl``-relative, the spelling :func:`_shim.dotted_suffix` produces
+Keys are ``engine``-relative, the spelling :func:`_shim.dotted_suffix` produces
 from a file path and the one ``SHADOWING``, ``DECLARED`` and ``COMPARED_PATH``
 all use. That is *not* the meter's spelling — the meter answers in full dotted
 names — and the two differ between scopes: ``django.template.base`` is the key
@@ -246,7 +246,7 @@ INTERPOSED = {
 
 # The namespace a table key belongs to, derived from the shim's own roots.
 #
-# Keys are `_impl`-relative, so the second scope's are prefixed with the root
+# Keys are `engine`-relative, so the second scope's are prefixed with the root
 # `NAMESPACE_ROOTS` gives it (`templatetags.cache`) while the first scope's are
 # bare (`loaders.base`) — the first namespace's root is `""`. Derived rather
 # than written as a literal prefix, because that literal would be a second

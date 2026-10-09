@@ -57,7 +57,7 @@ DJANGO_ANSWER = "ABCshadowed-abc"
 # The same sandwich with its first use inside a `{% with %}`, which reaches a
 # different arm of `_decode_value`: `{% with %}` builds `extra_context` as
 # `AttrValue::Map` (`crates/template-core/src/parser/tags/with.rs:82`), so the value is a `FilterExpr` *inside a
-# dict* and is decoded by `_impl/parser.py`'s dict comprehension rather than by
+# dict* and is decoded by `engine/parser.py`'s dict comprehension rather than by
 # the top-level `AttrValue::FilterExpr` arm the row above exercises.
 WITH_SOURCE = "{% with v=x|upper %}{{ v }}{% endwith %}{% load shadow %}{{ y|upper }}"
 WITH_ANSWER = "ABCshadowed-abc"
@@ -119,7 +119,7 @@ class FilterRebindingTests(unittest.TestCase):
         """The row above reaches *one* arm of `_decode_value`; this reaches another.
 
         **Measured: dropping `resolve_ref` from the dict comprehension at
-        `_impl/parser.py`'s `isinstance(value, dict)` branch leaves the whole
+        `engine/parser.py`'s `isinstance(value, dict)` branch leaves the whole
         Python suite green — 235 tests, no failure.** The reviewer found this
         while verifying the sandwich's oracle, and it is the reason this row
         exists rather than a preference for another template.

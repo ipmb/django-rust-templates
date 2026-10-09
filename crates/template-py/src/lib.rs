@@ -3062,7 +3062,7 @@ fn render_desc(py: Python<'_>, tree: &DescTree, context: Py<PyAny>) -> PyResult<
 /// parser.extra_data` inside `compile_nodelist`'s `try`, right after
 /// `parser.parse()` (`base.py:198-200`), and a shell that builds the `Template`
 /// by `__new__` skips that line. Handing the object back lets
-/// `_impl/parser.py::template_for` own the whole attribute list in one place —
+/// `engine/parser.py::template_for` own the whole attribute list in one place —
 /// which is what its own docstring has always claimed — instead of a second
 /// source-to-`Template` path existing for the shell to keep in step. The caller
 /// renders it, which is also what `Engine.from_string` needs at M9.
@@ -3071,11 +3071,11 @@ fn render_desc(py: Python<'_>, tree: &DescTree, context: Py<PyAny>) -> PyResult<
 /// anticipate.** D5 settled that the `Parser` comes from the caller, because
 /// materialising a `FilterExpression` calls `parser.find_filter`. It did not
 /// settle how Rust reaches the *materialiser*, and the answer the plan assumed
-/// is impossible: the shell lives in `django_rust_templates/_impl`, whose
+/// is impossible: the shell lives in `django_rust_templates/engine`, whose
 /// `__init__.py` is the shim's `django.template` and imports its own siblings
 /// (`from .engine import Engine`), so `import
-/// django_rust_templates._impl.parser` raises
-/// `ModuleNotFoundError: No module named 'django_rust_templates._impl.engine'`
+/// django_rust_templates.engine.parser` raises
+/// `ModuleNotFoundError: No module named 'django_rust_templates.engine.engine'`
 /// — measured. Under the shim the name `django.template.parser` would resolve,
 /// and M3 runs unshimmed. So the shell hands its materialiser over, as one
 /// module rather than three callables: `tree.check_filter(parser)`,
@@ -3101,7 +3101,7 @@ fn render_desc(py: Python<'_>, tree: &DescTree, context: Py<PyAny>) -> PyResult<
 /// this very call. So the shell builds a real `Template` around the tree
 /// (`__new__` plus assignment, because the constructor would parse the source a
 /// second time in Python) and `Template.render` binds it. See `template_for` in
-/// `_impl/parser.py`, which owns the attribute list.
+/// `engine/parser.py`, which owns the attribute list.
 ///
 /// **`engine` is a fifth argument, and it is the caller's for the same reason
 /// the parser is.** The render path reads the engine in six places, so a shell

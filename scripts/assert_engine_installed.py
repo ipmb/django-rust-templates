@@ -4,9 +4,9 @@
 continue if it fails. Two claims are checked, and together they are "no fallback":
 
 * **runtime** — every module the engine owns, imported, resolves to our file
-  under `_impl`, not to Django's;
+  under `engine`, not to Django's;
 * **file level** — `unshimmed()` is empty in both scopes, i.e. no name Django's
-  package defines lacks a same-named file in `_impl`.
+  package defines lacks a same-named file in `engine`.
 
 **Correctness is dated to the engine being complete.** Refusing on a non-empty
 meter would have blocked every suite run through M10–M13, when the meter was
@@ -35,7 +35,7 @@ def engine_fallbacks(unshimmed, scopes):
 
 
 def runtime_fallbacks(import_module, django_modules, not_the_engine, scopes):
-    """``{module: file}`` for every engine module not imported from under ``_impl``.
+    """``{module: file}`` for every engine module not imported from under ``engine``.
 
     Total over the engine: the population is `django_modules(scope) - not_the_engine`
     — the same call the meter makes — so a module a version bump adds to Django's
@@ -47,7 +47,7 @@ def runtime_fallbacks(import_module, django_modules, not_the_engine, scopes):
             dotted = f"{scope}.{name}"
             module = import_module(dotted)
             file = getattr(module, "__file__", "") or ""
-            if "_impl" not in file:
+            if "engine" not in file:
                 wrong[dotted] = file or "<no __file__>"
     return wrong
 

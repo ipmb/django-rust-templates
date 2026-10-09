@@ -3,7 +3,7 @@
 import zoneinfo
 from datetime import UTC, datetime, tzinfo
 
-from django.template import Library, Node, TemplateSyntaxError
+from django_rust_templates.engine import Library, Node, TemplateSyntaxError
 from django.utils import timezone
 
 register = Library()

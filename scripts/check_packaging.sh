@@ -222,7 +222,7 @@ class Command(BaseCommand):
         # The point of the whole substitution: Django's own name resolves to the
         # file the wheel shipped, not to Django's. The render alone would pass on
         # stock Django — it is the same template either way.
-        assert base.__file__.endswith("django_rust_templates/_impl/base.py"), base.__file__
+        assert base.__file__.endswith("django_rust_templates/engine/base.py"), base.__file__
         assert django_rust_templates.unshimmed() == [], django_rust_templates.unshimmed()
         self.stdout.write(
             f"  {django.get_version()} | {rendered.strip()} | "
@@ -418,7 +418,7 @@ assert rendered == "HI-123", f"rendered {rendered!r}"
 import django.template.base as base
 
 assert "site-packages" in base.__file__, base.__file__
-assert base.__file__.endswith("_impl/base.py"), base.__file__
+assert base.__file__.endswith("engine/base.py"), base.__file__
 print(f"  source install | {django.get_version()} | {rendered} | {base.__file__.split('site-packages/')[-1]}")
 PY
 
@@ -464,7 +464,7 @@ USE_TZ = True
 PY
 
 out="$(cd "$SITE/app" && PYTHONPATH="$SITE/app" DJANGO_SETTINGS_MODULE=settings \
-  "$V/bin/python" -c 'import django; django.setup(); import django.template.base as b; print("engine" if "_impl" in b.__file__ else "stock")' 2>&1)" \
+  "$V/bin/python" -c 'import django; django.setup(); import django.template.base as b; print("engine" if "engine" in b.__file__ else "stock")' 2>&1)" \
   || fail "the control run failed: $out"
 [ "$out" = "stock" ] || fail "the control is not a control: without sitecustomize.py on
      PYTHONPATH this still resolved our engine ('$out'), so the subject below proves nothing"
@@ -487,7 +487,7 @@ import django.template.base as base
 
 import django_rust_templates
 
-assert "django_rust_templates/_impl" in base.__file__, base.__file__
+assert "django_rust_templates/engine" in base.__file__, base.__file__
 assert django_rust_templates.unshimmed() == [], django_rust_templates.unshimmed()
 print(f"  django-admin, nothing edited | {django.get_version()} | "
       f"{base.__file__.split('site-packages/')[-1]}")

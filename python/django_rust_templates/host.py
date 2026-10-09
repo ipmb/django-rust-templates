@@ -270,7 +270,7 @@ def django_own_filters():
 
     The tag predicate answers "is this callable the one Rust implements?" with a
     name in hand, because `has_tag(command)` is handed one. `FilterExpression`
-    is not: `_impl/parser.py` stores the `find_filter` *handle* rather than a
+    is not: `engine/parser.py` stores the `find_filter` *handle* rather than a
     name, deliberately — the name is what a `{% load %}` rebinds — so the tuple
     `resolve` walks holds a callable and nothing to look it up by. The map is
     therefore the registries inverted, and the inversion is faithful because it
@@ -438,7 +438,7 @@ def effective_use_tz(context, func):
 def _wire_token(token):
     """A Django `Token` as the four-field tuple Rust's `_native.lex` emits.
 
-    Same order as `_impl/parser.py::_decode_token`: Django's signature is
+    Same order as `engine/parser.py::_decode_token`: Django's signature is
     `Token(token_type, contents, position=None, lineno=None)`, so the *wire* is
     `(token_type, contents, lineno, position)` and the constructor call below
     reorders it.

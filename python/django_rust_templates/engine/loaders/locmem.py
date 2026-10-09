@@ -4,7 +4,7 @@
 Wrapper for loading templates from a plain Python dict.
 """
 
-from django.template import Origin, TemplateDoesNotExist
+from .. import Origin, TemplateDoesNotExist
 
 from .base import Loader as BaseLoader
 

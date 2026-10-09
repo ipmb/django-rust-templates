@@ -5,11 +5,11 @@ module is the only place the two meet, and it is deliberately mechanical: it
 looks up a class by name, calls it with keyword arguments, and attaches
 ``token``/``origin`` afterwards.
 
-The path is ``_impl/parser.py`` as the milestone plan specifies. Note the
-consequence: ``_impl`` is on the shim's search path for ``django.template``, so
+The path is ``engine/parser.py`` as the milestone plan specifies. Note the
+consequence: ``engine`` is on the shim's search path for ``django.template``, so
 this file also makes ``django.template.parser`` importable — a name Django does
 not have. Nothing imports it (the shell reaches it as
-``django_rust_templates._impl.parser``), and ``_shim.unshimmed()`` compares
+``django_rust_templates.engine.parser``), and ``_shim.unshimmed()`` compares
 source trees, so it neither shadows anything nor perturbs the progress meter.
 Flagged rather than silently relocated, because if Django ever grows a
 ``template/parser.py`` this name would shadow it.
@@ -17,8 +17,8 @@ Flagged rather than silently relocated, because if Django ever grows a
 
 from __future__ import annotations
 
-from django.template import smartif
-from django.template.base import (
+from . import smartif
+from .base import (
     FilterExpression,
     Node,
     NodeList,
@@ -29,8 +29,8 @@ from django.template.base import (
     Variable,
     VariableNode,
 )
-from django.template.engine import Engine
-from django.template.defaulttags import (
+from .engine import Engine
+from .defaulttags import (
     AutoEscapeControlNode,
     CommentNode,
     CsrfTokenNode,
@@ -53,9 +53,9 @@ from django.template.defaulttags import (
     WidthRatioNode,
     WithNode,
 )
-from django.template.loader_tags import BlockNode, ExtendsNode, IncludeNode
-from django.templatetags.cache import CacheNode
-from django.templatetags.i18n import (
+from .loader_tags import BlockNode, ExtendsNode, IncludeNode
+from django_rust_templates.engine.templatetags.cache import CacheNode
+from django_rust_templates.engine.templatetags.i18n import (
     BlockTranslateNode,
     GetAvailableLanguagesNode,
     GetCurrentLanguageBidiNode,
@@ -65,9 +65,9 @@ from django.templatetags.i18n import (
     LanguageNode,
     TranslateNode,
 )
-from django.templatetags.l10n import LocalizeNode
-from django.templatetags.static import PrefixNode, StaticNode
-from django.templatetags.tz import (
+from django_rust_templates.engine.templatetags.l10n import LocalizeNode
+from django_rust_templates.engine.templatetags.static import PrefixNode, StaticNode
+from django_rust_templates.engine.templatetags.tz import (
     GetCurrentTimezoneNode,
     LocalTimeNode,
     TimezoneNode,

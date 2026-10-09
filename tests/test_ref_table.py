@@ -80,8 +80,8 @@ from django.template.engine import Engine  # noqa: E402
 from django_rust_templates import _native  # noqa: E402
 
 _MATERIALISER_SPEC = importlib.util.spec_from_file_location(
-    "django_rust_templates._impl.parser",
-    PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "parser.py",
+    "django_rust_templates.engine.parser",
+    PROJECT_ROOT / "python" / "django_rust_templates" / "engine" / "parser.py",
 )
 materialiser = importlib.util.module_from_spec(_MATERIALISER_SPEC)
 sys.modules[_MATERIALISER_SPEC.name] = materialiser

@@ -16,7 +16,7 @@ Two things here are not the obvious spelling and both were measured against the
 pinned tree rather than assumed:
 
 * the materialiser is loaded **from its file**, not imported as
-  `django_rust_templates._impl.parser`. See the note below.
+  `django_rust_templates.engine.parser`. See the note below.
 * Django's parser is given `builtins=Engine().template_builtins`. A bare
   `Parser(tokens)` registers *nothing* (`base.py:518-519`: `builtins=None`
   becomes `[]`), so it raises `Invalid block tag` on `{% csrf_token %}` and
@@ -79,15 +79,15 @@ from tests.parser_corpus import (  # noqa: E402
 )
 
 # Loaded from its file rather than imported, for the reason spelled out in
-# `tests/test_materialise.py`: `_impl/__init__.py` is the shim's
+# `tests/test_materialise.py`: `engine/__init__.py` is the shim's
 # `django.template` and imports its own siblings (`from .engine import Engine`
-# …), so importing the `_impl` *package* by its ordinary name executes that file
+# …), so importing the `engine` *package* by its ordinary name executes that file
 # and fails for want of `engine`. Loading the module directly is how this test
 # reaches the materialiser without installing the shim, which is what keeps the
 # node classes Django's own.
 _MATERIALISER_SPEC = importlib.util.spec_from_file_location(
-    "django_rust_templates._impl.parser",
-    PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "parser.py",
+    "django_rust_templates.engine.parser",
+    PROJECT_ROOT / "python" / "django_rust_templates" / "engine" / "parser.py",
 )
 materialise_module = importlib.util.module_from_spec(_MATERIALISER_SPEC)
 sys.modules[_MATERIALISER_SPEC.name] = materialise_module
@@ -148,7 +148,7 @@ def filter_parser():
     `do_variable` builds one via `compile_filter`, and
     `_materialise_filter_expression` needs `parser.find_filter` to turn each
     wire filter *name* back into a function. Without a parser it raises
-    `LookupError` by design (`python/django_rust_templates/_impl/parser.py:285`),
+    `LookupError` by design (`python/django_rust_templates/engine/parser.py:285`),
     which is what the corpus hit the moment variables were added to it.
 
     **This delegates to `render.parser_for` as of M6's Task 5, rather than

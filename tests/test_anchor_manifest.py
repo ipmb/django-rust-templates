@@ -561,7 +561,7 @@ class AnchorManifestTests(unittest.TestCase):
         are `round-N`, `mN-summary`, `mN-dispatch`, `mN-brief`, `mN-seams` or
         `mN-recon`, and no filename lacks a milestone or round. The extra reason
         is that a review record quotes our anchors *verbatim*: this round's
-        finding on _impl/parser.py:716 carried the wrong number
+        finding on engine/parser.py:716 carried the wrong number
         smartif.py:166-172 inside it, so scanning here fails the build on the
         reviewer's accurate quotation of our own defect.
         """

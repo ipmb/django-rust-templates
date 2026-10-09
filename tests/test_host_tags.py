@@ -113,7 +113,7 @@ class HostBlockTagRegionTests(unittest.TestCase):
         """The host route's half, asserted on the seam rather than on a tag.
 
         `do_partialdef` ran — that is the row above — and it ran inside Django's
-        `Parser.parse`, so it reached `_impl/defaulttags.py`'s compile function
+        `Parser.parse`, so it reached `engine/defaulttags.py`'s compile function
         and **not** `ShellHost.register_partial_def`. That is the hole this
         module documents, and it is now *per-route* rather than per-tag: M13 gave
         both tags Rust bodies, and this body is still Django's because

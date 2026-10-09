@@ -1,6 +1,6 @@
 # TRANSCRIBED: django/templatetags/l10n.py (Django 6.0.9)
 
-from django.template import Library, Node, TemplateSyntaxError
+from django_rust_templates.engine import Library, Node, TemplateSyntaxError
 from django.utils import formats
 
 register = Library()

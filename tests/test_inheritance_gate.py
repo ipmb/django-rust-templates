@@ -274,7 +274,7 @@ class MustBeFirstGateTests(unittest.TestCase):
         `.unwrap_or(false)` it is *accepted*, and the failure surfaces later and
         elsewhere — in the materialiser, as
         `AttributeError: 'object' object has no attribute 'token'` from
-        `_impl/parser.py`, a message about a file the author of the bad tag never
+        `engine/parser.py`, a message about a file the author of the bad tag never
         touched. Both spellings refuse eventually, which is why the plan's
         observation looked plausible; only one names the contract.
 
@@ -342,7 +342,7 @@ class IncludeCacheGateTests(unittest.TestCase):
 
     **That reason expired at M11 Task 1, and the re-read is a measurement
     rather than a re-reading of this paragraph.** With `IncludeNode.render`'s
-    cache bypassed in `_impl/loader_tags.py`, Django's row at
+    cache bypassed in `engine/loader_tags.py`, Django's row at
     `syntax_tests/test_include.py:371-397` fails `'000000000' != '012345678'` — so
     it is now real signal and no longer a row about the schedule. **Both
     instruments stay.** Which is which: Django's row is the *end-to-end* one

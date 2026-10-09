@@ -13,7 +13,7 @@ teeth has a row with teeth.
 6071 of those calls come from frames named render — VariableNode.render,
 CycleNode.render and TranslateNode.render — and 434 from a nested function
 called render_value inside the blocktranslate tag. The call sites are
-`python/django_rust_templates/_impl/base.py:1161`, which is ours, and
+`python/django_rust_templates/engine/base.py:1161`, which is ours, and
 `django/template/defaulttags.py:114`, `django/templatetags/i18n.py:91` and
 `django/templatetags/i18n.py:185`, which are not. The two out-of-module modules
 reach it through a from-import of render_value_in_context at module scope, and
@@ -107,7 +107,7 @@ def _pinned(name):
     functions and are not transcribed by this project, so sharing them is what
     makes this a comparison of the function and not of its dependencies.
 
-    Not ``importlib``: the shim serves ``django.template.base`` from ``_impl``,
+    Not ``importlib``: the shim serves ``django.template.base`` from ``engine``,
     so importing it by name gives the very function under test.
     """
     if name in _PINNED_CACHE:
@@ -193,7 +193,7 @@ class RenderValueInContextTests(unittest.TestCase):
         and is supposed to. Asserting on it here would be asserting the shim is
         not installed.
         """
-        self.assertIn("_impl", inspect.getfile(self.ours))
+        self.assertIn("engine", inspect.getfile(self.ours))
 
     def test_the_modules_that_copied_it_hold_ours(self):
         """The out-of-module call sites, which are copies taken at *import* time.
@@ -204,7 +204,7 @@ class RenderValueInContextTests(unittest.TestCase):
         whatever the module attribute was when it was imported, and nothing this
         project does to django.template.base afterwards can change it. That is
         the difference from our own file's
-        call, at `python/django_rust_templates/_impl/base.py:1161`, which reads
+        call, at `python/django_rust_templates/engine/base.py:1161`, which reads
         the module global at call time and therefore always follows.
 
         **One of the two is now ours and the hazard is unchanged, which is the
@@ -219,7 +219,7 @@ class RenderValueInContextTests(unittest.TestCase):
         ``scripts/check.sh`` establishes for every unit-test process, via the
         ``sitecustomize`` on ``shimpath`` — both bindings are ours. Import
         Django's ``Engine`` and ``defaulttags`` *before* ``install()`` and they
-        stay Django's: ``django.template.base`` resolves to ``_impl/base.py``
+        stay Django's: ``django.template.base`` resolves to ``engine/base.py``
         while ``defaulttags.render_value_in_context`` resolves to the pinned
         file, and ``is`` between the two is ``False``. So ``{% cycle %}`,
         ``{% firstof %}` and ``{% translate %}` would render through Django's

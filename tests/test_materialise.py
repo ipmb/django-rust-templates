@@ -5,9 +5,9 @@ because the whole point is that the objects produced are Django's — the same
 classes ``isinstance``, ``get_nodes_by_type`` and ``ExtendsNode.render`` test for.
 
 The materialiser is loaded from its file rather than imported as
-``django_rust_templates._impl.parser``: ``_impl/__init__.py`` is the shim's
+``django_rust_templates.engine.parser``: ``engine/__init__.py`` is the shim's
 ``django.template`` and imports its own siblings (``from .engine import
-Engine`` …), so importing the ``_impl`` *package* by its ordinary name executes
+Engine`` …), so importing the ``engine`` *package* by its ordinary name executes
 that file and fails for want of ``engine``. Loading the module directly is how
 this test reaches the materialiser without installing the shim, which is what
 keeps the node classes Django's own.
@@ -51,8 +51,8 @@ from django.utils.safestring import SafeString  # noqa: E402
 from django_rust_templates import _native  # noqa: E402
 
 _MATERIALISER_SPEC = importlib.util.spec_from_file_location(
-    "django_rust_templates._impl.parser",
-    PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "parser.py",
+    "django_rust_templates.engine.parser",
+    PROJECT_ROOT / "python" / "django_rust_templates" / "engine" / "parser.py",
 )
 materialiser = importlib.util.module_from_spec(_MATERIALISER_SPEC)
 sys.modules[_MATERIALISER_SPEC.name] = materialiser
@@ -335,7 +335,7 @@ class MaterialiseTests(unittest.TestCase):
         row covers the *membership*. This one is the direct-entry half the plan's
         Step 1 asks for: the three names by hand, and each resolving to a class
         defined in our own module — so a registry that carried the names pointing
-        at Django's classes would fail the ``_impl`` assertion while the generic
+        at Django's classes would fail the ``engine`` assertion while the generic
         row stayed green.
         """
         import inspect
@@ -344,14 +344,14 @@ class MaterialiseTests(unittest.TestCase):
             with self.subTest(name=name):
                 cls = materialiser.NODE_CLASSES.get(name)
                 self.assertIsNotNone(cls, f"{name} is not in NODE_CLASSES")
-                self.assertIn("_impl", inspect.getfile(cls))
+                self.assertIn("engine", inspect.getfile(cls))
 
     def test_the_l10n_node_class_is_registered_and_is_ours(self):
         """M12 Task 5: the class ``l10n.rs`` emits is materialisable.
 
         ``StaticEmitterRegistryTests`` below checks the *membership* generically,
         by reading the class names out of the Rust source. This is the
-        direct-entry half the plan's Step 1 asks for, and the ``_impl``
+        direct-entry half the plan's Step 1 asks for, and the ``engine``
         assertion is the part the generic row does not make: a registry carrying
         ``LocalizeNode`` pointing at Django's own class would satisfy membership
         and fail here. ``LocalizeNode`` is the milestone's only node whose
@@ -363,7 +363,7 @@ class MaterialiseTests(unittest.TestCase):
 
         cls = materialiser.NODE_CLASSES.get("LocalizeNode")
         self.assertIsNotNone(cls, "LocalizeNode is not in NODE_CLASSES")
-        self.assertIn("_impl", inspect.getfile(cls))
+        self.assertIn("engine", inspect.getfile(cls))
 
     def test_the_i18n_node_classes_are_registered_and_are_ours(self):
         """M12 Tasks 6a and 6b: the eight classes ``i18n.rs`` emits are materialisable.
@@ -406,7 +406,7 @@ class MaterialiseTests(unittest.TestCase):
             with self.subTest(name=name):
                 cls = materialiser.NODE_CLASSES.get(name)
                 self.assertIsNotNone(cls, f"{name} is not in NODE_CLASSES")
-                self.assertIn("_impl", inspect.getfile(cls))
+                self.assertIn("engine", inspect.getfile(cls))
 
     def test_an_unknown_value_type_is_loud(self):
         desc = ("TextNode", (("s", object()),), (), None)

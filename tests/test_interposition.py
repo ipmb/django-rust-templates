@@ -1,7 +1,7 @@
 """Direct-entry evidence that the interposed modules are actually ours.
 
 The suite cannot see this. Measured (``.review/m9-recon.md`` finding 3): with
-``_impl/base.py`` a byte-for-byte copy of Django's, ``unshimmed()`` reports one
+``engine/base.py`` a byte-for-byte copy of Django's, ``unshimmed()`` reports one
 fewer module, the whole suite is green, and the only row that notices is the
 meter. So a transcription that delegates nothing, or delegates wrongly, passes
 every count this project otherwise accepts.
@@ -63,7 +63,7 @@ class InterpositionTests(unittest.TestCase):
     def test_base_resolves_to_our_file(self):
         import django.template.base as base
 
-        self.assertIn("_impl", base.__file__, base.__file__)
+        self.assertIn("engine", base.__file__, base.__file__)
 
     def test_the_node_classes_are_defined_by_our_file(self):
         """Resolution and *identity* are different claims.
@@ -76,7 +76,7 @@ class InterpositionTests(unittest.TestCase):
         **Not on ``__module__``**, which reads ``django.template.base`` for our
         classes and is *supposed* to — the shim loads our file under Django's
         name, so that is the correct value for a drop-in replacement. The first
-        draft of this row asserted ``"_impl" in cls.__module__`` and failed on
+        draft of this row asserted ``"engine" in cls.__module__`` and failed on
         all five classes for exactly that reason.
         """
         import inspect
@@ -85,7 +85,7 @@ class InterpositionTests(unittest.TestCase):
 
         for name in ("Template", "NodeList", "Node", "Variable", "VariableNode"):
             with self.subTest(name=name):
-                self.assertIn("_impl", inspect.getfile(getattr(base, name)))
+                self.assertIn("engine", inspect.getfile(getattr(base, name)))
 
     def test_compile_nodelist_reaches_rust(self):
         """The parse seam, pinned to a Rust call rather than to a result.
@@ -156,7 +156,7 @@ class InterpositionTests(unittest.TestCase):
         """
         import django.template.smartif as smartif
 
-        self.assertIn("_impl", smartif.__file__, smartif.__file__)
+        self.assertIn("engine", smartif.__file__, smartif.__file__)
 
     def test_the_if_condition_tree_comes_from_rust_not_the_python_grammar(self):
         """Why ``smartif`` is interposed, pinned as a conjunction.
@@ -224,9 +224,9 @@ class InterpositionTests(unittest.TestCase):
 
         condition = template.nodelist[0].conditions_nodelists[0][0]
         self.assertIs(type(condition), smartif.OPERATORS["and"])
-        self.assertIn("_impl", inspect.getfile(type(condition)))
+        self.assertIn("engine", inspect.getfile(type(condition)))
         self.assertIs(TemplateLiteral.__mro__[1], smartif.Literal)
-        self.assertIn("_impl", inspect.getfile(TemplateLiteral.__mro__[1]))
+        self.assertIn("engine", inspect.getfile(TemplateLiteral.__mro__[1]))
 
     def test_compile_nodelist_keeps_upstreams_error_message_rewriting(self):
         """The obligation this milestone's own plan omitted, so it gets a row.
@@ -397,7 +397,7 @@ class InterpositionTests(unittest.TestCase):
         here, because the agreement gate in
         ``test_compared_path_instrument`` measures over the same run.
 
-        The ``_impl`` assertion is the reviewer's question — "does ``module_of``
+        The ``engine`` assertion is the reviewer's question — "does ``module_of``
         resolve a declared-but-not-yet-transcribed module?" — answered inside the
         row rather than in prose: it does, and it resolves it to *Django's* file,
         because that is what the fallback is for. The guard itself catches that
@@ -423,7 +423,7 @@ class InterpositionTests(unittest.TestCase):
             # *after* the unit suite, so a bare `python -m unittest` would have
             # this row answering about the wrong module and saying nothing.
             self.assertIn(
-                "_impl", module.__file__, f"{name} did not resolve to our file"
+                "engine", module.__file__, f"{name} did not resolve to our file"
             )
             measured = measure(module, sources, django_parse)
             pinned = {label: (first, last) for first, last, label in pinned_entries}
@@ -472,7 +472,7 @@ class ModuleInterpositionTests(unittest.TestCase):
     def test_utils_resolves_to_our_file(self):
         import django.template.utils as utils
 
-        self.assertIn("_impl", utils.__file__, utils.__file__)
+        self.assertIn("engine", utils.__file__, utils.__file__)
 
     def test_the_engine_handler_class_is_not_djangos(self):
         import django.template.utils as utils
@@ -488,7 +488,7 @@ class ModuleInterpositionTests(unittest.TestCase):
     def test_the_package_built_its_handler_from_our_class(self):
         """The discriminating row: ``django.template.engines`` is *our* handler.
 
-        ``_impl/__init__.py`` is a transcription and does ``from .utils import
+        ``engine/__init__.py`` is a transcription and does ``from .utils import
         EngineHandler``, then ``engines = EngineHandler()``. So the singleton that
         ``loader.py`` reaches through ``engines.all()`` is built from whichever
         class that import bound — and if the interposition were absent it would be
@@ -520,7 +520,7 @@ class ModuleInterpositionTests(unittest.TestCase):
     def test_context_resolves_to_our_file(self):
         import django.template.context as context
 
-        self.assertIn("_impl", context.__file__, context.__file__)
+        self.assertIn("engine", context.__file__, context.__file__)
 
     def test_the_context_classes_are_not_djangos(self):
         import inspect
@@ -540,7 +540,7 @@ class ModuleInterpositionTests(unittest.TestCase):
             with self.subTest(name=name):
                 ours = getattr(context, name)
                 self.assertIsNot(ours, getattr(pinned, name))
-                self.assertIn("_impl", inspect.getfile(ours))
+                self.assertIn("engine", inspect.getfile(ours))
 
     def test_a_template_renders_through_our_context(self):
         """The end-to-end row: `Context` is on the render path, not beside it."""
@@ -582,7 +582,7 @@ class ModuleInterpositionTests(unittest.TestCase):
     def test_engine_resolves_to_our_file(self):
         import django.template.engine as engine
 
-        self.assertIn("_impl", engine.__file__, engine.__file__)
+        self.assertIn("engine", engine.__file__, engine.__file__)
 
     def test_the_engine_class_is_not_djangos(self):
         import inspect
@@ -592,7 +592,7 @@ class ModuleInterpositionTests(unittest.TestCase):
         from tests.pinned_module import load_pinned
 
         self.assertIsNot(engine.Engine, load_pinned("engine.py").Engine)
-        self.assertIn("_impl", inspect.getfile(engine.Engine))
+        self.assertIn("engine", inspect.getfile(engine.Engine))
         # `django.template.Engine` is the same object, because the package
         # `__init__` imports it from this module by name.
         import django.template as package
@@ -734,7 +734,7 @@ class ModuleInterpositionTests(unittest.TestCase):
         for name in self.LOADER_MODULES:
             with self.subTest(name=name):
                 module = importlib.import_module(f"django.template.{name}")
-                self.assertIn("_impl", module.__file__, module.__file__)
+                self.assertIn("engine", module.__file__, module.__file__)
 
     def test_the_package_still_reaches_djangos_siblings(self):
         """The fallback survives one level down, which is the whole hazard.
@@ -755,12 +755,12 @@ class ModuleInterpositionTests(unittest.TestCase):
         paths = [pathlib.Path(p).resolve() for p in loaders.__path__]
         self.assertIn(
             (
-                PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "loaders"
+                PROJECT_ROOT / "python" / "django_rust_templates" / "engine" / "loaders"
             ).resolve(),
             paths,
         )
         self.assertTrue(
-            any(p.name == "loaders" and "_impl" not in str(p) for p in paths),
+            any(p.name == "loaders" and "engine" not in str(p) for p in paths),
             f"Django's own loader directory is not on {paths}",
         )
 
@@ -780,7 +780,7 @@ class ModuleInterpositionTests(unittest.TestCase):
             with self.subTest(name=name):
                 module = importlib.import_module(f"django.template.{name}")
                 self.assertIsNot(module.Loader, load_pinned(relative).Loader)
-                self.assertIn("_impl", inspect.getfile(module.Loader))
+                self.assertIn("engine", inspect.getfile(module.Loader))
 
     def test_our_app_directories_loader_subclasses_our_filesystem_loader(self):
         """The cross-module inheritance, which is what a half-built package breaks.
@@ -947,7 +947,7 @@ class LoaderTagsInterpositionTests(unittest.TestCase):
       inference.
 
     The measurement, since the second claim cannot be read off a green run: with
-    ``IncludeNode.render``'s cache bypassed in ``_impl/loader_tags.py`` — the
+    ``IncludeNode.render``'s cache bypassed in ``engine/loader_tags.py`` — the
     three lines keyed on ``self`` replaced by a bare
     ``context.template.engine.select_template(template_name)`` — Django's row at
     ``syntax_tests/test_include.py:371-397`` fails ``'000000000' != '012345678'``,
@@ -976,7 +976,7 @@ class LoaderTagsInterpositionTests(unittest.TestCase):
         import importlib
 
         module = importlib.import_module("django.template.loader_tags")
-        self.assertIn("_impl", module.__file__, module.__file__)
+        self.assertIn("engine", module.__file__, module.__file__)
 
     def test_the_classes_this_module_defines_are_not_djangos(self):
         """The classes with the file as their ``co_filename``, and the one it imports.
@@ -1006,7 +1006,7 @@ class LoaderTagsInterpositionTests(unittest.TestCase):
             with self.subTest(name=name):
                 ours = getattr(loader_tags, name)
                 self.assertIsNot(ours, getattr(pinned, name))
-                self.assertIn("_impl", inspect.getfile(ours))
+                self.assertIn("engine", inspect.getfile(ours))
 
         self.assertIs(loader_tags.Node, base.Node)
 
@@ -1034,13 +1034,13 @@ class LoaderTagsInterpositionTests(unittest.TestCase):
         includes = template.nodelist.get_nodes_by_type(loader_tags.IncludeNode)
         self.assertEqual(len(includes), 1)
         self.assertIs(type(includes[0]), loader_tags.IncludeNode)
-        self.assertIn("_impl", inspect.getfile(type(includes[0])))
+        self.assertIn("engine", inspect.getfile(type(includes[0])))
 
 
 class ShadowingTests(unittest.TestCase):
-    """Which ``_impl`` files wear a real module's name, and that each was meant.
+    """Which ``engine`` files wear a real module's name, and that each was meant.
 
-    ``_shim.py``'s docstring states the rule — a file under ``_impl`` may take a
+    ``_shim.py``'s docstring states the rule — a file under ``engine`` may take a
     real module's name only when it implements that module — and the rule as
     first written forbade the mechanism itself: four shipped files broke it on
     the day it was written, because interposing a module *is* taking its name
@@ -1320,7 +1320,7 @@ class FilterRoutingTests(unittest.TestCase):
         """The premise, on its own, so a green counter cannot be the whole story.
 
         `Parser.find_filter(name)` is the handle the parse keeps
-        (`python/django_rust_templates/_impl/parser.py:568`) and the object the routing compares against, so
+        (`python/django_rust_templates/engine/parser.py:568`) and the object the routing compares against, so
         this asserts the *identity* the routing will test — ours, from our file —
         rather than a name. Two claims, because interposing the file is not the
         same as the registry being the one the parser reads: `register` could be
@@ -1335,11 +1335,11 @@ class FilterRoutingTests(unittest.TestCase):
         from django_rust_templates.render import parser_for
 
         defaultfilters = importlib.import_module("django.template.defaultfilters")
-        self.assertIn("_impl", defaultfilters.__file__)
+        self.assertIn("engine", defaultfilters.__file__)
 
         func = parser_for("").find_filter("lower")
         self.assertIs(func, defaultfilters.register.filters["lower"])
-        self.assertIn("_impl", inspect.getfile(func))
+        self.assertIn("engine", inspect.getfile(func))
 
     def test_every_library_filter_reaches_rust(self):
         """M12 Task 7: the nine `django.templatetags` filters route to Rust.
@@ -2545,7 +2545,7 @@ class TzInterpositionTests(unittest.TestCase):
         import importlib
 
         module = importlib.import_module("django.templatetags.tz")
-        self.assertIn("_impl", module.__file__, module.__file__)
+        self.assertIn("engine", module.__file__, module.__file__)
 
     def test_each_tz_tag_compiles_to_our_node_class(self):
         """The routing claim, end to end, for all three names.
@@ -2585,7 +2585,7 @@ class TzInterpositionTests(unittest.TestCase):
                 ]
                 self.assertEqual([type(node).__name__ for node in nodes], [class_name])
                 self.assertIs(type(nodes[0]), getattr(tz, class_name))
-                self.assertIn("_impl", inspect.getfile(type(nodes[0])))
+                self.assertIn("engine", inspect.getfile(type(nodes[0])))
 
 
 class L10nInterpositionTests(unittest.TestCase):
@@ -2622,7 +2622,7 @@ class L10nInterpositionTests(unittest.TestCase):
         import importlib
 
         module = importlib.import_module("django.templatetags.l10n")
-        self.assertIn("_impl", module.__file__, module.__file__)
+        self.assertIn("engine", module.__file__, module.__file__)
 
     def test_the_localize_tag_compiles_to_our_node_class(self):
         """The routing claim, end to end, for the tag and all three accepted forms.
@@ -2663,7 +2663,7 @@ class L10nInterpositionTests(unittest.TestCase):
                 ]
                 self.assertEqual([type(node).__name__ for node in nodes], [class_name])
                 self.assertIs(type(nodes[0]), getattr(l10n, class_name))
-                self.assertIn("_impl", inspect.getfile(type(nodes[0])))
+                self.assertIn("engine", inspect.getfile(type(nodes[0])))
                 self.assertIs(nodes[0].use_l10n, use_l10n)
 
     def test_the_two_filters_are_registered_by_our_module(self):
@@ -2694,7 +2694,7 @@ class L10nInterpositionTests(unittest.TestCase):
                     func, f"{name} is not in our l10n registry at all"
                 )
                 self.assertIn(
-                    "_impl",
+                    "engine",
                     inspect.getfile(func),
                     f"{name} resolves to {inspect.getfile(func)}, not our file",
                 )
@@ -2758,7 +2758,7 @@ class I18nInterpositionTests(unittest.TestCase):
         import importlib
 
         module = importlib.import_module("django.templatetags.i18n")
-        self.assertIn("_impl", module.__file__, module.__file__)
+        self.assertIn("engine", module.__file__, module.__file__)
 
     def test_each_i18n_tag_compiles_to_our_node_class(self):
         """The routing claim, end to end, for the ten names and eight classes.
@@ -2824,7 +2824,7 @@ class I18nInterpositionTests(unittest.TestCase):
                 ]
                 self.assertEqual([type(node).__name__ for node in nodes], [class_name])
                 self.assertIs(type(nodes[0]), getattr(i18n, class_name))
-                self.assertIn("_impl", inspect.getfile(type(nodes[0])))
+                self.assertIn("engine", inspect.getfile(type(nodes[0])))
 
     def test_translate_as_var_stores_and_returns_nothing(self):
         """The ``as var`` branch: store into the context and emit nothing.
@@ -3348,7 +3348,7 @@ class DefaultTagsInterpositionTests(unittest.TestCase):
         import importlib
 
         module = importlib.import_module("django.template.defaulttags")
-        self.assertIn("_impl", module.__file__, module.__file__)
+        self.assertIn("engine", module.__file__, module.__file__)
 
     def test_the_node_classes_this_module_defines_are_not_djangos(self):
         """Review Focus 5: the classes the corpus builds, compared by identity.
@@ -3376,7 +3376,7 @@ class DefaultTagsInterpositionTests(unittest.TestCase):
             with self.subTest(name=name):
                 ours = getattr(defaulttags, name)
                 self.assertIsNot(ours, getattr(pinned, name))
-                self.assertIn("_impl", inspect.getfile(ours))
+                self.assertIn("engine", inspect.getfile(ours))
 
         self.assertIs(defaulttags.Node, base.Node)
 
@@ -3397,7 +3397,7 @@ class DefaultTagsInterpositionTests(unittest.TestCase):
         nodes = template.nodelist.get_nodes_by_type(defaulttags.ForNode)
         self.assertEqual(len(nodes), 1)
         self.assertIs(type(nodes[0]), defaulttags.ForNode)
-        self.assertIn("_impl", inspect.getfile(type(nodes[0])))
+        self.assertIn("engine", inspect.getfile(type(nodes[0])))
 
     def test_a_loaded_library_that_rebinds_a_builtin_tag_runs_its_own_body(self):
         """Review Focus 2: a library's ``if`` beats Rust's, decided by identity.

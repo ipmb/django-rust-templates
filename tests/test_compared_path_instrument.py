@@ -634,7 +634,7 @@ class ComparedPathAgreementTests(unittest.TestCase):
         live = []
         for name in sorted(guard.COMPARED_PATH):
             module = importlib.import_module(guard.module_of(name))
-            self.assertIn("_impl", module.__file__, f"{name} is not our file")
+            self.assertIn("engine", module.__file__, f"{name} is not our file")
             observation = observed_path(module, sources, django_parse)
             missing, extra = disagreement(
                 measure(module, sources, django_parse), observation

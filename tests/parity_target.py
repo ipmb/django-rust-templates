@@ -35,13 +35,13 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
-IMPL_DIR = PROJECT_ROOT / "python" / "django_rust_templates" / "_impl"
+IMPL_DIR = PROJECT_ROOT / "python" / "django_rust_templates" / "engine"
 
 
 def key_of(source: Path) -> str:
-    """``_impl``-relative posix path — the key the guard's tables use.
+    """``engine``-relative posix path — the key the guard's tables use.
 
-    ``source.name`` was the key until M10, and it was correct while ``_impl`` was
+    ``source.name`` was the key until M10, and it was correct while ``engine`` was
     flat. For the first file in a subpackage it is silently wrong in the worst
     available way: ``loaders/base.py`` keys as ``base.py``, which *is* a
     transcription — a different one — so ``DECLARED`` answers, the regions
@@ -64,7 +64,7 @@ def assert_target_is_not_rust_owned(testcase, target, module_name):
 
     ``target`` is a class (or function) whose source file is the comparison's
     Python side; ``module_name`` is its dotted path in ``django.template``, which
-    is what a transcription of it would be named in ``_impl``.
+    is what a transcription of it would be named in ``engine``.
     """
     import inspect
 

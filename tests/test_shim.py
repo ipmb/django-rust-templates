@@ -101,14 +101,14 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         # baseline installed, a row that needs the shim *out* has to say so.
         _shim.uninstall()
         real_file = importlib.import_module("django.template").__file__
-        self.assertNotIn("_impl", real_file)
+        self.assertNotIn("engine", real_file)
 
         _shim.install()
 
         shimmed = sys.modules["django.template"]
         self.assertTrue(
             Path(shimmed.__file__).resolve().is_relative_to(
-                (PROJECT_ROOT / "python" / "django_rust_templates" / "_impl").resolve()
+                (PROJECT_ROOT / "python" / "django_rust_templates" / "engine").resolve()
             ),
             f"django.template came from {shimmed.__file__}",
         )
@@ -136,7 +136,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
 
         import django.template
 
-        impl_dir = (PROJECT_ROOT / "python" / "django_rust_templates" / "_impl").resolve()
+        impl_dir = (PROJECT_ROOT / "python" / "django_rust_templates" / "engine").resolve()
         search = [Path(p).resolve() for p in django.template.__path__]
 
         self.assertEqual(search[0], impl_dir)
@@ -212,7 +212,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         self.assertNotIn("django.template", remaining)
 
     def test_an_implemented_module_wins_over_djangos(self):
-        """The load-bearing claim: a module in ``_impl`` is the one everyone gets.
+        """The load-bearing claim: a module in ``engine`` is the one everyone gets.
 
         ``exceptions`` is implemented, so both a direct import and Django's own
         internal import of it must resolve to our file.
@@ -221,7 +221,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
 
         import django.template.exceptions as ours
 
-        impl_dir = (PROJECT_ROOT / "python" / "django_rust_templates" / "_impl").resolve()
+        impl_dir = (PROJECT_ROOT / "python" / "django_rust_templates" / "engine").resolve()
         self.assertEqual(Path(ours.__file__).resolve().parent, impl_dir)
 
         # And it is no longer counted as falling back.
@@ -289,7 +289,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         restored = sys.modules["django.template"]
         self.assertFalse(
             Path(restored.__file__).resolve().is_relative_to(
-                (PROJECT_ROOT / "python" / "django_rust_templates" / "_impl").resolve()
+                (PROJECT_ROOT / "python" / "django_rust_templates" / "engine").resolve()
             )
         )
         self.assertFalse(_shim.installed())
@@ -298,7 +298,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         """The fallback has to be reapplied at every level, not just the top.
 
         ``django.template.backends`` is a package. The moment we provide
-        ``_impl/backends/__init__.py``, that package's ``__path__`` is ours alone
+        ``engine/backends/__init__.py``, that package's ``__path__`` is ours alone
         unless the finder rebuilds it with Django's directory appended — and then
         ``django.template.backends.django`` stops resolving at all. That would
         make the fallback vanish exactly when a milestone is half-finished, which
@@ -338,13 +338,13 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         ``None != 'ours'``. Measured both ways before the fix.
         """
         package_dir = (
-            PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "backends"
+            PROJECT_ROOT / "python" / "django_rust_templates" / "engine" / "backends"
         )
         # **Record what was here before writing anything.** The first version of
         # this row asserted the directory did not exist and removed it in
         # `finally`, which is a row that can only run while its subject is
         # absent — so it went from a test to a deletion the day something gave
-        # `_impl/backends/` a file, and the failure would have looked like a
+        # `engine/backends/` a file, and the failure would have looked like a
         # broken fallback rather than a test cleaning up after itself. Whether or
         # not the subject exists is now the row's input rather than its premise:
         # the probe file is ours to remove, and the `__init__.py` and the
@@ -378,7 +378,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
 
             sibling = importlib.import_module("django.template.backends.django")
             self.assertNotIn(
-                "_impl",
+                "engine",
                 sibling.__file__,
                 "our partial package cut its Django sibling off from the fallback",
             )
@@ -441,7 +441,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         ``django.template`` would work today and rot the moment a later milestone
         interposes it, which is exactly the recurrence being fixed here, so the
         holder is a module this row builds: it is in the capture namespace,
-        ``_impl`` does not serve it, and it holds Django's ``Node``. Nothing about
+        ``engine`` does not serve it, and it holds Django's ``Node``. Nothing about
         the hazard is synthetic — the binding, the identity comparison and the
         refusal are the real ones.
 
@@ -454,7 +454,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         _shim.uninstall()
         try:
             django_base = importlib.import_module("django.template.base")
-            self.assertNotIn("_impl", django_base.__file__ or "")
+            self.assertNotIn("engine", django_base.__file__ or "")
 
             probe = types.ModuleType("django.template.m11_stale_capture_probe")
             probe.Node = django_base.Node
@@ -502,7 +502,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         ours = sys.modules["django.template.base"]
         self.assertTrue(
             Path(ours.__file__).resolve().is_relative_to(
-                (PROJECT_ROOT / "python" / "django_rust_templates" / "_impl").resolve()
+                (PROJECT_ROOT / "python" / "django_rust_templates" / "engine").resolve()
             ),
             f"the second install put {ours.__file__} under our name",
         )
@@ -688,9 +688,9 @@ class NamespaceTests(unittest.TestCase):
     are interposed, and a node built by our parser fails an ``assertIsInstance``
     against them.
 
-    **The two namespaces map into ``_impl`` differently, and that is a fact to
+    **The two namespaces map into ``engine`` differently, and that is a fact to
     state rather than a wart to smooth over.** ``django.template`` is flat
-    because M9 built it that way, and re-keying it under ``_impl/template/``
+    because M9 built it that way, and re-keying it under ``engine/template/``
     would move every key in ``SHADOWING``, ``DECLARED``, ``COMPARED_PATH`` and
     the anchor manifest with their recorded line spans. ``django.templatetags``
     is a subdirectory because the unit of interposition is the path — a key
@@ -810,16 +810,16 @@ class NamespaceTests(unittest.TestCase):
     def test_a_namespaces_files_are_not_everything_under_its_root(self):
         """The label against the measurement, staged on a real tree.
 
-        `django.template` maps to `_impl` itself, so the bare walk of that root
+        `django.template` maps to `engine` itself, so the bare walk of that root
         also answers for `django.templatetags` — from the commit that creates
-        `_impl/templatetags/`, `templatetags.i18n` would be reported as ours for
+        `engine/templatetags/`, `templatetags.i18n` would be reported as ours for
         `django.template`. Harmless in `unshimmed`, which subtracts, and that is
         why it needs a row rather than a note: a coverage or ownership check is
         the obvious next caller, and the docstring said "our files for one
         namespace" with nothing checking it.
 
         The tree is staged in a temporary directory rather than waited for,
-        because `_impl/templatetags/` does not exist yet — a row that cannot fail
+        because `engine/templatetags/` does not exist yet — a row that cannot fail
         until Task 5 is a row nobody has read. `_IMPL_DIR` is restored in the
         `finally`, so the shim is untouched outside the block.
         """
@@ -839,14 +839,14 @@ class NamespaceTests(unittest.TestCase):
         self.assertEqual(
             outer,
             {"base"},
-            "`django.template`'s files are not everything under `_impl`: a "
+            "`django.template`'s files are not everything under `engine`: a "
             "nested namespace answers for its own names, from its own root",
         )
 
     def test_serving_a_namespace_does_not_claim_the_whole_of_it(self):
         """Review Focus 3: a library we do not provide must still resolve as Django's.
 
-        ``_impl/templatetags/`` does not exist yet, so the row asserts the
+        ``engine/templatetags/`` does not exist yet, so the row asserts the
         *mechanism* — the finder names the path and declines it because no file
         is there. It stays meaningful afterwards for every name the five
         libraries do not cover, and it is what would catch a finder that claimed

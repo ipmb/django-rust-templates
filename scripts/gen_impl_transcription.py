@@ -1,4 +1,4 @@
-"""Regenerate an ``_impl`` transcription of a pinned ``django/template`` module.
+"""Regenerate an ``engine`` transcription of a pinned ``django/template`` module.
 
 Two relations are checkable here and this script owns the first: its output must
 equal the committed file. The second — the committed file minus the pinned
@@ -9,7 +9,7 @@ which is a statement someone can check, where "we rewrote ``base.py``" is not.
 
 ``--check`` regenerates and diffs, like ``gen_python_word_ranges.py``, so a
 legitimate move (a pin bump) is fixed by re-running the generator rather than by
-editing a file by hand — and a hand edit to ``_impl/base.py`` fails here.
+editing a file by hand — and a hand edit to ``engine/base.py`` fails here.
 
 The marker goes immediately after the module docstring's opening ``\"\"\"``:
 **text, not a line number.** Anchoring to a line would make our file a function
@@ -42,7 +42,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CHECKOUT = ROOT / ".django"
-IMPL = ROOT / "python" / "django_rust_templates" / "_impl"
+IMPL = ROOT / "python" / "django_rust_templates" / "engine"
 
 MODULES = {
     "context.py": "django/template/context.py",
@@ -50,7 +50,7 @@ MODULES = {
     "smartif.py": "django/template/smartif.py",
     "utils.py": "django/template/utils.py",
     # M10's six loader files. The first keys in this table that are not a single
-    # segment, which is the point: a key is an `_impl`-relative posix path here as
+    # segment, which is the point: a key is an `engine`-relative posix path here as
     # it is in `DECLARED`, `COMPARED_PATH` and `_shim.SHADOWING`, and the value is
     # `django/template/` + the key for every row in the table — including these,
     # where the key carries the subdirectory the value has to carry too.
@@ -73,7 +73,7 @@ MODULES = {
     # **`templatetags/__init__.py` is deliberately absent**, though the plan
     # listed it. The shim's `_is_foreign_package` declines to serve the
     # `django.templatetags` package itself — only files inside it — so an
-    # `_impl/templatetags/__init__.py` would never be served while
+    # `engine/templatetags/__init__.py` would never be served while
     # `shadowing_files()` still reported it. Upstream's is 0 bytes: there is no
     # behaviour in it to transcribe.
     "templatetags/cache.py": "django/templatetags/cache.py",
@@ -122,7 +122,7 @@ MODULES = {
     #
     # `defaultfilters.py` and `defaulttags.py` are M11's other two and are
     # deliberately **not** listed: this table is also what `--check` walks, and a
-    # name here for a file `_impl` does not have fails the generator step in
+    # name here for a file `engine` does not have fails the generator step in
     # every commit that runs before the task which creates it. Each is added by
     # its own task, in the same commit as the file it generates — measured, in
     # the commit that interposed `loader_tags` alone.
@@ -145,6 +145,19 @@ MODULES = {
     # is what a transcription is for, and the case that needs the bodies right is
     # a `{% load %}`ed library rebinding a built-in tag.
     "defaulttags.py": "django/template/defaulttags.py",
+    # **This row existed for a day and was removed with the `DECLARED` row it
+    # fed.** `engine/__init__.py:57` is `from . import autoreload`, and that one
+    # line is why `import django_rust_templates.engine` raised
+    # `ImportError: cannot import name 'autoreload'`: the import resolves through
+    # the package's `__path__`, which the finder widens to include
+    # `django/template/`, and imported as `engine` there is no second path entry,
+    # so the sibling has to be a real file. Transcribing it was the fix that needs
+    # no exception; guarding the import is the better one, for the reason
+    # `tests/milestone_ownership.py` gives `autoreload` as `NOT_THE_ENGINE` — the
+    # module is three receivers that reset *Django's* loaders, and a transcription
+    # is a promise to keep a Django file faithful across releases. The four-line
+    # guard in `engine/__init__.py` is a region `check_transcriptions.py` already
+    # declares, and it is the same four lines the end state needs.
 }
 
 # Transcriptions this generator must **not** write, because their difference from
@@ -164,13 +177,147 @@ HAND_WRITTEN = {
     "base.py": "django/template/base.py",
 }
 
+# Lines an `engine` transcription does **not** take verbatim, as whole-line
+# substitutions keyed by the upstream line's exact text.
+#
+# M18.1 made `engine` importable without the meta-path finder, and this table is
+# the whole of what that cost the transcriptions. `engine` may be imported as
+# `django.template` (the finder serves it under that name, with a `__path__` that
+# falls back to the checkout) or as `django_rust_templates.engine` (a plain package
+# that resolves to itself).
+#
+# **There are two rewrite forms, and which one a file gets is decided by where
+# the file itself is served — not by taste.** `engine/__init__.py`,
+# `engine/base.py`, `engine/parser.py` and `engine/loaders/*.py` are all served under
+# names whose parent chain passes through the engine package, so `from .. import
+# X` names it in both modes and is used there.
+#
+# The five `engine/templatetags/*.py` cannot use that form, and an earlier version
+# of this table wrongly said they could. Upstream those files live under
+# `django/templatetags/`, a **sibling** of `django.template`, and the finder
+# serves them under exactly those names; so `..` there is `django`, and `from ..
+# import Library` asks `django` for a `Library` it has never had:
+#
+#     ImportError: cannot import name 'Library' from 'django'
+#
+# Standalone the same file is `django_rust_templates.engine.templatetags.X`, where
+# `..` *is* the engine package, so the two modes want `..` and `..template`
+# respectively — no relative spelling is correct in both, and one of them
+# silently binds stock Django. Those files therefore name the engine package
+# **absolutely**, by the stable name §"importable identity" specifies:
+# `django_rust_templates.engine`, which `engine/__init__.py` registers as itself so
+# that it is the same object the finder serves rather than a second copy of
+# `library.py` with a second `Library` class.
+#
+# Three properties make the table safe to keep here rather than in prose:
+#
+# * **every row is one line to one line**, so no transcription's line count
+#   moves and every `COMPARED_PATH` span in `check_transcriptions.py` stays
+#   valid. An expansion — `from django.template import Origin, TemplateDoesNotExist`
+#   becoming two lines — would shift every span below it and force a
+#   re-measurement; `from .. import Origin, TemplateDoesNotExist` does not;
+# * `engine/__init__.py` re-exports `Library`, `Node`, `Template`, `Origin`,
+#   `VariableDoesNotExist`, `TemplateSyntaxError` and `TemplateDoesNotExist`, so
+#   `from django.template import X` — which binds attributes *of that package* —
+#   becomes an import of that package with no other change;
+# * **a row that stops matching is an error, not a no-op.** See `_transform`.
+#
+# Two upstream lines that look like this table's business are deliberately
+# absent. `loaders/cached.py`'s `from django.template.backends.django import
+# copy_exception` names a module `engine` has no counterpart for and should not:
+# it is Django's backend layer, `copy_exception` is an ordinary function with no
+# identity requirement, and the import is correct as written in both modes.
+# `engine.py`'s two imports inside `Engine.get_default` likewise name the
+# *stock* backend on purpose — that method exists to find a `DjangoTemplates`
+# configured in `TEMPLATES`, and our backend is not one.
+TRANSFORMS = {
+    "base.py": {
+        "from django.template.context import BaseContext":
+            "from .context import BaseContext",
+    },
+    "loaders/base.py": {
+        "from django.template import Template, TemplateDoesNotExist":
+            "from .. import Template, TemplateDoesNotExist",
+    },
+    "loaders/filesystem.py": {
+        "from django.template import Origin, TemplateDoesNotExist":
+            "from .. import Origin, TemplateDoesNotExist",
+    },
+    "loaders/locmem.py": {
+        "from django.template import Origin, TemplateDoesNotExist":
+            "from .. import Origin, TemplateDoesNotExist",
+    },
+    "loaders/app_directories.py": {
+        "from django.template.utils import get_app_template_dirs":
+            "from ..utils import get_app_template_dirs",
+    },
+    "loaders/cached.py": {
+        "from django.template import TemplateDoesNotExist":
+            "from .. import TemplateDoesNotExist",
+    },
+    # Absolute, not relative: `..` from here is `django`, so no relative form
+    # reaches the engine package in both modes. See the table's comment.
+    "templatetags/cache.py": {
+        "from django.template import Library, Node, TemplateSyntaxError, VariableDoesNotExist":
+            "from django_rust_templates.engine import Library, Node, TemplateSyntaxError, VariableDoesNotExist",
+    },
+    "templatetags/i18n.py": {
+        "from django.template import Library, Node, TemplateSyntaxError, Variable":
+            "from django_rust_templates.engine import Library, Node, TemplateSyntaxError, Variable",
+        "from django.template.base import TokenType, render_value_in_context":
+            "from django_rust_templates.engine.base import TokenType, render_value_in_context",
+        "from django.template.defaulttags import token_kwargs":
+            "from django_rust_templates.engine.defaulttags import token_kwargs",
+    },
+    "templatetags/l10n.py": {
+        "from django.template import Library, Node, TemplateSyntaxError":
+            "from django_rust_templates.engine import Library, Node, TemplateSyntaxError",
+    },
+    "templatetags/tz.py": {
+        "from django.template import Library, Node, TemplateSyntaxError":
+            "from django_rust_templates.engine import Library, Node, TemplateSyntaxError",
+    },
+    # The one row that is not a rewrite of a *name*. `static.py` reaches the
+    # package's own attributes — `template.Library()`, `template.Node`,
+    # `template.TemplateSyntaxError` — at seven sites, so rewriting the import
+    # would mean rewriting the body and the transcription would stop being
+    # upstream's. `engine/__init__.py` therefore binds `template` to itself, and
+    # this import becomes an import of that binding with the body untouched.
+    "templatetags/static.py": {
+        "from django import template": "from django_rust_templates.engine import template",
+    },
+}
+
 # The pinned version, so a transcription says which upstream it transcribes and
 # a bump has one place to change rather than one per file.
 DJANGO_VERSION = "6.0.9"
 
 
+def _transform(name: str, source: str) -> str:
+    """``source`` with ``TRANSFORMS[name]`` applied, one whole line at a time.
+
+    **The old line must be present exactly once.** A transform that quietly
+    stopped matching — because the pin bumped and upstream reworded the import,
+    or because someone edited the table's key — would leave the transcription
+    importing from the checkout while `--check` reported a match, which is the
+    silent-degradation shape this project has refused three times over. Counting
+    the occurrences is what makes a pin bump break the generator *loudly*, in the
+    commit that takes it.
+    """
+    for old, new in TRANSFORMS.get(name, {}).items():
+        found = source.count(old + "\n")
+        if found != 1:
+            raise SystemExit(
+                f"{name}: the transform for {old!r} matches {found} line(s) of "
+                "the pin, not 1 — upstream has reworded it, or the table's key "
+                "is wrong. Fix the key; do not drop the row."
+            )
+        source = source.replace(old + "\n", new + "\n")
+    return source
+
+
 def render(name: str) -> str:
-    """The exact contents ``_impl/<name>`` must have."""
+    """The exact contents ``engine/<name>`` must have."""
     if name in HAND_WRITTEN:
         raise SystemExit(
             f"{name} differs from the pin by more than the marker — its declared "
@@ -179,7 +326,7 @@ def render(name: str) -> str:
         )
     if name not in MODULES:
         raise SystemExit(f"{name}: not a transcription; known: {sorted(MODULES)}")
-    source = (CHECKOUT / MODULES[name]).read_text()
+    source = _transform(name, (CHECKOUT / MODULES[name]).read_text())
     marker = f"# TRANSCRIBED: {MODULES[name]} (Django {DJANGO_VERSION})\n"
     if source.startswith('"""\n'):
         return '"""\n' + marker + "\n" + source[4:]

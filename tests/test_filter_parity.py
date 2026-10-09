@@ -15,7 +15,7 @@ now reads the **pinned** `FilterExpression` out of `.django` (through the same
 `test_the_comparison_target_is_not_rust_owned` is what watches it.
 
 The filter **callables** are a different story and are still the interposed
-module — `_impl/defaultfilters.py`, pin plus a marker, so their bodies are
+module — `engine/defaultfilters.py`, pin plus a marker, so their bodies are
 upstream's text. That file is transcribed rather than pristine, so it is
 warranted by `tests/parity_target.py` instead of by a path check.
 

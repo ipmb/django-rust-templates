@@ -57,12 +57,12 @@ Variable = load_pinned("base.py").Variable
 from django_rust_templates import _native  # noqa: E402
 
 # Loaded from its file for the reason `tests/test_materialise.py` spells out:
-# `_impl/__init__.py` is the shim's `django.template` and imports its own
-# siblings, so importing the `_impl` *package* by name executes that file and
+# `engine/__init__.py` is the shim's `django.template` and imports its own
+# siblings, so importing the `engine` *package* by name executes that file and
 # fails for want of `engine`.
 _MATERIALISER_SPEC = importlib.util.spec_from_file_location(
-    "django_rust_templates._impl.parser",
-    PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "parser.py",
+    "django_rust_templates.engine.parser",
+    PROJECT_ROOT / "python" / "django_rust_templates" / "engine" / "parser.py",
 )
 materialiser = importlib.util.module_from_spec(_MATERIALISER_SPEC)
 sys.modules[_MATERIALISER_SPEC.name] = materialiser
@@ -279,7 +279,7 @@ class VariableParityTests(unittest.TestCase):
         the shim has done to `django.template.base` in the meantime.
         """
         source = inspect.getsourcefile(Variable)
-        self.assertNotIn("_impl", source)
+        self.assertNotIn("engine", source)
         self.assertTrue(Path(source).resolve().is_relative_to(DJANGO_CHECKOUT.resolve()))
 
     def test_the_corpus_is_not_trivially_small(self):

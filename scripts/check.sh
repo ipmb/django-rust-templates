@@ -80,7 +80,7 @@ step "suite counts carry their provenance"
 
 step "transcriptions differ from upstream only where declared"
 # A `# TRANSCRIBED:` file is a claim about the pinned tree, and the suite cannot
-# falsify it: measured, `_impl/base.py` as a verbatim copy and `_impl/base.py`
+# falsify it: measured, `engine/base.py` as a verbatim copy and `engine/base.py`
 # transcribing wrongly both keep all 1547 tests green. So the diff is the
 # instrument, and this is where the parity harness's own warrant comes from —
 # once `base` is interposed, `test_parser_parity` compares Rust against *our*
@@ -94,7 +94,7 @@ step "the transcriptions are generated, not edited"
 # *which* regions of a transcription may differ from the pin; this says the rest
 # of each file is still what the generator produces, so a hand edit inside a
 # declared region — the one change the guard permits by construction — is
-# caught. Same inputs as the guard (four `_impl` files and `.django/`), so it
+# caught. Same inputs as the guard (four `engine` files and `.django/`), so it
 # costs a read and belongs on the fast path; `gen_python_case_fixups.py` below
 # does not, because it compiles a Rust probe.
 #
