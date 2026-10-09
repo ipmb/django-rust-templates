@@ -717,3 +717,119 @@ triage queue, not a to-do list, and the read is what divides it.
   fact when the 28 is the row count that entered the stranded list and the 12
   is the number of those whose spans were wrong. A ratio without its base is
   the same mistake as a count without its metric.
+
+## One paragraph, four wrong lines, and where the wrong ones landed
+
+`crates/template-core/src/parser/host.rs` names `base.py` once (line 64) and
+`defaulttags.py` once (line 189), then cites five more Django spans as bare
+`` `:N` ``. Two of the five were right. Four things were wrong, all of them in
+the two paragraphs about the filter loop's ordering, all measured with the
+pinned interpreter (`.venv/bin/python` 3.14.4, `.django/` @ 6.0.9) by catching
+each rejection's traceback rather than by reading:
+
+| cited | its claim | actually at | what the cited line holds |
+|---|---|---|---|
+| `:743` | `upto != start` | 747 | 743 is `filters = []` |
+| `:774` | `upto != len(token)` | 775 | 774 is `upto = match.end()` |
+| `:768` | `Variable('_bad')` raises | 770 | 768 is the `constant_arg` branch, which `_bad` never reaches |
+| `base.py:757-772` | the per-iteration order | 747-772 | 757 is inside the constant branch |
+
+The last one is the one the sentence refutes about itself: it lists the order as
+gap → argument `Variable` → `find_filter` → `args_check`, then says "the first
+two are separable in outcome" — but the gap check it names *first* (747) is
+outside a span that starts at 757, so the span cannot show the separability it
+was cited for.
+
+Two things about the shape. First, every error is on the loop's **edges** — the
+gap check, the remainder check, the argument's `Variable` — and none is on a
+line the paragraph is *about* (`find_filter` at 771 and the `append` at 773 are
+both right). A reader checks the line under discussion, not its periphery, and
+whatever produced these numbers did the same. Second, two of the four land on a
+line *adjacent to* the construct (774 is the assignment that feeds 775) or on
+its *sibling branch* (768 is the other `args.append`) — the shape a number takes
+when it was read off a nearby line rather than searched for.
+
+`filter_expr.rs:665` carried the same off-by-one for the same Django line
+(`` `base.py:774` `` for the remainder check) and was corrected in the same
+commit, because two files disagreeing about one line is worse than either error
+alone.
+
+**The corrections went in first, and that is the rule paying off.** A naming
+commit must never move a number, so the numbers were settled in `217a094` and
+the naming followed in `a11f24c`. The other order would make the naming commit's
+diff unreadable as "lexical only" — which is the property that lets a reader
+audit it at all.
+
+**A correction commit must also leave the tree's citations and the manifest in
+agreement.** Minting `base.py:747` alongside the correction was wrong: nothing
+cites `base.py:747` until the shorthand on line 73 is *named*, so that commit
+would have ended with a dead row. It moved to the naming commit. This is the
+first time the "no dead rows" invariant has constrained the *sequencing* of two
+commits rather than the content of one.
+
+`error.rs` is what makes this file readable as an outlier: five shorthands, five
+spans that contained their claim, zero corrections. `host.rs` is the second file
+with defects and the first where the defect is a pattern inside one paragraph.
+
+## The tool narrows its input silently, and that is all three holes so far
+
+Not one of the three holes found in `check_python_anchors.py` has been a wrong
+answer about input the tool saw:
+
+- `ANCHOR_RE` cannot match a decorator, so a decorated `def` is never seen
+- its path class is `[a-zA-Z_0-9/]`, which cannot match a hyphen, so every
+  `template-core` / `template-py` citation is dropped
+- `_check_entry` slices `source[start - 1 : end]`, and a slice past the end is
+  silently *short*, so an anchor naming lines that do not exist is "cited"
+
+Each is invisible: no match means not counted, not checked, not reported. Three
+instances is enough to call it the tool's characteristic failure mode, and the
+discipline that follows is cheaper than finding the fourth by hand — every place
+the tool slices, truncates, or pattern-matches should assert it consumed what it
+was given. A slice that runs past the end should raise; a regex that matches
+nothing where something anchor-shaped exists should report.
+
+## Sizing the `.rs` extension, and where its ambiguity actually is
+
+34 `` `*.rs:N` `` citations over `crates/`, `python/`, `tests/`, `scripts/`; 25
+under `ANCHOR_RE`'s own character class; 9 lost to the hyphen. Of the nine, one
+(`pyo3-0.29.3/src/marker.rs:414`) contains a dot as well as a hyphen, so
+widening the class to admit `-` would still leave it unmatched — the fix has to
+be `-` **and** `.`, or the extension ships a second silent drop inside the fix
+for the first.
+
+A resolvability census of the 34, which is the number that sizes the work:
+
+| how the path is written | count | resolves to |
+|---|---|---|
+| full path from the root | 3 | itself |
+| partial path | 27 | exactly one file by suffix |
+| bare `host.rs` | 3 | **two** files — `filters/host.rs`, `parser/host.rs` |
+| a cargo-registry path | 1 | nothing in the repo |
+
+So a resolver has to handle duplicates for **3 occurrences of 1 basename** —
+not the 10 bare-basename occurrences first reported here, and not the 5 the
+reviewer first reported. Fourth disputed count in this project, and the third
+time it has been because three people measured three different things: "written
+as a bare basename", "needs a basename map", and "a naive resolver cannot settle
+it" are three questions with three answers (10, 3, 5). The metric is not
+pedantry here; it is the whole of the disagreement.
+
+The last row is a third target class — Django, ourselves, and a **vendored
+dependency** pinned by `Cargo.lock` rather than by `.django/`, resolvable only
+against a cargo home that is not in the repo. It needs an explicit decision,
+because the alternative is an unresolvable row that someone later exempts by
+hand and nobody re-examines.
+
+## "Agreement is not evidence"
+
+Two files citing one construct at the same wrong number are not corroboration;
+they are one reader's choice copied twice. `defaulttags.py:106-112` is cited from
+three files, in agreement, and is still not the span the sentences ask for.
+`smartif.py:166-172` and `:410` survived in three files each for the same reason
+— every copy raised the apparent confidence while adding no evidence.
+
+This belongs beside the detector list because it is the one statement here that
+says what *not* to trust. It also inverts the disagreement detector correctly:
+disagreement between two citations of one construct is a reason to look, and
+agreement is not a reason to stop.
