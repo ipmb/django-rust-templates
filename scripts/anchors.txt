@@ -115,7 +115,7 @@ defaultfilters.py:60-68	django/template/defaultfilters.py	60	68	addslashes	-
 defaultfilters.py:71-75	django/template/defaultfilters.py	71	75	capfirst	-
 defaultfilters.py:78-83	django/template/defaultfilters.py	78	83	-	-
 defaultfilters.py:85-91	django/template/defaultfilters.py	85	91	-	-
-defaultfilters.py:94-220	django/template/defaultfilters.py	94	220	-	-
+defaultfilters.py:94-220	django/template/defaultfilters.py	94	220	@register.filter(is_safe=True)	)
 defaultfilters.py:95	django/template/defaultfilters.py	95	-	def floatformat(text, arg=-1):	-
 defaultfilters.py:138-151	django/template/defaultfilters.py	138	151	force_grouping = False	arg = arg[:-1] or -1
 defaultfilters.py:139	django/template/defaultfilters.py	139	-	use_l10n = True	-
