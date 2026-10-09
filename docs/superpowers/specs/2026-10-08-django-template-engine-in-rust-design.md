@@ -191,38 +191,78 @@ docs/superpowers/plans/
 
 ## 9. Test strategy — three layers
 
-1. **Rust unit tests** (`cargo test`) — engine semantics in isolation. Fast.
-2. **Differential harness** — render a corpus of templates through both stock
-   Django and our shim, diff the output. Built in M0. Gives a fast signal long
-   before the Django suite is green, and pinpoints regressions to a template
-   rather than a test file.
+1. **Rust unit tests** (`cargo test`) — engine semantics in isolation. Fast, and
+   the primary development driver.
+2. **Differential harness** — renders a corpus twice and compares, including
+   error types and messages. Two modes:
+   - **shim vs stock** — proves the substitution layer does not change Django's
+     behaviour. Meaningful from M0, when everything still falls back.
+   - **rust-native vs stock** — calls the Rust engine directly through `_native`
+     and compares against Django. This is how the engine is measured *before* it
+     is interposed, and it is the main day-to-day signal.
 3. **The Django suite** — the acceptance criterion. Run in full at every
-   milestone boundary; per-module during development.
+   milestone boundary; per-module once the modules a test needs are ours.
 
-## 10. Milestone sequence
+## 10. Development strategy and milestones
 
-Ordered to maximise green tests early: ~58 of 122 files are filter tests.
+### 10.1 Why modules, not test files, are the unit
 
-| | Component | Unlocks |
+Interposition is atomic: a module under `django.template` is either Django's or
+ours, never partly ours. `_impl/base.py` either exists and is complete, or does
+not exist and Django's `base.py` serves every importer.
+
+This invalidates "unlock these test files" as a milestone unit. `test_base.py`
+imports `Template`, `Variable` and `Context` and so needs `base`, `context` *and*
+`engine` to all be ours before it can pass — even though it tests the lexer,
+which is a small part of `base`. A milestone framed around it would be
+unmeasurable for most of its life.
+
+So the project runs **engine-first**:
+
+- The Rust engine is built and measured **directly**, through native entry points
+  (`_native.lex`, `_native.parse`, `_native.render`), driven by `cargo test` and
+  the rust-native differential mode. Progress is visible from M1 onward, per case
+  rather than per test module.
+- A module is **interposed** only when it is complete. At that point its Django
+  tests become real signal rather than noise.
+- The Django suite runs throughout, in both modes. The acceptance gate is §2,
+  reached when `unshimmed()` is empty and strict mode is clean.
+
+`unshimmed()` therefore measures *integration* progress, while the differential
+corpus measures *engine* progress. Both matter; neither alone is the project's
+status.
+
+### 10.2 Consequence for `base.py`
+
+`base.py` is 1100 lines and contains the lexer, parser, expression classes,
+`Template`, `Node`, `NodeList` and `Origin`. It cannot be interposed piecewise,
+and it cannot be complete until the variable resolver is — because
+`Variable.resolve` must handle `SafeData`, `Promise`, callables and
+`alters_data`. `base` therefore interposes late, as one unit, after the resolver
+lands. Everything in M1–M8 is developed but not yet interposed.
+
+### 10.3 Milestones
+
+| | Component | Done when |
 |---|---|---|
-| M0 | Bootstrap: toolchain, workspace, maturin, venv, pinned Django, shim skeleton, runner scripts, differential harness, reviewer wiring. Prove `{{ 1\|add:2 }}` end-to-end. | — |
-| M1 | Lexer, `Token`, `DebugLexer` | `test_base` |
-| M2 | `Parser`, `Node`/`NodeList`, `TextNode`, shadow tree | `test_parser`, `test_nodelist` |
-| M3 | `FilterExpression`, `Variable` | `test_parser` |
-| M4 | All 57 filters | 58 `filter_tests/*` |
-| M5 | smart-if, `{% if %}`, `{% ifchanged %}` | `test_smartif`, `test_if` |
-| M6 | `for`, `with`, `firstof`, `cycle`, `regroup`, `spaceless`, `autoescape`, `verbatim`, `comment`, `now`, `lorem`, `widthratio`, `templatetag`, `filter`, `debug`, `resetcycle` | most of `syntax_tests` |
-| M7 | `Library`, custom tags/filters, `simple_tag`, `inclusion_tag`, callbacks | `test_library`, `test_custom` |
-| M8 | `{% block %}`, `{% extends %}`, `{% include %}` | `test_extends`, `test_include` |
-| M9 | `Engine`, loaders, `Origin`, autoreload | `test_engine`, `test_loaders`, `test_origin`, `test_autoreloader` |
-| M10 | `Context`, context processors | `test_context` |
-| M11 | Escaping: `SafeData`, `Promise`, `alters_data`, `do_not_call_in_templates`, logging | `test_callables`, `test_logging`, lazy filter cases |
-| M12 | `i18n`/`l10n`/`static`/`tz`/`cache` tags | `syntax_tests/i18n/*`, `test_cache`, `test_url` |
-| M13 | Partials | `test_partials` |
-| M14 | Backends, response, framework integration | `test_response`, `tests.py` |
-| M15 | Full-suite hardening | all |
+| M0 | Bootstrap, substitution mechanism, harness | ✅ 1547 run / 6 structural skips; full suite green with `exceptions` interposed |
+| M1 | Rust lexer, `Token`, `TokenType`, `DebugLexer`, `_native.lex` | Lexer reproduces Django's token stream exactly, incl. positions, verbatim state, and non-DOTALL tag matching |
+| M2 | Rust parser, node AST, `_native.parse` | Parse tree descriptor for every built-in tag; syntax-error parity |
+| M3 | `FilterExpression`, `Variable`, `smartif`, primitive resolver | First `_native.render`; text, variables, dotted/index lookup, filters |
+| M4 | All 57 built-in filters | Filter corpus parity |
+| M5 | Remaining built-in tags (`for`, `if`, `with`, `cycle`, …) | Syntax corpus parity |
+| M6 | `Library`, extension host callbacks | Python-defined tags/filters work through the engine |
+| M7 | Inheritance: `block`, `extends`, `include` | Inheritance corpus parity |
+| M8 | Escaping and the Python object protocol | `SafeData`, `Promise`, callables, `alters_data`, `do_not_call_in_templates`; resolver complete |
+| M9 | Interpose `base`, `smartif` | `test_base`, `test_parser`, `test_nodelist`, `test_smartif` become real signal |
+| M10 | Interpose `context`, `engine`, `utils`, `loaders`, `origin` | `test_context`, `test_engine`, `test_loaders`, `test_origin` |
+| M11 | Interpose `defaulttags`, `defaultfilters`, `loader_tags` | bulk of `syntax_tests` and `filter_tests` |
+| M12 | `i18n`, `l10n`, `static`, `tz`, `cache` libraries | `syntax_tests/i18n/*`, `test_cache`, `test_url` |
+| M13 | Partials, `library`, `backends`, `response` | `test_partials`, `test_response` |
+| M14 | `unshimmed()` empty under strict mode | full suite green with no fallback |
+| M15 | Hardening | §2 met with margin |
 
-Each milestone ends with its target modules green and one commit.
+Each milestone ends with its stated check green and one commit.
 
 ## 11. Review workflow
 
