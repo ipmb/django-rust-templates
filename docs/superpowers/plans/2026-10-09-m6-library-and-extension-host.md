@@ -1388,6 +1388,12 @@ qualified citations like `django/template/base.py:615` and the tree's own files.
 **The checker must handle both forms**, resolving a bare basename against
 `.django/` and a qualified path against `.django/` then the repo root.
 
+**477 is what the regex sees; 415 is what the migration touches.** The figure
+above counts the dated plans as well, because it measures the corpus rather than
+the work. The scan's roots are the four live ones — `crates/`, `python/`,
+`tests/`, `.review/` — and the plans are excluded by the explicit rule beside
+`TREE_ROOTS`, for the reason argued below.
+
 What that triage can reach: of 834 in-scope occurrences, **283 have a code span
 quoted within 200 characters and 228 of those do not appear at the cited line.**
 Most of the 228 are the heuristic firing on an unrelated nearby backtick, not a
@@ -1398,13 +1404,51 @@ alternative.**
 **And a third form the regex above cannot see at all.** The tree also cites Django
 by a bare line number when the file is implied by context — `` (`:1035`) ``,
 `` (``:56-58``, ``:73``) `` — meaning "the file the surrounding comment is about".
-Measured: **360 occurrences, 241 distinct**, concentrated in `filters/host.rs`
-(59), `filter_cases.py` (47), `filters/floatformat.rs` (46). Spot-checking
-`parser/tags/if.rs`'s eleven, whose subject is `defaulttags.py`, found **four
-wrong of six readable**: `:1001-1006` for the `elif` loop (the loop is at
-`:1000-1007`), `:1024-1025` for `IfNode.__init__` (`:1024` is `def ifchanged`),
-`:1011` for `conditions_nodelists.append((None, nodelist))` (`:1009`) — and one
-that was right (`:995-996`, `:1002-1003`).
+
+**Three metrics, because the two numbers first reported here were two right
+answers to two different questions.** Occurrences of a backtick followed by `:N`,
+counted with `-o`, by root:
+
+```
+crates/ python/ tests/      the live code                364
+.review/                    the review record           +54  → 418
+docs/superpowers/plans/     the dated plans            +403  → 821
+```
+
+The 360 measured here first was the code-only metric with `.review/` omitted; the
+reviewer's 823 is the whole-tree metric, and the two **agree** on the same
+pattern. The per-file table in the first report was separately counting *lines
+containing* an anchor rather than occurrences, which is why it understated
+`filters/host.rs` at 48 when the file carries 59. **The metric is: occurrences of
+a backtick followed by `:N`, `grep -o`, over the named roots** — and it has to be
+named before it is compared, which is the third time this project has paid for
+that lesson.
+
+Spot-checking `parser/tags/if.rs`'s eleven, whose subject is `defaulttags.py`,
+found **four wrong, two loose and four right of the ten readable** — read line by
+line rather than sampled:
+
+```
+  cited         the prose claims                          actual     verdict
+  :995          `TemplateIfParser(parser, bits).parse()`  :993       WRONG
+  :1001-1006    the `while token.contents...` elif loop   :999-1004  WRONG
+  :1024-1025    `IfNode.__init__(self, conditions_...)`   :307-309   WRONG
+  :1011         `conditions_nodelists.append((None, ...))` :1009     WRONG
+  :996          `parser.parse(...)`, then `next_token()`  :994-996   loose
+  :1009-1018    the optional `else`, then the `endif` check :1007-1018 loose
+  :326          `condition.eval(context)`                 :326       right
+  :993-995      the three parse statements                :993-995   right
+  :323-333      `IfNode.render`'s loop and its return     :323-333   right
+  :995-996, :1002-1003   the first body's two spans       both       right
+```
+
+**The `:1001-1006` correction in this paragraph's first draft was itself wrong.**
+It said the loop is at `:1000-1007`; the `while` is at **999** and the body ends
+at **1004**, so the replacement was off at both ends. That is the third instance
+of this defect at the third level — a correction, produced while deliberately
+looking for bad anchors, inside the message reporting that anchors are bad. It is
+the strongest argument available for the sequencing in Steps 4 and 5, and it is
+why the migration does not start until `--check` is green over the named corpus.
 
 So the shorthand pocket is **both larger and dirtier** than the named form.
 The decision this forces, and it is the plan's call rather than the tool's:
@@ -1417,7 +1461,41 @@ concentrated files (the implied file is stated once per doc comment) and the
 checker **fails on an unresolvable shorthand**, which is what stops the
 convention growing back.
 
-**Four wrong anchors found and fixed in this revision**, all measured against the
+**The cheaper alternative, and why it fails — recorded so the next person does
+not have to re-derive it.** The proposal was to declare the file once per module
+(`//! Anchors below are into django/template/defaulttags.py unless qualified`) and
+resolve `:N` against the nearest preceding declaration: ~30 header lines instead
+of ~400 rewrites, and it keeps the shorthand's readability, which is the whole
+reason the shorthand exists. It does not survive measurement — **but not for the
+reason first offered to this plan**, which was that *every* file carrying
+shorthand also names two or more Django files. That is false: **13 of the 44
+carrying files name exactly one**, and the largest such is
+`crates/template-core/src/filters/floatformat.rs` at **46 occurrences naming only
+`defaultfilters.py`**.
+
+The true reason is a distribution rather than a universal: **111 of the 418
+code-and-review occurrences (27%) sit in single-file modules and 307 (73%) do
+not.** `filters/host.rs` names 10 distinct Django files, `tests/filter_cases.py`
+7, `filters/filesizeformat.rs` 2. So a per-module default is sound for about a
+quarter of the pocket and silently wrong for the rest, and the failure mode is
+the exact one the guard exists to catch, reintroduced as the guard's own
+mechanism. **A rule that is right 27% of the time is worse than no rule**, because
+it is the rule a future contributor will reach for — the shorthand stays readable
+and the reader has no signal that the resolution was a guess.
+
+**Scope: the dated plans are excluded, explicitly and with this reason.**
+`docs/superpowers/plans/` carries 403 of the 821 occurrences, and a dated plan is
+a record of what was believed on a date. Rewriting its citations converts it into
+a record of what is true now and destroys the distinction this project has
+already lost once, when a review target moved underneath a review. A stale plan
+anchor must never fail a build about live code. So the migration and `--check`
+cover `crates/`, `python/`, `tests/` and `.review/` — 418 occurrences — and the
+exclusion is a rule written beside `TREE_ROOTS` rather than a glob that reads
+like an oversight. If the plans are ever to be held current they need the
+opposite treatment — verified once, frozen, never rewritten — and a separate
+report, not this gate.
+
+**Seven wrong anchors found and fixed in this revision**, all measured against the
 pinned tree, and each fixed at every site rather than at the one that was
 sampled: `condition.eval(context)` cited as `defaulttags.py:1037` is at `:326`
 (two sites); the `(condition, nodelist)` unpack cited as `:1035` is at `:323`
@@ -1427,6 +1505,18 @@ sampled: `condition.eval(context)` cited as `defaulttags.py:1037` is at `:326`
 `:386`, `:399`. Plus two found while fixing those: `defaulttags.py:996` for the
 tuple literal (it is `:995`; `:996` is `token = parser.next_token()`) and
 `:995` for the `TemplateIfParser` call (it is `:993`).
+
+**And two more, found in `parser/tags/if.rs` while auditing its shorthand — in the
+*named* half, which the triage list is supposed to be the clean part of.**
+`find_filter`'s message cited as `base.py:690` is at `:682` (`:690` is inside
+`constant_string`'s regex) — the message is the `raise` at 682, and `find_filter`
+itself opens at 678. And `translate_token`'s dispatch cited as
+`smartif.py:166-172` is at `:179-183` — `166-172` is the `is not`/`not in` fold,
+which is the *neighbouring* claim's subject and is cited for it too. **One range,
+two claims, and it can support only one of them**, with the snippet `translate_token`
+nowhere near it: exactly the failure `--check` exists to name. A third anchor in
+the same file, `smartif.py:120-172` for the fold, was repaired to `:159-173` for
+being loose at its start rather than wrong.
 
 **A sampled row that turned out to be the heuristic, not a defect**, recorded
 because it is how the triage must be read: `defaultfilters.py:996` was listed as a
@@ -1449,7 +1539,11 @@ now open: no confirmed instance yet.
 - Produces: `python -I scripts/check_python_anchors.py --check` → exit 1 on drift,
   modelled on `scripts/gen_python_word_ranges.py --check`. A `--triage` mode
   prints the 228-row suspicion list without failing, so it can be read before
-  the corpus is clean.
+  the corpus is clean. Shorthand anchors are reported as a separate `unmigrated`
+  count: **exit 0 while that count is falling and exit 1 once `--check --frozen`
+  is passed**, which is how the guard is added in Step 4 and closed in Step 5.
+  The two modes are one flag apart on purpose — the tool has to be usable before
+  the migration it verifies, or the ordering cannot be held.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1548,9 +1642,16 @@ cited line, because reading it off is what makes the check circular. `--check`
 fails when that text is not at the cited line; `--update` derives the numbers
 from the text.
 
-    python -I scripts/check_python_anchors.py --check    # gate, exit 1 on drift
-    python -I scripts/check_python_anchors.py --triage   # suspicion list, exit 0
-    python -I scripts/check_python_anchors.py --update   # rewrite cited numbers
+    python -I scripts/check_python_anchors.py --check            # gate, exit 1 on drift
+    python -I scripts/check_python_anchors.py --check --frozen   # also fails on shorthand
+    python -I scripts/check_python_anchors.py --triage           # suspicion list, exit 0
+    python -I scripts/check_python_anchors.py --update           # rewrite cited numbers
+
+`--frozen` exists so the guard can land *before* the shorthand migration (Step 4)
+and be closed after it (Step 5): plain `--check` reports the shorthand as an
+`unmigrated` count and does not fail on it, and `--frozen` fails on any shorthand
+at all. One flag, because the alternative — holding the checker until the
+migration is done — removes the only instrument that can verify the migration.
 
 **What this does not check: that the snippet supports the claim beside it.** It
 is a number-versus-text guard, not a reviewer — a green `--check` means the
@@ -1582,13 +1683,23 @@ AMBIGUOUS = {
 # (`` `django/template/base.py:615` ``, `` `_impl/parser.py:210` ``). 47 of the
 # corpus is the second form, and 5 of those 47 name our own files.
 ANCHOR_RE = re.compile(r"`([a-z_0-9/]+\.py):(\d+)(?:-(\d+))?`")
-# The third form — a bare `` `:1035` `` meaning "the file this comment is about" —
-# is matched only to be *rejected*: 360 occurrences today, and 4 of the 6 readable
-# ones in `parser/tags/if.rs` are wrong. A tool cannot resolve it without guessing
-# the implied file, and guessing here reproduces the defect. Naming the file is
-# the migration; this regex is what stops the convention growing back.
+# The third form — a bare `` `:N` `` meaning "the file this comment is about" —
+# is matched only to be *rejected*: 418 occurrences in the scanned roots today,
+# and 4 of the 10 readable ones in `parser/tags/if.rs` are wrong. A tool cannot
+# resolve it without guessing the implied file, and there is nothing sound to
+# guess from: 73% of occurrences live in modules naming two or more Django files,
+# and a module-level default would resolve those to whichever file the header
+# named. Naming the file is the migration; this regex is what stops the
+# convention growing back.
 SHORTHAND_RE = re.compile(r"`:(\d+)(?:-(\d+))?`")
-TREE_ROOTS = ["crates", "python", "tests", "docs", ".review"]
+# `docs/superpowers/plans/` is **excluded by an explicit rule, not by a glob that
+# looks like an oversight.** It carries 403 of the 821 whole-tree occurrences, and
+# a dated plan records what was believed on a date; rewriting its citations makes
+# it a record of what is true now and loses that distinction. A stale plan anchor
+# must never fail a build about live code. Should the plans ever be held current,
+# they need the opposite treatment — verified once, frozen, never rewritten — and
+# a report of their own, not this gate.
+TREE_ROOTS = ["crates", "python", "tests", ".review"]
 OUR_OWN = {"_shim.py", "differential.py", "parser.py", "test_materialise.py", "test_parser_parity.py"}
 ```
 
@@ -1602,7 +1713,7 @@ anchor is a range), so a Django pin bump that reflows the line reports "snippet
 not found" rather than silently re-pointing at whatever now occupies the old
 number.
 
-- [ ] **Step 4: Read the triage list, then make `--check` green, then add the pass**
+- [ ] **Step 4: Read the triage list, then make `--check` green over the named corpus, then add the pass**
 
 Run: `python -I scripts/check_python_anchors.py --triage`
 Expected: ~228 rows, each an anchor with a code span quoted nearby that is not at
@@ -1625,7 +1736,67 @@ block:
   "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_python_anchors.py" --check
 ```
 
-- [ ] **Step 5: Commit**
+**A green `--check` here is over the named corpus with the shorthand still
+present**, which is why the checker must tolerate the shorthand in this step and
+fail on it only after Step 5 — plain `--check` prints the shorthand as an
+`unmigrated` count and exits 0, while `--check --frozen` exits 1 on any
+shorthand at all. `check.sh` gets the plain form here and the `--frozen` form in
+Step 5, one flag apart. Without that, the guard could not be added before the
+migration it is meant to verify, which is the ordering the whole task depends on.
+
+**This step covers the named corpus only, and the boundary is the whole point of
+the ordering.** The checker does not need the shorthand migration to be useful —
+it is useful immediately against the ~70 anchors already named, and it turns the
+other ~400 rewrites from hand-edits into edits the tool verifies as they land.
+See Step 5.
+
+- [ ] **Step 5: Migrate the shorthand to named form, under `--check`, one file at a time**
+
+**Only after Step 4 is green.** The process that produced this task's own wrong
+`:1000-1007` — a correction made while looking for bad anchors — is the process
+that would be doing ~400 hand-edits, so the guard goes first and the migration
+runs behind it. Each file is migrated and committed with `--check` passing, so a
+bad rewrite cannot land.
+
+Order by occurrence count, biggest first, because the concentrated files are the
+mechanical ones and they set the pattern:
+
+```
+crates/template-core/src/filters/host.rs                        59
+tests/filter_cases.py                                           47
+crates/template-core/src/filters/floatformat.rs                 46
+crates/template-core/src/filters/filesizeformat.rs              22
+crates/template-core/src/parser/tags/cycle.rs                   18
+crates/template-py/src/filters.rs                               17
+crates/template-py/src/lib.rs                                   14
+python/django_rust_templates/_impl/parser.py                    12
+crates/template-core/src/parser/tags/if.rs                      11
+… 35 more files, 418 occurrences total across the four live roots
+```
+
+`parser/tags/if.rs` is not the biggest but is the one to do **first among equals**,
+because its four wrong anchors are already known and re-writing it re-measures
+each one against `defaulttags.py` as it lands.
+
+A shorthand is migrated by **naming the file the surrounding comment is already
+about** — the substitution is `:1035` → `defaulttags.py:323`, never a change of
+number. Where a single comment genuinely spans two Django files, the anchor names
+its own; that is the case the per-module default would have got wrong, and it is
+the case to read rather than assume.
+
+For each file:
+
+```bash
+python -I scripts/check_python_anchors.py --check   # must be green before and after
+git add <file> && git commit -m "anchors: name the django file in <file>"
+```
+
+**When the `unmigrated` count reaches zero**, close the gate in the same commit:
+`check.sh` switches to `--check --frozen`, so a shorthand written tomorrow fails
+the build rather than joining the pocket. That flip is the deliverable that makes
+this a convention rather than a cleanup.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add scripts/check_python_anchors.py scripts/anchors.txt scripts/check.sh tests/test_anchor_manifest.py
