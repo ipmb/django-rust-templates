@@ -768,9 +768,10 @@ CASES: list[dict] = [
         "arg": 5,
     },
     {
-        # `width <= 0` returns the value **unchanged** (`:435`), and the guard
-        # runs *after* `int(arg)`, so `center("abc", 0)` is `'abc'` and
-        # `center("abc", "x")` raises rather than returning. The pair below
+        # `width <= 0` returns the value **unchanged**
+        # (`defaultfilters.py:435-437`), and the guard runs *after* `int(arg)`,
+        # so `center("abc", 0)` is `'abc'` and `center("abc", "x")` raises
+        # rather than returning. The pair below
         # pins the value half; the raising half is a Rust body test, because a
         # corpus row has no exception path to compare.
         "name": "center/zero-width-is-the-value",
@@ -806,7 +807,8 @@ CASES: list[dict] = [
         "value": mark_safe("ab"),
         "arg": 4,
     },
-    # --- ljust / rjust (`:417-430`): the builtins, with no `<= 0` guard ------
+    # --- ljust / rjust (`defaultfilters.py:417-428`): the builtins, with no
+    #     `<= 0` guard
     {
         # **The argument is Python's `int`, not Rust's `str::parse`.** `int`
         # accepts PEP 515 underscores, so `ljust("abc", "5_0")` is a 50-wide
@@ -900,7 +902,8 @@ CASES: list[dict] = [
         "value": "",
         "arg": -5,
     },
-    # --- truncatechars / truncatewords (`:305-314`, `:330-337`) --------------
+    # --- truncatechars / truncatewords
+    #     (`defaultfilters.py:305-313`, `defaultfilters.py:330-341`)
     {
         # The ellipsis **counts toward the length**: 3 gives two characters plus
         # `…`. A body that truncated to `length` and then appended would be one
@@ -1042,7 +1045,8 @@ CASES: list[dict] = [
         "value": "<p>one two",
         "arg": 1,
     },
-    # --- wordwrap (`:410-415`): `textwrap` with `break_long_words=False` -----
+    # --- wordwrap (`defaultfilters.py:410-414`): `textwrap` with
+    #     `break_long_words=False`
     {
         # The `wrap` width argument, which no unit test can see. A body passing
         # a different width answers differently on every row below.
@@ -3334,7 +3338,7 @@ CASES: list[dict] = [
         "filter": "linebreaks",
         "value": "just one line",
     },
-    # --- linebreaksbr (`:497-509`, is_safe=True, needs_autoescape) ----------
+    # --- linebreaksbr (`defaultfilters.py:497-508`, is_safe=True, needs_autoescape)
     {
         # No paragraph split here at all: `\n\n` is two `<br>`s.
         "name": "linebreaksbr/escapes-newlines",
@@ -3374,7 +3378,7 @@ CASES: list[dict] = [
         "filter": "linebreaksbr",
         "value": "<>&''\n\"",
     },
-    # --- linenumbers (`:230-245`, is_safe=True, needs_autoescape) -----------
+    # --- linenumbers (`defaultfilters.py:230-244`, is_safe=True, needs_autoescape)
     {
         # 12 lines, so the width is `len("12") == 2` — and the padding is the
         # row: `'01. line 1'`, not `'1. line 1'`.
@@ -3429,7 +3433,7 @@ CASES: list[dict] = [
         "filter": "linenumbers",
         "value": "a\r\nb",
     },
-    # --- iriencode (`:223-228`, is_safe=True, `@stringfilter`) --------------
+    # --- iriencode (`defaultfilters.py:223-227`, is_safe=True, `@stringfilter`)
     #
     # The whole body is `iri_to_uri`, so these rows pin the host's function
     # rather than anything Rust decides.

@@ -138,9 +138,9 @@ defaultfilters.py:206	django/template/defaultfilters.py	206	-	[str(digit) for di
 defaultfilters.py:207	django/template/defaultfilters.py	207	-	while len(digits) <= abs(exponent):	-
 defaultfilters.py:210	django/template/defaultfilters.py	210	-	if sign and rounded_d	-
 defaultfilters.py:214	django/template/defaultfilters.py	214	-	formats.number_format(	-
-defaultfilters.py:223-227	django/template/defaultfilters.py	223	227	iriencode	-
+defaultfilters.py:223-227	django/template/defaultfilters.py	223	227	def iriencode(value):	return iri_to_uri(value)
 defaultfilters.py:225-227	django/template/defaultfilters.py	225	227	return iri_to_uri(value)	-
-defaultfilters.py:230-244	django/template/defaultfilters.py	230	244	linenumbers	-
+defaultfilters.py:230-244	django/template/defaultfilters.py	230	244	def linenumbers(value, autoescape=True):	return mark_safe("\n".join(lines))
 defaultfilters.py:247-251	django/template/defaultfilters.py	247	251	-	-
 defaultfilters.py:254-263	django/template/defaultfilters.py	254	263	make_list	-
 defaultfilters.py:266-274	django/template/defaultfilters.py	266	274	def slugify(value):	-
@@ -148,9 +148,9 @@ defaultfilters.py:277-294	django/template/defaultfilters.py	277	294	stringformat
 defaultfilters.py:289	django/template/defaultfilters.py	289	-	isinstance(value, tuple)	-
 defaultfilters.py:292	django/template/defaultfilters.py	292	-	"%" + str(arg)	-
 defaultfilters.py:297-302	django/template/defaultfilters.py	297	302	-	-
-defaultfilters.py:305-313	django/template/defaultfilters.py	305	313	-	-
+defaultfilters.py:305-313	django/template/defaultfilters.py	305	313	def truncatechars(value, arg):	return Truncator(value).chars(length)
 defaultfilters.py:316-327	django/template/defaultfilters.py	316	327	truncatechars_html	-
-defaultfilters.py:330-341	django/template/defaultfilters.py	330	341	-	-
+defaultfilters.py:330-341	django/template/defaultfilters.py	330	341	def truncatewords(value, arg):	return Truncator(value).words(length, truncate=" …")
 defaultfilters.py:344-355	django/template/defaultfilters.py	344	355	truncatewords_html	-
 defaultfilters.py:358-362	django/template/defaultfilters.py	358	362	-	-
 defaultfilters.py:365-379	django/template/defaultfilters.py	365	379	def urlencode(value, safe=None):	return quote(value, **kwargs)
@@ -160,11 +160,13 @@ defaultfilters.py:389-400	django/template/defaultfilters.py	389	400	_urlize(valu
 defaultfilters.py:399	django/template/defaultfilters.py	399	-	_urlize(value, trim_url_limit=int(limit), nofollow=True, autoescape=autoescape)	-
 defaultfilters.py:403-407	django/template/defaultfilters.py	403	407	wordcount	-
 defaultfilters.py:404	django/template/defaultfilters.py	404	-	@stringfilter	-
-defaultfilters.py:410-414	django/template/defaultfilters.py	410	414	wordwrap	-
+defaultfilters.py:410-414	django/template/defaultfilters.py	410	414	def wordwrap(value, arg):	return wrap(value, int(arg))
 defaultfilters.py:417-421	django/template/defaultfilters.py	417	421	-	-
 defaultfilters.py:417-438	django/template/defaultfilters.py	417	438	def ljust(value, arg):	return f"{value:^{width}}"
+defaultfilters.py:417-428	django/template/defaultfilters.py	417	428	return value.ljust(int(arg))	return value.rjust(int(arg))
 defaultfilters.py:424-428	django/template/defaultfilters.py	424	428	-	-
 defaultfilters.py:431-438	django/template/defaultfilters.py	431	438	def center(value, arg):	return f"{value:^{width}}"
+defaultfilters.py:435-437	django/template/defaultfilters.py	435	437	if width <= 0:	return value
 defaultfilters.py:441-449	django/template/defaultfilters.py	441	449	-	-
 defaultfilters.py:447-450	django/template/defaultfilters.py	447	450	-	-
 defaultfilters.py:457-461	django/template/defaultfilters.py	457	461	-	-
@@ -173,7 +175,7 @@ defaultfilters.py:474-482	django/template/defaultfilters.py	474	482	force_escape
 defaultfilters.py:485-494	django/template/defaultfilters.py	485	494	def linebreaks_filter(value, autoescape=True):	return mark_safe(linebreaks(value, autoescape))
 defaultfilters.py:486	django/template/defaultfilters.py	486	-	-	-
 defaultfilters.py:493	django/template/defaultfilters.py	493	-	-	-
-defaultfilters.py:497-508	django/template/defaultfilters.py	497	508	linebreaksbr	-
+defaultfilters.py:497-508	django/template/defaultfilters.py	497	508	def linebreaksbr(value, autoescape=True):	return mark_safe(value.replace("\n", "<br>"))
 defaultfilters.py:511-516	django/template/defaultfilters.py	511	516	-	-
 defaultfilters.py:518-525	django/template/defaultfilters.py	518	525	safeseq	-
 defaultfilters.py:528-532	django/template/defaultfilters.py	528	532	def striptags(value):	return strip_tags(value)
