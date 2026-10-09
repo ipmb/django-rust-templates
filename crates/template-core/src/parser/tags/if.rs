@@ -3,7 +3,7 @@
 //! The tag is small; what makes it M5's largest is that its condition is a
 //! **parse tree Python has to hold**. `do_if` runs
 //! `TemplateIfParser(parser, bits).parse()` (`:995`) and `IfNode.render` calls
-//! `condition.eval(context)` on the result (`:1037`), so the arena
+//! `condition.eval(context)` on the result (`:326`), so the arena
 //! `smartif.rs` builds has to cross as shape, and the materialiser rebuilds
 //! real `smartif` nodes from it — see [`IfConditionDesc`].
 //!
@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn a_branch_is_a_tuple_and_the_else_condition_is_none() {
         // The tuple, not a list, is the whole point: `IfNode.render` unpacks
-        // `(condition, nodelist)` (`defaulttags.py:1035`) and `describe`'s tuple
+        // `(condition, nodelist)` (`defaulttags.py:323`) and `describe`'s tuple
         // arm carries a marker the list arm does not, so a list here would be a
         // detectable diff on every parity row.
         let node = compile("{% if a %}x{% else %}y{% endif %}");
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn elif_branches_come_back_in_source_order_and_each_names_its_own_body() {
         // The order is load-bearing twice over: `IfNode.render` takes the *first*
-        // truthy condition (`:1035-1041`), and the `NodeListRef` index only means
+        // truthy condition (`:323-333`), and the `NodeListRef` index only means
         // anything if the nodelists were pushed in the same order as the branches.
         let node = compile("{% if a %}1{% elif b %}2{% elif c %}3{% else %}4{% endif %}");
         let branches = branches(&node);

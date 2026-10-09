@@ -909,7 +909,7 @@ impl FilterHost for PyFilterHost<'_> {
             };
             kwargs.set_item("trim_url_limit", limit)?;
             // `nofollow=True` is not a caller's choice: `urlize` and `urlizetrunc`
-            // both hardcode it (`defaultfilters.py:383`, `:395`), and the trait's
+            // both hardcode it (`defaultfilters.py:386`, `:399`), and the trait's
             // signature carries no `nofollow` for that reason.
             kwargs.set_item("nofollow", true)?;
             kwargs.set_item("autoescape", autoescape)?;

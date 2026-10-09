@@ -533,7 +533,7 @@ def _decode_value(value, resolve_ref=None, parser=None, child_lists=None):
     if isinstance(value, tuple):
         # `AttrValue::Tuple` — `IfNode.conditions_nodelists`' `(condition,
         # nodelist)` pairs. A real `tuple` and not a list: `IfNode.render`
-        # *unpacks* each pair (`defaulttags.py:1035`), and the parity suite can
+        # *unpacks* each pair (`defaulttags.py:323`), and the parity suite can
         # tell the two containers apart, because `describe`'s tuple arm carries a
         # marker the list arm deliberately does not. Recursed exactly as the list
         # arm is, so a `None` condition, an `IfCondition` and a `NodeListRef` in
@@ -567,7 +567,7 @@ def _decode_condition(condition, resolve_ref=None):
 
     **Real ones, and not look-alikes**, because ``IfNode.render`` calls
     ``condition.eval(context)`` on each branch's first element
-    (``defaulttags.py:1037``): ``Operator.eval`` recurses through its own
+    (``defaulttags.py:326``): ``Operator.eval`` recurses through its own
     ``self.first``/``self.second`` and ``TemplateLiteral.eval`` calls
     ``self.value.resolve(context, ignore_failures=True)`` (``:917-918``). So the
     two shapes here are Django's two, built from Django's own table and Django's
@@ -577,7 +577,7 @@ def _decode_condition(condition, resolve_ref=None):
     exactly what ``IfParser.translate_token`` does (``smartif.py:166-172``) — one
     instance per occurrence, whose ``id`` was set by the module-level loop
     (``smartif.py:117-118``). ``first``/``second`` are then assigned, which is
-    what ``led`` and ``nud`` do (``:56-58``, ``:73``), and the assignment rather
+    what ``led`` and ``nud`` do (``:54-56``, ``:81-83``), and the assignment rather
     than a constructor is deliberate: ``Operator`` is built inside a closure in
     ``infix``/``prefix`` and its signature is not part of anything we may rely on.
 
@@ -609,7 +609,7 @@ def _decode_condition(condition, resolve_ref=None):
     if condition.first is None:
         raise LookupError(
             f"{condition!r} is an operator with no `first` operand; every "
-            "smartif operator sets one (`nud` at smartif.py:73, `led` at :56-58)"
+            "smartif operator sets one (`nud` at smartif.py:81, `led` at :54)"
         )
     try:
         make = smartif.OPERATORS[condition.key]

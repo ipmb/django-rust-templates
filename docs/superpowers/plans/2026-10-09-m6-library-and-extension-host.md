@@ -1347,20 +1347,28 @@ author-drift ratchet: it is the one thing in the project that checks a
 applied. That is a different justification from the one this task was first
 written with, and a stronger one.
 
-**Two defect kinds, not one.** Sampling the tree found both:
+**Sampling found more than one kind.** Four wrong numbers, each verified and each
+fixed at every site (see below for the full list, including two more found while
+fixing them):
 
-| where | prose says the line is | the line actually is | kind |
-|---|---|---|---|
-| `crates/template-py/src/lib.rs` | `defaulttags.py:1037` = `condition.eval(context)` | `{% for date in days %}`; the call is at `:326` | wrong number |
-| same file | `defaulttags.py:1035` = `IfNode.render` | `<h1>Archive for {{ year }}</h1>`; the class opens at `:307` | wrong number |
-| `crates/template-py/src/filters.rs` | `defaultfilters.py:383` = `nofollow=True` | `@stringfilter`; the call is at `:386` | wrong number |
-| `crates/template-py/src/lib.rs` | `smartif.py:73` = `smartif.OPERATORS` | `"""`; `OPERATORS` is at `:98` | wrong number |
-| `crates/template-core/src/filters/host.rs` | `defaultfilters.py:996` = `type(e).__name__` | the number is right and the line reads `e.__class__.__name__` | **misquote** |
+| where | prose says the line is | the line actually is |
+|---|---|---|
+| `crates/template-py/src/lib.rs` | `defaulttags.py:1037` = `condition.eval(context)` | `{% for date in days %}`; the call is at `:326` |
+| `crates/template-core/src/parser/tags/if.rs` | `defaulttags.py:1035` = the pair unpack | `<h1>Archive for {{ year }}</h1>`; it is at `:323` |
+| `crates/template-py/src/filters.rs` | `defaultfilters.py:383` = `nofollow=True` | `@stringfilter`; the call is at `:386` |
+| `crates/template-py/src/lib.rs` | `smartif.py:73` = `self.second = None` | the `prefix` docstring opens at `:72`; the assignment is at `:83` |
 
-All five measured on the pinned tree. The fifth is the reason the manifest's
-snippet must be the code **the prose is about** rather than the text at the cited
-line: seeding the snippet from the cited line makes the check circular and
-cannot find any of these five. Authored snippets find both kinds with one rule.
+A *fifth* kind was hypothesised from the same sample — the number right and the
+quoted source text wrong — and **it did not survive checking**: the one instance
+(`defaultfilters.py:996`) has the right number, and the `type(e).__name__` quote
+beside it belongs to a different claim. Recorded because the triage must be read
+row by row, and because a kind asserted before it is confirmed is the error this
+task exists to stop.
+
+What the misquote kind *would* change if it exists: the manifest's snippet must be
+the code **the prose is about** rather than the text at the cited line — seeding
+from the cited line cannot find any of the four above. Authored snippets find both
+kinds with one rule.
 
 **And the size is not fourteen.** Measured over `crates python tests docs .review`,
 with the metric named because two of us counted this differently and both were
@@ -1383,9 +1391,50 @@ qualified citations like `django/template/base.py:615` and the tree's own files.
 What that triage can reach: of 834 in-scope occurrences, **283 have a code span
 quoted within 200 characters and 228 of those do not appear at the cited line.**
 Most of the 228 are the heuristic firing on an unrelated nearby backtick, not a
-defect — but the five above are in it, and it is the list to read first, because
+defect — but the four below are in it, and it is the list to read first, because
 it is ordered by suspicion rather than by file. **415 anchors read cold is the
 alternative.**
+
+**And a third form the regex above cannot see at all.** The tree also cites Django
+by a bare line number when the file is implied by context — `` (`:1035`) ``,
+`` (``:56-58``, ``:73``) `` — meaning "the file the surrounding comment is about".
+Measured: **360 occurrences, 241 distinct**, concentrated in `filters/host.rs`
+(59), `filter_cases.py` (47), `filters/floatformat.rs` (46). Spot-checking
+`parser/tags/if.rs`'s eleven, whose subject is `defaulttags.py`, found **four
+wrong of six readable**: `:1001-1006` for the `elif` loop (the loop is at
+`:1000-1007`), `:1024-1025` for `IfNode.__init__` (`:1024` is `def ifchanged`),
+`:1011` for `conditions_nodelists.append((None, nodelist))` (`:1009`) — and one
+that was right (`:995-996`, `:1002-1003`).
+
+So the shorthand pocket is **both larger and dirtier** than the named form.
+The decision this forces, and it is the plan's call rather than the tool's:
+
+**Name the file at every anchor; migrate the shorthand.** A tool cannot resolve
+":1035" without a heuristic for "which file is this comment about", and a
+heuristic here reproduces the failure it exists to catch. Once every anchor names
+its file, one regex sees the whole corpus. The migration is mechanical for the
+concentrated files (the implied file is stated once per doc comment) and the
+checker **fails on an unresolvable shorthand**, which is what stops the
+convention growing back.
+
+**Four wrong anchors found and fixed in this revision**, all measured against the
+pinned tree, and each fixed at every site rather than at the one that was
+sampled: `condition.eval(context)` cited as `defaulttags.py:1037` is at `:326`
+(two sites); the `(condition, nodelist)` unpack cited as `:1035` is at `:323`
+(three sites, two of them shorthand); `nud`'s `self.second = None` cited as
+`smartif.py:73` is at `:83`, `led`'s `self.first = left` cited as `:56-58` is at
+`:55` (six sites); `nofollow=True` cited as `defaultfilters.py:383`, `:395` is at
+`:386`, `:399`. Plus two found while fixing those: `defaulttags.py:996` for the
+tuple literal (it is `:995`; `:996` is `token = parser.next_token()`) and
+`:995` for the `TemplateIfParser` call (it is `:993`).
+
+**A sampled row that turned out to be the heuristic, not a defect**, recorded
+because it is how the triage must be read: `defaultfilters.py:996` was listed as a
+misquote — the tree beside it quotes `type(e).__name__` and the line reads
+`e.__class__.__name__` — but the anchor is right and the quote belongs to a
+different claim (what `pprint` prints, `crates/template-py/src/filters.rs:649`).
+**Every row is judged, not applied.** Whether the misquote *kind* exists at all is
+now open: no confirmed instance yet.
 
 **Files:**
 - Create: `scripts/check_python_anchors.py`
@@ -1533,6 +1582,12 @@ AMBIGUOUS = {
 # (`` `django/template/base.py:615` ``, `` `_impl/parser.py:210` ``). 47 of the
 # corpus is the second form, and 5 of those 47 name our own files.
 ANCHOR_RE = re.compile(r"`([a-z_0-9/]+\.py):(\d+)(?:-(\d+))?`")
+# The third form — a bare `` `:1035` `` meaning "the file this comment is about" —
+# is matched only to be *rejected*: 360 occurrences today, and 4 of the 6 readable
+# ones in `parser/tags/if.rs` are wrong. A tool cannot resolve it without guessing
+# the implied file, and guessing here reproduces the defect. Naming the file is
+# the migration; this regex is what stops the convention growing back.
+SHORTHAND_RE = re.compile(r"`:(\d+)(?:-(\d+))?`")
 TREE_ROOTS = ["crates", "python", "tests", "docs", ".review"]
 OUR_OWN = {"_shim.py", "differential.py", "parser.py", "test_materialise.py", "test_parser_parity.py"}
 ```

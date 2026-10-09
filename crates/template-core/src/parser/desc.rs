@@ -121,9 +121,9 @@ pub enum AttrValue {
     /// A **tuple** of values, and the container type is the whole point.
     ///
     /// `{% if %}` is the only producer: `IfNode.conditions_nodelists` is a list
-    /// of `(condition, nodelist)` **tuples** (`defaulttags.py:996`), `do_if`
+    /// of `(condition, nodelist)` **tuples** (`defaulttags.py:995`), `do_if`
     /// builds them with tuple literals, and `IfNode.render` unpacks them
-    /// (`:1035`). A list would render identically and be a different node — the
+    /// (`:323`). A list would render identically and be a different node — the
     /// same argument `IfChangedNode._varlist` is pinned by — and the parity
     /// suite can tell the two apart, because `describe`'s tuple arm carries a
     /// `"tuple"` marker the list arm deliberately does not have.
@@ -190,8 +190,8 @@ pub enum AttrValue {
     /// **The tree, and not a handle to one, because `template-core` is what
     /// builds it.** `{% if %}`'s condition is the one attribute whose value is
     /// a parse *tree*: `do_if` runs `TemplateIfParser(parser, bits).parse()`
-    /// (`defaulttags.py:995`) and `IfNode.render` then calls
-    /// `condition.eval(context)` on the result (`:1037`). Python therefore needs
+    /// (`defaulttags.py:993`) and `IfNode.render` then calls
+    /// `condition.eval(context)` on the result (`:326`). Python therefore needs
     /// real `smartif` nodes at render time, and the descriptor is how the shape
     /// gets there.
     ///
@@ -226,8 +226,8 @@ pub enum IfConditionDesc {
     /// An `infix`/`prefix` `Operator` instance, with its two operands.
     ///
     /// `second` is `None` for a prefix operator: `nud` sets
-    /// `self.second = None` (`smartif.py:73`) where `led` sets both
-    /// (`:56-58`). Emitted rather than omitted so the materialiser assigns it,
+    /// `self.second = None` (`smartif.py:83`) where `led` sets both
+    /// (`:55-56`). Emitted rather than omitted so the materialiser assigns it,
     /// which is what Django does.
     Operator {
         /// One of `smartif.OPERATORS`' thirteen keys — `and`, `not in`, `==`, …

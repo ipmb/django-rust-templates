@@ -382,8 +382,8 @@ impl IfParser {
     /// Called once per branch by `do_if`, after [`Self::parse`] has succeeded —
     /// so every child an operator names is present, and the two `expect`s below
     /// are statements about `nud`/`led` rather than hopes. `nud` gives a prefix
-    /// operator a `first` and explicitly `None` for `second` (`smartif.py:73`);
-    /// `led` gives an infix operator both (`:56-58`). A `TokenBase.led` or
+    /// operator a `first` and explicitly `None` for `second` (`smartif.py:81-83`);
+    /// `led` gives an infix operator both (`:55-56`). A `TokenBase.led` or
     /// `TokenBase.nud` fall-through never returns, so nothing else reaches here.
     ///
     /// The literals are `Compiled` because `IfParser::template` is the only

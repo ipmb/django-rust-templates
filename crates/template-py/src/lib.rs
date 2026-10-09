@@ -488,7 +488,7 @@ impl NodeSlot {
 ///
 /// The one attribute on the wire whose value is a parse **tree**, and the reason
 /// is that its leaves are Python objects: `IfNode.render` calls
-/// `condition.eval(context)` on each branch (`defaulttags.py:1037`), an
+/// `condition.eval(context)` on each branch (`defaulttags.py:326`), an
 /// `Operator`'s `eval` recurses through its own `first`/`second`, and a
 /// `TemplateLiteral`'s calls `self.value.resolve(context, ignore_failures=True)`
 /// (`:917-918`). So the shell rebuilds real `smartif` objects and this is the
@@ -498,7 +498,7 @@ impl NodeSlot {
 /// the materialiser dispatches on `kind` and both halves are needed at once by
 /// nothing. `key`/`first`/`second` are the operator's — `key` is one of
 /// `smartif.OPERATORS`' thirteen, and `second` is `None` for the prefix `not`,
-/// which `nud` sets (`smartif.py:73`). `text`/`expression` are the literal's:
+/// which `nud` sets (`smartif.py:81-83`). `text`/`expression` are the literal's:
 /// `TemplateLiteral.text` is what `display()` returns and `expression` is the
 /// **host's** `FilterExpression`, by handle into the same table `NodeRef`
 /// indexes.
@@ -636,7 +636,7 @@ fn attr_value_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
         AttrValue::Tuple(items) => {
             // A real `tuple`, and the container type is the contract:
             // `IfNode.conditions_nodelists` holds `(condition, nodelist)` pairs
-            // that `IfNode.render` *unpacks* (`defaulttags.py:1035`), and the
+            // that `IfNode.render` *unpacks* (`defaulttags.py:323`), and the
             // parity suite can tell a list from a tuple because `describe`'s
             // tuple arm carries a marker. Recursed, for the `List` arm's reason.
             let items: Vec<Py<PyAny>> = items
@@ -653,7 +653,7 @@ fn attr_value_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
 ///
 /// Recursive, and the recursion is the shape: an `Operator` is two more
 /// conditions and a `TemplateLiteral` is a leaf. `first` is `Some` on every
-/// operator — `nud` and `led` both set it (`smartif.py:56-58`, `:73`) — and the
+/// operator — `nud` and `led` both set it (`smartif.py:54-56`, `:81-83`) — and the
 /// `expect` says so rather than emitting a `None` the shell would turn into an
 /// `AttributeError` three frames away.
 fn if_condition_to_py(py: Python<'_>, tree: &IfConditionDesc) -> PyResult<Py<PyAny>> {
