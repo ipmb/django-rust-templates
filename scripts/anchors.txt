@@ -21,8 +21,8 @@ parser/mod.rs:434-439	crates/template-core/src/parser/mod.rs	434	439	token.or_el
 crates/template-core/src/parser/mod.rs:496	crates/template-core/src/parser/mod.rs	496	-	pub fn extend_nodelist(	-
 parser/mod.rs:502	crates/template-core/src/parser/mod.rs	502	-	if node.must_be_first && nodelist.contains_nontext {	-
 resolve.rs:28	crates/template-core/src/parser/resolve.rs	28	-	pub enum Step {	-
-parser/resolve.rs:147	crates/template-core/src/parser/resolve.rs	147	-	pub trait LookupTarget {	-
-resolve.rs:244	crates/template-core/src/parser/resolve.rs	244	-	pub enum LookupOutcome {	-
+parser/resolve.rs:156	crates/template-core/src/parser/resolve.rs	156	-	pub trait LookupTarget {	-
+resolve.rs:253	crates/template-core/src/parser/resolve.rs	253	-	pub enum LookupOutcome {	-
 extends.rs:71	crates/template-core/src/parser/tags/extends.rs	71	-	if !nodelist.get_nodes_by_type("ExtendsNode").is_empty() {	-
 tags/mod.rs:183	crates/template-core/src/parser/tags/mod.rs	183	-	Ok(NodeDesc::with_nodelist(	-
 parser/tags/mod.rs:198	crates/template-core/src/parser/tags/mod.rs	198	-	fn standin_first	-
@@ -144,6 +144,7 @@ base.py:959	django/template/base.py	959	-	for bit in self.lookups:	-
 base.py:960-992	django/template/base.py	960	992	try:  # dictionary lookup	)  # missing attribute
 base.py:963	django/template/base.py	963	-	hasattr(type(current), "__getitem__")	-
 base.py:968	django/template/base.py	968	-	except (TypeError, AttributeError, KeyError, ValueError, IndexError):	-
+base.py:969-992	django/template/base.py	969	992	try:  # attribute lookup	)  # missing attribute
 base.py:972-976	django/template/base.py	972	976	if isinstance(current, BaseContext) and getattr(	current = getattr(current, bit)
 base.py:972	django/template/base.py	972	-	if isinstance(current, BaseContext) and getattr(	-
 base.py:977	django/template/base.py	977	-	except (TypeError, AttributeError):	-

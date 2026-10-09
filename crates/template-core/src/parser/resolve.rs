@@ -128,17 +128,26 @@ pub struct PendingFailure;
 
 /// What the resolver needs from a context, supplied by the host.
 ///
-/// Eleven methods, and the split is the point. **Seven are one per predicate
-/// Django actually evaluates**, and collapsing any two of them merges two of
-/// Django's arms, which is wrong in a case this milestone measured. Three more
-/// are the callable arm's outcomes — `call_arm`, `call` and `string_if_invalid`
-/// — which are not predicates but the three things Django's arm can do to the
-/// value. The last is `node`, the handle the loop ended on.
+/// Eleven methods, and the split is the point. **Three attempt a lookup** —
+/// `get_item`, `get_attr` and `get_index` *are* Django's `current[bit]`,
+/// `getattr(current, bit)` and `current[int(bit)]`, in that order, and each
+/// returns a [`Step`] rather than a bool because the attempt has already
+/// happened. **Four are predicates read around those attempts** —
+/// `has_getitem`, `context_probes_attribute`, `is_context`, `in_dir` — and
+/// collapsing any two of those merges two of Django's arms, which is wrong in a
+/// case this milestone measured. **Three are the callable arm's outcomes** —
+/// `call_arm`, `call` and `string_if_invalid` — which are not predicates but
+/// the three things Django's arm can do to the value. The last is `node`, the
+/// handle the loop ended on.
 ///
 /// The count is written down because it went stale: M8 added `call` and
 /// `string_if_invalid` in Tasks 1 and 2 and this line still said "nine" until
 /// the close-out read it, which is the same failure as a name in a code block
-/// that outlives its referent.
+/// that outlives its referent. **The split then went wrong in that same edit**:
+/// the first fix called all seven non-callable methods predicates, which loses
+/// the one distinction the trait exists to carry — which of Django's three
+/// tries a method is — and it survived a read-through because seven is a
+/// number. Corrected by review, checked against `base.py:969-992`.
 ///
 /// There is no `repr` here, and its absence is a decision: Django formats the
 /// missing-key message lazily in `VariableDoesNotExist.__str__`, so the host

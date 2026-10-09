@@ -38,8 +38,21 @@ own" — the answer is `tests/test_m8_side_effects.py`, and it is a counter.
 
 The trait did not move; two methods were added to it, and no new trait was
 introduced. `LookupTarget` (`parser/resolve.rs`) went from nine methods to
-**eleven**: seven predicates Django evaluates, the callable arm's three outcomes
-(`call_arm`, `call`, `string_if_invalid`), and `node`.
+**eleven**: the three lookup *attempts* (`get_item`, `get_attr`, `get_index`,
+each returning a `Step` because the attempt has already happened), the four
+predicates read around them (`has_getitem`, `context_probes_attribute`,
+`is_context`, `in_dir`), the callable arm's three outcomes (`call_arm`, `call`,
+`string_if_invalid`), and `node`.
+
+**That split was wrong in the first close-out, and review caught it.** The
+corrected doc comment called all seven non-callable methods "predicates"; three
+of them perform Django's three tries and test nothing, and folding them into the
+booleans loses the one distinction the trait exists to carry — which of
+Django's `current[bit]` / `getattr(current, bit)` / `current[int(bit)]` a method
+*is*. It survived a read-through because "seven" is a number: the count was
+right and the sentence around it was not. Same failure as the stale "nine",
+one level down, and the second time this milestone a true number hid a false
+claim about it.
 
 What M8 wired, per Django's path. Five paths reach a substitution or the
 handler; two are M8's, and the other three already shipped.
@@ -101,16 +114,26 @@ anything observes it** — a mutation whose only effect is to *cause* a failure 
 invisible, because the stash absorbs it.
 
 **Nothing forces a `Promise`.** With no forcing site on the resolve path, the
-contract is discharged by *not adding* one. Measured, both proxies: `str(proxy)
-== proxy` is `True` and `str(proxy) is proxy` is `False`, so the gate asserts
-**identity**; an equality row would pass on exactly the resolver it exists to
-refuse, and the mutation's own failure message says so —
-`AssertionError: 'lazy & value' is not 'lazy & value'`.
+contract is discharged by *not adding* one — and the evidence is the **contract,
+not an enumeration of Django's forcing sites**, which is the correction review
+made to this paragraph. Enumerating two sites and concluding "nothing forces"
+is an exhaustiveness claim about Django's source, this project's worst class of
+error; measuring the output is not.
+`m8_measure_promise_contract.py` runs one lazy proxy through all five shapes the
+resolve path has — a context value, an attribute, a dict key, an integer index,
+and **a called method's return** (the arm M8 added, the likeliest place for a
+forcing site to have crept in) — and all five return the **identical object**.
+The gate asserts **identity**, because `str(proxy) == proxy` is `True` and
+`str(proxy) is proxy` is `False`: an equality row would pass on exactly the
+resolver it exists to refuse, and the mutation's own failure message says so —
+`AssertionError: 'lazy & value' is not 'lazy & value'`. A third forcing site
+elsewhere cannot change either result.
 
 ## What was falsified
 
-Five claims, each by measurement rather than by argument, and the count is the
-point — this project's worst class of error is an exhaustiveness claim.
+Six claims, each by measurement rather than by argument, and the count is the
+point — this project's worst class of error is an exhaustiveness claim. The
+sixth is this record's own, added by review after the close-out commit.
 
 1. **This plan's Goal, "force a `Promise` where Django forces it."** Falsified by
    Task 3 / `m8_measure_promise.py`: no forcing site is on the resolve path, so
@@ -137,6 +160,16 @@ point — this project's worst class of error is an exhaustiveness claim.
    Found by the anchor gate while seeding this milestone's citations (§D2/§D3);
    deliberately **not** corrected in `.review/m8-measurements/m8_measure_promise.py`,
    which is a dated record excluded from the scan.
+6. **This record's own first fix of the `LookupTarget` count.** "Seven
+   predicates, three callable-arm outcomes, and `node`" — the *number* eleven was
+   right and the claim about it was wrong, because three of the seven perform
+   Django's three lookup attempts and test nothing. Found in review, by reading
+   the trait rather than the count, and it is the second time in this milestone
+   that a true number hid a false sentence about it. The same review produced one
+   **strengthening** rather than a falsification: the `Promise` claim now rests
+   on five measured shapes of the resolve path's output instead of an
+   enumeration of Django's forcing sites, because an enumeration is an
+   exhaustiveness claim and this row's whole purpose is to not be one.
 
 ## The gate's shape, and why the pinned suite cannot be it
 
@@ -190,7 +223,7 @@ that is only implied is one the next session re-derives from scratch or assumes.
 | owed | who | why it is not M8's |
 |---|---|---|
 | `annotate_exception` — `Node.render_annotated`'s `_culprit_node`/`template_debug` protocol (`base.py:1044-1068`) | M9 | goes live only when `setup_test_environment` routes the suite through `NodeList.render`; nothing supplies it today (spec §5.2, *Open obligations*). It is stateful across nested renders and keyed on the exception's **identity**, so it cannot be reconstructed after the fact |
-| `render_value_in_context`'s sequence — `template_localtime` → `localize` → the autoescape branch (`base.py:1123-1136`), with `issubclass(type(value), str)` as the *conversion* test | M9 | it is on the render path, which is Django's until M9 interposes `base`. Recon obligation 5, and **no M8 task delivered it** — this row is where that is said out loud |
+| `render_value_in_context`'s sequence — `template_localtime` → `localize` → the autoescape branch (`base.py:1123-1136`), with `issubclass(type(value), str)` as the *conversion* test | M9 | it is on the render path, which is Django's until M9 interposes `base`. Recon obligation 5, and **no M8 task could have delivered it** — the site is a module-level function in `base.py`, uninterposed until M9, so there was nothing of ours to fill; this row is where that is said out loud |
 | the forced-vs-unforced `Promise` distinction | M9 | latent today: Task 3 measured that consumers **do** distinguish (the 57-filter sweep) but that no render row can see it, because the render path is Django's. The identity gate at `_native.resolve` is what holds the contract until then |
 
 **The plan's own handoff table cited `base.py:1044-1070` for `render_annotated`,
@@ -208,14 +241,14 @@ the milestone's status, its measured claim (the substitution is an assignment
 inside the bit loop), its gate and the numbers, in the M3/M7 rows' form — the
 same edit M7's close-out made to its own row. §5.2's *Open obligations* gained
 the second owed item: `render_value_in_context`'s sequence, which the recon
-recorded as obligation 5 and **which no M8 task delivered**, so a reader at M9
+recorded as obligation 5 and **which no M8 task could have delivered** (its site is in an uninterposed module), so a reader at M9
 meets it as an obligation rather than re-deriving it. The vacuity rule's scope
 paragraph, which said M8's row "owes that second question an answer of its own",
 now records the answer it got.
 
 ## The re-run, at close-out
 
-**2026-10-09, against `.django/` @ 6.0.9.** All eight scripts in
+**2026-10-09, against `.django/` @ 6.0.9.** All nine scripts in
 `.review/m8-measurements/`, each as
 `.venv/bin/python -I .review/m8-measurements/<name>.py`. Every one ran; the
 figures this document rests on, quoted as printed:
@@ -235,6 +268,9 @@ m8_measure_callarm.py    no-arg -> 'NO_ARGS'; needs one arg -> the invalid value
 m8_measure_promise.py    all 8 render rows: same
                          sweep: gettext_lazy 57 filters (21 skipped), 3 differ
                                 lazy->SafeString 57 filters (21 skipped), 8 differ
+m8_measure_promise_contract.py
+                         p / o.attr / d.k / lst.0 / o.meth:
+                         isinstance Promise: True, is-same-object: True  (5 shapes, 0 forced)
 m8_measure_escape.py     register['escape'] is df.escape_filter: True / is html_escape: False
 m8_measure_filter_names.py  registered filters: 57; attribute is a DIFFERENT object: 6
 m8_measure_baseline.py   _native exposes 26 public names; §5.2's six: resolve True, the rest False
@@ -261,21 +297,23 @@ which is recon §3's "opaque by design" and not a defect.
 `bash scripts/check.sh` → `all checks passed`, `Ran 1547 tests … OK
 (skipped=6)`, `25 module(s) still served by Django`, clippy clean,
 `cargo test -p template-core` **682 passed**. The anchor gate:
-`1134 anchor occurrence(s) checked, 651 cited of 651 manifest entr(ies), 0
+`1137 anchor occurrence(s) checked, 652 cited of 652 manifest entr(ies), 0
 failure(s)`. M8 adds no shim coverage, so none of the three suite numbers may
 move — and none did.
 
-**The anchor manifest grew 640 → 651 rows across this milestone, and moved five
-of them** — eleven net new rows is one metric and five moves is another, and they
-are not the same eleven. The moves: three in Task 1 (`parser/resolve.rs:107→139`,
-`resolve.rs:170→236`, `template-py/src/lib.rs:117→119`) and two at close-out
-(`parser/resolve.rs:139→147`, `resolve.rs:236→244`).
+**The anchor manifest grew 640 → 652 rows across this milestone, and moved seven
+of them** — twelve net new rows is one metric and seven moves is another, and
+they are not the same twelve. The moves: three in Task 1 (`parser/resolve.rs:107→139`,
+`resolve.rs:170→236`, `template-py/src/lib.rs:117→119`), two at the first
+close-out (`parser/resolve.rs:139→147`, `resolve.rs:236→244`), and two more when
+review corrected the trait's split (`parser/resolve.rs:147→156`,
+`resolve.rs:244→253`).
 
-**The last two moves are the interesting ones, and they are why the gate earns
+**The last four moves are the interesting ones, and they are why the gate earns
 its place.** They were caused by correcting the `LookupTarget` doc comment's
 stale "nine methods, one per predicate Django actually evaluates" — the count was
 true before M8 and false after Task 1 added two methods, and nobody updated it
-when they added them. The corrected comment adds nine lines above the trait, so
+when they added them. The corrected comment adds lines above the trait, so
 `pub trait LookupTarget {` moved 139 → 147 and `pub enum LookupOutcome {` moved
 236 → 244, and the gate failed on both by comparing the recorded *snippet*
 against the cited line rather than the number alone. **A comment fix is a
