@@ -157,6 +157,7 @@ defaultfilters.py:403-407	django/template/defaultfilters.py	403	407	wordcount	-
 defaultfilters.py:404	django/template/defaultfilters.py	404	-	@stringfilter	-
 defaultfilters.py:410-414	django/template/defaultfilters.py	410	414	wordwrap	-
 defaultfilters.py:417-421	django/template/defaultfilters.py	417	421	-	-
+defaultfilters.py:417-438	django/template/defaultfilters.py	417	438	def ljust(value, arg):	return f"{value:^{width}}"
 defaultfilters.py:424-428	django/template/defaultfilters.py	424	428	-	-
 defaultfilters.py:431-438	django/template/defaultfilters.py	431	438	center	-
 defaultfilters.py:441-449	django/template/defaultfilters.py	441	449	-	-

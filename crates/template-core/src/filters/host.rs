@@ -198,7 +198,8 @@ pub trait FilterHost {
     /// (`defaultfilters.py:46`), and `unordered_list` does it again per item.
     fn to_str(&self, value: &Value) -> Result<String, Error>;
     /// `int(v)` — `get_digit` (`defaultfilters.py:757-776`), `divisibleby`
-    /// (`defaultfilters.py:854-858`) and the three padding filters (`:417-430`).
+    /// (`defaultfilters.py:854-858`) and the three padding filters
+    /// (`defaultfilters.py:417-438`).
     /// Python's `int` accepts `" 5 "`, `"5_0"`
     /// and `"٠٥"`, and is arbitrary-precision, so this is not a parse.
     fn to_int(&self, value: &Value) -> Result<IntValue, Error>;
