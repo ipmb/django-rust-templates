@@ -22,11 +22,11 @@ base.py:561-564	django/template/base.py	561	564	command = token.contents.split()
 base.py:564-569	django/template/base.py	564	569	-	-
 base.py:568	django/template/base.py	568	-	self.prepend_token(token)	-
 base.py:573	django/template/base.py	573	-	(command, token)	-
-base.py:583-585	django/template/base.py	583	585	-	-
+base.py:583-585	django/template/base.py	583	585	except Exception as e:	raise self.error(token, e)
 base.py:585	django/template/base.py	585	-	-	-
 base.py:611	django/template/base.py	611	-	-	-
 base.py:615	django/template/base.py	615	-	node.token = token	-
-base.py:619-630	django/template/base.py	619	630	-	-
+base.py:619-630	django/template/base.py	619	630	def error(self, token, e):	return e
 base.py:632-648	django/template/base.py	632	648	def invalid_block_tag(self, token, command, parse_until=None):	-
 base.py:651	django/template/base.py	651	-	-	-
 base.py:668-670	django/template/base.py	668	670	def add_library(self, lib):	self.filters.update(lib.filters)
@@ -241,7 +241,7 @@ defaultfilters.py:651-665	django/template/defaultfilters.py	651	665	-	-
 defaultfilters.py:651-666	django/template/defaultfilters.py	651	666	return value[slice(*bits)]	return value  # Fail silently.
 defaultfilters.py:669-737	django/template/defaultfilters.py	669	737	def unordered_list(value, autoescape=True):	return mark_safe(list_formatter(value))
 defaultfilters.py:708-714	django/template/defaultfilters.py	708	714	if isinstance(next_item, (list, tuple, types.GeneratorType)):	yield item, next_item
-defaultfilters.py:745-754	django/template/defaultfilters.py	745	754	-	-
+defaultfilters.py:745-754	django/template/defaultfilters.py	745	754	def add(value, arg):	return ""
 defaultfilters.py:757-775	django/template/defaultfilters.py	757	775	get_digit	-
 defaultfilters.py:783-794	django/template/defaultfilters.py	783	794	-	-
 defaultfilters.py:797-808	django/template/defaultfilters.py	797	808	-	-

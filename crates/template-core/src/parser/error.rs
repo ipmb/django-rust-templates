@@ -7,20 +7,20 @@ use crate::parser::desc::TokenDesc;
 /// The taxonomy is not decoration. Django's filters catch *specific* classes and
 /// let the rest escape — `first` catches `IndexError` and lets a generator's
 /// `TypeError` out (`defaultfilters.py:602-608`), `divisibleby` has no `try` at
-/// all so a `ZeroDivisionError` propagates (`:854-858`), `add` catches bare
-/// `Exception` (`:745-754`), `get_digit` catches `ValueError` and returns the
-/// original value (`:757-776`) — so "did it raise, and with what class" is part
-/// of each body's observable behaviour. A seam that flattened every failure to
-/// one error type would make those branches unimplementable, and the corpus could
-/// not pin them.
+/// all so a `ZeroDivisionError` propagates (`defaultfilters.py:854-857`), `add`
+/// catches bare `Exception` (`defaultfilters.py:745-754`), `get_digit` catches
+/// `ValueError` and returns the original value (`defaultfilters.py:757-775`) — so
+/// "did it raise, and with what class" is part of each body's observable
+/// behaviour. A seam that flattened every failure to one error type would make
+/// those branches unimplementable, and the corpus could not pin them.
 ///
 /// **The six are the classes the 57 catch, and they are not the whole of what can
-/// arrive.** `pprint` (`:990-996`) catches bare `Exception` and puts
-/// `e.__class__.__name__` **into the string it returns**, so the class name is
-/// part of that filter's *output* for any class at all — a `RecursionError` from
-/// `pformat` has to render as `RecursionError`, and a closed six could not say
-/// so. Hence [`PyErrorKind::Other`], which carries Python's `__name__`. It is a
-/// seventh variant rather than a second `class: String` field beside `kind`,
+/// arrive.** `pprint` (`defaultfilters.py:990-996`) catches bare `Exception` and
+/// puts `e.__class__.__name__` **into the string it returns**, so the class name
+/// is part of that filter's *output* for any class at all — a `RecursionError`
+/// from `pformat` has to render as `RecursionError`, and a closed six could not
+/// say so. Hence [`PyErrorKind::Other`], which carries Python's `__name__`. It is
+/// a seventh variant rather than a second `class: String` field beside `kind`,
 /// because two representations of one fact can disagree, and `Other` cannot.
 ///
 /// The named variants are spelled exactly as Python names the classes, and
@@ -76,11 +76,11 @@ pub struct FilterHostError {
 ///
 /// The tag seam's twin of [`FilterHostError`], and boxed for the same reason
 /// ([`ErrorKind::FilterHost`] records the measurement). It is a struct rather
-/// than a bare `String` because the class is part of the observable behaviour
-/// and was being thrown away: Django's `Parser.parse` re-raises the **same
-/// object** after `Parser.error` attaches a token (`base.py:583-585`,
-/// `:619-630`), so a tag whose compile function raises `TypeError` leaves the
-/// parse as a `TypeError`. Measured on the pinned tree:
+/// than a bare `String` because the class is part of the observable behaviour and
+/// was being thrown away: Django's `Parser.parse` re-raises the **same object**
+/// after `Parser.error` attaches a token (`base.py:583-585`, `base.py:619-630`),
+/// so a tag whose compile function raises `TypeError` leaves the parse as a
+/// `TypeError`. Measured on the pinned tree:
 ///
 /// ```text
 /// Engine(libraries={"cls": "lib"}).from_string("{% load cls %}{% boom %}")
