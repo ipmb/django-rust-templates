@@ -133,6 +133,33 @@ and, at verbosity 2, the six by name:
 The identities match §2's enumeration exactly — which is the point: the
 enumeration is *right*, and being right is not the same as being enforced.
 
+#### The count alone is not enough, and this is not a hypothetical
+
+`Ran 1547` and `skipped=6` are independent. Demonstrated, not argued.
+`.django/tests/template_tests/syntax_tests/test_numpy.py:13` guards two real
+tests with `@skipIf(numpy is False, "Numpy must be installed to run these
+tests.")`, and §2:64-65 makes those two in scope by installing Numpy. A skipped
+test is still *collected*, so losing Numpy does not move `Ran` — it moves only
+the skip count. Probed by shadowing the import (`numpy.py` raising `ImportError`
+on `PYTHONPATH`, ahead of the venv's site-packages):
+
+```
+$ PYTHONPATH=<blocker> bash scripts/run_django_suite.sh -v 2 template_tests.syntax_tests.test_numpy
+Ran 2 tests in 0.000s
+OK (skipped=2)          # 'Numpy must be installed to run these tests.'
+
+$ bash scripts/run_django_suite.sh -v 2 template_tests.syntax_tests.test_numpy
+Ran 2 tests in 0.000s
+OK                      # the control: both run
+```
+
+Scaled to the acceptance run that is `Ran 1547 tests … OK (skipped=8)`: the exact
+count §2 pins, with two tests §2 requires to run silently not running. An
+unpinned `Ran 1547` is *satisfied by* the regression it looks like it guards —
+which is why §2:31 says "each of the 6 skips is one of the structural cases
+enumerated below" rather than "6 skip". The count is the weaker half of its own
+clause.
+
 **One thing already exists and nothing knows it.** `scripts/anchors.txt:856-857`
 records snippet pins on two of the six:
 
