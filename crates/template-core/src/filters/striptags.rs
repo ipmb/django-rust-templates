@@ -29,8 +29,8 @@
 //! is `Result` rather than `String` because `MAX_STRIP_TAGS_DEPTH = 50`
 //! (`html.py:44`) has **two** guards and both raise a bare
 //! `django.core.exceptions.SuspiciousOperation` (empty message): the
-//! `long_open_tag_without_closing_re` scan (`:47`, `<[a-zA-Z][^>]{1000,}` with
-//! `>= 50` `<`) and the loop that counts `_strip_once` iterations (`:220-222`,
+//! `long_open_tag_without_closing_re` scan (`html.py:47`, `<[a-zA-Z][^>]{1000,}` with
+//! `>= 50` `<`) and the loop that counts `_strip_once` iterations (`html.py:220-222`,
 //! needing both `<` and `>` present). The body `?`s the seam call so that raise
 //! escapes rather than becoming an answer.
 //!

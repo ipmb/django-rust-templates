@@ -456,6 +456,7 @@ html.py:181-197	django/utils/html.py	181	197	convert_charrefs=False	-
 html.py:210-229	django/utils/html.py	210	229	-	-
 html.py:211-229	django/utils/html.py	211	229	-	-
 html.py:214	django/utils/html.py	214	-	for long_open_tag in long_open_tag_without_closing_re.finditer(value):	-
+html.py:220-222	django/utils/html.py	220	222	while "<" in value and ">" in value:	raise SuspiciousOperation
 html.py:221-222	django/utils/html.py	221	222	if strip_tags_depth >= MAX_STRIP_TAGS_DEPTH:	raise SuspiciousOperation
 html.py:222	django/utils/html.py	222	-	raise SuspiciousOperation	-
 html.py:319	django/utils/html.py	319	-	safe_input = isinstance(text, SafeData)	-
