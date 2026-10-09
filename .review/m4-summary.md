@@ -49,7 +49,7 @@ listed with the task they correct.
 | `4652830`, `81127f7`, `b0fb754`, `e5c9ae7`, `8192192`, `aaab0e1`, `918a5cd` | M4 plan, its two §6/§10.3 corrections, and the design-gate revisions |
 | `854a513`, `ad61ad6` | Task 1 — `pyunicode`'s case mapping, and the generators' `--check` in the gate |
 | `75950aa` | Task 2 — `Value`, `FilterFlags`, `FilterHost` (40 methods), the registry in full |
-| `522ed56`, `cdd2ecf`, `8b73608` | Task 3 — the FFI surface, the corpus harness, the inventory test |
+| `522ed56`, `cdd2ecf`, `8b73608` | Task 3 — the FFI surface, the corpus harness, the inventory test, and the corpus's seed (Step 4b replaces `upper` and `lower`'s stubs with bodies) |
 | `84f12b2`, `1252277`, `ebb5f97` | Task 4 — case and simple text, 6 filters |
 | `eaceab2`, `7d744e7`, `31ae3ad`, `c11a581` | Task 5 — padding and truncation, 8 filters |
 | `3ab831e`, `c0f431b`, `e541da1` | Task 6 — sequences, 9 filters |
@@ -363,10 +363,10 @@ says so.
 - **`713fc19`'s five lazy-helper pairs**: derived and asserted, so the next bump
   moves a test.
 
-## The plan-vs-tree defect rate — fourteen, and one new class
+## The plan-vs-tree defect rate — fifteen, and one new class
 
 M2 classified its seven; M3 added eight and found the broken-snippet class. M4
-adds **fourteen**, and the shape has shifted again: the largest class here is
+adds **fifteen**, and the shape has shifted again: the largest class here is
 **a count produced by a structure nobody asked the structure about.**
 
 | # | Task | What it believed | What is true |
@@ -385,6 +385,19 @@ adds **fourteen**, and the shape has shifted again: the largest class here is
 | 12 | Task 3 | "~90 `CASES` rows" | **64** — nested `context`/`settings` dicts counted as rows |
 | 13 | Task 10 | a row named `date/sentinel-text` | does not exist; it is `date/branch-two-absent-argument` |
 | 14 | Task 10 | `timesince`'s far-future row is a monotonicity property | an **exact equality** (`'0\xa0minutes'`) |
+| 15 | plan | the group-sizing table's Task 4 row: **8** filters, `lower` delegated | Task 4 **dispatched 6** — `upper` and `lower`'s bodies landed a task earlier (Task 3 Step 4b) |
+
+**#15 I found while self-checking this summary, which is the point.** The sizing
+table (§"Tasks 4–10", the artifact a reader uses to check the fan-out) sums to 57
+by counting each filter under its *theme*; the task headings sum to 55 by
+counting what each task *dispatched*. Both numbers are right and neither says
+which question it is answering, so the table lists `lower` under Task 4's
+delegated filters when Task 3 landed it. This is the same defect as #12 one
+layer up — and it is the reason I re-measured every count in this summary rather
+than transcribing the plan's: **a document that reviews a count-error record has
+to expect one in itself.** The plan is left as-is and the reconciliation is
+written here, because a plan edited during its own milestone review makes the
+review target move.
 
 **#12 is the eleventh count dispute in this project and the shape is now
 boring, which is the point**: a number derived from a structure nobody asked the
@@ -489,10 +502,10 @@ the `phone2numeric` ruling's first leg is the *reachable* one.
 5. **`FilterHost::now()` has no caller.** The seam carries a method the filter
    layer must not use, and its doc now says so. Should it be removed and re-added
    when `{% now %}` needs it, or kept with the warning?
-6. **The fourteen plan defects.** #1/#2/#3 are one class — a count or an
-   interface published from a reading and later moved by a derivation. Is that a
-   process failure with a fix, or the irreducible cost of planning before
-   measuring?
+6. **The fifteen plan defects.** #1/#2/#3 are one class — a count or an
+   interface published from a reading and later moved by a derivation — and #15
+   is #12 one layer up. Is that a process failure with a fix, or the irreducible
+   cost of planning before measuring?
 
 Ask for executable findings where you can — a command and its expected output
 rather than prose. Where a finding is about a number, please name the metric and
