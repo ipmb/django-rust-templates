@@ -210,6 +210,7 @@ defaultfilters.py:840-843	django/template/defaultfilters.py	840	843	-	-
 defaultfilters.py:846-851	django/template/defaultfilters.py	846	851	default_if_none	-
 defaultfilters.py:854-858	django/template/defaultfilters.py	854	858	divisibleby	-
 defaultfilters.py:860-891	django/template/defaultfilters.py	860	891	yesno	-
+defaultfilters.py:878	django/template/defaultfilters.py	878	-	arg = gettext("yes,no,maybe")	-
 defaultfilters.py:879	django/template/defaultfilters.py	879	-	bits = arg.split(",")	-
 defaultfilters.py:899-939	django/template/defaultfilters.py	899	939	filesizeformat	-
 defaultfilters.py:905-907	django/template/defaultfilters.py	905	907	bytes_ = int(bytes_)	-

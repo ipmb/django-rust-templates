@@ -2986,8 +2986,9 @@ CASES: list[dict] = [
         "expected": "1,000.0\xa0KB",
     },
     {
-        # `yesno`'s default argument *is* `gettext("yes,no,maybe")` (`:863`),
-        # so the wave-2 rows with no argument are the harness's second
+        # `yesno`'s default argument *is* `gettext("yes,no,maybe")`
+        # (`defaultfilters.py:878`), so the wave-2 rows with no argument are the
+        # harness's second
         # translation seam: under `en-us` a body that returned `"maybe"` without
         # asking the host is indistinguishable from one that asked.
         "name": "yesno/locale-translates-the-default-arguments",
