@@ -55,6 +55,22 @@ def text_desc(contents, token=None):
     return ("TextNode", (("s", contents),), (), token)
 
 
+def collect_class_names(nodelist_desc):
+    """Every `class_name` in a descriptor tree, nested nodelists included.
+
+    Reads the wire form directly rather than materialising, so it can report
+    what the emitter produced even when the registry cannot build it.
+    """
+    names = set()
+    stack = [nodelist_desc]
+    while stack:
+        nodes, _contains_nontext = stack.pop()
+        for class_name, _attrs, nodelists, _token in nodes:
+            names.add(class_name)
+            stack.extend(nodelist for _name, nodelist in nodelists)
+    return names
+
+
 class MaterialiseTests(unittest.TestCase):
     def test_a_text_node_is_a_real_text_node(self):
         nodelist = materialiser.materialise(([TEXT], False))
@@ -244,6 +260,71 @@ class ParseToMaterialiseTests(unittest.TestCase):
         self.assertEqual(debug_node.token.position, (0, 11))
         plain_node = materialiser.materialise(_native.parse("{% debug %}"))[0]
         self.assertIsNone(plain_node.token.position)
+
+    # One template per class the M2 emitter can produce. `ResetCycleNode` is
+    # deliberately absent because both of its paths raise at M2 —
+    # `{% resetcycle %}` wants a prior `{% cycle %}`, and `{% cycle %}` needs
+    # `FilterExpression`, so it is M3's. Measured, not assumed: `{% resetcycle %}`
+    # reports "No cycles in template." and `{% resetcycle foo %}` reports
+    # "Named cycle 'foo' does not exist." Its descriptor shape is pinned by a
+    # unit test in `crates/template-core` instead.
+    EMITTING_TEMPLATES = {
+        "TextNode": "hello",
+        "AutoEscapeControlNode": "{% autoescape on %}x{% endautoescape %}",
+        "CommentNode": "{% comment %}c{% endcomment %}",
+        "CsrfTokenNode": "{% csrf_token %}",
+        "DebugNode": "{% debug %}",
+        "NowNode": '{% now "Y" %}',
+        "SpacelessNode": "{% spaceless %}x{% endspaceless %}",
+        "TemplateTagNode": "{% templatetag openblock %}",
+        "VerbatimNode": "{% verbatim %}v{% endverbatim %}",
+    }
+
+    def test_every_class_the_emitter_produces_is_registered(self):
+        """The registry's real obligation, stated as a test.
+
+        Deliberately *not* a count of Django's `Node` subclasses. A
+        `Node.__subclasses__()` walk measures import state rather than
+        inventory, and it moves as modules load. Measured on the pinned tree in
+        a process that had imported only `django.template.base`, then with
+        settings configured:
+
+            after importing base only       6
+            after django.setup()           42
+              + django.templatetags.tz     45
+              + django.templatetags.cache  46
+              + django.templatetags.l10n   47
+
+        So "34 Node subclasses", a figure this project briefly carried, was an
+        artifact of *when* the walk ran rather than a fact about Django. The
+        reproducible figures are 32 for `django/template/*.py`, 15 for
+        `django/templatetags/*.py`, and 47 for both.
+
+        What the registry owes is narrower and closed: every `class_name` the
+        Rust emitter can produce resolves to a node class. That set is ours, it
+        does not depend on Django's import graph, and it fails for the right
+        reason — a tag whose emitter names a class nobody registered.
+        """
+        registry = set(materialiser.NODE_CLASSES)
+
+        for class_name, source in self.EMITTING_TEMPLATES.items():
+            with self.subTest(class_name=class_name):
+                emitted = collect_class_names(_native.parse(source))
+                self.assertIn(
+                    class_name, emitted, f"{source!r} did not emit {class_name}"
+                )
+                self.assertLessEqual(
+                    emitted,
+                    registry,
+                    f"{source!r} emits {sorted(emitted - registry)}, "
+                    "which the materialiser cannot build",
+                )
+
+        # And the same templates must survive the path a real template takes —
+        # `materialise` is what raises when the registry falls behind.
+        for source in self.EMITTING_TEMPLATES.values():
+            with self.subTest(source=source):
+                materialiser.materialise(_native.parse(source))
 
 
 if __name__ == "__main__":
