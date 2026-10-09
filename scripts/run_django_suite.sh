@@ -46,4 +46,28 @@ if [ "${DJANGO_RUST_TEMPLATES:-1}" = "1" ]; then
 fi
 
 cd "$CHECKOUT/tests"
+
+# The acceptance invocation is `template_tests` alone (`:25`), and it is the one
+# whose transcript §2 pins. It is captured rather than streamed because the six
+# skips are only named at verbosity 2, and printed back on success as the
+# one-line summary a reader wants. Every other label set streams as before.
+if [ "${LABELS[*]}" = "template_tests" ]; then
+  TRANSCRIPT="$(mktemp "${TMPDIR:-/tmp}/django-suite.XXXXXX")"
+  trap 'rm -f "$TRANSCRIPT"' EXIT
+  set +e
+  "$PROJECT_ROOT/.venv/bin/python" runtests.py -v 2 "${LABELS[@]}" \
+    >"$TRANSCRIPT" 2>&1
+  STATUS=$?
+  set -e
+  if [ "$STATUS" -ne 0 ]; then
+    cat "$TRANSCRIPT"
+    exit "$STATUS"
+  fi
+  "$PROJECT_ROOT/.venv/bin/python" "$HERE/assert_suite_outcome.py" "$TRANSCRIPT"
+  # Needed on success as well as failure: `set -e` propagates a refusal, and
+  # without this the script would fall through to the `exec` below and run the
+  # whole suite a second time.
+  exit $?
+fi
+
 exec "$PROJECT_ROOT/.venv/bin/python" runtests.py "${LABELS[@]}"

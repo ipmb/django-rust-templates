@@ -581,6 +581,14 @@
       out of §3 of the design document by the port's own tests rather than restated here or
       in code, so the count cannot reach zero by quietly widening what it excludes.
     </p>
+    <p class="sub" style="margin-top:16px">
+      The run also pins its own outcome. Its transcript is compared, as a whole line, against
+      <code>OK (skipped=6)</code> after exactly 1547 tests, and the six skips are checked
+      <em>by identity</em> — so a swap that keeps the total at six, a skip that appears, or a
+      skip that stops appearing all stop the gate. The line is compared rather than dissected
+      because a run may be green and still not this one: an <code>expectedFailure</code> that
+      fails prints <code>OK (expected failures=1)</code> and exits 0.
+    </p>
   </section>
 
   <footer>

@@ -353,7 +353,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # `test_the_frame_reader_refuses_a_moved_anchor` is its control — the reader
 # parses prose, and its failure arm is the one a green run never reaches.
 # 462 + 2 = 464.
-PINNED = 464
+# 464 → 478 is M15 Task 1, **fourteen** rows and one new file:
+# `tests/test_suite_outcome.py` drives `scripts/assert_suite_outcome.py` with
+# fabricated transcripts. The gate exists because `.review/m15-recon.md` §3.1
+# measured that nothing read the acceptance run's own summary line, so §2's
+# central count was enforced by prose. Two rows hold the healthy side (the
+# declared outcome is accepted; a refusal names the undeclared skip), four the
+# summary line (a failure, an error, `expected failures=1` — which prints `OK`
+# and exits 0, the reason the line is compared whole — and its mirror, an
+# unexpected success), and the rest the parse: a truncated transcript, a doubled
+# skip line, a swap that keeps the count at six, a changed run count, a skip on
+# a docstringed test, teardown lines after the verdict, plus the tie to §2's
+# prose and its control. Discovery agrees exactly: 464 + 14 = 478, no renames.
+PINNED = 478
 
 
 def collected() -> unittest.TestSuite:
