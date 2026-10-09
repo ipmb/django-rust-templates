@@ -43,16 +43,25 @@ This file previously reported exactly one such pair. That number is not
 reproducible from the current census and is superseded by the six measured
 here; it predates both the widened scan and the naming passes.
 
-Two of the six are worth separating out, because they are a different shape
-from the other four. `filesizeformat.rs` cites `html.py:502-507` **and**
-`django/utils/html.py:502-507`, and `test_host_tags.py` cites `tests.py:148-155`
+**Three** of the six are worth separating out, because they are a different shape
+from the other three. `filesizeformat.rs` cites `html.py:502-507` **and**
+`django/utils/html.py:502-507`; `pyregex.rs` cites `base.py:705` **and**
+`django/template/base.py:705`; and `test_host_tags.py` cites `tests.py:148-155`
 **and** `.django/tests/template_tests/tests.py:148-155` — one file, two
-spellings, one construct. The other four are two different files disagreeing
+spellings, one construct. The other three are two different files disagreeing
 about how to spell a construct they both cite.
+
+The row for `base.py:705` is the one this file previously missed: it was
+written down as two single-file pairs from a sibling record instead of
+re-measured, and the arithmetic that would have caught it is in the count this
+file publishes — `824 (anchor, citing file)` relations against `821` on
+constructs, a difference of exactly three, which is exactly the number of
+single-file pairs. A relation count and a construct count that differ by *n*
+say *n* files spell one construct two ways.
 
 The table is merged on the construct, so each pair appears once, under its
 fuller spelling, showing the construct's citer count rather than either
-spelling's. The two single-file pairs are absent from the table for the
+spelling's. The three single-file pairs are absent from the table for the
 reason they are interesting: each construct's citers merge to one file, so it
 never reaches the two-file threshold.
 

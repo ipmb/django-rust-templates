@@ -1066,14 +1066,40 @@ detector**. The most-agreed anchors remain agreed-upon and right.
 The shape is unchanged, and the re-measurement also settles the one count in
 this series that had a gap in it. Counted on constructs, **31.4% of them (169)
 cover 56.8% of the citations, and 11.1% (60) cover 30.2%** — against 31.1% /
-56.6% / 54.6% and 10.9% / 30.0% / 27.9% before. The occurrence half of the pair
-now equals the relation half exactly (955 and 955). The candidate explanation is
-the six duplicate spellings — splitting one construct's relations across two
-keys would depress the relation half and leave the occurrence half alone, which
-is the direction the gap ran — but the claim I can stand behind is the weaker
-one: on constructs the two units agree exactly, so the fifth "two right answers
-to two questions" in this series was two readings that agree once the unit is
-fixed.
+56.6% / 54.6% and 10.9% / 30.0% / 27.9% before.
+
+The gap this was supposed to settle is still here, and the reason is that there
+are **three units, not two**, each with its own number:
+
+| unit | count |
+|---|---|
+| occurrences (anchor mentions, `file:line`) | **955** |
+| relations (`anchor`, citing file) | **824** |
+| relations (`construct`, citing file) | **821** |
+
+and **955 = 821 + 134**, where 134 is the extra occurrences contributed by the
+108 `(construct, citing file)` pairs that mention their construct more than once
+— `crates/template-py/src/lib.rs` alone cites `base.py:771-772` four times. So
+the occurrence half does **not** equal a relation half. The earlier revision of
+this passage said it did — "now equals the relation half exactly (955 and 955)"
+— and that sentence compared the occurrence count to itself, which is why its
+own table two lines above could say 824 without the contradiction registering.
+The candidate explanation it offered, the six duplicate spellings, is wrong for
+*this* gap as well: a spelling change moves an occurrence between keys, it does
+not create or destroy one.
+
+The spellings explain the *other* gap, the 3 between the two relation units, and
+exactly: three of the six two-spelling constructs have one file citing both
+spellings, so that file is two `(anchor, file)` rows and one
+`(construct, file)` row. `git`-checkable: `824 − 821 = 3` and the same
+measurement yields three single-file pairs and no fourth.
+
+What survives is what this file already said, and it is the weaker claim: the
+units agree once the unit is named. The fifth "two right answers to two
+questions" in this series is settled by the naming, not by the agreement — and
+the pair of gaps is the clearest instance of the pattern in the whole task,
+because *both* candidate explanations were on offer and each one was right about
+a different gap.
 
 ### A third kind of provenance, which the first two kinds of repair cannot reach
 
@@ -1130,13 +1156,17 @@ tree was comparing it to anything.
 ### The census's own agreement caveat, re-measured
 
 The construct key merges spellings, so the six duplicated spellings this file's
-sibling reported as one are now visible. Two of the six are a single file
+sibling reported as one are now visible. **Three** of the six are a single file
 spelling one construct two ways — `filesizeformat.rs` cites `html.py:502-507`
-*and* `django/utils/html.py:502-507`, `test_host_tags.py` cites
+*and* `django/utils/html.py:502-507`, `pyregex.rs` cites `base.py:705` *and*
+`django/template/base.py:705`, `test_host_tags.py` cites
 `tests.py:148-155` *and* `.django/tests/template_tests/tests.py:148-155`. The
-other four are two different files disagreeing about how to spell a construct
+other three are two different files disagreeing about how to spell a construct
 they both cite. The earlier "exactly one" is not reproducible from the current
-census and is superseded.
+census and is superseded. **And so is the "two" this file first carried**, which
+was copied from a sibling record rather than measured; the arithmetic that
+catches it — `824` anchor relations against `821` construct relations, a gap
+equal to the number of single-file pairs — is computed below.
 
 ### One more unnamed population, and it is the reviewer's
 
@@ -1214,17 +1244,43 @@ not include `parser/error.rs` in any line).
 is provenance, and counting the narrowing with it credits the span work to
 drift. That, plus a count that came out five in one reading and six in another,
 is why **no per-class tally is published** — the actionable result is a rule, and
-the rule does not depend on the classification:
+the rule does not depend on the classification. The five-versus-six wobble is
+resolved and it was a heading: `d81abb3`'s message says "Six were right when
+written and the line moved" and then enumerates five, and there is no sixth
+(`git log -S` puts all five corrected anchors in that commit and none anywhere
+else). The "six" belongs to a different sentence in the same message — "Six of
+the nine are width-neutral" — and the heading took it. `.review/m6-summary.md`
+carries the full measurement.
 
-> **Into a pinned tree, a wrong citation is a misreading. Into a moving tree, a
-> wrong citation is elapsed time.**
+> **Within a single pin, a wrong citation into a pinned tree is a misreading.
+> Into a moving tree, a wrong citation is elapsed time.**
 
-The first half is a proof: `.django/` at 6.0.9 does not move, so a wrong Django
-number cannot be drift. The second is the measurement above — five of five
-correct when written. It also explains `--update`'s base split structurally
-rather than by risk: `--update=django` is rare because misreadings are rare
-after a careful pass, `--update=crates` is routine because time passes
-regardless of care.
+The first half is a proof *conditional on its premise*, and the premise is about
+one pin rather than about the Django tree. `.django/` at 6.0.9 does not move, so
+during 6.0.9 a wrong Django number cannot be drift — it is a reading that never
+pointed at the claim, or a boundary drawn wrong. But this project has already
+changed its reference once: round 1 measured against
+`/Users/pete/projects/tmp/django` @ `8ee7341527` (`6.0.4-17-g8ee7341527`), and
+finding 14 was "land `.django/` at 6.0.9 and re-check every finding above against
+it". A citation written in that window is drift with respect to the reference
+its author read, even though no one edited Django. The tree moved; the pin moved
+it. So the unparameterised form is false and the condition is not decoration.
+Whether the *current* set contains a pre-pin citation is a measurement, not a
+deduction, and one this file cannot make — `.django/` is gitignored, so there is
+no history to measure against.
+
+Two consequences worth more than the correction. The next pin bump — a 6.0.10
+security release, or M14's own dependency work — invalidates Django citations in
+exactly the way `7efc59c` invalidated five `.rs` comments, and this is the
+instrument for it: **running `--check` on the bump commit reddens precisely the
+citations the new Django moved**, turning a silent invalidation into a listed
+one. That is the checker's best future use and it only becomes visible once the
+premise is stated as a condition.
+
+The second half is the measurement above — five of five correct when written.
+Together they explain `--update`'s base split structurally rather than by risk:
+`--update=django` is rare because misreadings are rare after a careful pass,
+`--update=crates` is routine because time passes regardless of care.
 
 **Scope, stated because the sentence would otherwise travel.** "Not one is a
 misreading" is true of the `.rs` set — citations into a tree that moves — and

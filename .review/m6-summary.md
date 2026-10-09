@@ -111,13 +111,22 @@ was verified against the pinned tree on 2026-10-09: `base.py:816` (14 files),
 `defaulttags.py:929` (6), all six correct.
 
 **Six constructs are spelled two ways**, so the manifest holds six more rows than
-it holds constructs. Two of the six are a *single file* spelling one construct
-two ways — `filesizeformat.rs` cites both `html.py:502-507` and
-`django/utils/html.py:502-507`; `test_host_tags.py` cites both `tests.py:148-155`
-and `.django/tests/template_tests/tests.py:148-155`. The other four are two
+it holds constructs. **Three** of the six are a *single file* spelling one
+construct two ways — `filesizeformat.rs` cites both `html.py:502-507` and
+`django/utils/html.py:502-507`; `pyregex.rs` cites both `base.py:705` and
+`django/template/base.py:705`; `test_host_tags.py` cites both `tests.py:148-155`
+and `.django/tests/template_tests/tests.py:148-155`. The other three are two
 different files disagreeing about how to spell a construct they both cite. This
 is recorded rather than fixed: a name-based key would need the resolver, which is
 the thing the census avoids.
+
+The count is checkable rather than asserted, and the check is the one that
+caught this paragraph undercounting — it first said two, copied from a sibling
+record. **`824 (anchor, citing file)` relations against `821` on constructs is a
+difference of three**, and that difference *is* the single-file pairs: each one
+is two anchor rows and one construct row for the same file. A relation count and
+a construct count are therefore not two measurements of one quantity; they are
+two units, and their difference counts the files that spell one construct twice.
 
 ## The base is a precondition, not a label
 
@@ -183,14 +192,20 @@ story — at `52f1cb1^` the three `extend_nodelist` call sites are 218, 252 and
 
 ### The rule, which outlives the tally
 
-**Into a pinned tree, a wrong citation is a misreading. Into a moving tree, a
-wrong citation is elapsed time.** The first half is a proof rather than a
-measurement: `.django/` at 6.0.9 does not move, so a wrong Django number
-*cannot* be drift — it is a reading that never pointed at the claim, or a
-boundary drawn wrong. The second half is what the reviewer found by measuring
-each `.rs` claim at the commit that wrote it: all five were correct when
-written, against the post-edit file, with the file's stat checked to rule the
-third class in or out.
+**Within a single pin, a wrong citation into a pinned tree is a misreading. Into
+a moving tree, a wrong citation is elapsed time.** The first half is a proof
+conditional on its premise, and the premise is about *one pin*: `.django/` at
+6.0.9 does not move, so during 6.0.9 a wrong Django number *cannot* be drift — it
+is a reading that never pointed at the claim, or a boundary drawn wrong. The
+condition is load-bearing, because this project has already moved its own
+reference: round 1 measured against `/Users/pete/projects/tmp/django` @
+`8ee7341527` (`6.0.4-17-g8ee7341527`), and finding 14 was to land `.django/` at
+6.0.9 and re-check every finding against it. A citation written in that window is
+drift with respect to the reference its author read. The tree moved; the pin
+moved it. The second half is what the reviewer found by measuring each `.rs`
+claim at the commit that wrote it: all five were correct when written, against
+the post-edit file, with the file's stat checked to rule the third class in or
+out.
 
 Two failure modes, two remedies: **care and re-reading** for the first, a
 **snapshot comparison** for the second — and one tool catches both, because both
@@ -198,6 +213,13 @@ reduce to "does the text still sit at the number". It also retro-justifies
 `--update`'s base split structurally rather than by risk: `--update=django` is
 rare because misreadings are rare *after* a careful pass, `--update=crates` is
 routine because time passes regardless of care.
+
+**Stating the condition buys an instrument.** The next pin bump — a 6.0.10
+release, or M14's own dependency work — invalidates Django citations in exactly
+the way `7efc59c` invalidated five `.rs` comments. Running `--check` on the bump
+commit reddens precisely the citations the new Django moved, which is the
+checker's best future use; while the premise was written as unconditional that
+use was invisible, because the sentence claimed the class could not exist.
 
 **The tally is deliberately not published.** The same reviewer who produced the
 classification also produced the reason to distrust it: the count came out five
@@ -207,6 +229,21 @@ six lines to two. Only the move is provenance; the narrowing is a boundary
 judgement that rode along, and counting them together credits the span work to
 drift. The rule above does not depend on the classification, which is the
 argument for publishing it and not the counts.
+
+**And the five-versus-six wobble has a cause, now measured.** `d81abb3`'s message
+is headed "**Six** were right when written and the line moved" and then
+enumerates **five**: `error.rs:160-165` → `292-293` and `parser/mod.rs:186` →
+`267` (two), `with.rs:79` → `82` and `url.rs:81` → `83` (two), `tags/mod.rs:182`
+→ `180` (one). There is no sixth: `git log -S` puts all five corrected anchors in
+that commit and none elsewhere, and the commit's other claims are the count
+(`17` → `14`), the never-correct span (`392-418` → `429`) and the FFI semantics
+set. The heading most likely inherited its "six" from the sentence twenty lines
+below it, "Six of the nine are width-neutral — five renumbers of the same width
+and the `17` → `14`" — a different six, of a different set. So the wobble was
+not a reading error at either end; it was a heading that disagreed with its own
+body, which is a defect of the same family as the rest of this exercise and one
+that no checker reads, because commit messages are not scanned. A tally
+assembled from those messages would have inherited it.
 
 **And the class that survives is narrower than "misreading".** Across the `.rs`
 set, not one is an author reading a line wrongly; the one that looked like it,
