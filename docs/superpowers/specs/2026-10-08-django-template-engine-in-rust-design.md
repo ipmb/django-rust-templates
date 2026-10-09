@@ -728,6 +728,20 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   `template-py` and with it PyO3. Cargo's `target/` file lock then serialises
   concurrent invocations for free, so no build lock is needed.
 
+- **"The registry, written once in full" is scoped to the `django/template/`
+  set — 32 node classes — not to every node class forever.** Measured on the
+  pinned tree: 32 in `django/template/*.py` (2 `base`, 23 `defaulttags`, 4
+  `library`, 3 `loader_tags`), 15 more in `django/templatetags/*.py` (8 `i18n`,
+  3 `tz`, 2 `static`, 1 `cache`, 1 `l10n`), 47 in total. The 15 belong to M12's
+  libraries and are not in scope for M3–M7; a promise that read as "all node
+  classes" would be a promise this milestone split cannot keep.
+  Do not measure this set with `Node.__subclasses__()`: that walks *import
+  state*, and it moves as modules load (6 with only `base` imported, 42 after
+  `django.setup()`, then 45/46/47 as the templatetag modules follow). Source it
+  from the files, or better, assert the closed obligation instead — every
+  `class_name` the Rust emitter can produce resolves. That is what
+  `tests/test_materialise.py` pins.
+
 - **§5.5's render path** — `NodeList.render`/`Node.render_annotated` kept
   verbatim, shadow nodes renderable; M9 gate.
 - **§5.2's `annotate_exception`** — needed for Rust-owned culprits; verified by
