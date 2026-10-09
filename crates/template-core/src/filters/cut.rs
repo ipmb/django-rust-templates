@@ -111,6 +111,28 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
 
 #[cfg(test)]
 mod tests {
+    //! **Nothing here exercises a refusal, and the reason is a fact about the
+    //! wrapper rather than an absence of one.**
+    //!
+    //! `run` *does* have a propagation path — `to_str(&value)?`, which
+    //! [`crate::filters::host::FilterHost::to_str`] is allowed to refuse, so a
+    //! refusal would escape. It is **unreachable, not absent**: `@stringfilter`
+    //! pre-coerces the value before the body runs (`defaultfilters.py:44`), so
+    //! the operand is already a `Value::Str` or `Value::Safe` on arrival and
+    //! `to_str` cannot fail — the same fact that lets `upper`/`lower` call it as
+    //! a pure accessor. **What would make this sentence false:** if `cut` ever
+    //! lost its `@stringfilter` flag, that refusal becomes live and nothing here
+    //! is testing it.
+    //!
+    //! The argument's refusal — `cut`'s only *reachable* one — is the other
+    //! case, and is also not tested here: it is **synthesised in Rust**
+    //! ([`not_a_string`]; no host operation performs the `str.replace`), so a
+    //! test asserting its text compares the body against itself and can only
+    //! agree. The doctrine is in `tests/filter_cases.py`. A synthesised
+    //! message's only real check is an `ERROR_CASES` row, and `cut` has both:
+    //! `{{ x|cut:1 }}` and `{{ x|cut:None }}`, pinned against **Django's**
+    //! wording, its class, and the fact that it escapes rather than being
+    //! swallowed into `""`. A body test beside those is a restatement to delete.
     use super::*;
     use crate::filters::host::TestFilterHost;
 
@@ -224,52 +246,6 @@ mod tests {
             )
             .unwrap(),
             Value::Str("abc".into())
-        );
-    }
-
-    /// A non-`str` argument raises `TypeError` from `str.replace` — measured
-    /// (`cut("a1b", 1)`), and it escapes the filter. The class is asserted rather
-    /// than a message, which is what the seam's taxonomy carries.
-    #[test]
-    fn a_non_string_argument_raises_type_error() {
-        let h = host("a1b");
-        let error = run(Value::Str("a1b".into()), Some(Value::Int(1)), &call(&h)).unwrap_err();
-        assert_eq!(
-            error.kind,
-            crate::parser::error::ErrorKind::FilterHost(Box::new(
-                crate::parser::error::FilterHostError {
-                    kind: PyErrorKind::TypeError,
-                    message: "replace() argument 1 must be str, not int".to_string(),
-                    operation: "str.replace",
-                }
-            ))
-        );
-    }
-
-    /// A `None` argument answers CPython's `replace` `TypeError`, the one a
-    /// template can observe (`{{ x|cut:None }}`), whose message says **`None`**
-    /// and not `NoneType`. The second assertion is the trap this pins: a body
-    /// that reached for `Value::None.type_name()` — the obvious spelling — would
-    /// produce `not NoneType` and fail the first.
-    #[test]
-    fn a_none_argument_is_the_replace_type_error() {
-        let h = host("abc");
-        let error = run(Value::Str("abc".into()), None, &call(&h)).unwrap_err();
-        assert_eq!(
-            error.kind,
-            crate::parser::error::ErrorKind::FilterHost(Box::new(
-                crate::parser::error::FilterHostError {
-                    kind: PyErrorKind::TypeError,
-                    message: "replace() argument 1 must be str, not None".to_string(),
-                    operation: "str.replace",
-                }
-            )),
-            "`{{ x|cut:None }}` is `replace() argument 1 must be str, not None`"
-        );
-        assert_ne!(
-            Value::None.type_name(),
-            "None",
-            "`type_name()` says `NoneType`, which is what CPython's message does *not* say"
         );
     }
 }

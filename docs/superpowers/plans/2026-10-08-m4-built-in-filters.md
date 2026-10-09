@@ -2820,6 +2820,51 @@ are `is_safe=False`, so none calls `mark_safe`.
 
 The trait is **42 methods, 25 of them `Result`**.
 
+**7. The wave landed, and it found a defect in the seam that no body test could
+have found.** The four bodies, 56 `CASES` rows and 5 `ERROR_CASES` rows are in;
+the stub count went 28 → 24.
+
+Three rows disagreed on the first run, all `pluralize`, all numeric or
+alphanumeric *strings* — and they were one bug in `float_of`
+(`template-py/src/filters.rs`), which was `self.object(value)?.extract::<f64>()`.
+A pyo3 `f64` extraction is `PyFloat_AsDouble`, i.e. `__float__`; a `str` has no
+`__float__`, so it raised a **`TypeError`** where Python's `float()` parses the
+string and raises a **`ValueError`** for a bad one. `int_of` beside it had always
+called the `int` *type*, so only the float half was wrong.
+
+The class is the whole contract here, which is why this was a wrong answer and
+not a missed one: `pluralize` catches `(ValueError, TypeError)` and **branches
+differently** on the two — `ValueError` falls through to `""` without asking
+`len`, `TypeError` asks. So `{{ "abc"|pluralize }}` answered `"s"` (the `len` arm,
+`len("abc") == 3`) where Django answers `""`, and `{{ "2"|pluralize }}` answered
+`""` (`len("2") == 1`, the singular suffix) where Django answers `"s"`.
+
+**Why only the corpus could see it.** §10.4 gives an agent `cargo test -p
+template-core` and never `maturin develop`, so the fan-out's `pluralize` body
+tests script a `TestFilterHost` — they pin that the body *dispatches* on the
+class it is handed, and they were right about that. The class it is handed is
+the FFI's, and only a real host call over a real `str` can observe it. This is
+the case §10.4's rule exists for, and it is worth recording that the rule
+produced a finding rather than only a constraint.
+
+**And one of the three disagreeing rows was `"1"`, which agreed.** `float("1")`
+and `len("1") == 1` select the same empty singular suffix, so a body taking the
+wrong arm is right by coincidence — the third form of "parity validates
+agreement, never correctness", and the reason the row set needs `"1"` *and*
+`"2"` rather than either alone. `"1"` is the only input where the two arms
+coincide, and it is the one that would have made a two-row set look complete.
+
+**The corpus also needed an argument no template can spell.** `[1]`, `[","]` and
+`object()` are the three of `comma_bits`'s five rows that settle the fusion, and
+a template has no list or object literal — so `CASES`/`ERROR_CASES` gained
+`arg_variable`, whose object the token reaches as a bare name resolved through
+the context. Measured, and it is the reason the harness refuses a `str` there:
+`FilterExpression("x|pluralize:argvar", p).filters[0][1][0][0]` is
+`lookup=True` where `x|pluralize:"s"` is `False`, and `resolve` marks only the
+`False` case (`base.py:803-806`). A `str` under `arg_variable` would therefore
+reach Django unmarked and ours marked — two engines given *different inputs*,
+which is the raw-token defect this corpus has already been fixed for once.
+
 ### Task 8: escaping and safety — 12 filters
 
 `escape`, `force_escape`, `escapeseq`, `safe`, `safeseq`, `striptags`,

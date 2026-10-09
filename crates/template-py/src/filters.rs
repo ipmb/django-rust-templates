@@ -264,6 +264,25 @@ impl<'py> PyFilterHost<'py> {
     }
 
     /// `float(value)` through Python, for the same reason `int_of` exists.
+    ///
+    /// **Through the `float` *type*, not `extract::<f64>()`.** A pyo3 `f64`
+    /// extraction is `PyFloat_AsDouble`, i.e. `__float__` — and a `str` has no
+    /// `__float__`, so pyo3 raises a `TypeError` where Python's `float()` parses
+    /// the string and raises a **`ValueError`** for a bad one. Measured on the
+    /// pinned tree: `float("abc")` is `ValueError: could not convert string to
+    /// float: 'abc'`, while `extract::<f64>()` on the same object answers
+    /// `TypeError: must be real number, not str`. The class is the whole
+    /// contract — `pluralize` catches `(ValueError, TypeError)` and branches
+    /// *differently* on the two, so an inverted pair is a wrong answer rather
+    /// than a missed one: `{{ "abc"|pluralize }}` is `""` through the
+    /// `ValueError` arm and `"s"` through the `TypeError` one. `float("2")` is
+    /// 2.0 and `extract` refuses it outright, which is a wrong *value*.
+    ///
+    /// It went unnoticed because no earlier row could see it: `float("1")` and
+    /// the `TypeError`/`len` path agree by coincidence (`len("1") == 1` selects
+    /// the same empty singular suffix), so the corpus row that exposed it was
+    /// the one where the two arms disagree. `int_of` never had the bug, having
+    /// called the `int` type from the start.
     fn float_of(&self, value: &Value) -> PyResult<f64> {
         match value {
             Value::Float(number) => return Ok(*number),
@@ -271,7 +290,11 @@ impl<'py> PyFilterHost<'py> {
             Value::Bool(flag) => return Ok(if *flag { 1.0 } else { 0.0 }),
             _ => {}
         }
-        self.object(value)?.bind(self.py).extract::<f64>()
+        let parsed = self
+            .py
+            .get_type::<PyFloat>()
+            .call1((self.object(value)?,))?;
+        parsed.extract::<f64>()
     }
 
     /// `bool(value)`, short-circuiting the variants Rust can answer and asking

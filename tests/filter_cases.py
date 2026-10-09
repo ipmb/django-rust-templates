@@ -1777,6 +1777,420 @@ CASES: list[dict] = [
         "value": "AbC",
         "arg": "s",
     },
+    # --- Task 7, wave 2: pluralize, yesno, default, default_if_none --------
+    #
+    # `default` and `default_if_none` exist as a pair *because* they differ, and
+    # that difference is the pair's whole content: one asks truthiness, the
+    # other asks `is None`. Four inputs separate them — `0`, `""`, `[]` and
+    # `False` — and each appears below on both filters. A body that implemented
+    # either one as the other passes one column alone, so the columns are only
+    # meaningful together.
+    #
+    # **Both return the argument *object*, so their safety is the operand's and
+    # not the filter's.** Both are `is_safe=False`, so the loop never marks the
+    # answer; what carries a mark is whatever the body handed back. A quoted
+    # constant argument is `mark_safe`d by `resolve` (`base.py:788-792`), which
+    # is the whole of why `default(0, "x")` is a `SafeString` while
+    # `default_if_none(0, "x")` is the `int` 0 — same argument text, different
+    # row, and `assert_same`'s safety half is the only thing that sees it. A
+    # body that built a fresh value instead of returning the operand loses the
+    # flag on one and gains it on the other, in the same direction both times.
+    {
+        "name": "default/zero-takes-the-argument",
+        "filter": "default",
+        "value": 0,
+        "arg": "x",
+    },
+    {
+        "name": "default/empty-string-takes-the-argument",
+        "filter": "default",
+        "value": "",
+        "arg": "x",
+    },
+    {
+        "name": "default/empty-list-takes-the-argument",
+        "filter": "default",
+        "value": [],
+        "arg": "x",
+    },
+    {
+        "name": "default/empty-dict-takes-the-argument",
+        "filter": "default",
+        "value": {},
+        "arg": "x",
+    },
+    {
+        "name": "default/none-takes-the-argument",
+        "filter": "default",
+        "value": None,
+        "arg": "x",
+    },
+    {
+        "name": "default/false-takes-the-argument",
+        "filter": "default",
+        "value": False,
+        "arg": "x",
+    },
+    {
+        "name": "default/truthy-int-passes-through",
+        "filter": "default",
+        "value": 1,
+        "arg": "x",
+    },
+    {
+        "name": "default/truthy-string-passes-through",
+        "filter": "default",
+        "value": "abc",
+        "arg": "x",
+    },
+    {
+        "name": "default/truthy-list-passes-through",
+        "filter": "default",
+        "value": [1],
+        "arg": "x",
+    },
+    {
+        # The argument is *not* returned, so its mark cannot be what the row
+        # passes on: a body that marked its result unconditionally fails here
+        # while passing every `takes-the-argument` row above.
+        "name": "default/unused-argument-is-not-returned",
+        "filter": "default",
+        "value": "z",
+        "arg": "y",
+    },
+    {
+        # A bare token, so an unmarked `int` — the contrast to the `SafeString`
+        # rows above. Nothing in the value decides this; the argument's *shape*
+        # does.
+        "name": "default/numeric-argument-is-unmarked",
+        "filter": "default",
+        "value": 0,
+        "arg": 5,
+    },
+    {
+        # `"arg": None` is the explicit `None` token, not an absent argument, so
+        # this is `0 or None` — and the answer is `None`, which is falsy and
+        # still returned. A body guarding the argument against `None` answers
+        # `0` here.
+        "name": "default/none-argument-is-an-argument",
+        "filter": "default",
+        "value": 0,
+        "arg": None,
+    },
+    {
+        "name": "default_if_none/none-takes-the-argument",
+        "filter": "default_if_none",
+        "value": None,
+        "arg": "x",
+    },
+    {
+        # The four rows that separate this filter from `default`, and they are
+        # the reason both exist.
+        "name": "default_if_none/zero-passes-through",
+        "filter": "default_if_none",
+        "value": 0,
+        "arg": "x",
+    },
+    {
+        "name": "default_if_none/empty-string-passes-through",
+        "filter": "default_if_none",
+        "value": "",
+        "arg": "x",
+    },
+    {
+        "name": "default_if_none/empty-list-passes-through",
+        "filter": "default_if_none",
+        "value": [],
+        "arg": "x",
+    },
+    {
+        "name": "default_if_none/false-passes-through",
+        "filter": "default_if_none",
+        "value": False,
+        "arg": "x",
+    },
+    {
+        "name": "default_if_none/truthy-passes-through",
+        "filter": "default_if_none",
+        "value": 1,
+        "arg": "x",
+    },
+    {
+        "name": "default_if_none/numeric-argument-is-unmarked",
+        "filter": "default_if_none",
+        "value": None,
+        "arg": 5,
+    },
+    {
+        "name": "default_if_none/none-argument-is-an-argument",
+        "filter": "default_if_none",
+        "value": None,
+        "arg": None,
+    },
+    # `yesno`'s default argument is `gettext("yes,no,maybe")` — a **translation
+    # lookup**, not a literal — so its three rows state their i18n state by
+    # running under the same unconfigured-i18n settings the rest of the corpus
+    # uses, where `gettext` is the identity and the suffix is the English
+    # string. That is a real host call on both sides rather than a constant.
+    {
+        "name": "yesno/default-argument-true",
+        "filter": "yesno",
+        "value": True,
+    },
+    {
+        "name": "yesno/default-argument-false",
+        "filter": "yesno",
+        "value": False,
+    },
+    {
+        "name": "yesno/default-argument-none-is-maybe",
+        "filter": "yesno",
+        "value": None,
+    },
+    {
+        "name": "yesno/two-bits-true",
+        "filter": "yesno",
+        "value": True,
+        "arg": "y,n",
+    },
+    {
+        "name": "yesno/two-bits-false",
+        "filter": "yesno",
+        "value": False,
+        "arg": "y,n",
+    },
+    {
+        # Two bits leave `maybe` unset, and the source's fallback makes it the
+        # *no* string — so `None` and `False` answer alike here and the
+        # three-bit row below is the only one that separates them.
+        "name": "yesno/two-bits-none-is-no",
+        "filter": "yesno",
+        "value": None,
+        "arg": "y,n",
+    },
+    {
+        "name": "yesno/three-bits-true",
+        "filter": "yesno",
+        "value": True,
+        "arg": "y,n,m",
+    },
+    {
+        "name": "yesno/three-bits-false",
+        "filter": "yesno",
+        "value": False,
+        "arg": "y,n,m",
+    },
+    {
+        "name": "yesno/three-bits-none-is-maybe",
+        "filter": "yesno",
+        "value": None,
+        "arg": "y,n,m",
+    },
+    {
+        "name": "yesno/truthy-string-is-yes",
+        "filter": "yesno",
+        "value": "x",
+        "arg": "y,n",
+    },
+    {
+        # `None` is `maybe` and `0` is *no* — the pair that pins `is None`
+        # against truthiness in the branch, which is the same distinction
+        # `default_if_none` makes.
+        "name": "yesno/zero-is-no",
+        "filter": "yesno",
+        "value": 0,
+        "arg": "y,n",
+    },
+    {
+        "name": "yesno/empty-list-is-no",
+        "filter": "yesno",
+        "value": [],
+        "arg": "y,n",
+    },
+    {
+        # Fewer than two bits returns the **value**, not `""` — measured
+        # `yesno(None, "y") -> None`. A body that answered with the argument's
+        # first bit, or with an empty string, fails here; the row's value is
+        # chosen to be neither.
+        "name": "yesno/short-argument-returns-the-value",
+        "filter": "yesno",
+        "value": "v",
+        "arg": "y",
+    },
+    {
+        "name": "yesno/short-argument-returns-none",
+        "filter": "yesno",
+        "value": None,
+        "arg": "y",
+    },
+    {
+        # The empty argument is one bit, not zero, so it takes the same arm as
+        # the pair above: `"".split(",")` is `[""]`.
+        "name": "yesno/empty-argument-is-one-bit",
+        "filter": "yesno",
+        "value": "v",
+        "arg": "",
+    },
+    {
+        # Four bits fail the three-way unpack, and the source's `except
+        # ValueError` falls back to `bits[0], bits[1], bits[1]` — so the third,
+        # fourth and any further bits are all discarded and `maybe` becomes the
+        # *no* string. This is the arm a body written as an `if len == 3` would
+        # get wrong.
+        "name": "yesno/four-bits-uses-the-first-two",
+        "filter": "yesno",
+        "value": True,
+        "arg": "a,b,c,d",
+    },
+    {
+        "name": "yesno/four-bits-none-uses-the-second",
+        "filter": "yesno",
+        "value": None,
+        "arg": "a,b,c,d",
+    },
+    {
+        # `is_safe=False`, so the loop does not mark — and both returns here are
+        # freshly built `str`s, so nothing can carry a mark in either direction.
+        "name": "yesno/safe-value-is-not-marked",
+        "filter": "yesno",
+        "value": mark_safe("x"),
+        "arg": "y,n",
+    },
+    {
+        "name": "yesno/safe-value-with-the-default-argument",
+        "filter": "yesno",
+        "value": mark_safe("x"),
+    },
+    # `pluralize`'s argument handling is the seam's `comma_bits`, and the first
+    # four rows below are why it is one operation rather than a `contains`, a
+    # `concat` and a `split`: the argument's *type* decides which of the three
+    # raises, and with which class. See `ERROR_CASES` for the five inputs that
+    # make that visible.
+    {
+        # The argument defaults to `"s"`, `","` is prepended because it holds no
+        # comma, and `",s".split(",")` is `["", "s"]` — so the *singular* suffix
+        # is the empty string. `pluralize(1)` is `""`, not `"s"`. The plan's
+        # draft of this filter said otherwise; this row is the correction.
+        "name": "pluralize/one-is-singular",
+        "filter": "pluralize",
+        "value": 1,
+    },
+    {
+        "name": "pluralize/two-is-plural",
+        "filter": "pluralize",
+        "value": 2,
+    },
+    {
+        "name": "pluralize/zero-is-plural",
+        "filter": "pluralize",
+        "value": 0,
+    },
+    {
+        "name": "pluralize/explicit-bits-singular",
+        "filter": "pluralize",
+        "value": 1,
+        "arg": "s,p",
+    },
+    {
+        "name": "pluralize/explicit-bits-plural",
+        "filter": "pluralize",
+        "value": 2,
+        "arg": "s,p",
+    },
+    {
+        "name": "pluralize/float-one-is-singular",
+        "filter": "pluralize",
+        "value": 1.0,
+    },
+    {
+        "name": "pluralize/float-not-one-is-plural",
+        "filter": "pluralize",
+        "value": 1.5,
+    },
+    {
+        # More than two bits returns `""` *before* the value is looked at, so
+        # this row would pass even for a body that never called `to_float`.
+        "name": "pluralize/three-bits-is-empty",
+        "filter": "pluralize",
+        "value": 1,
+        "arg": "a,b,c",
+    },
+    {
+        # **The row that separates the `ValueError` arm from the `TypeError`
+        # one.** `float("abc")` raises `ValueError`, which the source lets fall
+        # through to `return ""` *without asking `len`* — so a body that read a
+        # non-numeric operand as "not a number, try `len`" answers `"s"` here
+        # (`len("abc") == 3`). The plan's bullet for this filter stated the
+        # wrong rule and this row is the measurement that refutes it; no list
+        # row can, because a list reaches the `len` arm legitimately.
+        "name": "pluralize/non-numeric-string-is-not-len-based",
+        "filter": "pluralize",
+        "value": "abc",
+    },
+    {
+        "name": "pluralize/empty-string-is-not-len-based",
+        "filter": "pluralize",
+        "value": "",
+    },
+    {
+        # A numeric *string* goes through `float`, so it is a number and not a
+        # length — and `"1"` is the row where that is invisible: `float("1")`
+        # and `len("1") == 1` select the same empty singular suffix, so a body
+        # that took the `len` arm by mistake agrees here.
+        "name": "pluralize/numeric-string-one",
+        "filter": "pluralize",
+        "value": "1",
+    },
+    {
+        # **The row that exposed a defect in the seam, and it is `"1"`'s
+        # twin.** `"2"` is the first input where the two arms disagree
+        # (`float("2") != 1` is plural; `len("2") == 1` is singular), and it
+        # failed: the host's `to_float` was `PyFloat_AsDouble` — `__float__` —
+        # which refuses a `str` with a `TypeError` where Python's `float()`
+        # parses it, so every numeric string took the wrong arm. The fix is in
+        # `template-py/src/filters.rs`'s `float_of`; this row is the only thing
+        # that could have found it, because §10.4 gives an agent no way to run
+        # the real host.
+        "name": "pluralize/numeric-string-two",
+        "filter": "pluralize",
+        "value": "2",
+    },
+    {
+        # A list *is* `len`-able, so this is the `TypeError` arm answering
+        # legitimately: `len([1]) == 1` is singular. Paired with the row below,
+        # which is the same arm reaching the other suffix.
+        "name": "pluralize/list-of-one-is-len-based",
+        "filter": "pluralize",
+        "value": [1],
+    },
+    {
+        "name": "pluralize/empty-list-is-plural",
+        "filter": "pluralize",
+        "value": [],
+    },
+    {
+        # `float(None)` is a `TypeError` and `len(None)` is another one, and the
+        # second escaping is what makes this `""` rather than a raise.
+        "name": "pluralize/none-has-no-length-either",
+        "filter": "pluralize",
+        "value": None,
+    },
+    {
+        # `float(True)` is `1.0`, so a `bool` is a number here and not a length.
+        "name": "pluralize/true-is-one",
+        "filter": "pluralize",
+        "value": True,
+    },
+    {
+        # A `SafeString` argument is a `str`, so it survives the `,` test and
+        # the concatenation — and the concatenation's result is what `.split`
+        # is called on, which is why the argument's safety cannot change the
+        # answer for a *valid* argument.
+        "name": "pluralize/safe-argument-still-splits",
+        "filter": "pluralize",
+        "value": 2,
+        "arg": mark_safe("s"),
+    },
 ]
 
 
@@ -1794,15 +2208,24 @@ CASES: list[dict] = [
 # on no exception at all. The literal is the measurement.
 #
 # It is also a *strong* claim rather than a tautology, because the two sides get
-# their text from different places: Django's message is CPython's `str.replace`,
-# and ours is synthesised in Rust (`cut.rs`'s `not_a_string`, since no host
-# operation performs the replacement). A list that compared only classes would
-# never look at that synthesis; this one pins it to the wording a template sees.
+# their text from different places on **both** of the shapes this list holds.
+# `cut`'s is synthesised in Rust (`cut.rs`'s `not_a_string`, since no host
+# operation performs the replacement) and Django's is CPython's `str.replace`, so
+# this list is the only place the synthesis is pinned to the wording a template
+# sees. `pluralize`'s and `yesno`'s are CPython's **on both sides** — the class
+# and the text both cross the seam out of the real `in`/`+`/`str.split` — so
+# what those rows claim is that the seam preserved them, which is a claim about
+# `comma_bits` rather than about a string literal. The two shapes sit in one list
+# because the assertion is the same one; the module doc's rule says which of the
+# two needs a *body* test beside it, and it is neither of these.
 #
 # Keys are `CASES`' keys with the same meanings: an **absent** `arg` means the
-# filter was written without one, and `"arg": None` means the explicit `None`
-# token (`{{ x|cut:None }}`). `value_factory` is available for the one reason it
-# is above — a one-shot input — and `raises`/`message` are the row's assertion.
+# filter was written without one, `"arg": None` means the explicit `None` token
+# (`{{ x|cut:None }}`), and `arg_variable` holds an argument of a shape a
+# template cannot spell as a constant — the bare name the token carries resolves
+# through the context, as `test_filter_parity.py`'s `arg_token` explains.
+# `value_factory` is available for the one reason it is above — a one-shot
+# input — and `raises`/`message` are the row's assertion.
 #
 # **A row here is not a replacement for a body test.** They check different
 # things and the split is by who authors the message: a message passed through
@@ -1840,5 +2263,82 @@ ERROR_CASES: list[dict] = [
         "arg": None,
         "raises": "TypeError",
         "message": "replace() argument 1 must be str, not None",
+    },
+    # --- the wave-2 half: `comma_bits`'s five inputs, and the two classes the
+    #     same "not a string" produces -----------------------------------------
+    #
+    # All five are the *same three lines* of `defaultfilters.py` — `if
+    # prepend_comma and "," not in arg: arg = "," + arg` then `arg.split(",")` —
+    # reached through two filters whose argument handling differs by one flag.
+    # Five rows for one expression is not redundancy: the argument's **type**
+    # decides which operation raises and with which class, and the `[1]`/`[","]`
+    # pair is what proves nothing shorter can stand in for it. `[","]` is the
+    # only argument that gets **past** the membership test — a list can answer
+    # `"," not in [","]`, it is `False` — and dies one step later at the
+    # `.split`. So the same "argument is not a string" produces a `TypeError`
+    # through one list and an `AttributeError` through another, and a Rust side
+    # holding `contains`, `concat` and `split` as separate primitives could not
+    # tell them apart: which one raises is a fact about the operand's class that
+    # only the Python side can see. Hence one method.
+    {
+        # `{{ x|yesno:5 }}`. `yesno` passes `prepend_comma = false`, so there is
+        # no `in` to fail first and the `int` reaches `.split` directly — an
+        # `AttributeError`. Its `pluralize` twin below is the *other* class for
+        # the same input, and the two together are the measurement that forces
+        # the flag rather than a comment explaining it.
+        "name": "yesno/non-string-argument",
+        "filter": "yesno",
+        "value": True,
+        "arg": 5,
+        "raises": "AttributeError",
+        "message": "'int' object has no attribute 'split'",
+    },
+    {
+        # `{{ x|pluralize:5 }}`, and the mirror of the row above: the `in` runs
+        # first here and refuses the `int` itself.
+        "name": "pluralize/non-string-argument",
+        "filter": "pluralize",
+        "value": 1,
+        "arg": 5,
+        "raises": "TypeError",
+        "message": "argument of type 'int' is not a container or iterable",
+    },
+    {
+        # `"," not in [1]` is `True`, so the prepend runs and `"," + [1]` is the
+        # concatenation failure. Reachable only as a **variable** argument:
+        # a template has no list literal, and `template_literal` cannot render
+        # one as a constant.
+        "name": "pluralize/list-argument-fails-the-concatenation",
+        "filter": "pluralize",
+        "value": 1,
+        "arg_variable": [1],
+        "raises": "TypeError",
+        "message": 'can only concatenate str (not "list") to str',
+    },
+    {
+        # The pair's other half, and the reason the whole row set exists:
+        # `"," not in [","]` is `False`, so **no** concatenation happens and the
+        # list survives to `.split` — a different class from the row above, off
+        # the same "a list is not a string" premise. A seam that fused
+        # `contains`/`concat`/`split` into one Rust-side sequence would have to
+        # choose one of these two messages for both.
+        "name": "pluralize/list-of-separators-fails-the-split",
+        "filter": "pluralize",
+        "value": 1,
+        "arg_variable": [","],
+        "raises": "AttributeError",
+        "message": "'list' object has no attribute 'split'",
+    },
+    {
+        # A third distinct class for a third distinct operand — and the one that
+        # says the message is CPython's rather than a Rust template: it names
+        # `object`, which is the argument's own type, and only the Python side
+        # knows it.
+        "name": "pluralize/object-argument",
+        "filter": "pluralize",
+        "value": 1,
+        "arg_variable": object(),
+        "raises": "TypeError",
+        "message": "argument of type 'object' is not a container or iterable",
     },
 ]

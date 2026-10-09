@@ -93,6 +93,54 @@ def implemented_filters() -> set[str]:
     return all_names - stubs
 
 
+def case_arg(case):
+    """The Python object the row's argument **is**, or `None` for no argument.
+
+    The value half of [`arg_token`], and the one the Rust side is handed: our
+    `_native.filter` takes resolved values, so a variable argument is just its
+    object. Kept beside the token half so the two cannot disagree about which key
+    a row used.
+    """
+    if "arg_variable" in case:
+        return case["arg_variable"]
+    return case.get("arg")
+
+
+def arg_token(case):
+    """The argument's template text, and the context names it needs. `(text, extra)`.
+
+    Two shapes, and a row picks between them for one reason: `template_literal`
+    can render only a `str`, number, `bool` or `None` as a template **constant**,
+    and Django has no list or object literal in a filter argument — so
+    `pluralize`'s `[1]` and `[","]`, the rows that settle `comma_bits`'s fusion,
+    cannot be `arg` rows at all. A row names such an argument twice:
+    `arg_variable` holds the object, and the token carries the bare name,
+    which `Variable` resolves as a lookup.
+
+    **A variable argument is deliberately not `mark_safe`d, and refusing a `str`
+    here is what keeps that honest.** `resolve` marks a constant
+    (`base.py:788-792`) and a lookup is not one, so a `str` under `arg_variable`
+    would reach Django unmarked and ours marked — the two sides given *different
+    inputs*, which is the raw-token defect this corpus has already been fixed for
+    once. Every non-`str` shape is unaffected: `rust_answer` marks only a `str`.
+    A row wanting a marked sequence has no template that produces it and should
+    not be written; the assertion says so rather than letting the mismatch in.
+    """
+    if "arg_variable" in case:
+        value = case["arg_variable"]
+        if isinstance(value, str):
+            raise AssertionError(
+                f"{case['name']}: a `str` under `arg_variable` would be a "
+                f"variable lookup and so unmarked, while our side marks every "
+                f"`str` argument — the two engines would be given different "
+                f"inputs. Use `arg` for a `str`."
+            )
+        return "argvar", {"argvar": value}
+    if "arg" in case:
+        return probe.template_literal(case["arg"]), {}
+    return None, {}
+
+
 class FilterParityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -113,8 +161,8 @@ class FilterParityTests(unittest.TestCase):
     def render_django(self, case):
         """Django's answer, through `resolve`'s loop, with the token it used.
 
-        The argument goes through `probe.template_literal` because `django_answer`
-        takes **template text**, not a Python object: a `str` argument has to be
+        The argument goes through [`arg_token`] because `django_answer` takes
+        **template text**, not a Python object: a `str` argument has to be
         rendered as the constant `"b"` to become a `constant_arg` and be
         `mark_safe`d by `resolve` (`base.py:788-792`), where the bare `b` would be
         a variable lookup. Task 4's `cut` rows are the corpus's first with an
@@ -122,14 +170,14 @@ class FilterParityTests(unittest.TestCase):
         which made every argument a lookup while `test_every_case` asserted the
         token was the constant. Both sides now agree on what `x|cut:"b"` means.
         """
-        given = probe.template_literal(case["arg"]) if "arg" in case else None
+        given, extra = arg_token(case)
         return probe.django_answer(
-            case["filter"], case_value(case), given, case.get("context")
+            case["filter"], case_value(case), given, case.get("context"), extra
         )
 
     def render_rust(self, case, context):
         return probe.rust_answer(
-            case["filter"], case_value(case), case.get("arg"), context
+            case["filter"], case_value(case), case_arg(case), context
         )
 
     def assert_same(self, case, django_result, rust_result, membership=False):
@@ -212,10 +260,11 @@ class FilterParityTests(unittest.TestCase):
                 # whose `arg` fails to render (or renders as a variable rather
                 # than a constant) is a failure rather than a quietly different
                 # question: `x|add:4` and `x|add:"4"` are different inputs.
-                self.assertEqual(expression.token, f"x|{case['filter']}" + (
-                    f":{probe.template_literal(case['arg'])}"
-                    if "arg" in case else ""
-                ))
+                given, _ = arg_token(case)
+                self.assertEqual(
+                    expression.token,
+                    f"x|{case['filter']}" + ("" if given is None else f":{given}"),
+                )
 
     def assert_raises_same(self, case, side, call):
         """One engine refuses the row's input, in the row's own words.
@@ -260,9 +309,9 @@ class FilterParityTests(unittest.TestCase):
 
         The sibling of `test_every_case`, for the inputs a `CASES` row cannot
         hold. The argument resolution is deliberately the same code path —
-        `probe.template_literal` for Django's token, `probe.rust_answer` for our
-        value — so a row here asks the *same question* as a `CASES` row and
-        differs only in what is asserted about the answer.
+        [`arg_token`] for Django's token, [`case_arg`] for our value — so a row
+        here asks the *same question* as a `CASES` row and differs only in what
+        is asserted about the answer.
 
         There is no token assertion, and none is missing: the token is only in
         hand when `django_answer` returns, and on these rows it raises instead.
@@ -271,20 +320,26 @@ class FilterParityTests(unittest.TestCase):
         """
         for case in ERROR_CASES:
             with self.subTest(case=case["name"]):
-                given = probe.template_literal(case["arg"]) if "arg" in case else None
+                given, extra = arg_token(case)
                 self.assert_raises_same(
                     case,
                     "Django",
                     lambda: probe.django_answer(
-                        case["filter"], case_value(case), given, case.get("context")
+                        case["filter"],
+                        case_value(case),
+                        given,
+                        case.get("context"),
+                        extra,
                     ),
                 )
-                context = probe.context_for(case_value(case), case.get("context"))
+                context = probe.context_for(
+                    case_value(case), case.get("context"), extra
+                )
                 self.assert_raises_same(
                     case,
                     "ours",
                     lambda: probe.rust_answer(
-                        case["filter"], case_value(case), case.get("arg"), context
+                        case["filter"], case_value(case), case_arg(case), context
                     ),
                 )
 
@@ -331,20 +386,21 @@ class FilterParityTests(unittest.TestCase):
         self.assertEqual(
             len(all_names), 57, "the registry itself is not Django's 57 filters"
         )
-        # 28: the 57 minus `lower` and `upper`, which Task 3 lands as the corpus's
+        # 24: the 57 minus `lower` and `upper`, which Task 3 lands as the corpus's
         # seed, minus Task 4's six — `capfirst`, `title`, `cut`, `addslashes`,
         # `make_list`, `wordcount` — minus Task 5's eight: `center`, `ljust`,
         # `rjust`, `truncatechars`, `truncatechars_html`, `truncatewords`,
         # `truncatewords_html`, `wordwrap` — minus Task 6's nine: `first`,
         # `last`, `length`, `slice`, `join`, `random`, `dictsort`,
-        # `dictsortreversed`, `unordered_list` — and minus Task 7's first wave of
-        # four: `add`, `divisibleby`, `get_digit`, `stringformat`. Each group's
-        # commit decreases this by its own size and adds its rows to
-        # tests/filter_cases.py — one number and one list, edited together, in
-        # the commit that does the work.
+        # `dictsortreversed`, `unordered_list` — minus Task 7's first wave of
+        # four: `add`, `divisibleby`, `get_digit`, `stringformat` — and minus
+        # Task 7's second wave of four: `pluralize`, `yesno`, `default`,
+        # `default_if_none`. Each group's commit decreases this by its own size
+        # and adds its rows to tests/filter_cases.py — one number and one list,
+        # edited together, in the commit that does the work.
         self.assertEqual(
             len(stubs),
-            28,
+            24,
             f"the stub count moved: {len(stubs)} left, {sorted(stubs)}. If a "
             f"group landed, this number and tests/filter_cases.py both move with "
             f"it; if nothing landed, a body has been reverted or a registry row "

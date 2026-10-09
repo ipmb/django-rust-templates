@@ -129,12 +129,14 @@ def template_literal(value) -> str:
     if isinstance(value, (int, float)):
         return repr(value)
     raise SystemExit(
-        f"cannot render {value!r} as a template constant — the corpus holds "
-        f"only str, int, float, bool and None arguments"
+        f"cannot render {value!r} as a template constant — a `CASES` row holds "
+        f"str, int, float, bool and None under `arg`, and any other shape under "
+        f"`arg_variable`, which the test resolves through the context as a "
+        f"variable lookup (`{{{{ x|f:a }}}}`)"
     )
 
 
-def context_for(value, context_kwargs: dict | None = None):
+def context_for(value, context_kwargs: dict | None = None, extra: dict | None = None):
     """The `Context` the loop reads `autoescape` and `use_tz` off.
 
     Extracted from [`django_answer`] because an error row needs the same context
@@ -143,11 +145,23 @@ def context_for(value, context_kwargs: dict | None = None):
     by the same function, so a change to the defaults cannot reach one side of a
     comparison and not the other. `Context()`'s defaults are `autoescape=True`,
     `use_tz=None`, the same two values `_native.filter` defaults to.
+
+    `extra` holds the names a row's **variable** argument resolves through (see
+    [`django_answer`]). It is a separate parameter from `context_kwargs` because
+    the two are different kinds of thing: `context_kwargs` is the row's `context`
+    key and reaches the *loop* (`autoescape`, `use_tz`), while `extra` is part of
+    the *input* — an argument the token cannot spell as a constant.
     """
-    return Context({"x": value}, **(context_kwargs or {}))
+    return Context({"x": value, **(extra or {})}, **(context_kwargs or {}))
 
 
-def django_answer(name: str, value, given: str | None, context_kwargs: dict | None = None):
+def django_answer(
+    name: str,
+    value,
+    given: str | None,
+    context_kwargs: dict | None = None,
+    extra: dict | None = None,
+):
     """Django's result for `value|name[:arg]`, through `resolve`'s loop.
 
     The `FilterExpression` is built from the same token text a template would
@@ -165,6 +179,16 @@ def django_answer(name: str, value, given: str | None, context_kwargs: dict | No
     than the one this script meant to write, and the context because the loop
     reads `autoescape` and `use_tz` off it and the Rust side must be given the
     same two values.
+
+    **`given` is template text, and for a variable argument it is a bare name.**
+    `template_literal` can render only a `str`, number, `bool` or `None` as a
+    *constant*, and Django has no list or object literal in a filter argument —
+    so an argument of any other shape has to be written as a name and supplied
+    through `extra`. That is the same distinction `filter_re` makes, and it is
+    load-bearing on the way back: a name is a `var_arg`, so `resolve` hands it
+    over **unmarked**, where a quoted constant is `mark_safe`d
+    (`base.py:788-792`). A row that wanted `mark_safe([1])` has no template that
+    produces it.
     """
     engine = Engine()
     parser = Parser(
@@ -174,7 +198,7 @@ def django_answer(name: str, value, given: str | None, context_kwargs: dict | No
     )
     token = f"x|{name}" if given is None else f"x|{name}:{given}"
     expression = FilterExpression(token, parser)
-    context = context_for(value, context_kwargs)
+    context = context_for(value, context_kwargs, extra)
     return expression.resolve(context), expression, context
 
 

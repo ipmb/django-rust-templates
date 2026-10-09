@@ -660,10 +660,8 @@ mod tests {
     /// **The central commit that lands a group moves that group's names out of
     /// this list**, in the same commit — and the assertion below is what makes
     /// forgetting fail rather than pass.
-    const STILL_STUBBED: [&str; 28] = [
+    const STILL_STUBBED: [&str; 24] = [
         "date",
-        "default",
-        "default_if_none",
         "escape",
         "escapejs",
         "escapeseq",
@@ -676,7 +674,6 @@ mod tests {
         "linebreaksbr",
         "linenumbers",
         "phone2numeric",
-        "pluralize",
         "pprint",
         "safe",
         "safeseq",
@@ -688,7 +685,6 @@ mod tests {
         "urlencode",
         "urlize",
         "urlizetrunc",
-        "yesno",
     ];
 
     #[test]
