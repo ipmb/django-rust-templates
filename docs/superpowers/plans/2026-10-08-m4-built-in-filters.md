@@ -215,8 +215,17 @@ not have to re-derive which filters are "really" Rust:
 That is why `date` is Rust (it parses the format string, applies the `arg`
 dispatch, decides between `date_format`/`time_format` — see
 `defaultfilters.py:783-810`) while `formats.date_format` is a host call, and why
-`floatformat`'s rounding, exponent arithmetic and 200-digit refusal are Rust
-while `formats.number_format` is a host call.
+`floatformat`'s **200-digit refusal, `arg`-suffix dispatch, control flow and
+digit assembly** are Rust while `formats.number_format` **and the whole decimal
+engine** — `Decimal`, `scaleb`, `prec = max(getcontext().prec, prec)` at `:200`,
+`quantize` — are host calls. **An earlier revision of this paragraph said
+`floatformat`'s "rounding, exponent arithmetic and 200-digit refusal" were Rust;
+Task 7's design round refuted that by measurement, and §D2's own rule had already
+named "what a `decimal.Context` is set to" as host state, so the example
+contradicted the rule it illustrates.** The amendment at the end of Task 7
+records the two measured routes by which the context reaches the answer —
+`scaleb`'s clamp to `0E-Etiny` below `2*(Emax+prec)` and its `InvalidOperation`
+above it — and the host contract that crosses the seam with it.
 
 **This delegation is permanent, and an earlier revision of this plan said
 otherwise.** It claimed `urlize` would be "ported twice" because
@@ -2300,8 +2309,13 @@ no-op mutation in this project already produced one false "passed".
   re-deriving it.
 - `pluralize` (`:942-982`) — `arg="s"`; a `","` is prepended when absent; more
   than two bits returns `""`; `float(value) == 1` decides, falling back on
-  `len(value)` for a `TypeError`. `float(value)` is `to_float`, and a `ValueError`
-  means "not a number, try `len`". Three arms.
+  `len(value)` for a `TypeError`. **Three arms, and the `len` fallback is only in
+  the `TypeError` one** — an earlier revision of this bullet said a `ValueError`
+  means "not a number, try `len`", and it does not: a `ValueError` falls through
+  to `return ""` without asking (measured `pluralize("abc") -> ""` where a
+  `len`-based body answers `"s"`, and `pluralize([]) -> "s"` where `len` is how
+  it got there). `float(value)` is `to_float`; the arms are number-ish → compare,
+  `TypeError` → `len` (whose own `TypeError` → `""`), `ValueError` → `""`.
 - `yesno` (`:860-897`) — `arg=None` → `gettext("yes,no,maybe")`, so **the default
   case is a translation lookup** and the corpus needs `override_settings(LANGUAGE_CODE=...)`
   or an uninstalled i18n state to be meaningful. `len(bits) < 2` returns `value`
@@ -2325,6 +2339,223 @@ no-op mutation in this project already produced one false "passed".
 - `filesizeformat` (`:899-940`) — `formats.number_format` plus `ngettext`, so it
   needs both host calls, and the corpus needs `USE_THOUSAND_SEPARATOR` in both
   states.
+
+**What Task 7's design round found, and the three corrections it makes to this
+section.** Written before the bodies, because the first changes what the group's
+largest body is made of.
+
+**1. The sentence in §D2 about `floatformat` is false, and §D2's own rule is
+what refutes it.** `defaultfilters.py:200` is
+
+```python
+prec = max(getcontext().prec, prec)
+```
+
+— a direct read of the global decimal context, three lines after
+`Decimal(1).scaleb(-abs(p))` at `:194`. So "`floatformat`'s rounding, exponent
+arithmetic and 200-digit refusal are Rust" is wrong on two of its three nouns,
+and §D2 had already said so: **"what a `decimal.Context` is set to" is named in
+the rule itself as host state.** The correction is to §D2's *example*, not its
+rule, and §D2 has been amended in place.
+
+**The subtler half is that the context is observable through the answer**, which
+is why this is not bookkeeping about where a line lives. Two measured routes:
+
+* **Below the boundary `scaleb` clamps, and it clamps to a zero.** For large `p`
+  the "exponent" is not `1E-p`: `Decimal(1).scaleb(-abs(p))` silently returns
+  `Decimal('0E-' + Etiny)`, with `Etiny = Emin - prec + 1`. Measured at `prec=1`
+  with `p=1000027`: `scaleb` gives `Decimal('0E-999999')`, so `quantize` rounds
+  at **999999** places and the digit assembly is 1000001 chars — while the
+  answer is **1000029**, because `formats.number_format(number, abs(p))` pads the
+  fraction out to `abs(p)` decimals. The final width is `number_format`'s; the
+  rounding position is the context's. A Rust port that computed `10^-p` for real
+  would round at `p` where Django rounds at 999999.
+* **Past `2*(Emax + prec)` it raises, out of a `try`.** `scaleb` raises
+  `InvalidOperation` at `abs(p) = 2*(Emax + prec) + 1` and clamps below it, and
+  the boundary is exact to the integer and moves with `prec` — measured
+  `prec=1 -> 2000000` clamps / `2000001` raises, `28 -> 2000054/2000055`,
+  `1000 -> 2001998/2001999`, `100000 -> 2199998/2199999`, each matched by a
+  transition at exactly that integer. End to end: **`floatformat(1.5, 2000054)`
+  is 2000056 chars at the default `prec=28` and raises `InvalidOperation` at
+  `prec=1`** — a template input Django accepts, whose answer is a property of
+  thread-local state. (The exception *class* moves too: at the boundary itself
+  the operation reports `Overflow` where a Rust reimplementation would say
+  `InvalidOperation`. Not worth reproducing, and not corpus-reachable, since a
+  raising row cannot be a corpus row.)
+
+So `floatformat`'s **decimal engine is host**, and it crosses the seam whole:
+parse, `scaleb`, the `prec` computation and `quantize` are none of them a
+function of the filter's arguments. What stays Rust is the control flow, the
+`arg`-suffix dispatch, the 200-digit refusal, the `not m and p <= 0` integer
+branch, the digit assembly, the `.` insertion and the sign.
+
+**2. The host contract this adds.** Three methods, and the rest of the group
+needs none of them:
+
+```rust
+/// `Decimal(str(value))`, then the `Decimal(str(float(value)))` retry
+/// (`:152-159`). `Unparseable` is the source's `return ""`.
+fn decimal_parse(&self, value: &Value) -> Result<DecimalParse, Error>;
+
+pub enum DecimalParse {
+    Parsed(ParsedDecimal),
+    Unparseable,
+}
+
+pub struct ParsedDecimal {
+    /// The `Decimal` itself, as an `Opaque`, for `decimal_quantize`. It is a
+    /// handle rather than a re-parse so `str(text)` happens once.
+    pub value: Value,
+    /// `str(text)` — the payload of all three `return input_val` arms
+    /// (`:163`, `:177`, `:182`). A plain `str`, and **not** safe.
+    pub input_val: String,
+    /// `d.as_tuple()`'s parts, so the refusal and the assembly need no second
+    /// round trip. Most-significant digit first.
+    pub sign: bool,
+    pub digits: Vec<u8>,
+    /// `None` for `"F"`/`"n"`/`"N"` (inf and nan). That is the `TypeError` arm
+    /// at `:168-170` **and** the reason `int(d)` raises at `:180`; both mean
+    /// `return input_val`, so the body tests this once and never reads a
+    /// meaningless `integral`.
+    pub exponent: Option<i64>,
+    /// `not (int(d) - d)` — the source's `m` (`:180`) — and `false` when that
+    /// raised, which is exactly when `exponent` is `None`.
+    pub integral: bool,
+}
+
+/// `:194-205`: `exp = Decimal(1).scaleb(-abs(p))`, the `units`/`prec`
+/// computation and `d.quantize(exp, ROUND_HALF_UP, Context(prec=prec))`.
+/// Returns `rounded_d.as_tuple()`.
+///
+/// One method rather than three, because every step reads or is bounded by the
+/// thread-local context; a Rust caller computing its own `prec` is the bug this
+/// seam exists to prevent. `places` is `abs(p)`; `integral` is `m`'s truthiness,
+/// passed rather than recomputed so the source's single `int(d) - d` stays
+/// single.
+fn decimal_quantize(
+    &self,
+    decimal: &Value,
+    places: u64,
+    integral: bool,
+) -> Result<DecimalTuple, Error>;
+
+pub struct DecimalTuple {
+    pub sign: bool,
+    pub digits: Vec<u8>,
+    pub exponent: i64,
+}
+
+/// `formats.number_format(round(value, 1), 1)` whole (`:911-912`).
+///
+/// Not `number_format` with a Rust-rounded argument: Python's two-argument
+/// `round` on a **float** rounds against the exact binary value, not the decimal
+/// one. Measured `round(0.35, 1)` is `0.3` (the exact value is
+/// `0.34999999999999997780…`) where `Decimal(str(0.35)).quantize(Decimal("0.1"),
+/// ROUND_HALF_EVEN)` is `0.4`. A Rust `round` over the decimal text — what the
+/// rest of this crate does — answers `0.4` where Django answers `0.3`.
+fn filesize_number_format(&self, value: f64) -> String;
+
+/// `int(value) % int(arg) == 0` — `divisibleby` (`:854-858`), which has **no**
+/// `try`: `arg == 0` is `ZeroDivisionError`, a non-numeric operand is
+/// `ValueError` or `TypeError`, and all three escape. Rust compares the result
+/// to zero, so `IntValue::Big` is never zero and only `Small(0)` matters.
+fn int_modulo(&self, a: &Value, b: &Value) -> Result<IntValue, Error>;
+```
+
+`add`'s first arm needs no new method: `int(value) + int(arg)` **is** Python `+`
+on two ints, so it is the existing `add_values` over the two coerced
+`IntValue`s, with both `to_int` calls made in source order (`value` first, so a
+`ValueError` from it wins). That needs an `IntValue -> Value` conversion —
+`Small(n) -> Value::Int(n)`, `Big(text) -> Value::BigInt(text.into_boxed_str())`
+— because `add_values` takes `&Value`. The alternative, an `int_add` on
+`IntValue`, is worse for the reason `add_values` exists at all: `IntValue::Big`
+is canonical decimal *text*, so `Big % Big` and a carrying `i64 + i64` have no
+Rust expression and the arithmetic is host territory either way.
+
+`filesizeformat` therefore needs **four** host calls, not the two this section
+says: `filesize_number_format`, `ngettext`, `percent_format` (for both
+`gettext("%s KB") % …` and `ngettext(…) % {"size": …}`, which is a mapping
+operand) and `gettext`. `avoid_wrapping` is **verified pure** and stays Rust:
+`django/utils/html.py:502-507` is `return value.replace(" ", "\xa0")` on a `str`.
+
+**3. What measurement says about the individual bullets above**, three of which
+the plan got wrong and the rest of which it got only partly:
+
+* **`pluralize`: the `len` fallback is only in the `TypeError` arm.** The bullet
+  above says "a `ValueError` means 'not a number, try `len`'". It does not — a
+  `ValueError` falls through to `return ""` and never asks. Measured
+  `pluralize("abc") -> ""` (a `len`-based body answers `"s"`), `pluralize("") ->
+  ""`, `pluralize([1]) -> ""` (that one *is* `len`), `pluralize([]) -> "s"`,
+  `pluralize("1") -> ""` (the singular suffix, not a failure). The corpus needs a
+  **non-numeric string** row for this; no list row reaches it.
+* **`get_digit`: the `except` names one class, so a `TypeError` escapes.**
+  `int(None)` is a `TypeError` where the source catches `ValueError` only —
+  measured `get_digit(None, 1)` raises. Reachable (`{{ x|get_digit:1 }}` with `x`
+  unset), and a **body test**, not a corpus row. Also measured: `get_digit(123,
+  9) -> 0` (the `IndexError` arm), `get_digit(123, 0) -> 123`, `get_digit("-123",
+  1) -> 3`.
+* **`floatformat`'s two `arg` traps.** The suffix dispatch reads `arg[-1]`
+  **before** any parse, so an empty-string arg is `IndexError: string index out
+  of range` and escapes — measured `floatformat(6666.6666, "")` raises (a body
+  guarding with `is_empty()` would answer where Django raises). And `int(arg)`'s
+  `ValueError` is `return input_val`: measured `floatformat(6666.6666, "x") ->
+  "6666.6666"`, plain `str`. The measured suffix rows are `"2g" -> "6,666.67"`,
+  `"2u" -> "6666.67"`, `"g" -> "6,666.7"`, `"gu"`/`"ug" -> "6666.7"`.
+* **`floatformat`'s integer branch is the *integral* test, not `exponent < 0`.**
+  `not m and p <= 0` asks whether the value is a whole number — measured
+  `floatformat(1.0, -1) -> "1"` and `floatformat("1.0", -1) -> "1"`, both with
+  exponent `-1`. A body testing the exponent would take the quantize path here.
+* **`floatformat` rounds `ROUND_HALF_UP` on the exact decimal**, not banker's:
+  measured `floatformat(0.5, 0) -> "1"` and `floatformat(2.5, 0) -> "3"`, where
+  `round(2.5)` is `2`.
+* **The 200-digit refusal is Rust and its boundary is exactly 200.** Measured:
+  199 zeros after a `1` (sum 200) formats to a `SafeString` 203 chars long; 200
+  zeros (sum 201) returns `input_val` as a plain `str`. `"1e300"` and `"1e-400"`
+  refuse; `inf`/`-inf`/`nan` reach the `int(d)` arm and return `"inf"`/`"-inf"`/
+  `"nan"` unmarked; `"abc"` and `None` are the `Unparseable` arm and answer `""`.
+  The exponent being `"F"`/`"n"`/`"N"` makes the sum 0 rather than raising, which
+  is why the refusal does not fire for the non-finites.
+* **`default`/`default_if_none` return the argument *object***, so their safety
+  is the argument's and not the filter's: measured `default(0, "x")` is
+  `SafeString("x")` — the quoted constant was `mark_safe`d by `resolve` — where
+  `default_if_none(0, "x")` is the int `0`. A body that built a new value
+  instead of returning the operand loses that flag. Both are `is_safe=False`.
+* **`yesno`'s short-arg arm returns the *value*.** Measured `yesno(None, "y") ->
+  None`, not `""`. The default-arg row is a `gettext("yes,no,maybe")` lookup, so
+  the corpus must state its i18n state; measured untranslated `yesno(True, None)
+  -> "yes"`.
+* **`add`'s three arms are all corpus-reachable, but not as this section's
+  examples suggest.** Arm 1 `add(1, 2) -> 3` and `add(1.5, 1) -> 2` (so it really
+  is `int()` on both); arm 2 `add("a", "b") -> "ab"` — **not** two lists, because
+  an `arg` is a template constant and a template has no list literal; arm 3
+  `add({}, 1) -> ""` and `add([1], 2) -> ""`, where `value + arg` is the caught
+  `TypeError`. The `bare except Exception` is what makes arm 3 `""`.
+* **`stringformat`'s refusal arm** is measured `stringformat("abc", "d") -> ""`,
+  `(None, "d") -> ""`, `(42, "z") -> ""`, and `([1], "s") -> "[1]"` — so the
+  refusal is the `%` operator's, and `str(arg)` alone is Rust's.
+
+**§11 for this group.** The central mutation is on the seam itself and it is the
+one §11's "moves 0 rows" rule exists for:
+
+```text
+  rows moved
+      ?   floatformat: the host's `prec = max(getcontext().prec, prec)` -> `prec`
+          (the host stops reading the context — and no corpus row can see it,
+           because the corpus runs at the default prec=28 and no row sits near
+           the 2*(Emax+prec) boundary, and a raising row cannot be a corpus row)
+      ?   floatformat: ROUND_HALF_UP -> ROUND_HALF_EVEN
+          (moves floatformat/rounds-half-up-on-the-exact-decimal)
+      ?   pluralize: the ValueError arm folded into the TypeError one
+          (moves pluralize/non-numeric-string-is-not-len-based)
+```
+
+If the first moves 0 rows, that is the signal and the remedy is a **local pin**,
+not a weaker mutation: a Rust unit test over a `TestFilterHost` whose
+`decimal_quantize` is scripted cannot see it either, so the pin has to be a real
+host call with `getcontext().prec` set to 1 and a `places` past the boundary —
+i.e. the same shape as the measurement above. The counts are recorded in the
+group's commit, and each mutation asserts its pattern was found **and** that the
+file's md5 changed before it runs.
 
 ### Task 8: escaping and safety — 12 filters
 
