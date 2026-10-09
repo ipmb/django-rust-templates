@@ -3374,22 +3374,71 @@ about to change.
 The group where §D2's tiering is load-bearing, and the one the corpus cannot
 prove with one settings state.
 
-- `date` (`:783-795`) / `time` (`:797-809`) — `expects_localtime=True`,
-  `is_safe=False`, `arg=None`. Rust owns the whole body: the `arg` handling, the
-  `date_format`/`time_format` dispatch, the `arg is None` default, and
-  `formats.date_format`/`time_format` are host calls. `expects_localtime` means
-  the **FFI** applies `localtime` before the call (Task 3's loop), so this task's
-  tests drive the loop, not the body, for that half.
-- `timesince` (`:811-822`) / `timeuntil` (`:824-838`) — `arg=None`. With `arg`,
-  it is the elapsed time between two datetimes; without, between `arg`-less
-  `now` and the value — and `now` comes from `FilterHost::now()`, so the corpus
-  row for the `arg=None` case is **time-dependent** and cannot be an equality row
-  against a fixed literal. The corpus uses the two-argument form for equality and
-  pins the one-argument form with a monotonicity property (the output for a
-  value one hour older is the same string as for the value itself).
+**Task 10 landed in `82c334e`, and it corrected this section in three places.**
+Two are line ranges that started on the decorator and ran past the body —
+measured in the pinned 6.0.9, `date` is `:783-794`, `time` `:797-808`,
+`timesince` `:811-821` and `timeuntil` `:824-832`; the bullets below carried
+`:783-795`, `:797-809`, `:811-822` and `:824-838`, the last overshooting by six
+and reaching the `####` separator. The third is the claim that `now` comes from
+`FilterHost::now()`, which is wrong and is corrected in the bullet. A fourth
+change is not a correction but a **seam addition**: `date` and `time` have two
+branches calling two different formatters, and the second of the pair was not
+expressible through `date_format`/`time_format` at all, so
+`dateformat_format`/`dateformat_time_format` landed in `cf8d69a`. The first two
+were found by reading the bodies against the source rather than by a failing
+row — no corpus row can see a formatter that is only ever called in a fallback,
+which is §10.4's blind spot.
 
-- [ ] **Step: after Task 10, update §10.3's M4 row** and write
+- `date` (`:783-794`) / `time` (`:797-808`) — `expects_localtime=True`,
+  `is_safe=False`, `arg=None`. Rust owns the whole body: the `arg` handling, the
+  **two-branch** dispatch, the `arg is None` default, and the four
+  `date_format`/`time_format`/`dateformat_format`/`dateformat_time_format` host
+  calls. **The two branches call two different functions, which is why the seam
+  carries four methods rather than two.** Branch 1 is `formats.date_format`,
+  whose body is `dateformat.format(value, get_format(arg or "DATE_FORMAT"))` —
+  the argument is a lookup key and `None` is the sentinel, so its signature is
+  `Option<&str>`. Branch 2 is `django.utils.dateformat.format` (imported at
+  `:14`), which `str()`s its argument and splits the text, so an absent argument
+  is the literal `"None"` — four live format characters — and its signature is
+  `&Value`. A body that spelled branch 2 as `date_format(value, Some("DATE_FORMAT"))`
+  answers `''` where Django answers `'Oct.202610'`; `date/branch-two-absent-argument`
+  and its `DATE_WITHOUT_DAY` fixture are that row, and its `isocalendar()` must
+  return a real `IsoCalendarDate` — a bare tuple answers `''` for the wrong
+  reason. The guard is `value in (None, "")`, **equality against two sentinels
+  and not truthiness**, which is why `{{ 0|date:5 }}` is `'5'` where a
+  `bool(value)` guard gives `''`. The catch-lists differ: `date` catches only
+  `AttributeError` and `time` catches `(AttributeError, TypeError)`, so
+  `{{ d|date:"H" }}` propagates where `{{ d|time:"H" }}` is `''`.
+  `expects_localtime` means the **FFI** applies `localtime` before the call
+  (Task 3's loop), so this task's tests drive the loop, not the body, for that
+  half; the corpus's five `localtime` rows carry `context`+`settings`+`expected`
+  and are the only evidence the flag is carried at all.
+- `timesince` (`:811-821`) / `timeuntil` (`:824-832`) — `arg=None`. With `arg`,
+  it is the elapsed time between two datetimes; without, between the value and
+  `now` **filled by the helper itself** (`timesince.py:67-68`), not by
+  `FilterHost::now()` — that is the correction, and it is why the `arg=None` row
+  need not be treated as time-dependent. The far-future row is an **exact
+  equality** (`datetime.now() + 3650 days` is `'0\xa0minutes'`), not the
+  monotonicity property this section used to specify: the helper's future-stop
+  arm makes the answer exact, so one literal pins more than a property comparing
+  two rows. `timeuntil` is `timesince(..., reversed=True)` — the seam's flag, not
+  a caller-side operand swap, which would normalise the timezones the other way
+  (`timesince.py:72-73` swaps *after* `:66-70` normalises). Both catch
+  `(ValueError, TypeError)` and let `AttributeError` escape: the helper raises it
+  for a non-date value, so `'x'|timesince` is a live error carrying Python's own
+  message (`'str' object has no attribute 'year'`) — the reason the seam's
+  `timesince` returns `Result<String, Error>` rather than `String`.
+
+- [x] **Step: after Task 10, update §10.3's M4 row** and write
   `.review/m4-summary.md` in the shape `.review/m3-summary.md` established.
+  **Done, with one correction to this step and one addition to it.** The
+  correction: the Task 10 section above (3370–3430) was rewritten, because four
+  of its line ranges and its `FilterHost::now()` claim were wrong against
+  `.django/` @ 6.0.9 — see that section's opening paragraph. The addition: a
+  citation pass over `host.rs`, `urlize.rs` and `urlizetrunc.rs` (`7df817f`)
+  landed as its own commit, because the wrong `file:line` ranges had propagated
+  from the trait docs into the wave-B modules and the plan's text was not the
+  only place carrying them.
 
 ---
 

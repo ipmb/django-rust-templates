@@ -31,7 +31,7 @@ reading.
 
 `formats.date_format(value, format=None, …)` is
 `dateformat.format(value, get_format(format or "DATE_FORMAT", …))`
-(`formats.py:155-158`). Two consequences the trait's `format: &str` obscures:
+(`formats.py:155-157`). Two consequences the trait's `format: &str` obscures:
 `None` and `"DATE_FORMAT"` are the *same call*, and **`settings.DATE_FORMAT`
 is not either of them**.
 
