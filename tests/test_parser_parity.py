@@ -464,12 +464,13 @@ class CorpusParityTests(unittest.TestCase):
         self.assert_trees_match(source, debug=True)
 
     def test_the_corpus_has_a_row_whose_tree_contains_a_host_node(self):
-        """`builtin_tag_names()` is Rust's registry, so the coverage gate is
-        structurally blind to every tag the *host* compiles — including both of
-        M6's, and `{% load %}` itself.
+        """`builtin_tag_names_including_stubs()` is Rust's registry, so the
+        coverage gate is structurally blind to every tag the *host* compiles —
+        including both of M6's, and `{% load %}` itself.
 
         That is not a hypothetical: the gate derives its demand from
-        `builtin_tag_names() - builtin_tag_stubs()`, so when `load` and
+        `builtin_tag_names_including_stubs() - builtin_tag_stub_names()`, so
+        when `load` and
         `querystring` left the stub set in Task 3 it demanded nothing new, and
         M6 could have closed with its whole mechanism ungraded and every
         coverage assertion green. This row is what makes that impossible, and it
@@ -519,7 +520,7 @@ class CorpusParityTests(unittest.TestCase):
         Enumerated from the engine, not hardcoded. M2's version of this test
         listed eight names, so it could not fail for any tag it did not name —
         the vacuous gate the M5 plan exists to close. It now names none and
-        derives the set instead: a tag leaves `builtin_tag_stubs()` when its body
+        derives the set instead: a tag leaves `builtin_tag_stub_names()` when its body
         lands, and this test starts demanding a row for it in that same commit,
         whether or not anyone remembered to update a list here.
 
@@ -529,7 +530,9 @@ class CorpusParityTests(unittest.TestCase):
         indistinguishable from an oversight. Here the exceptions are named,
         counted, and asserted to be all of them.
         """
-        implemented = set(_native.builtin_tag_names()) - set(_native.builtin_tag_stubs())
+        implemented = set(_native.builtin_tag_names_including_stubs()) - set(
+            _native.builtin_tag_stub_names()
+        )
         joined = "\n".join(TEMPLATES)
         # `\b` and not a bare prefix: `{% ifchanged %}` is not a `{% if %}` row,
         # and a prefix match would let the longer tag's row satisfy the shorter
@@ -818,7 +821,7 @@ class ShapeTests(unittest.TestCase):
         converts it to `TemplateSyntaxError` exactly as before.
 
         The example is a tag that is **still** a stub, enumerated rather than
-        guessed: `_native.builtin_tag_stubs()` is `['partial', 'partialdef']` on
+        guessed: `_native.builtin_tag_stub_names()` is `['partial', 'partialdef']` on
         this tree, and `partialdef` is the one of the two Django's base parser
         will not reject first. `{% if %}` was the example until M5's Task 7
         landed it, and `{% load x %}` until M6 handed `load` to the host — which

@@ -136,7 +136,7 @@ class InterpositionTests(unittest.TestCase):
         ``{% if %}`` grammar into ``crates/template-core/src/parser/smartif.rs``,
         which the parse seam drives inside ``compile_template``, and the shell
         then materialises the resulting ``IfCondition`` tree into real
-        ``smartif`` objects (``template-py/src/lib.rs:667``). A row
+        ``smartif`` objects (``template-py/src/lib.rs:673``). A row
         named after the plan's premise would have asserted something untrue
         about a call that does not happen, so it is renamed and rewritten here;
         the substitution is recorded in the plan's Task 3 corrections.

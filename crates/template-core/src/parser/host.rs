@@ -246,7 +246,7 @@ impl Host for NoHost {
         // it has no table, so it has no second index to give. Nothing built
         // under it is ever materialised (`_native.parse` always builds the
         // shell's host; `NoHost` appears only in Rust unit tests and in
-        // `builtin_tag_stubs`'s probe), so a collision cannot be observed here.
+        // `builtin_tag_stub_names`'s probe), so a collision cannot be observed here.
         //
         // The `unreachable!` alternative would be a lie: unlike `call_tag`
         // above, this *is* reachable — a tag that allocates a slot is compiled

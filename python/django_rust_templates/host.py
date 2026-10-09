@@ -115,8 +115,9 @@ class ShellHost:
 
     def __init__(self, parser):
         self.parser = parser
-        # `builtin_tag_names()` minus `builtin_tag_stubs()`: the names Rust has a
-        # real compile function for. `names()` alone is the registry's *keys*,
+        # `builtin_tag_names_including_stubs()` minus
+        # `builtin_tag_stub_names()`: the names Rust has a
+        # real compile function for. The first alone is the registry's *keys*,
         # and a stub is a key with a body that raises `Unimplemented`, so taking
         # it whole claims `partial` and `partialdef` for Rust and the identity
         # clause below then declines them on the host's behalf — measured, that
@@ -127,11 +128,12 @@ class ShellHost:
         #
         # The subtraction is not a new rule, it is the one the rest of the tree
         # already uses: `tests/test_parser_parity.py` derives "implemented" as
-        # `set(builtin_tag_names()) - set(builtin_tag_stubs())`, and
+        # `set(builtin_tag_names_including_stubs()) -
+        # set(builtin_tag_stub_names())`, and
         # `tests/test_tag_inventory.py` pins the stub set to those two names. The
         # host was the one place that read the keys as the registry.
-        self._rust_owned = set(_native.builtin_tag_names()) - set(
-            _native.builtin_tag_stubs()
+        self._rust_owned = set(_native.builtin_tag_names_including_stubs()) - set(
+            _native.builtin_tag_stub_names()
         )
         self._django_tags = django_own_tags()
         # The exception object `call_tag` last let past, for the shell to

@@ -257,7 +257,8 @@ TEMPLATES = [
     # Every row above is compiled by Rust's own registry, so before this block
     # the corpus had no tree containing a host node at all — and the coverage
     # test below cannot demand one, because it derives its demand from
-    # `builtin_tag_names()`, which is Rust's registry and structurally blind to
+    # `builtin_tag_names_including_stubs()`, which is Rust's registry and
+    # structurally blind to
     # every tag the host owns. `{% load %}` is how these rows reach their
     # library, and it is itself host-owned (`defaulttags.py:1099`).
     #

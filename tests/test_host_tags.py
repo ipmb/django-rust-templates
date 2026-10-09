@@ -17,7 +17,7 @@ Error *text* cannot close the hole — our messages are ported verbatim from
 Django's, so `{% for %}` with a missing argument raises identical text whichever
 side compiled it. The discriminator has to be something only one side does, and
 that is `{% partialdef %}`: its Rust entry is still a stub
-(`builtin_tag_stubs()` contains it), so a Rust-parsed body would raise
+(`builtin_tag_stub_names()` contains it), so a Rust-parsed body would raise
 `UnimplementedTag` (`measured`), while a Django-parsed one runs `do_partialdef`
 and stores into `parser.extra_data["partials"]` (`defaulttags.py:1250-1251`).
 The contrast is asserted below rather than argued in this docstring, because a

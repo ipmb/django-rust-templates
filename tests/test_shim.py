@@ -212,7 +212,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
 
         The cache-drop below is not incidental. The row writes a module and
         expects the finder to see it, but ``install()`` returns early when the
-        shim is already installed (``_shim.py:239``), and a session-start install
+        shim is already installed (``_shim.py:303``), and a session-start install
         (which ``check.sh`` now does, so every test module binds the same
         classes) means the shim *is* already installed by the time this row
         runs. A ``django.template.loaders`` cached earlier in the session then
@@ -263,6 +263,76 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         before = sys.modules["django.template"]
         _shim.install()
         self.assertIs(before, sys.modules["django.template"])
+
+    def test_install_refuses_a_capture_from_the_universe_it_replaces(self):
+        """A module that imported Django's `Node` first is refused, not papered over.
+
+        ``from django.template.base import Node`` is a copy, and nothing done to
+        ``django.template.base`` afterwards can change it — so a module executed
+        while Django's template modules were current keeps Django's ``Node`` for
+        the rest of the process, and every ``isinstance`` against ours is then
+        false. The measured shape is ``host.django_own_tags()["if"] is
+        defaulttags.register.tags["if"]`` going ``False``, which makes
+        ``ShellHost.has_tag`` hand ``{% if %}`` back to Python's ``do_if``.
+
+        The state is reproduced rather than described: drop the cached
+        ``defaulttags``, import it while the shim is out, then install. A refused
+        install must also leave the process where it started, so the assertion
+        after it is that the shim is *not* installed.
+        """
+        _shim.uninstall()
+        try:
+            sys.modules.pop("django.template.defaulttags", None)
+            import django.template.defaulttags as django_defaulttags
+
+            self.assertNotIn("_impl", django_defaulttags.__file__ or "")
+
+            with self.assertRaises(_shim.ShimError) as caught:
+                _shim.install()
+
+            message = str(caught.exception)
+            self.assertIn("django.template.defaulttags", message)
+            self.assertIn("Node", message)
+            self.assertFalse(_shim.installed(), "a refused install left the shim in")
+        finally:
+            # The module holding the capture is dropped so the next import takes
+            # ours, and the shim goes back to installed for every later row.
+            sys.modules.pop("django.template.defaulttags", None)
+            _shim.install()
+
+    def test_uninstall_while_uninstalled_does_not_poison_the_cache(self):
+        """The second ``uninstall()`` must not file Django's modules as ours.
+
+        ``uninstall`` moves every served name from ``sys.modules`` into the
+        *ours* cache. Called when the shim is already out, that cache is holding
+        Django's own modules — so afterward ``install`` places Django's ``base``
+        under our name, and every module that captured our ``Node`` is then a
+        module holding a class nothing else has. The visible damage is the
+        fail-loud check refusing a legitimate install, which is how this was
+        found: 24 bindings reported stale across `test_shim`'s run, all of them
+        correct against the cache before the second `uninstall` touched it.
+
+        `tearDown` uninstalls and the rows call `uninstall()` themselves, so the
+        redundant call is the ordinary case rather than a corner, and the
+        assertion is on what a caller can see: after the cycle, ``install``
+        still gives back *our* file.
+        """
+        _shim.install()
+        _shim.uninstall()
+
+        django_base = sys.modules["django.template.base"]
+        _shim.uninstall()  # already out: must change nothing
+
+        self.assertIs(sys.modules["django.template.base"], django_base)
+
+        _shim.install()
+        ours = sys.modules["django.template.base"]
+        self.assertTrue(
+            Path(ours.__file__).resolve().is_relative_to(
+                (PROJECT_ROOT / "python" / "django_rust_templates" / "_impl").resolve()
+            ),
+            f"the second install put {ours.__file__} under our name",
+        )
 
     def test_strict_mode_raises_while_falling_back(self):
         with self.assertRaises(_shim.ShimError):

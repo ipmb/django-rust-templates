@@ -202,9 +202,9 @@ fn standin_first(_parser: &mut Parser<'_>, _token: &Token) -> Result<NodeDesc, E
 /// The stand-in compile function for `command`, if `command` names one.
 ///
 /// A `match` here rather than three `REGISTRY` rows: a row would put a name in
-/// `builtin_tag_names` that Django's registry does not have, and the Python
-/// cross-check in `tests/test_tag_inventory.py` asserts against Django's real
-/// set. `registry::builtin_tag` consults this before the table.
+/// `builtin_tag_names_including_stubs` that Django's registry does not have, and
+/// the Python cross-check in `tests/test_tag_inventory.py` asserts against
+/// Django's real set. `registry::builtin_tag` consults this before the table.
 #[cfg(test)]
 pub(crate) fn standin_tag(command: &str) -> Option<CompileFn> {
     match command {

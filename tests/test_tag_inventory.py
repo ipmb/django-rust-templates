@@ -272,7 +272,7 @@ class RustRegistryTests(unittest.TestCase):
     def test_the_rust_registry_is_djangos_builtins_minus_the_python_owned_two(self):
         from django_rust_templates import _native
 
-        names = _native.builtin_tag_names()
+        names = _native.builtin_tag_names_including_stubs()
         self.assertEqual(sorted(names), sorted(REGISTERED - self.PYTHON_OWNED))
         self.assertEqual(len(names), 25)
 
@@ -281,19 +281,19 @@ class RustRegistryTests(unittest.TestCase):
 
         for name in sorted(self.PYTHON_OWNED):
             with self.subTest(name=name):
-                self.assertNotIn(name, _native.builtin_tag_names())
+                self.assertNotIn(name, _native.builtin_tag_names_including_stubs())
 
     def test_the_only_two_unimplemented_entries_are_the_m13_pair(self):
         """A stub is a real M13 tag, not a stand-in for a name Rust handed over.
 
-        `builtin_tag_stubs()` asks the registry itself which names have a compile
+        `builtin_tag_stub_names()` asks the registry itself which names have a compile
         function that returns `Unimplemented`, so pinning the set here is what
         separates "not done yet" from "not ours": `load` and `querystring` are
         absent from the table entirely, and only `partial`/`partialdef` remain.
         """
         from django_rust_templates import _native
 
-        self.assertEqual(set(_native.builtin_tag_stubs()), {"partial", "partialdef"})
+        self.assertEqual(set(_native.builtin_tag_stub_names()), {"partial", "partialdef"})
 
     def test_no_m5_tag_is_still_a_stub(self):
         """M5's switch: the milestone is done iff this intersection is empty.
@@ -312,13 +312,13 @@ class RustRegistryTests(unittest.TestCase):
         """
         from django_rust_templates import _native
 
-        still = set(_native.builtin_tag_stubs()) & M5_TAGS
+        still = set(_native.builtin_tag_stub_names()) & M5_TAGS
         self.assertEqual(still, set(), f"M5 has not landed: {sorted(still)}")
 
         # Why this test cannot be satisfied from Python, which is the property
         # that makes it a gate rather than a comment: both sides come from the
         # engine. `M5_TAGS` is derived above from Django's registry, and
-        # `builtin_tag_stubs()` is derived in Rust by asking each compile
+        # `builtin_tag_stub_names()` is derived in Rust by asking each compile
         # function, so there is no Python literal to edit here. The Rust side
         # pins its own derivation against a literal in
         # `registry.rs::every_entry_is_reachable_and_every_unimplemented_one_is_a_stub`

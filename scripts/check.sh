@@ -100,7 +100,8 @@ if [ "$FAST" -eq 0 ]; then
   # 2026-10-09 after M9 interposed `base` (instrument:
   # `.review/m9-measurements/m9_measure_native_calls.py`): 23,263 calls from
   # 1,176 of the 1,547 tests — `resolve` 10,180; `compile_template`,
-  # `builtin_tag_names` and `builtin_tag_stubs` 4,361 each. So Rust *is* on the
+  # `builtin_tag_names_including_stubs` and `builtin_tag_stub_names` 4,361
+  # each. So Rust *is* on the
   # suite's path now, and the reason the label stays is narrower: `lex` is still
   # reached zero times (`base.Lexer` is Python at M9) and `engine.py` is still
   # Django's, so "rust engine" would assert more than the run does. The

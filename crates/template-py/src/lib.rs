@@ -38,31 +38,36 @@ use template_core::parser::{Error, ErrorKind, Host, Parser as CoreParser};
 use template_core::pynum::IntValue;
 use template_core::token::{Token, TokenType};
 
-/// Every built-in tag command Rust owns a compile function for, ascending.
+/// Every command name in Rust's tag registry, ascending, **stubs included**.
 ///
 /// Exposed because the cross-check lives where both languages exist: Django's
 /// registry is only readable from Python, and a Rust test cannot see `.django`.
 /// The list is the `REGISTRY` table in `template_core::parser::registry`, which
 /// is written once and in full (§10.4) — a name missing here is a built-in tag
 /// this engine would report as unknown.
+///
+/// The name carries "including stubs" because it did not used to, and the
+/// misreading cost three separate afternoons: this is the registry's keys, not
+/// the tags Rust implements. Subtract `builtin_tag_stub_names()` for the latter.
 #[pyfunction]
-fn builtin_tag_names() -> Vec<&'static str> {
-    template_core::parser::registry::builtin_tag_names()
+fn builtin_tag_names_including_stubs() -> Vec<&'static str> {
+    template_core::parser::registry::builtin_tag_names_including_stubs()
 }
 
-/// The registered names whose compile function is **still a milestone stub**,
+/// The registry's names whose compile function is **still a milestone stub**,
 /// ascending — the registry's own answer, derived there by asking each compile
 /// function rather than from a second list.
 ///
-/// Exposed for the same reason as `builtin_tag_names`, and with more at stake:
-/// a milestone's *scope* is a prose phrase ("the remaining built-in tags") and
-/// its *gate* is a set difference, so `tests/test_tag_inventory.py` needs the set
-/// the engine believes is unfinished in order to subtract it from the tags that
-/// are done. Derived in `template_core::parser::registry::builtin_tag_stubs`,
-/// where the doc records why a hand-maintained list is not good enough here.
+/// Exposed for the same reason as `builtin_tag_names_including_stubs`, and with
+/// more at stake: a milestone's *scope* is a prose phrase ("the remaining
+/// built-in tags") and its *gate* is a set difference, so
+/// `tests/test_tag_inventory.py` needs the set the engine believes is unfinished
+/// in order to subtract it from the tags that are done. Derived in
+/// `template_core::parser::registry::builtin_tag_stub_names`, where the doc
+/// records why a hand-maintained list is not good enough here.
 #[pyfunction]
-fn builtin_tag_stubs() -> Vec<&'static str> {
-    template_core::parser::registry::builtin_tag_stubs()
+fn builtin_tag_stub_names() -> Vec<&'static str> {
+    template_core::parser::registry::builtin_tag_stub_names()
 }
 
 /// Engine version, so the Python shell can assert it is talking to the build it
@@ -75,8 +80,9 @@ fn engine_version() -> &'static str {
 /// Every built-in filter this engine implements, ascending — the Rust registry's
 /// names.
 ///
-/// The cross-check lives where both languages exist, for `builtin_tag_names`'
-/// reason: Django's registry is only readable from Python, so
+/// The cross-check lives where both languages exist, for
+/// `builtin_tag_names_including_stubs`' reason: Django's registry is only
+/// readable from Python, so
 /// `tests/test_filter_inventory.py` is the test that compares the two, and this
 /// is the half it cannot read any other way.
 #[pyfunction]
@@ -2167,7 +2173,7 @@ fn log_resolution_failure(
 /// `tests/test_resolve_invalid.py`, `tests/test_resolve_callarm.py` and
 /// `tests/test_m8_side_effects.py` can compare a lookup against Django's **at
 /// the method**, with the arm that failed named in the report. Those five
-/// harnesses exercise `silent_variable_failure` — `test_render_parity.py:529`
+/// harnesses exercise `silent_variable_failure` — `test_render_parity.py:533`
 /// and `test_resolve_callarm.py:86` are named for it — so an `_native.resolve`
 /// that returned the raw failure would diverge from the pinned method on exactly
 /// the rows they were built for.
@@ -2545,8 +2551,8 @@ fn compile_template(
 
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(builtin_tag_names, m)?)?;
-    m.add_function(wrap_pyfunction!(builtin_tag_stubs, m)?)?;
+    m.add_function(wrap_pyfunction!(builtin_tag_names_including_stubs, m)?)?;
+    m.add_function(wrap_pyfunction!(builtin_tag_stub_names, m)?)?;
     m.add_function(wrap_pyfunction!(engine_version, m)?)?;
     m.add_function(wrap_pyfunction!(filter_names, m)?)?;
     m.add_function(wrap_pyfunction!(stringfilter_filters, m)?)?;

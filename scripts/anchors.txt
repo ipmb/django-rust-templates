@@ -34,8 +34,8 @@ crates/template-py/src/filters.rs:248-257	crates/template-py/src/filters.rs	248	
 crates/template-py/src/filters.rs:871	crates/template-py/src/filters.rs	871	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
 template-py/src/filters.rs:1587-1589	crates/template-py/src/filters.rs	1587	1589	Some(host.classify(&args.get_item(0)?)?)	-
 crates/template-py/src/filters.rs:1644-1645	crates/template-py/src/filters.rs	1644	1645	host.take_raised()	-
-template-py/src/lib.rs:119	crates/template-py/src/lib.rs	119	-	fn filter_flags	-
-template-py/src/lib.rs:667	crates/template-py/src/lib.rs	667	-	fn if_condition_to_py	-
+template-py/src/lib.rs:125	crates/template-py/src/lib.rs	125	-	fn filter_flags	-
+template-py/src/lib.rs:673	crates/template-py/src/lib.rs	673	-	fn if_condition_to_py	-
 crates/template-py/src/lib.rs:1104	crates/template-py/src/lib.rs	1104	-	-	-
 crates/template-py/src/lib.rs:1251	crates/template-py/src/lib.rs	1251	-	-	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
@@ -373,6 +373,7 @@ defaultfilters.py:984-987	django/template/defaultfilters.py	984	987	def phone2nu
 defaultfilters.py:990-996	django/template/defaultfilters.py	990	996	def pprint(value):	return "Error in formatting: %s: %s" % (e.__class__.__name__, e)
 defaultfilters.py:996	django/template/defaultfilters.py	996	-	"Error in formatting: %s: %s" % (e.__class__.__name__, e)	-
 django/template/defaulttags.py:37	django/template/defaulttags.py	37	-	-	-
+django/template/defaulttags.py:30-38	django/template/defaulttags.py	30	38	-	-
 defaulttags.py:99	django/template/defaulttags.py	99	-	def __init__(self, cyclevars, variable_name=None, silent=False):	-
 defaulttags.py:104-114	django/template/defaulttags.py	104	114	def render(self, context):	return render_value_in_context(value, context)
 django/template/defaulttags.py:114	django/template/defaulttags.py	114	-	-	-
@@ -647,12 +648,10 @@ timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not 
 python/django_rust_templates/_impl/base.py:1161	python/django_rust_templates/_impl/base.py	1161	-	-	-
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
 _shim.py:52	python/django_rust_templates/_shim.py	52	-	TARGET = "django.template"	-
-_shim.py:239	python/django_rust_templates/_shim.py	239	-	if installed():	-
-test_render_parity.py:529	tests/test_render_parity.py	529	-	def test_a_silent_variable_failure_is_substituted(self):	-
-test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
+_shim.py:303	python/django_rust_templates/_shim.py	303	-	if installed():	-
+python/django_rust_templates/host.py:243	python/django_rust_templates/host.py	243	-	-	-
 tests/parity_target.py:41	tests/parity_target.py	41	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
 tests/parity_target.py:147	tests/parity_target.py	147	-	So this is the replacement Python side	-
-python/django_rust_templates/host.py:243	python/django_rust_templates/host.py	243	-	-	-
 filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-
 test_unordered_list.py:143	tests/template_tests/filter_tests/test_unordered_list.py	143	-	unordered_list(item_generator()),	-
 test_unordered_list.py:148	tests/template_tests/filter_tests/test_unordered_list.py	148	-	def test_nested_generators(self):	-
@@ -677,4 +676,6 @@ tests.py:148-155	tests/template_tests/tests.py	148	155	def test_compile_tag_extr
 .django/tests/template_tests/tests.py:148-155	tests/template_tests/tests.py	148	155	-	-
 tests/template_tests/tests.py:231-243	tests/template_tests/tests.py	231	243	def test_callable_uses_deferred_annotations(self):	self.assertEqual(template.render(Context({"obj": MyObject()})), "")
 tests/test_host_tags.py:32-37	tests/test_host_tags.py	32	37	PROJECT_ROOT = Path(__file__).resolve().parent.parent	sys.path.insert(0, str(_path))
+test_render_parity.py:533	tests/test_render_parity.py	533	-	def test_a_silent_variable_failure_is_substituted(self):	-
+test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
 .django/tests/utils_tests/test_html.py:204-217	tests/utils_tests/test_html.py	204	217	-	-

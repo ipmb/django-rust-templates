@@ -135,7 +135,8 @@
 //! `Engine().template_builtins[0].tags` is 24 (`defaulttags` alone), while the
 //! union across all three builtin libraries is 27 (`defaulttags` 24 +
 //! `loader_tags` 3). Both are right answers to different questions, and this
-//! project has lost time to that shape four times. `builtin_tag_names` is
+//! project has lost time to that shape four times.
+//! `builtin_tag_names_including_stubs` is
 //! cross-checked against Django's real registry by `tests/test_tag_inventory.py`
 //! so the number cannot drift unnoticed — and that cross-check computes the
 //! complement from `REGISTERED` minus an explicit set, so a change here is a
@@ -158,8 +159,8 @@ pub type CompileFn = fn(&mut Parser<'_>, &Token) -> Result<NodeDesc, Error>;
 /// `(command, compile function)`, ascending by command.
 ///
 /// One table rather than a `match` plus a separate name list: two spellings of
-/// the same 24 names is a drift risk, and `builtin_tag_names` exists precisely
-/// so a test can compare the set against Django's.
+/// the same 24 names is a drift risk, and `builtin_tag_names_including_stubs`
+/// exists precisely so a test can compare the set against Django's.
 type Entry = (&'static str, CompileFn);
 
 const REGISTRY: &[Entry] = &[
@@ -199,8 +200,9 @@ const REGISTRY: &[Entry] = &[
 pub fn builtin_tag(command: &str) -> Option<CompileFn> {
     // Test-only stand-ins, still an arm rather than table rows: they are parser
     // machinery, not Django tags, and adding them to `REGISTRY` would put three
-    // names in `builtin_tag_names` that have no counterpart in Django's
-    // registry — which is exactly what the Python cross-check asserts against.
+    // names in `builtin_tag_names_including_stubs` that have no counterpart in
+    // Django's registry — which is exactly what the Python cross-check asserts
+    // against.
     #[cfg(test)]
     if let Some(compile) = tags::standin_tag(command) {
         return Some(compile);
@@ -211,13 +213,29 @@ pub fn builtin_tag(command: &str) -> Option<CompileFn> {
         .map(|(_, compile)| *compile)
 }
 
-/// Every command name Rust owns a compile function for, ascending.
-pub fn builtin_tag_names() -> Vec<&'static str> {
+/// Every command name in the registry, ascending — **including the stubs**.
+///
+/// The name says what the function answers, because the old one
+/// (`builtin_tag_names`) did not, and the misreading it invited has now been made
+/// three times: this is the registry's *keys*, not the set of tags Rust
+/// implements. A stub is a key whose body raises `Unimplemented`, so anyone who
+/// takes this list whole claims `partial` and `partialdef` for Rust and then has
+/// to hand them back — measured at 245 failures of the 1547 when `ShellHost`
+/// did exactly that. The implemented set is this minus
+/// [`builtin_tag_stub_names`], and the subtraction is written at each call site
+/// rather than offered as a third function because two spellings of one set is
+/// the drift this table exists to prevent.
+pub fn builtin_tag_names_including_stubs() -> Vec<&'static str> {
     REGISTRY.iter().map(|(name, _)| *name).collect()
 }
 
-/// The registered names whose compile function is **still a milestone stub**,
+/// The registry's names whose compile function is **still a milestone stub**,
 /// ascending.
+///
+/// The half of the pair [`builtin_tag_names_including_stubs`] documents: this is
+/// what the names above are subtracted by. Named `…_stub_names` rather than
+/// `…_stubs` so the two read as one set and a subset of it, which is what they
+/// are.
 ///
 /// Derived from the table by **asking it**, not from a second list: a name is a
 /// stub iff compiling it returns [`ErrorKind::Unimplemented`]. Every stub body is
@@ -231,7 +249,7 @@ pub fn builtin_tag_names() -> Vec<&'static str> {
 /// **Why not a list, or an `is_stub` column.** Both are the same defect one layer
 /// down: right until they are not, with nothing to fail when they drift from the
 /// bodies they describe. This is the set M5's gate is a set-difference against —
-/// `builtin_tag_stubs() & M5_TAGS == set()` — so it has to be the engine's own
+/// `builtin_tag_stub_names() & M5_TAGS == set()` — so it has to be the engine's own
 /// answer. It also makes the milestone *progress* derivable: a tag lands, and its
 /// name leaves this list, demanding a corpus row from
 /// `test_the_corpus_covers_every_implemented_tag_with_a_success_path`.
@@ -255,7 +273,7 @@ pub fn builtin_tag_names() -> Vec<&'static str> {
 /// drive a real tag's compile function builds its own token, as the corpus does;
 /// reusing this one would couple a real tag's behaviour to a predicate that must
 /// stay insensitive to it.
-pub fn builtin_tag_stubs() -> Vec<&'static str> {
+pub fn builtin_tag_stub_names() -> Vec<&'static str> {
     let probe = Token {
         token_type: TokenType::Block,
         contents: "x".to_string(),
@@ -299,7 +317,7 @@ mod tests {
         // scan is a scan over a known order, and so that a reader can find an
         // entry without reading all 24. A table that drifts out of order
         // silently breaks the second promise, so it is asserted.
-        let names = builtin_tag_names();
+        let names = builtin_tag_names_including_stubs();
         let mut sorted = names.clone();
         sorted.sort_unstable();
         assert_eq!(names, sorted, "REGISTRY is not ascending by command");
@@ -317,7 +335,7 @@ mod tests {
         // for why those two are absent and for the counting trap. `include` was
         // the third until M7; the doc keeps its bullet because the reason it was
         // listed never met the rule.
-        assert_eq!(builtin_tag_names().len(), 25);
+        assert_eq!(builtin_tag_names_including_stubs().len(), 25);
     }
 
     #[test]
@@ -355,7 +373,7 @@ mod tests {
         // sufficient reason even though the surrounding support changed from
         // "Rust owns the registry outright" to "the dispatch predicate filters
         // what reaches it" (`.review/m5-seams.md`, Finding A point 3).
-        for name in builtin_tag_names() {
+        for name in builtin_tag_names_including_stubs() {
             assert!(
                 name.is_ascii(),
                 "{name:?} is not ASCII: a tag name reaches `py_repr_str`, which \
@@ -380,7 +398,7 @@ mod tests {
     fn every_entry_is_reachable_and_every_unimplemented_one_is_a_stub() {
         // Two independent statements of the same set, and the independence is the
         // point: the literal below is a **pin** on the derivation in
-        // `builtin_tag_stubs`, so a stub body that stopped returning
+        // `builtin_tag_stub_names`, so a stub body that stopped returning
         // `Unimplemented` — the one way that function can drift from the entries
         // it describes — reddens here instead of silently shrinking the set M5's
         // gate is a set-difference against. The derivation, not this literal, is
@@ -395,12 +413,12 @@ mod tests {
         // milestone, which is what keeps every commit in between green.
         let stubs = ["partial", "partialdef"];
         assert_eq!(
-            builtin_tag_stubs(),
+            builtin_tag_stub_names(),
             stubs,
-            "builtin_tag_stubs() disagrees with the pin above: either a stub body \
+            "builtin_tag_stub_names() disagrees with the pin above: either a stub body \
              stopped returning Unimplemented, or the table changed",
         );
-        for name in builtin_tag_names() {
+        for name in builtin_tag_names_including_stubs() {
             assert!(builtin_tag(name).is_some(), "{name} does not resolve");
         }
         // The *implemented* names, which is the other half of the same pin:
@@ -441,7 +459,7 @@ mod tests {
         .chain(stubs)
         .collect();
         expected.sort_unstable();
-        assert_eq!(builtin_tag_names(), expected);
+        assert_eq!(builtin_tag_names_including_stubs(), expected);
     }
 
     #[test]
@@ -453,8 +471,8 @@ mod tests {
         // gives a tag a real body, the name leaves `stubs` and this still holds,
         // which is what makes it useful at every milestone rather than only at
         // M5's gate.
-        let names = builtin_tag_names();
-        let stubs = builtin_tag_stubs();
+        let names = builtin_tag_names_including_stubs();
+        let stubs = builtin_tag_stub_names();
         for name in &stubs {
             assert!(
                 names.contains(name),
