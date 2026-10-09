@@ -376,9 +376,48 @@ A structural-equality test per milestone guards against drift.
 
 **Rust owns:** tokenization and positions; `Parser` and tag dispatch;
 `FilterExpression`/`Variable` compilation; the smart-if grammar; variable
-resolution and auto-calling; `conditional_escape`; all built-in tags and filters;
+resolution and auto-calling; `conditional_escape`; the **filter layer** — dispatch,
+`FilterFlags`, arity, the escaping protocol — for all 57 built-in filters;
 **compiling** the inheritance structure — which nodes are blocks, the `blocks`
 mapping, `get_nodes_by_type` results, and the `must_be_first` ordering rule.
+
+**"All built-in tags and filters" was too strong, and the exception is permanent,
+not deferred.** An earlier draft of this section said Rust owns "all built-in tags
+and filters" and M4's plan then assumed seven filter bodies would come home to
+Rust at M10. Both were wrong, in the same way: **M10's `utils` is
+`django/template/utils.py` (the `EngineHandler` module), because `_shim.py:52`
+sets `TARGET = "django.template"` and the finder takes over exactly one
+namespace.** `django.utils.dateformat`, `django.utils.formats`,
+`django.utils.html`, `django.utils.text`, `django.utils.timesince` and
+`django.utils.translation` are therefore **unreachable by any milestone in §10.3**.
+That is §3 working as written — "We depend on the real Django for everything else"
+— not a hole in the plan, and it needs to be stated here so that a reader at M10
+does not go looking for filter bodies nobody scheduled.
+
+Measured, and **derived in a test rather than enumerated** the way §10.3's tag
+inventory derives 27: a filter delegates when the utility its body calls bottoms
+out, within its own module, in runtime state Rust cannot hold (settings, locale,
+the active language, the clock) or in a Python-stdlib table-or-parser port
+(`HTMLParser`, `textwrap`, `json`, `unicodedata`). **18 of the 57**:
+`date`, `filesizeformat`, `floatformat`, `iriencode`, `json_script`, `slugify`,
+`striptags`, `time`, `timesince`, `timeuntil`, `truncatechars`,
+`truncatechars_html`, `truncatewords`, `truncatewords_html`, `urlize`,
+`urlizetrunc`, `wordwrap`, `yesno`.
+
+The neighbouring counts are each a right answer to a different question, which is
+why the metric is written down: 57 registered filters; **31** reference *any*
+`django.utils` name (which includes `mark_safe`, a primitive Rust reimplements as
+`Value::Safe`); **26** reference a utility in a module that *imports* something
+stateful (which wrongly sweeps in `escape`, `join` and `linenumbers` because
+`strip_tags` lives in the same file); **18** delegate by the metric above.
+
+For those 18 the filter **layer** is still Rust's (dispatch, `FilterFlags`, the
+`safe` marking, the `int(arg)` conversions and the failure paths) and the
+**body's answer** comes from Django. The parity target at M4 is that the
+delegation is *correct*, not that the logic is Rust's. One consequence, written
+down because it otherwise reads as an oversight later: `{{ x|date:"Y" }}` crosses
+the FFI on every render, permanently. §3 makes performance a non-criterion, so
+that is a choice rather than a cost.
 
 **Python owns the render-time inheritance dance**, and this is a correction to an
 earlier draft that assigned "block/extends/include resolution" to Rust wholesale.
@@ -930,6 +969,20 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   change nothing pins would trade a documented divergence for an undocumented
   one. §9's differential corpus owns both the type and the band. M4's filter
   work does not touch this.
+
+  **The eventual fix is known, small and bounded, and is recorded here so the
+  corpus work does not re-derive it.** The band splits in two. **Above the
+  recursion limit** (measured: 600 and up) both engines refuse and *only the
+  exception type differs*, so changing the type makes that band agree exactly —
+  one change, complete for that band. **Between about 600 and 1000** the two
+  engines genuinely differ in behaviour, not merely in type: this engine parses
+  where Django raises. No type change helps there and no guard value fixes it,
+  because Django's bound is a function of `sys.getrecursionlimit()` and the
+  ambient call depth rather than a constant. So the corpus should expect
+  agreement above the limit once the type is aligned, and expect a *documented*
+  divergence in the middle band — two different assertions, which is why the
+  band is written down before the corpus is written rather than discovered
+  while writing it.
 
 - **§5.5's render path** — `NodeList.render`/`Node.render_annotated` kept
   verbatim, shadow nodes renderable; M9 gate.
