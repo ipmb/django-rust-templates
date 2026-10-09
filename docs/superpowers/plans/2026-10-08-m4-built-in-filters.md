@@ -2134,7 +2134,16 @@ a green assertion.
 - `stringformat` (`:277-295`) — `("%" + str(arg)) % value` in a
   `try/except (ValueError, TypeError)` → `""`. The `%` operator on a Python value
   is `FilterHost::percent_format`; `str(arg)` is Rust's — via `to_str`, because
-  `arg` here is already a resolved value.
+  `arg` here is already a resolved value. **The spec crosses the seam whole, and
+  that is what closes Task 5's width cap on the precision axis**: Rust's
+  `format!` panics with the same `Formatting argument out of range` past a
+  runtime *precision* of 65535 (`Formatter` caps width and precision alike —
+  measured), and `{{ x|stringformat:"70000d" }}` is a legal template Django
+  answers with a 70000-character pad (measured: `"70000d"` → 70000 chars,
+  `".70000f"` → 70002). But CPython performs the `%`, so no Rust side ever holds
+  the precision and there is nothing to guard. Recorded because it is a *closed*
+  route, not an open one — the next reader should find why it is safe rather than
+  re-deriving it.
 - `pluralize` (`:942-982`) — `arg="s"`; a `","` is prepended when absent; more
   than two bits returns `""`; `float(value) == 1` decides, falling back on
   `len(value)` for a `TypeError`. `float(value)` is `to_float`, and a `ValueError`
@@ -2153,7 +2162,12 @@ a green assertion.
   input **as-is**; `Decimal` arithmetic with `prec = max(getcontext().prec, prec)`
   reading **thread-local decimal state**; `mark_safe` on two branches; the
   `formats.number_format` host call. This one is worth its own review round within
-  the group.
+  the group. **Its precision is the one live route to Task 5's `u16` cap**: unlike
+  `stringformat`, the Rust half assembles the decimal text, so if it reaches for
+  `format!("{:.*}", p, x)` a legal `{{ x|floatformat:70000 }}` panics where Django
+  answers 70002 characters (measured), and the 200-digit refusal does **not**
+  catch it — `floatformat("1.5", 70000)` has `len(digits) + abs(exponent)` of 3.
+  Assemble by string/repetition, not through a runtime precision.
 - `filesizeformat` (`:899-940`) — `formats.number_format` plus `ngettext`, so it
   needs both host calls, and the corpus needs `USE_THOUSAND_SEPARATOR` in both
   states.
