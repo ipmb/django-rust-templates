@@ -1968,8 +1968,44 @@ entirely the host's.
   (`width` 0 and negative, value unchanged), including the *order*, since
   `int(arg)` runs before the test. Rust's `format!("{:^width$}")` was measured to
   agree with Python's `^` on 11 inputs — nine ASCII, plus a 2-byte `é` and a
-  combining `e`+U+0301 — and to pad by **code points**; the body may use it, but
-  the row's expected answer comes from the probe, never from the builtin's name.
+  combining `e`+U+0301 — and to pad by **code points**. **That agreement is real
+  and the body still may not use it**, for the reason the next bullet gives: they
+  agree on every value a small test would reach and not on the widths a template
+  may legally ask for. The row's expected answer comes from the probe, never from
+  the builtin's name.
+- **The non-positive width, for all three padding filters, and the Rust width cap
+  underneath it.** `center` guards explicitly — `if width <= 0: return value`
+  (`:434-435`, after `int(arg)`) — while `ljust`/`rjust` (`:417-430`) have no
+  guard at all and rely on `str.ljust`/`str.rjust` returning the string unchanged
+  for any width below its length, negatives included. Three different routes,
+  one answer: measured through the oracle, all three return the value unchanged
+  at width `0`, `-1` and `-5`, empty string included. What the guard buys is the
+  *error type*, and only for `center`, because it decides whether the width
+  reaches the format spec at all:
+
+  | filter | width | through `resolve` on the pinned 6.0.9 |
+  |---|---|---|
+  | `center` | `10**30` | `ValueError: Too many decimal digits in format string` |
+  | `center` | `-10**30` | `'ab'` — the guard short-circuits, the spec never sees it |
+  | `ljust` / `rjust` | either sign | `OverflowError: Python int too large to convert to C ssize_t` |
+
+  So the **sign** of a huge width decides which error you get, or none, and only
+  for `center`. And the builtin is the wrong reference one more time:
+  `'ab'.center(10**30)` is an `OverflowError` where the *filter* is a
+  `ValueError`, because the filter's positive branch is the format spec and not
+  `str.center`.
+
+  The Rust hazard sits under all three, and it is a **panic rather than a
+  divergence**, which is why it is a body test and not a corpus row:
+  `format!("{:^width$}", "ab", width = 65535)` is fine, `width = 65536` **panics**
+  with `Formatting argument out of range`, and so does `width = (-5i64) as usize`
+  (1.8e19). Rust's formatter caps the width at `u16::MAX`; CPython's format spec
+  has no such cap and answers 65536 and 70000 happily (measured). A body that
+  pads via the format spec therefore panics on a legal `{{ x|center:70000 }}` and
+  on *every* negative width, so the three bodies pad manually
+  (`" ".repeat(…)`) and each carries one test at width 65536 asserting the
+  padded length — a `result.len()` assertion, not a 64KB literal — to pin that
+  the format spec is not on the path.
 - `truncatechars` (`:305-314`) / `truncatewords` (`:330-337`) — `int(arg)` in a
   `try/except ValueError` that **returns the value unchanged** (the failure is
   silent, so the test must pin the silence), then `Truncator(value).chars(length)`
@@ -2039,6 +2075,16 @@ different question rather than a crash, exactly the shape of the two harness
 defects Task 4 exposed. Do not add the key before the row that needs it: an
 unused knob is the `repr` pattern at the harness level, and this group's first
 row with `autoescape=False` is what makes it observable.
+
+**The same rule covers the other two capabilities this plan commits to that the
+harness does not have yet** — the two *settings* states for `urlize`'s
+`URLIZE_ASSUME_HTTPS` (Global Constraints) and the *membership* comparison for
+the filters whose answer is chosen at random (`Review Focus 4`). Each is added
+by the commit whose first row needs it, each observed failing for its intended
+reason under the old path first, and none speculatively. What matters about all
+three is the failure mode they prevent, and it is the same one both times it has
+already happened: a row that is silently scoring a *different question* against
+a green assertion.
 - `random` (`:642-648`) — `random_module.choice(value)`, catching `IndexError` →
   `""`. **Review Focus 4**: the corpus row asserts membership, and the test says
   so in its name, because an equality row would be green 1 time in 57.
