@@ -692,7 +692,10 @@ triage queue, not a to-do list, and the read is what divides it.
   paragraph in the write-up, because it is the sweep's own failure mode
   occurring in the conversation *about* the sweep.
 - **An internal disagreement between two citations of one line is itself a
-  signature, but its rate cannot be measured against the manifest.** Found in
+  signature, but its rate cannot be measured against the manifest.** It has two
+  instances, both found by reading rather than by any tool: the `timesince` pair
+  above (`60-70` vs `60-73`, one construct, neither end the unit) and
+  `ifchanged.rs` below. Found in
   `ifchanged.rs`, whose two citations of Django's `nodelist_false = NodeList()`
   gave it as `` `:1057-1058` `` and `` `:1058` ``, disagreeing with each other —
   and both were wrong; the line is 1060. Mechanically the signature is two sites
@@ -750,9 +753,12 @@ its *sibling branch* (768 is the other `args.append`) — the shape a number tak
 when it was read off a nearby line rather than searched for.
 
 `filter_expr.rs:665` carried the same off-by-one for the same Django line
-(`` `base.py:774` `` for the remainder check) and was corrected in the same
-commit, because two files disagreeing about one line is worse than either error
-alone.
+(`` `base.py:774` `` for the remainder check), and this is not a second opinion —
+the two files **agreed**. 774 was cited twice and wrong twice, which is why it
+was corrected in the same commit as host.rs's: leaving one of two agreeing
+citations at the old number would have turned a shared error into an apparent
+disagreement, and the disagreement would have been the *corrected* half. The
+same fact is the second instance of the case below.
 
 **The corrections went in first, and that is the rule paying off.** A naming
 commit must never move a number, so the numbers were settled in `217a094` and
@@ -824,12 +830,75 @@ hand and nobody re-examines.
 ## "Agreement is not evidence"
 
 Two files citing one construct at the same wrong number are not corroboration;
-they are one reader's choice copied twice. `defaulttags.py:106-112` is cited from
-three files, in agreement, and is still not the span the sentences ask for.
-`smartif.py:166-172` and `:410` survived in three files each for the same reason
-— every copy raised the apparent confidence while adding no evidence.
+they are one reader's choice copied twice — every copy raises the apparent
+confidence while adding no evidence. Measured over the tree (524 distinct
+anchors are cited; 163 of them from two or more files), it has two instances:
+
+| anchor | cited from | wrong because |
+|---|---|---|
+| `base.py:774` | 2 files — `parser/host.rs:73`, `parser/filter_expr.rs:665` | 774 is `upto = match.end()`; the remainder check is 775 |
+| `defaulttags.py:106-112` | 3 files — `parser/tags/cycle.rs`, `_impl/parser.py`, `tests/test_ref_table.py` | 106 is the comment `# First time the node is rendered in template`; the unit is `CycleNode.render`, 104-114 |
+
+The second is why the row is held back rather than named: three files will have
+to be corrected together when that unit is settled, and correcting them one file
+at a time would leave the other two asserting a span the first has already
+disowned.
+
+What the count *does not* say is that agreement is a defect detector. The
+most-agreed anchors in the tree are agreed-upon and right: `base.py:816` is
+cited from **14** files, `base.py:813` from 7, `defaulttags.py:46` and
+`base.py:773` from 6 each, and the `smartif` pair my earlier draft of this
+section named — `smartif.py:55-56` (2 files) and `smartif.py:81-83` (3 files) —
+was verified against the pinned tree and is correct on both (`self.first = left`
+/ `self.second = parser.expression(bp)` in `led`; `self.first = …` /
+`self.second = None` in `nud`). So agreement is **not** a detector at all: it is
+a prior that says *the number was copied, not independently read*, which lowers
+rather than raises the cost of checking it.
 
 This belongs beside the detector list because it is the one statement here that
-says what *not* to trust. It also inverts the disagreement detector correctly:
+says what *not* to trust. It inverts the disagreement detector correctly:
 disagreement between two citations of one construct is a reason to look, and
-agreement is not a reason to stop.
+agreement is no reason to stop.
+
+## The gap detector, built and measured
+
+The reviewer proposed a detector for the shape host.rs had four of: a shorthand
+whose quotation sits on a line *near* the number rather than on it. Built
+(`/tmp/gap_detector.py`), run over the then-unmigrated shorthands, and measured
+rather than adopted — it is a **reading aid with a 2-in-3 hit rate and a large
+blind spot**, not a filter:
+
+```
+17 shorthand(s) got as far as a unique probe
+  4 the probe is inside the span
+ 13 the probe is OUTSIDE the span
+skipped: probe not unique in the target: 22
+skipped: no quotation precedes it: 1
+```
+
+Ten of the thirteen are the script's own resolution failures (it lacks the
+checker's `BASENAMES` map, so basenames like `html.py` raise), leaving **three
+real candidates, of which two are genuine defects** — both in files no naming
+pass had reached yet:
+
+| shorthand | prose said | the quoted line is at | what the cited line holds |
+|---|---|---|---|
+| `widthratio.rs:5` | `parser.compile_filter(max_width)` (`:1649`) | 1648 | `asvar=asvar,` |
+| `lorem.rs:24` | `common = bits[-1] != "random"` (`:1160`) | 1162 | `tagname = bits[0]` |
+
+The third, `lorem.rs:6`'s `:1160-1175`, is a **false positive**: the prose quotes
+the docstring's usage syntax (`{% lorem [count] [method] [random] %}`, 1141)
+while citing the implementation, so "the quotation is on the cited line" is the
+wrong question to have asked. Whether that span is the right *unit* is a separate
+question, settled in that file's own pass.
+
+And the detector **missed a defect it should have caught**: `widthratio.rs:9`'s
+`:543-545` does not contain the raise at 548 — but the quoted message wraps
+across two source lines, so the line-based `QUOTE` regex never sees a closed
+span and the shorthand is skipped as "no quotation precedes it". Its two blind
+spots, then, are nameable exactly: **quotations that wrap a line** (also causing
+the skip) and **quotations that name something other than the cited code** —
+usage strings, docstrings, error messages. Its two true positives did front-load
+corrections that reading would have found one file at a time, so it earns a place
+in `--triage` as three printed lines per shorthand (cited line, probe line, gap)
+and **not** as a gate.
