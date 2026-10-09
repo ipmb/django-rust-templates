@@ -275,9 +275,15 @@ defaulttags.py:403	django/template/defaulttags.py	403	-	tzinfo = timezone.get_cu
 defaulttags.py:439	django/template/defaulttags.py	439	-	-	-
 defaulttags.py:611-702	django/template/defaulttags.py	611	702	len(args) < 2	-
 defaulttags.py:612	django/template/defaulttags.py	612	-	-	-
+defaulttags.py:657	django/template/defaulttags.py	657	-	args = token.split_contents()	-
+defaulttags.py:659-660	django/template/defaulttags.py	659	660	if len(args) < 2:	raise TemplateSyntaxError("'cycle' tag requires at least two arguments")
+defaulttags.py:662-671	django/template/defaulttags.py	662	671	if len(args) == 2:	return parser._named_cycle_nodes[name]
 defaulttags.py:669-671	django/template/defaulttags.py	669	671	if name not in parser._named_cycle_nodes:	return parser._named_cycle_nodes[name]
 defaulttags.py:671	django/template/defaulttags.py	671	-	return parser._named_cycle_nodes[name]	-
+defaulttags.py:675-685	django/template/defaulttags.py	675	685	if len(args) > 4:	args = args[:-1]
+defaulttags.py:686-688	django/template/defaulttags.py	686	688	elif args[-2] == "as":	silent = False
 defaulttags.py:693-696	django/template/defaulttags.py	693	696	node = CycleNode(values, name, silent=silent)	parser._named_cycle_nodes[name] = node
+defaulttags.py:697-699	django/template/defaulttags.py	697	699	else:	node = CycleNode(values)
 defaulttags.py:700	django/template/defaulttags.py	700	-	parser._last_cycle_node = node	-
 defaulttags.py:724-757	django/template/defaulttags.py	724	757	-	-
 defaulttags.py:744	django/template/defaulttags.py	744	-	_, rest = token.contents.split(None, 1)	-

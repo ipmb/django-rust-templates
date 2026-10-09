@@ -2,14 +2,14 @@
 //!
 //! # Five shapes, and the two-bit `as`
 //!
-//! `args = token.split_contents()` (`:654`), then:
+//! `args = token.split_contents()` (`defaulttags.py:657`), then:
 //!
-//! 1. `len(args) < 2` → refuse (`:657-658`).
+//! 1. `len(args) < 2` → refuse (`defaulttags.py:659-660`).
 //! 2. `len(args) == 2` → a **name reference**: the node the name was bound to,
-//!    or refuse (`:660-671`).
-//! 3. `len(args) > 4` and `args[-3] == "as"` → `… as name silent` (`:675-686`).
-//! 4. `len(args) > 4` and `args[-2] == "as"` → `… as name` (`:687-688`).
-//! 5. otherwise → the anonymous form (`:698-700`).
+//!    or refuse (`defaulttags.py:662-671`).
+//! 3. `len(args) > 4` and `args[-3] == "as"` → `… as name silent` (`defaulttags.py:675-685`).
+//! 4. `len(args) > 4` and `args[-2] == "as"` → `… as name` (`defaulttags.py:686-688`).
+//! 5. otherwise → the anonymous form (`defaulttags.py:697-699`).
 //!
 //! The `len(args) > 4` guard is load-bearing and reads as an off-by-one until
 //! it fires: `{% cycle a as b %}` has four bits, so it is **shape 5** — a
