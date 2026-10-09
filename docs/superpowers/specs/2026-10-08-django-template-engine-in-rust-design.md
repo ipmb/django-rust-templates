@@ -822,6 +822,26 @@ implementing such a section wait for the round, even though the rule above
 otherwise holds only the milestone close-out. This is the one place a commit
 genuinely must precede a review round's existence.
 
+**Every snippet in a plan is executed against the pinned tree before the plan is
+committed, and a plan is not reviewable until it is.** This is a rule because
+the opposite was measured three tasks in a row: M2's Task 5, Task 6 (four
+verified defects) and Task 7 (three) each contained snippets that could not have
+run — a bare `Parser` that registers no builtins, `split_whitespace` where the
+plan's own test required Python's separator set, an import of a package whose
+`__init__` cannot execute under that name, a tag count that was 59 written as
+"60-odd". None was a design error; every one was a snippet written from
+recollection rather than run. The reviewer found the *design* problems in those
+same tasks and would have had to find these too, which spends the scarce
+resource (review) on the cheap one (measurement).
+
+The rule is operational, not aspirational: before a plan is committed, the
+author runs each snippet's commands and pastes the real output into the plan's
+"Expected" lines. Where a snippet cannot be run in isolation (it depends on code
+a later task writes), the fragment that *can* be checked — the citation, the
+count, the API signature — is checked against `.django/` or the crate and the
+result recorded beside it. "Verified against the tree" in a plan is a claim with
+evidence attached, not a formality.
+
 **Known environment deviation:** `rusty-reviewer` runs as a peer Claude session
 (`django-rust-templates-a8`), not as a subagent of this session. A
 `.claude/agents/rusty-reviewer.md` definition was written in M0 but is not
