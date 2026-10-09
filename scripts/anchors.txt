@@ -367,6 +367,7 @@ defaulttags.py:1204	django/template/defaulttags.py	1204	-	@register.tag(name="pa
 defaulttags.py:1250-1251	django/template/defaulttags.py	1250	1251	-	-
 defaulttags.py:1251	django/template/defaulttags.py	1251	-	-	-
 defaulttags.py:1268	django/template/defaulttags.py	1268	-	@register.tag(name="partial")	-
+defaulttags.py:1279	django/template/defaulttags.py	1279	-	extra_data = parser.extra_data	-
 defaulttags.py:1286	django/template/defaulttags.py	1286	-	simple_tag	-
 defaulttags.py:1286-1287	django/template/defaulttags.py	1286	1287	@register.simple_tag(name="querystring", takes_context=True)	def querystring(context, *args, **kwargs):
 defaulttags.py:1352-1417	django/template/defaulttags.py	1352	1417	@register.tag	return RegroupNode(target, expression, var_name)
@@ -405,6 +406,8 @@ library.py:421	django/template/library.py	421	-	-	-
 library.py:454	django/template/library.py	454	-	parser.compile_filter	-
 loader_tags.py:87	django/template/loader_tags.py	87	-	-	-
 loader_tags.py:227-232	django/template/loader_tags.py	227	232	-	-
+loader_tags.py:305	django/template/loader_tags.py	305	-	bits[1] = construct_relative_path(parser.origin.template_name, bits[1])	-
+loader_tags.py:308	django/template/loader_tags.py	308	-	if nodelist.get_nodes_by_type(ExtendsNode):	-
 loader_tags.py:347	django/template/loader_tags.py	347	-	-	-
 smartif.py:22-26	django/template/smartif.py	22	26	-	-
 smartif.py:40-42	django/template/smartif.py	40	42	def __repr__(self):	return "(" + " ".join(out) + ")"
