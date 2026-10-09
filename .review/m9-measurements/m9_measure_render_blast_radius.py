@@ -1,17 +1,26 @@
-"""How many of the 1547 tests put ``NodeList.render`` on their path, and why.
+"""The two seams M9 interposes, sized by running the suite and counting.
 
-M9 interposes ``django.template.base``, which is the module ``NodeList``,
-``Node`` and ``Variable`` live in. The milestone is the risky one because the
-blast radius is *not* the tests that name templates: ``setup_test_environment``
-replaces ``Template._render`` with ``instrumented_test_render``
-(``django/test/utils.py:108-114``), whose whole body is
+M9 interposes ``django.template.base``, which is the module ``Template``,
+``NodeList``, ``Node`` and ``Variable`` live in. The milestone is the risky one
+because the blast radius is *not* the tests that name templates:
+
+``setup_test_environment`` replaces ``Template._render`` with
+``instrumented_test_render`` (``django/test/utils.py:108-114``), whose whole body
+is
 
     template_rendered.send(sender=self, template=self, context=context)
     return self.nodelist.render(context)
 
 so **every** ``template.render()`` inside the suite — including the ones in
-Django's own view, form and admin tests — goes through ``NodeList.render``. This
-counts them, rather than arguing from the source.
+Django's own view, form and admin tests — goes through ``NodeList.render``.
+
+The other seam is the parse: every ``Engine.from_string`` builds a ``Template``,
+whose ``__init__`` ends in ``self.nodelist = self.compile_nodelist()``
+(``base.py:155``), so ``Template.compile_nodelist`` is where an interposed
+``base`` flips the suite's *parsing* onto Rust — without ``engine.py`` being
+touched, which is M10's module.
+
+This counts all of it, rather than arguing from the source.
 
 Run it the same way the suite is run, because the count is meaningless
 otherwise: without ``DJANGO_RUST_TEMPLATES=1`` and ``shimpath`` on
@@ -22,7 +31,7 @@ otherwise: without ``DJANGO_RUST_TEMPLATES=1`` and ``shimpath`` on
         python -I .review/m9-measurements/m9_measure_render_blast_radius.py
 
 ``-I`` keeps the ambient environment out, which matters because this script
-patches a class in the pinned tree.
+patches classes in the pinned tree.
 """
 
 import collections
@@ -69,6 +78,7 @@ if "_impl" not in (base.__file__ or ""):
 
 current = {"id": None}
 renders = collections.Counter()
+parses = collections.Counter()
 annotations = collections.Counter()
 originals = {}
 
@@ -84,6 +94,16 @@ for cls_name in ("NodeList",):
         return render
 
     cls.render = make(originals[cls_name])
+
+_original_compile = base.Template.compile_nodelist
+
+
+def counting_compile_nodelist(self):
+    parses[current["id"]] += 1
+    return _original_compile(self)
+
+
+base.Template.compile_nodelist = counting_compile_nodelist
 
 # The other half of the same interposition: ``base.Node`` carries the
 # render-time annotation protocol.
@@ -146,9 +166,18 @@ total = sum(per_test.values())
 print()
 print(f"NodeList.render calls: {total}")
 print(f"distinct tests that rendered at least once: {len(per_test)}")
-top = sorted(per_test.items(), key=lambda kv: -kv[1])[:10]
-for name, count in top:
-    print(f"  {count:5d}  {name}")
+
+per_test_parses = {k: v for k, v in parses.items() if k is not None}
+print()
+print(f"Template.compile_nodelist calls: {sum(per_test_parses.values())}")
+print(
+    "distinct tests that parsed at least once: "
+    f"{len(per_test_parses)}"
+)
+print(
+    "distinct tests that both parsed and rendered: "
+    f"{len(set(per_test) & set(per_test_parses))}"
+)
 
 per_test_annotations = {k: v for k, v in annotations.items() if k is not None}
 print()

@@ -59,10 +59,42 @@ protocol). The breakdown is printed rather than only the wanted figure, so the
 conflation cannot recur silently.
 
 **Why this matters for M9's acceptance.** The milestone's headline evidence is
-`Ran 1547 tests … OK (skipped=6)` with the meter at 23. Finding 3 below is that
-this evidence is *vacuous on its own*: a verbatim copy of `base.py` also passes.
+`Ran 1547 tests … OK (skipped=6)` from `scripts/run_django_suite.sh`, with the
+meter at 23. Finding 3 below is that this evidence is *vacuous on its own*: a
+verbatim copy of `base.py` also passes.
 The 964/84 figures are what a reader needs to size the risk, and the M9 close-out
 needs delegation-specific evidence to go with them.
+
+## 1a. The parse seam is wider than the render seam — 1170 of the 1547
+
+The same script and the same suite run:
+
+```
+Template.compile_nodelist calls: 4360
+distinct tests that parsed at least once: 1170
+distinct tests that both parsed and rendered: 958
+```
+
+**1170 tests parse, 964 render, 958 do both.** The parse seam is the wider one,
+and it is the one `base.Template` alone controls: every `Engine.from_string`
+builds a `Template`, whose `__init__` ends in
+`self.nodelist = self.compile_nodelist()` (`base.py:155`), so an interposed
+`Template.compile_nodelist` flips the whole suite's parsing onto Rust **without
+`engine.py` being touched** — which matters, because `engine.py` is M10's module
+and M9 may not reach for it.
+
+Two consequences for the plan:
+
+- The suite count is a weak instrument on *both* seams, not just the render one.
+  A `compile_nodelist` that quietly called Django's `Lexer`/`Parser` would keep
+  all 1547 green.
+- `compile_nodelist` is where `extra_data`, `get_exception_info` and the
+  `Template: <name>, <msg>` message rewriting live (`base.py:201-213`), and the
+  suite exercises the annotation half of it hard: **340 `get_exception_info`
+  calls arrive from `compile_nodelist`** over the run, eight times the render-time
+  figure. A Rust-backed rewrite of this method has to keep all three, which is
+  why it wants to be a *delegating* transcription rather than a new
+  implementation.
 
 ## 2. `run_django_suite.sh` is the only meaningful invocation
 
