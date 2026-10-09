@@ -412,14 +412,14 @@ pub trait FilterHost {
     fn str_title(&self, text: &str) -> String;
 
     // --- engines whose state is not the filter's argument -------------------
-    /// `django.utils.html.strip_tags` — `HTMLParser`-based (`html.py:238-272`),
+    /// `django.utils.html.strip_tags` — `HTMLParser`-based (`html.py:211-229`),
     /// so the tag grammar, the entity handling and the malformed-input behaviour
     /// are all Python's.
     ///
     /// **Fallible where its neighbours here are not, and the measurement is one
     /// call**: `strip_tags("<a" + "<" * 49 + "x" * 1000)` raises
     /// `SuspiciousOperation` (empty message) out of `HTMLParser`'s depth limit
-    /// (`MAX_STRIP_TAGS_DEPTH = 50`, `html.py:246`). The input is ASCII, so
+    /// (`MAX_STRIP_TAGS_DEPTH = 50`, `html.py:44`). The input is ASCII, so
     /// nothing at the FFI boundary stops it arriving, and Django's own
     /// `striptags` body has no `try` around this call — the raise **is** that
     /// filter's answer on such a value. A bare `String` here would have to
@@ -473,7 +473,7 @@ pub trait FilterHost {
     ///
     /// **`limit` is `Option<&IntValue>` rather than the `Option<usize>` this
     /// signature carried until wave B, because that type cannot express two of the
-    /// answers the corpus reaches.** `Urlizer.trim_url` (`html.py:412-415`) is
+    /// answers the corpus reaches.** `Urlizer.trim_url` (`html.py:407-410`) is
     /// `if limit is None or len(x) <= limit: return x` and then
     /// `"%s…" % x[: max(0, limit - 1)]`, so `trim_url_limit` is compared against a
     /// length and sliced — both of which take any Python int. Measured on the
@@ -486,7 +486,7 @@ pub trait FilterHost {
     /// (`c4027d0`): `trim_url_limit`'s ints are a sentinel range, not a length.
     ///
     /// **The `int()` is not this method's.** `urlizetrunc`'s body does it —
-    /// `int(limit)` before the call (`defaultfilters.py:395`) — so
+    /// `int(limit)` before the call (`defaultfilters.py:399`) — so
     /// [`FilterHost::to_int`] is where `int("abc")`'s `ValueError` and
     /// `int(None)`'s `TypeError` come from, and this seam is handed an int or
     /// `None` and nothing else. `None` is `urlize`'s own call site
@@ -597,7 +597,7 @@ pub trait FilterHost {
     /// **`format` is an `Option` because Django's default is spelled `None`, and
     /// `None` and the literal `"DATE_FORMAT"` are the *same call*.** The body is
     /// `dateformat.format(value, get_format(format or "DATE_FORMAT", use_l10n))`
-    /// (`formats.py:155-158`). Measured on `date(2026, 10, 8)` under
+    /// (`formats.py:155-157`). Measured on `date(2026, 10, 8)` under
     /// `LANGUAGE_CODE="de"`:
     ///
     /// ```text
@@ -652,7 +652,7 @@ pub trait FilterHost {
     ///
     /// `timeuntil` is not `timesince` with the arguments swapped: Django's
     /// `timesince(d, now, reversed=False)` swaps `d` and `now` *after*
-    /// normalising the timezones (`timesince.py:60-70`), so
+    /// normalising the timezones (`timesince.py:60-73`), so
     /// `now.astimezone(d.tzinfo)` expresses one operand in the other's zone and
     /// the calendar fields `total_months` reads (`:83`) are zone-dependent. A
     /// caller-side swap normalises the opposite way and reports different months

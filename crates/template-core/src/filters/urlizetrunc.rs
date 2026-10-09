@@ -15,7 +15,7 @@
 //!
 //! **The body's decisions, in order:**
 //!
-//! 1. `call.host.to_int(&arg.unwrap_or(Value::None))` — `:395`'s `int(limit)`,
+//! 1. `call.host.to_int(&arg.unwrap_or(Value::None))` — `:399`'s `int(limit)`,
 //!    **first and with no `try`** (the `wordwrap` pattern, `wordwrap.rs:73`), so
 //!    its `ValueError` for a non-numeric argument and its `TypeError` for `None`
 //!    escape before the text is read. `unwrap_or(Value::None)` rather than an
@@ -25,7 +25,7 @@
 //!    panicked on the absent argument would break that gate. The absent token is
 //!    unreachable from a template anyway: `{{ x|urlizetrunc }}` is a
 //!    `TemplateSyntaxError: urlizetrunc requires 2 arguments, 1 provided`, raised
-//!    by `args_check` (`base.py:819`) before any body runs.
+//!    by `args_check` (`base.py:822`) before any body runs.
 //! 2. `call.host.to_str(&value)` — the `@stringfilter` accessor, as in `urlize`.
 //! 3. `call.host.urlize(&text, Some(&limit), autoescape)` — the int reaches the
 //!    seam as it is. `IntValue::Small` and `IntValue::Big` are both handed
@@ -34,13 +34,13 @@
 //!    The `autoescape` is `call.autoescape && !call.host.is_safe(&value)`, the
 //!    same collapse [`urlize`](crate::filters::urlize) makes and for the same
 //!    reason — `Urlizer.__call__`'s `safe_input = isinstance(text, SafeData)`
-//!    (`html.py:314`); see that module's "The `safe_input` collapse".
-//! 4. `call.host.mark_safe(Value::Str(rendered))` — `:397`'s own `mark_safe`.
+//!    (`html.py:319`); see that module's "The `safe_input` collapse".
+//! 4. `call.host.mark_safe(Value::Str(rendered))` — `:398`'s own `mark_safe`.
 //!
-//! **`int(limit)` is the body's, not the seam's.** Django does it at `:395`,
+//! **`int(limit)` is the body's, not the seam's.** Django does it at `:399`,
 //! before the helper call, so [`FilterHost::to_int`] is where `int("abc")`'s
 //! `ValueError` and `int(None)`'s `TypeError` come from and the seam is handed an
-//! int or `None` only. `None` is `urlize`'s own call site (`:383`), not a
+//! int or `None` only. `None` is `urlize`'s own call site (`:386`), not a
 //! spelling of `0`.
 //!
 //! Measured rows on `"see https://example.com/very/long/path now"`; every answer
@@ -64,7 +64,7 @@
 //!
 //! **`trim_url` is the host's, and its shape is why the seam changed.** It is
 //! `if limit is None or len(x) <= limit: return x`, then
-//! `"%s…" % x[: max(0, limit - 1)]` (`html.py:412-415`) — the limit is compared
+//! `"%s…" % x[: max(0, limit - 1)]` (`html.py:407-410`) — the limit is compared
 //! *and sliced*, both of which take any Python int. That is why `-1` is `'…'` and
 //! a 30-digit literal truncates nothing, and why the seam's `limit` is
 //! `Option<&IntValue>` rather than the `Option<usize>` it carried until wave B: a
@@ -91,18 +91,18 @@ use crate::parser::error::Error;
 /// `urlizetrunc`'s body:
 /// `mark_safe(_urlize(str(value), trim_url_limit=int(limit), nofollow=True, autoescape))`.
 pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
-    // `int(limit)` (`:395`) first and with no `try`, so its refusal escapes
+    // `int(limit)` (`:399`) first and with no `try`, so its refusal escapes
     // before the text is read. `unwrap_or` keeps the absent argument on the same
     // path rather than panicking — see the module doc.
     let limit = call.host.to_int(&arg.unwrap_or(Value::None))?;
     // `autoescape and not isinstance(value, SafeData)` — the `linebreaks`
     // collapse, shared with `urlize` (see that module's doc).
     let autoescape = call.autoescape && !call.host.is_safe(&value);
-    // `defaultfilters.py:44`'s `str(value)`, done once by the FFI loop (§D3).
+    // `defaultfilters.py:46`'s `str(value)`, done once by the FFI loop (§D3).
     let text = call.host.to_str(&value)?;
     // The int reaches the seam unread: `trim_url` compares and slices with it.
     let rendered = call.host.urlize(&text, Some(&limit), autoescape);
-    // `:397`'s own `mark_safe`.
+    // `:398`'s own `mark_safe`.
     Ok(call.host.mark_safe(Value::Str(rendered.into())))
 }
 
@@ -234,7 +234,7 @@ mod tests {
         h.assert_called("urlize");
     }
 
-    /// A plain input is marked by the **body** (`:397`), not left to the loop.
+    /// A plain input is marked by the **body** (`:398`), not left to the loop.
     #[test]
     fn the_body_marks_the_result_safe() {
         let h = host(IntValue::Small(5), "x", "RENDERED");

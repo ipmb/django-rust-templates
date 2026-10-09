@@ -15,7 +15,7 @@
 //! host's ([`FilterHost::urlize`]), and the body is the seam call plus
 //! `mark_safe`. The helper is delegated whole rather than reimplemented for the
 //! reason §D2 gives and `html.py` bears out: `Urlizer` is a stateful instance
-//! built once at import (`html.py:489-490`) whose `@cached_property` tables are
+//! built once at import (`html.py:492`) whose `@cached_property` tables are
 //! derived from `settings` — the very definition of an answer that does not live
 //! in the template.
 //!
@@ -29,9 +29,9 @@
 //! 3. **The `autoescape` handed to the helper is
 //!    `call.autoescape && !call.host.is_safe(&value)`**, the `linebreaks` pattern
 //!    (`linebreaks.rs:130`) and the same expression Django's own `linebreaks`
-//!    `def` writes at its level (`defaultfilters.py:486`). The helper's escaping
+//!    `def` writes at its level (`defaultfilters.py:493`). The helper's escaping
 //!    is governed by `autoescape and not safe_input`, where
-//!    `safe_input = isinstance(text, SafeData)` (`html.py:314`, `:374-376`) —
+//!    `safe_input = isinstance(text, SafeData)` (`html.py:319`, `:387-389`) —
 //!    measured, `mark_safe("<b>bold</b> https://e.com")` is **not** escaped while
 //!    the same text as a plain `str` is. The seam takes `&str`, so the marker
 //!    cannot cross it; collapsing the pair in the body is text-equivalent for
@@ -39,11 +39,11 @@
 //!    `if safe_input: return mark_safe(word)`, whose text is the same `word` a
 //!    falsy flag would yield. See "The `safe_input` collapse" below.
 //! 4. `call.host.urlize(&text, None, autoescape)`. The limit is `None` because
-//!    `:383` passes no `trim_url_limit`, so the helper's default applies;
+//!    `:386` passes no `trim_url_limit`, so the helper's default applies;
 //!    `nofollow=True` is the seam's constant — both call sites hardcode it, so
 //!    the trait carries no `nofollow` parameter (`host.rs`).
 //! 5. `call.host.mark_safe(Value::Str(rendered))`. The `def` body calls
-//!    `mark_safe` itself (`:384`), and the loop does not supply it here: the
+//!    `mark_safe` itself (`:386`), and the loop does not supply it here: the
 //!    loop marks only when `is_safe and isinstance(obj, SafeData)`
 //!    (`base.py:816`), and for a plain `str` input neither half fires. So the
 //!    body's own marking is what makes every row below a `SafeString`.
@@ -51,9 +51,9 @@
 //! ## The `safe_input` collapse
 //!
 //! `Urlizer.__call__` computes `safe_input = isinstance(text, SafeData)`
-//! (`html.py:314`) and `handle_word` (`:333-397`) uses it in exactly four places:
-//! the two `if autoescape and not safe_input:` guards (`:374-376`) and the two
-//! `if safe_input: return mark_safe(word)` branches (`:387-390`, `:394-397`).
+//! (`html.py:319`) and `handle_word` (`:337-405`) uses it in exactly four places:
+//! the two `if autoescape and not safe_input:` guards (`:387-389`) and the two
+//! `if safe_input: return mark_safe(word)` branches (`:397-398`, `:401-402`).
 //! Under the substitution `autoescape <- autoescape and not safe_input`:
 //!
 //! * the first pair is the substitution verbatim;
@@ -65,7 +65,7 @@
 //! Measured over 32 cases — `{plain, mark_safe} × {autoescape on, off} × 8`
 //! inputs, including one with all four of `<`, `&`, `'`, `"` in one string —
 //! the collapse changes no answer. Django's own `linebreaks`
-//! (`defaultfilters.py:486`) is this same collapse, written in the source rather
+//! (`defaultfilters.py:493`) is this same collapse, written in the source rather
 //! than forced by a `&str` seam, which is why `linebreaks.rs` carries it too.
 //!
 //! Measured rows through `FilterExpression.resolve` on the pinned 6.0.9,
@@ -142,12 +142,12 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
     // as Python's does, so `is_safe` is not asked when `call.autoescape` is
     // false. See the module doc's "The `safe_input` collapse".
     let autoescape = call.autoescape && !call.host.is_safe(&value);
-    // `defaultfilters.py:44`'s `str(value)`, done once by the FFI loop (§D3).
+    // `defaultfilters.py:46`'s `str(value)`, done once by the FFI loop (§D3).
     let text = call.host.to_str(&value)?;
     // `html.py:496-499` whole; `nofollow=True` is the seam's constant and `None`
-    // is `:383`'s absent `trim_url_limit`.
+    // is `:386`'s absent `trim_url_limit`.
     let rendered = call.host.urlize(&text, None, autoescape);
-    // `:384`'s own `mark_safe` — the loop's does not fire for a plain `str`.
+    // `:386`'s own `mark_safe` — the loop's does not fire for a plain `str`.
     Ok(call.host.mark_safe(Value::Str(rendered.into())))
 }
 
