@@ -96,16 +96,18 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         *back* would have gone on passing. The count is the claim each milestone
         is accepted on, so the count is what is asserted; it moves by one in the
         same commit as each interposition (25 at M8, 24 with `base`, 23 with
-        `smartif`, 22 with `utils`, 21 with `context` — the milestone's number).
+        `smartif`, 22 with `utils`, 21 with `context`, 20 with `engine` — the
+        milestone's number).
         """
         _shim.install()
 
         remaining = _shim.unshimmed()
-        self.assertEqual(len(remaining), 21, sorted(remaining))
+        self.assertEqual(len(remaining), 20, sorted(remaining))
         self.assertNotIn("django.template.base", remaining)
         self.assertNotIn("django.template.smartif", remaining)
         self.assertNotIn("django.template.utils", remaining)
         self.assertNotIn("django.template.context", remaining)
+        self.assertNotIn("django.template.engine", remaining)
         # Ours is not in the list, because ours is the package itself.
         self.assertNotIn("django.template", remaining)
 
@@ -214,7 +216,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
 
         The cache-drop below is not incidental. The row writes a module and
         expects the finder to see it, but ``install()`` returns early when the
-        shim is already installed (``_shim.py:398``), and a session-start install
+        shim is already installed (``_shim.py:399``), and a session-start install
         (which ``check.sh`` now does, so every test module binds the same
         classes) means the shim *is* already installed by the time this row
         runs. A ``django.template.loaders`` cached earlier in the session then

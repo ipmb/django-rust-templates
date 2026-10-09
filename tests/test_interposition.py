@@ -541,6 +541,104 @@ class ModuleInterpositionTests(unittest.TestCase):
             django_parse("{% verbatim %}a{% endverbatim %}")
         self.assertEqual(sum(pinned_counts.values()), 0)
 
+    def test_engine_resolves_to_our_file(self):
+        import django.template.engine as engine
+
+        self.assertIn("_impl", engine.__file__, engine.__file__)
+
+    def test_the_engine_class_is_not_djangos(self):
+        import inspect
+
+        import django.template.engine as engine
+
+        from tests.pinned_module import load_pinned
+
+        self.assertIsNot(engine.Engine, load_pinned("engine.py").Engine)
+        self.assertIn("_impl", inspect.getfile(engine.Engine))
+        # `django.template.Engine` is the same object, because the package
+        # `__init__` imports it from this module by name.
+        import django.template as package
+
+        self.assertIs(package.Engine, engine.Engine)
+
+    def test_the_parse_harness_runs_our_engine(self):
+        """The compared path here is `Engine.__init__` and its two lookups.
+
+        Measured: `django_parse` builds a **fresh** `Engine` per call
+        (`test_parser_parity._library_engine`), so the harness enters
+        `Engine.__init__`, `Engine.get_template_builtins` and
+        `Engine.get_template_libraries` on every source — and because the engine
+        is fresh each time, the count is per call rather than once per process.
+        The positive control is the pinned copy, which must reach nothing.
+        """
+        import django.template.engine as engine
+
+        from tests.compared_path import instrumented
+        from tests.pinned_module import load_pinned
+        from tests.test_parser_parity import django_parse
+
+        with instrumented(engine) as counts:
+            django_parse("{{ x }}")
+        for label in (
+            "Engine.__init__",
+            "Engine.get_template_builtins",
+            "Engine.get_template_libraries",
+        ):
+            self.assertIn(label, counts)
+
+        with instrumented(load_pinned("engine.py")) as pinned_counts:
+            django_parse("{{ x }}")
+        self.assertEqual(sum(pinned_counts.values()), 0)
+
+    def test_a_template_loads_and_renders_through_our_engine(self):
+        """The milestone's premise in one row: our `Engine`'s own load path.
+
+        `get_template` → `find_template` → `find_template_loader` (which does
+        `import_string` on the dotted path) → the loader's `get_contents`. At
+        this commit the loader itself is still Django's, which is why the row
+        asserts the *engine* functions and not the loader's; Task 7 extends it.
+        """
+        import django.template.engine as django_engine
+
+        from tests.compared_path import instrumented
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pathlib.Path(tmpdir, "greet.html").write_text("{{ name }}!")
+            engine = Engine(
+                loaders=[("django.template.loaders.filesystem.Loader", [tmpdir])]
+            )
+            with instrumented(django_engine) as counts:
+                rendered = engine.get_template("greet.html").render(
+                    Context({"name": "Ada"})
+                )
+        self.assertEqual(rendered, "Ada!")
+        self.assertIn("Engine.get_template", counts)
+
+    def test_loaders_with_app_dirs_is_still_refused(self):
+        """An argument-combination contract, kept across interposition.
+
+        `Engine.__init__` raises `ImproperlyConfigured("app_dirs must not be set
+        when loaders is defined.")` — it is the guard every misconfigured
+        `TEMPLATES` setting hits — and no `.django` test reaches it through our
+        engine, so without this row a transcription that dropped the `if` would
+        ship silently. The message is asserted, not just the type: it is what a
+        user of this software sees.
+
+        `assertRaisesRegex` and not `assertRaisesMessage`: that helper is
+        Django's, for `SimpleTestCase`, and these rows are plain `unittest` on
+        purpose — they have to be runnable without Django's test runner, which
+        is the same reason `render_through` builds its own `Engine`.
+        """
+        import re
+
+        from django.core.exceptions import ImproperlyConfigured
+
+        with self.assertRaisesRegex(
+            ImproperlyConfigured,
+            re.escape("app_dirs must not be set when loaders is defined."),
+        ):
+            Engine(app_dirs=True, loaders=["django.template.loaders.filesystem.Loader"])
+
 
 class ShadowingTests(unittest.TestCase):
     """Which ``_impl`` files wear a real module's name, and that each was meant.

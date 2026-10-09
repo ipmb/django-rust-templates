@@ -109,6 +109,7 @@ SHADOWING = {
     "__init__.py": "transcribed",
     "base.py": "transcribed",
     "context.py": "transcribed",
+    "engine.py": "transcribed",
     "exceptions.py": "fresh",
     "smartif.py": "transcribed",
     "utils.py": "transcribed",

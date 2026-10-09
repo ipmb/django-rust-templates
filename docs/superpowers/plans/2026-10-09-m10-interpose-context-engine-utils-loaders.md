@@ -1234,7 +1234,7 @@ git commit -m "M10: interpose django.template.context — the meter is 21"
 
 ### Task 5: `_impl/engine.py` (meter 21 → 20)
 
-`Engine` is where the loaders are constructed and where the settings enter, and it is the last of the three single-module interpositions. Its measured reach is also three functions, all of them `Engine.__init__` and the two `lru_cache`d classmethods that the parity harness's fresh-per-call engine enters.
+`Engine` is where the loaders are constructed and where the settings enter, and it is the last of the three single-module interpositions. Its measured reach is also three functions: `Engine.__init__` and the two lookups it makes eagerly, `get_template_builtins` and `get_template_libraries`. They are **plain methods** — the `lru_cache`d one in this file is `Engine.get_default`, a `staticmethod` the harness never reaches, because it builds its Engines directly and never asks for the global default. (Corrected while executing Task 5: the first draft of this paragraph called the two lookups `lru_cache`d classmethods, which they are not.)
 
 **Files:**
 - Modify: `scripts/gen_impl_transcription.py`, `scripts/check_transcriptions.py`, `python/django_rust_templates/_shim.py`, `tests/milestone_ownership.py`, `tests/test_shim.py`, `tests/test_interposition.py`

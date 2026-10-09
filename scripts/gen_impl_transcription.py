@@ -46,6 +46,7 @@ IMPL = ROOT / "python" / "django_rust_templates" / "_impl"
 
 MODULES = {
     "context.py": "django/template/context.py",
+    "engine.py": "django/template/engine.py",
     "smartif.py": "django/template/smartif.py",
     "utils.py": "django/template/utils.py",
 }

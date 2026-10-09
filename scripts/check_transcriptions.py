@@ -195,6 +195,24 @@ COMPARED_PATH = {
         (34, 40, "BaseContext._reset_dicts"),
         (146, 155, "Context.__init__"),
     ],
+    # 3 functions, spans 22-129 of 236 — `Engine.__init__` and the two lookups
+    # it makes eagerly. The harness builds a **fresh** `Engine` per call
+    # (`test_parser_parity._library_engine`), so this is entered once per
+    # corpus source rather than once per process, and the count is per call.
+    #
+    # `get_template_builtins` and `get_template_libraries` are plain methods —
+    # **not** the `lru_cache`d pair the plan calls them, which is `Engine.
+    # get_default` (a `staticmethod`, measured as never reached: the harness
+    # builds its Engines directly and never asks for the global default). They
+    # are in the pin under their own spans because each is a separate function
+    # whose lines the guard has to be able to name; a declared region placed in
+    # either belongs to that region and not to `__init__`'s.
+    # Measured with `.review/m10-measurements/m10_measure_compared_path.py`.
+    "engine.py": [
+        (22, 65, "Engine.__init__"),
+        (122, 123, "Engine.get_template_builtins"),
+        (125, 129, "Engine.get_template_libraries"),
+    ],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])
@@ -400,6 +418,21 @@ DECLARED = {
             # `scripts/check_transcriptions.py` fails the commit if any line
             # here is not upstream's.
             ((1, 2), None, "# TRANSCRIBED: django/template/context.py (Django 6.0.9)"),
+        ],
+    ),
+    "engine.py": (
+        "django/template/engine.py",
+        [
+            # The marker and its blank separator, ours only. Upstream opens with
+            # `import functools`, so the marker is a comment on line 1; no
+            # executable line, hence clause (5)'s note rather than statements.
+            #
+            # **This is the entire file**, like `context.py` and `smartif.py` —
+            # 236 lines against upstream's 234, and the diff is the two lines of
+            # marker. The four imports below the marker are upstream's
+            # (`functools`, `ImproperlyConfigured`, `cached_property`,
+            # `import_string`) and so is every line after them.
+            ((1, 2), None, "# TRANSCRIBED: django/template/engine.py (Django 6.0.9)"),
         ],
     ),
 }
