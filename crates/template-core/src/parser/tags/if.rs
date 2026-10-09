@@ -373,8 +373,9 @@ mod tests {
 
     #[test]
     fn a_merged_operator_is_one_key_rather_than_two_tokens() {
-        // `merge_tokens` folds `not in` and `is not` into a single operator
-        // before `translate_token` looks them up (`smartif.py:159-173`), so the
+        // `IfParser.__init__`'s token loop folds `not in` and `is not` into a
+        // single operator as it walks the list (`smartif.py:159-173`), and
+        // `translate_token` then looks *that* up (`smartif.py:179-185`), so the
         // key is the two-word one and no operand named `in` exists.
         let node = compile("{% if a not in b %}x{% endif %}");
         let (key, first, second) = operator(tree_of(&node));
