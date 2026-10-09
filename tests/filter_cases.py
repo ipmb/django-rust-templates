@@ -2385,7 +2385,8 @@ CASES: list[dict] = [
     # what does — and the pairing is deliberate for that reason.
     #
     # Three of the five sites are the *same* line: `return input_val`
-    # (`:162`, `:177`), reached by an argument that will not parse, by a value
+    # (`defaultfilters.py:163`, `defaultfilters.py:177`), reached by an
+    # argument that will not parse, by a value
     # whose digits-and-exponent sum exceeds 200, and by a non-finite value whose
     # `as_tuple()` exponent is a letter. A body that got any one of them right and
     # collapsed the others into it would pass a corpus that held one row per
