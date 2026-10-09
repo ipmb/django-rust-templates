@@ -655,17 +655,18 @@ class ShapeTests(unittest.TestCase):
         converts it to `TemplateSyntaxError` exactly as before.
 
         The example is a tag that is **still** a stub, enumerated rather than
-        guessed: `_native.builtin_tag_stubs()` is `['load', 'partial',
-        'partialdef', 'querystring']` on this tree, and `load` is the one of the
-        four Django's base parser will not reject first. `{% if %}` was the
-        example until M5's Task 7 landed it, which is exactly the rot this test
-        was written to survive: it names a stub, so the milestone that implements
-        the last stub has to move it.
+        guessed: `_native.builtin_tag_stubs()` is `['partial', 'partialdef']` on
+        this tree, and `partialdef` is the one of the two Django's base parser
+        will not reject first. `{% if %}` was the example until M5's Task 7
+        landed it, and `{% load x %}` until M6 handed `load` to the host — which
+        is exactly the rot this test was written to survive: it names a stub, so
+        every milestone that implements the last stub, or hands one over, has to
+        move it. M13 implements the pair that is left.
         """
         with self.assertRaises(_native.UnimplementedTag) as caught:
-            _native.parse("{% load x %}")
+            _native.parse("{% partialdef x %}")
         self.assertIsInstance(caught.exception, _native.ParseError)
-        self.assertEqual(caught.exception.token[1], "load x")
+        self.assertEqual(caught.exception.token[1], "partialdef x")
 
         # The classes are genuinely different, and a syntax error is not
         # silently swept into the "not built yet" bucket.

@@ -11,6 +11,28 @@ pub enum TokenType {
     Comment = 3,
 }
 
+impl TokenType {
+    /// The reverse of `as u8`, for a token arriving from the host.
+    ///
+    /// [`Host::call_tag`] hands the shell its token stream and gets the
+    /// unconsumed remainder back, and that remainder crosses as the same wire
+    /// form `_native.lex` uses. `None` for anything outside the four values:
+    /// Django's `TokenType` has exactly these four members
+    /// (`django/template/base.py:97-101`), so a fifth value is a wire bug the
+    /// caller must report rather than a type to invent.
+    ///
+    /// [`Host::call_tag`]: crate::parser::host::Host::call_tag
+    pub fn from_wire(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Text),
+            1 => Some(Self::Var),
+            2 => Some(Self::Block),
+            3 => Some(Self::Comment),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub token_type: TokenType,

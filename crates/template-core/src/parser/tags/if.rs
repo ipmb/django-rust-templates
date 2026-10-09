@@ -185,7 +185,12 @@ mod tests {
             false
         }
 
-        fn call_tag(&self, _command: &str, _token: &Token) -> Result<NodeDesc, Error> {
+        fn call_tag(
+            &self,
+            _command: &str,
+            _token: &Token,
+            _tokens: &[Token],
+        ) -> Result<(NodeDesc, Vec<Token>), Error> {
             unreachable!("FilterHost compiles no tags")
         }
 

@@ -26,12 +26,10 @@ pub mod for_tag;
 #[path = "if.rs"]
 pub mod if_tag;
 pub mod ifchanged;
-pub mod load;
 pub mod lorem;
 pub mod now;
 pub mod partial;
 pub mod partialdef;
-pub mod querystring;
 pub mod regroup;
 pub mod resetcycle;
 pub mod spaceless;
@@ -301,7 +299,12 @@ pub(crate) mod support {
             false
         }
 
-        fn call_tag(&self, _command: &str, _token: &Token) -> Result<NodeDesc, Error> {
+        fn call_tag(
+            &self,
+            _command: &str,
+            _token: &Token,
+            _tokens: &[Token],
+        ) -> Result<(NodeDesc, Vec<Token>), Error> {
             unreachable!("CountingHost::call_tag is never reached: has_tag returns false")
         }
 
@@ -507,9 +510,16 @@ mod tests {
             matches!(command, "hosty" | "standin")
         }
 
-        fn call_tag(&self, command: &str, _token: &Token) -> Result<NodeDesc, Error> {
+        fn call_tag(
+            &self,
+            command: &str,
+            _token: &Token,
+            tokens: &[Token],
+        ) -> Result<(NodeDesc, Vec<Token>), Error> {
             if command == "hosty" {
-                Ok(NodeDesc::new("StandinHostNode"))
+                // Consumes nothing and pushes nothing back, so the stream is
+                // returned unchanged — the identity case of the cursor handoff.
+                Ok((NodeDesc::new("StandinHostNode"), tokens.to_vec()))
             } else {
                 Err(Error::host("the host refused"))
             }

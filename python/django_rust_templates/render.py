@@ -50,6 +50,7 @@ from django.template.context import Context
 from django.template.engine import Engine
 
 from django_rust_templates import _native
+from django_rust_templates.host import ShellHost
 
 __all__ = ("materialiser", "parser_for", "render_string")
 
@@ -112,10 +113,21 @@ def parser_for(source, engine=None):
     `template_builtins` are used, so a filter library the caller registered is
     visible to the parse. That is the same reason `_native.render` takes the
     parser rather than building one: Python knows which engine, and Rust cannot.
+
+    `libraries` is the third thing the caller's engine decides, and it was
+    missing until M6 — measured, `{% load custom %}` raised
+    `'custom' is not a registered tag library` because `find_library` reads
+    `parser.libraries` (`defaulttags.py:1065-1075`) and `Parser.__init__` fills it
+    from `Engine.template_libraries`. Nothing but a `{% load %}` reads it, which
+    is why its absence went unnoticed for five milestones.
     """
     if engine is None:
         engine = Engine()
-    return Parser(Lexer(source).tokenize(), builtins=engine.template_builtins)
+    return Parser(
+        Lexer(source).tokenize(),
+        builtins=engine.template_builtins,
+        libraries=engine.template_libraries,
+    )
 
 
 def render_string(source, context, engine=None):
@@ -139,11 +151,23 @@ def render_string(source, context, engine=None):
     No exception handling: the parse's `TemplateSyntaxError` and the render's
     own exceptions must both reach the caller as themselves, because
     `tests/test_render_parity.py` compares types and messages as well as output.
+
+    **The `ShellHost` is built here, before the parse, and that timing is
+    load-bearing**: it snapshots `parser.tags` at construction to tell Django's
+    own builtin callables from anything a `{% load %}` puts there. Built after
+    the parse it would see the post-load table and every loaded tag would read as
+    a builtin.
     """
     if engine is None:
         engine = Engine()
     if isinstance(context, dict):
         context = Context(context)
+    parser = parser_for(source, engine)
     return _native.render(
-        source, context, parser_for(source, engine), materialiser(), engine
+        source,
+        context,
+        parser,
+        materialiser(),
+        engine,
+        ShellHost(parser),
     )

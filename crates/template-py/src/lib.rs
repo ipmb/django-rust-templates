@@ -1061,6 +1061,26 @@ struct FilterCheckHost<'py> {
     /// exactly as `PyTarget.arena`'s is the `resolve` call — a handle is
     /// meaningless outside the pair.
     refs: RefCell<Vec<Option<Py<PyAny>>>>,
+    /// The shell's tag seam, one object per parse — `ShellHost` in
+    /// `python/django_rust_templates/host.py`.
+    ///
+    /// **One object rather than two callables**, and that is a correction to the
+    /// plan, which had `has_tag` and `call_tag` travel separately. They are a
+    /// single thing in both directions: `has_tag` is consulted first and
+    /// `call_tag` is called only for a name it accepted, so the two must be
+    /// answering about the *same* registry at the *same* moment, and the
+    /// registry is one `Parser`'s dict. Two callables would let a caller pair
+    /// them across parses — a `has_tag` from one and a `call_tag` from another —
+    /// with no error anywhere, which is the same silent-wrong-source shape the
+    /// filter handle's table exists to prevent.
+    ///
+    /// `None` is [`NoHost`]'s behaviour exactly: `has_tag` answers `false` and
+    /// `call_tag` is unreachable. That is what keeps
+    /// `_native.parse(source, check_filter=None)` — every Rust-only test and the
+    /// parity corpus's "no host" rows — working unchanged.
+    ///
+    /// [`NoHost`]: template_core::parser::host::NoHost
+    host: Option<Bound<'py, PyAny>>,
 }
 
 impl FilterCheckHost<'_> {
@@ -1085,12 +1105,104 @@ impl FilterCheckHost<'_> {
 }
 
 impl Host for FilterCheckHost<'_> {
-    fn has_tag(&self, _command: &str) -> bool {
-        false
+    fn has_tag(&self, command: &str) -> bool {
+        let Some(host) = &self.host else {
+            return false;
+        };
+        // A raise here is an integration bug in the shell, not a verdict on the
+        // template, and the trait returns a plain `bool` with nowhere to put it.
+        // A panic is therefore the loud option rather than swallowing it as
+        // `false`, which would silently route a host tag to Rust's own registry
+        // and produce `Invalid block tag` for a tag the host was ready to
+        // compile.
+        host.call_method1("has_tag", (command,))
+            .and_then(|answer| answer.extract::<bool>())
+            .expect("ShellHost.has_tag raised or did not return a bool")
     }
 
-    fn call_tag(&self, _command: &str, _token: &Token) -> Result<NodeDesc, Error> {
-        unreachable!("FilterCheckHost::call_tag is never reached: has_tag always returns false")
+    fn call_tag(
+        &self,
+        command: &str,
+        token: &Token,
+        tokens: &[Token],
+    ) -> Result<(NodeDesc, Vec<Token>), Error> {
+        let Some(host) = &self.host else {
+            unreachable!(
+                "FilterCheckHost::call_tag is never reached without a host: \
+                 has_tag returns false when there is none"
+            )
+        };
+        let py = host.py();
+        let wire = |token: &Token| -> WireToken {
+            (
+                token.token_type as u8,
+                token.contents.clone(),
+                token.lineno,
+                token.position,
+            )
+        };
+        let stream = match PyList::new(py, tokens.iter().map(wire)) {
+            Ok(list) => list,
+            Err(error) => {
+                return Err(Error::internal(format!(
+                    "could not hand the token stream to the host: {error}"
+                )))
+            }
+        };
+        // The dispatched token travels as its **wire tuple**, not as a Python
+        // `Token`: building one here would mean this crate naming a Django
+        // class, and the shell already builds `Token`s for the stream. The
+        // shell turns this into `Token(TokenType(t), contents, position, lineno)`
+        // — Django's own signature — so the compile function receives a real
+        // token, which is what `token.split_contents()` needs.
+        let answer = host
+            .call_method1("call_tag", (command, wire(token), stream))
+            .map_err(|error| Error::host(python_error_message(py, &error)))?;
+        let (node, left) = match answer.extract::<(Bound<'_, PyAny>, Bound<'_, PyAny>)>() {
+            Ok(pair) => pair,
+            // Not `Error::host`: no Python exception was raised, so claiming one
+            // would send the reader looking for a traceback that does not exist.
+            // This is the seam's own contract failing, which is `Internal`.
+            Err(error) => {
+                return Err(Error::internal(format!(
+                    "ShellHost.call_tag({command:?}) did not return a (node, tokens) pair: {error}"
+                )))
+            }
+        };
+        let left = match left.extract::<Vec<WireToken>>() {
+            Ok(left) => left,
+            Err(error) => {
+                return Err(Error::internal(format!(
+                    "ShellHost.call_tag({command:?}) returned tokens this side cannot read: {error}"
+                )))
+            }
+        };
+        let left = left
+            .into_iter()
+            .map(|(kind, contents, lineno, position)| {
+                TokenType::from_wire(kind).map(|token_type| Token {
+                    token_type,
+                    contents,
+                    lineno,
+                    position,
+                })
+            })
+            .collect::<Option<Vec<Token>>>()
+            .ok_or_else(|| {
+                Error::internal(format!(
+                    "ShellHost.call_tag({command:?}) returned a token with no known type"
+                ))
+            })?;
+        // The node the host built goes into the same table `{% if %}`'s
+        // `FilterExpression` and `{% cycle %}`'s slot live in: it is a Python
+        // object this side must not read, and a `NodeRef` is how a descriptor
+        // names one (§5.2). The materialiser's `HOST_NODE` arm returns it.
+        let handle = {
+            let mut refs = self.refs.borrow_mut();
+            refs.push(Some(node.unbind()));
+            CoreNodeRef((refs.len() - 1) as u64)
+        };
+        Ok((NodeDesc::host(handle), left))
     }
 
     fn check_filter(&self, name: &str, arg_count: usize) -> Result<Option<CoreNodeRef>, Error> {
@@ -1218,6 +1330,9 @@ fn parse_filter_expression(
         // entry point has no such seam".
         compile_filter: None,
         refs: RefCell::new(Vec::new()),
+        // A `{{ … }}` body has no block tags in it, so `has_tag` is never
+        // consulted and there is nothing for a tag seam to do.
+        host: None,
     };
     match template_core::parser::filter_expr::parse_filter_expression(token, &host) {
         // The table goes out **with** the descriptor, because this entry point's
@@ -1325,7 +1440,7 @@ fn with_ref_table(
 /// `Parser` in hand pass `materialiser.compile_filter(parser)`; `render` builds
 /// its own, so the shell's end-to-end path cannot forget it.
 #[pyfunction]
-#[pyo3(signature = (source, debug = false, origin_template_repr = None, check_filter = None, compile_filter = None))]
+#[pyo3(signature = (source, debug = false, origin_template_repr = None, check_filter = None, compile_filter = None, host = None))]
 fn parse(
     py: Python<'_>,
     source: &str,
@@ -1333,11 +1448,13 @@ fn parse(
     origin_template_repr: Option<String>,
     check_filter: Option<Bound<'_, PyAny>>,
     compile_filter: Option<Bound<'_, PyAny>>,
+    host: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     let host = FilterCheckHost {
         check_filter,
         compile_filter,
         refs: RefCell::new(Vec::new()),
+        host,
     };
     let nodelist = parse_source(py, source, debug, origin_template_repr, &host)?;
     with_ref_table(py, nodelist, &host)
@@ -1919,6 +2036,7 @@ fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>
 /// `tests/test_render_parity.py` compares exception *types and messages* as well
 /// as output.
 #[pyfunction]
+#[pyo3(signature = (source, context, parser, tree, engine, host = None))]
 fn render(
     py: Python<'_>,
     source: &str,
@@ -1926,6 +2044,7 @@ fn render(
     parser: Py<PyAny>,
     tree: Py<PyAny>,
     engine: Py<PyAny>,
+    host: Option<Bound<'_, PyAny>>,
 ) -> PyResult<String> {
     let tree = tree.bind(py);
     let check = tree.getattr("check_filter")?.call1((parser.bind(py),))?;
@@ -1938,6 +2057,7 @@ fn render(
         check_filter: Some(check),
         compile_filter: Some(compile),
         refs: RefCell::new(Vec::new()),
+        host,
     };
 
     let desc = parse_source(py, source, false, None, &host)?;

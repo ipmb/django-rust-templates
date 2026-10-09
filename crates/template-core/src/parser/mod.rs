@@ -192,6 +192,25 @@ impl<'a> Parser<'a> {
         );
     }
 
+    /// The tokens from the cursor on, in **parse order**.
+    ///
+    /// The internal stack is reversed (`base.py:504-505`, for `pop` from the
+    /// end), so this reverses a copy. It exists for [`Host::call_tag`], which
+    /// hands a host compile function the stream it may consume.
+    pub fn remaining_tokens(&self) -> Vec<Token> {
+        self.tokens.iter().rev().cloned().collect()
+    }
+
+    /// Replace the cursor with `tokens`, in parse order.
+    ///
+    /// Replacing rather than advancing by a count is what makes a host
+    /// callback's `prepend_token` work without a special case: whatever the host
+    /// leaves behind *is* the stream, and the host is Django's own `Parser`,
+    /// whose stack semantics the reversal already mirrors.
+    pub fn replace_tokens(&mut self, tokens: Vec<Token>) {
+        self.tokens = tokens.into_iter().rev().collect();
+    }
+
     /// `Parser.skip_past(endtag)`.
     ///
     /// Loops until a **block** token whose contents *equal* `endtag` — a
@@ -293,7 +312,25 @@ impl<'a> Parser<'a> {
                     // host-first would route them to Python and these compile
                     // functions would never run.
                     let compiled = if self.host.has_tag(&command) {
-                        self.host.call_tag(&command, &token)
+                        // The host compiles it, and it may consume the rest of
+                        // the stream. Both halves cross by value: the host is
+                        // Python's own `Parser` and holds no borrow of this one
+                        // (§5.2), which is what lets `{% load %}` and a
+                        // `simple_block_tag`'s nested parse re-enter at all.
+                        let remaining = self.remaining_tokens();
+                        // Not `?`: a host error must reach the `map_err` below
+                        // like any other compile error, because Django attaches
+                        // the token in `Parser.parse`'s `except` and the host's
+                        // exception does not carry one. `?` here would return
+                        // before `self.error(&token, …)` ran and the message
+                        // would lose its line and position.
+                        match self.host.call_tag(&command, &token, &remaining) {
+                            Ok((desc, left)) => {
+                                self.replace_tokens(left);
+                                Ok(desc)
+                            }
+                            Err(error) => Err(error),
+                        }
                     } else if let Some(compile) = registry::builtin_tag(&command) {
                         compile(self, &token)
                     } else {
@@ -556,19 +593,22 @@ mod tests {
         // anything. Now it is an `Unimplemented` naming the milestone that
         // supplies it.
         //
-        // The example is `{% load %}`, and it moved *to* `load` in Task 7: this
-        // test is one of the few that names a *specific* unimplemented tag, so
-        // M5's tasks move it as they land. It named `{% if %}` until Task 7
-        // implemented that tag, and `load` is now the first still-stubbed entry
-        // in the registry — it is M6's, so this line outlives M5.
-        let error = failure("{% load x %}");
+        // The example is `{% partialdef %}`, one of the two stubs M13 will
+        // replace, and it moved *to* `partialdef` in M6: this test is one of the
+        // few that names a *specific* unimplemented tag, so each milestone's
+        // tasks move it as they land. It named `{% if %}` until M5 implemented
+        // that tag, then `{% load %}` — which M6 stopped being a stub at all,
+        // because it left the table for the host. `partialdef` is the first
+        // still-stubbed entry now and is M13's, so this line outlives M6.
+        let error = failure("{% partialdef x %}");
         assert_eq!(
             error.kind,
             ErrorKind::Unimplemented(
-                "'load' is a built-in tag this engine does not implement yet (M6)".to_string(),
+                "'partialdef' is a built-in tag this engine does not implement yet (M13)"
+                    .to_string(),
             ),
         );
-        assert_eq!(error.token.unwrap().contents, "load x");
+        assert_eq!(error.token.unwrap().contents, "partialdef x");
     }
 
     #[test]

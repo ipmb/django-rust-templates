@@ -76,21 +76,18 @@ class FilterRebindingTests(unittest.TestCase):
         if not settings.configured:
             settings.configure(USE_I18N=False)
 
-    @unittest.expectedFailure
     def test_a_load_does_not_rebind_an_earlier_tokens_filter(self):
         """The sandwich: builtin use, `{% load %}`, shadowed use.
 
-        **Task 3 owns this decorator.** The row is red until `{% load %}` exists,
-        and it is red *today* for exactly that reason — measured, through our own
-        engine:
+        **This row was red until Task 3 and is the reason M6 could not ship
+        without `{% load %}`.** It carried `@unittest.expectedFailure` from Task
+        1 — marked rather than skipped so that it stayed visible and so that
+        passing would report *unexpected success*, which is a failure: the
+        decorator could not be forgotten, only deleted. Task 3 deleted it.
 
-            UnimplementedTag: 'load' is a built-in tag this engine does not
-            implement yet (M6)
-
-        It is marked rather than skipped or omitted so that it stays visible and
-        so that the day it starts passing it reports **unexpected success**,
-        which is a failure: Task 3 cannot land `{% load %}` without being told to
-        delete this line. A skip would have gone quiet instead.
+        It was red for exactly one reason, measured through our own engine:
+        `UnimplementedTag: 'load' is a built-in tag this engine does not
+        implement yet (M6)`.
 
         `render_string` is the subject and `Engine.from_string` only the oracle,
         so a green row here cannot be stock Django answering for us — which is

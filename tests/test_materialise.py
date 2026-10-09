@@ -240,13 +240,72 @@ class MaterialiseTests(unittest.TestCase):
         self.assertEqual(node.token.contents, "echo")
         self.assertEqual(node.origin, "origin.html")
 
+    def test_a_host_node_descriptor_of_the_wrong_shape_is_loud(self):
+        """The descriptor's shape is a contract; a violation must not be dropped.
+
+        `NodeDesc::host` emits exactly one attribute, `node`, and no children.
+        The arm above the registry reads the handle out of the attribute list,
+        and the first draft read it out of *whatever* list it was handed — so a
+        descriptor carrying a second attribute, or the wrong attribute name, or
+        a child nodelist, materialised the held node and discarded the rest in
+        silence. Measured before the guard was written: all three returned the
+        held `TextNode`. A dropped nodelist is the dangerous one, because the
+        node then renders as though the children were never there.
+        """
+        held = TextNode("held")
+        resolve = lambda index: held  # noqa: E731 — short and local, as above
+
+        cases = {
+            "a second attribute": (
+                ("HostNode", (("node", _native.NodeRef(0)), ("extra", 1)), (), None),
+                "exactly one attribute",
+            ),
+            "the wrong attribute name": (
+                ("HostNode", (("handle", _native.NodeRef(0)),), (), None),
+                "exactly one attribute",
+            ),
+            "a child nodelist": (
+                (
+                    "HostNode",
+                    (("node", _native.NodeRef(0)),),
+                    (("", ([], False)),),
+                    None,
+                ),
+                "no nodelists",
+            ),
+        }
+        for label, (desc, expected) in cases.items():
+            with self.subTest(label=label):
+                with self.assertRaises(LookupError) as caught:
+                    materialiser.materialise_node(desc, resolve_ref=resolve)
+                self.assertIn(expected, str(caught.exception))
+
+    def test_a_host_node_over_an_empty_slot_is_loud(self):
+        """A broken *table* is a different failure from a broken descriptor.
+
+        The wrong-type case above raises a `LookupError` naming the descriptor;
+        the empty-slot case used to raise
+        `AttributeError: 'NoneType' object has no attribute 'token' and no
+        __dict__ for setting new attributes` (measured), which names neither the
+        descriptor, the slot, nor the parse. Same style as the `NodeSlot` check
+        in `_decode_value`.
+        """
+        desc = ("HostNode", (("node", _native.NodeRef(0)),), (), None)
+        with self.assertRaises(LookupError) as caught:
+            materialiser.materialise_node(desc, resolve_ref=lambda index: None)
+        self.assertIn("empty reference-table slot", str(caught.exception))
+
     def test_the_host_node_sentinel_is_not_a_django_class(self):
         """`desc::HOST_NODE` must not name a class Django could materialise.
 
-        The materialiser tests the name before `NODE_CLASSES`, so a collision
-        would not *break* — it would silently make every real `HostNode`-named
-        Django node unmaterialisable, which is the worse failure because it is
-        invisible until someone uses that class.
+        Two guards, and they are not the same claim. The loop below is the
+        *upstream* one: if Django ever gained a class by this name, the sentinel
+        would be shadowing it. The `NODE_CLASSES` assertion is the one that
+        matches the stated failure mode — the arm tests the sentinel *before*
+        the registry lookup, so a `NODE_CLASSES` entry under this name would
+        never be reached, and every descriptor naming it would silently
+        materialise *our* node instead of the registered class. That is the
+        invisible failure; the loop alone cannot see it.
         """
         from django.template import base, defaulttags, loader_tags
 
@@ -254,6 +313,7 @@ class MaterialiseTests(unittest.TestCase):
             self.assertFalse(
                 hasattr(module, "HostNode"), f"django {module.__name__} defines HostNode"
             )
+        self.assertNotIn(materialiser.HOST_NODE, materialiser.NODE_CLASSES)
 
     def test_a_safe_str_becomes_a_safe_string(self):
         desc = ("VerbatimNode", (("content", _native.SafeStr("{{ raw }}")),), (), None)

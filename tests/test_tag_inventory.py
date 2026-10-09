@@ -230,7 +230,7 @@ class TagInventoryTests(unittest.TestCase):
 
 
 class RustRegistryTests(unittest.TestCase):
-    """The Rust registry is Django's built-ins minus the three §6 assigns to Python.
+    """The Rust registry is Django's built-ins minus the five Python owns as tags.
 
     M2 could assert the complement from Rust alone (`the_registry_holds_exactly_the_nine_m2_tags`
     listed the 18 names that must *not* be registered), because a missing entry
@@ -238,22 +238,44 @@ class RustRegistryTests(unittest.TestCase):
     written once and in full, so an unimplemented tag has an entry whose compile
     function returns `Unimplemented` rather than no entry at all. The set is
     therefore only checkable where Django's registry is readable, which is here.
+
+    M6 moved the count from three to five by handing `load` and `querystring` to
+    the host, and the two left for two different reasons. Both are §6's — a
+    Python-owned tag is one whose compile function Django must run — but
+    `load`'s reason is *state* (`parser.add_library` rebinds `parser.tags` and
+    `parser.filters`, and `A2` keeps that state in one real `Parser`) while
+    `querystring`'s is *machinery* (`simple_tag`'s generated compile function
+    calls `parse_bits` driven by the callable's signature — `library.py:454`).
     """
 
-    def test_the_rust_registry_matches_the_loader_tags_subtraction(self):
+    # The five Django registers that Rust does not own the compile function for.
+    PYTHON_OWNED = {"block", "extends", "include", "load", "querystring"}
+
+    def test_the_rust_registry_is_djangos_builtins_minus_the_python_owned_five(self):
         from django_rust_templates import _native
 
-        self.assertEqual(
-            sorted(_native.builtin_tag_names()),
-            sorted(REGISTERED - {"block", "extends", "include"}),
-        )
+        names = _native.builtin_tag_names()
+        self.assertEqual(sorted(names), sorted(REGISTERED - self.PYTHON_OWNED))
+        self.assertEqual(len(names), 22)
 
-    def test_the_three_loader_tags_are_absent_on_purpose(self):
+    def test_the_five_python_owned_tags_are_absent_on_purpose(self):
         from django_rust_templates import _native
 
-        for name in ("block", "extends", "include"):
+        for name in sorted(self.PYTHON_OWNED):
             with self.subTest(name=name):
                 self.assertNotIn(name, _native.builtin_tag_names())
+
+    def test_the_only_two_unimplemented_entries_are_the_m13_pair(self):
+        """A stub is a real M13 tag, not a stand-in for a name Rust handed over.
+
+        `builtin_tag_stubs()` asks the registry itself which names have a compile
+        function that returns `Unimplemented`, so pinning the set here is what
+        separates "not done yet" from "not ours": `load` and `querystring` are
+        absent from the table entirely, and only `partial`/`partialdef` remain.
+        """
+        from django_rust_templates import _native
+
+        self.assertEqual(set(_native.builtin_tag_stubs()), {"partial", "partialdef"})
 
     def test_no_m5_tag_is_still_a_stub(self):
         """M5's switch: the milestone is done iff this intersection is empty.

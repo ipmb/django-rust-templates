@@ -8,11 +8,12 @@
 //! and a tag that is not implemented yet is a stub in its own file rather than a
 //! missing entry.
 //!
-//! **Three built-in names are deliberately absent**, and a test asserts their
-//! absence: `block`, `extends` and `include`. §6 assigns them to Python and M7
-//! supplies them through the host seam, so they are not Rust compile functions
-//! at any milestone, and an entry here would be a promise this project has
-//! already decided not to keep. The mechanical reason — the one to reach for
+//! **Five built-in names are deliberately absent**, and a test asserts their
+//! absence. `block`, `extends` and `include` are §6's — Python's, supplied
+//! through the host seam, M7's. `load` and `querystring` are §6's too, and M6
+//! took them out of the table; the paragraphs below record which of the rule's
+//! clauses each one falls under. An entry here would be a promise this project
+//! has already decided not to keep. The mechanical reason — the one to reach for
 //! when the next built-in's side has to be decided — is the rule below.
 //!
 //! **The rule behind that subtraction, stated rather than listed**, because
@@ -36,22 +37,35 @@
 //!   *materialised* nodes, which do not exist at compile time.
 //! - `include` reaches `parser.compile_filter` and the loader machinery.
 //!
-//! **A separate bucket, and `load` is its only member — it is in the table for
-//! now, and M6 must decide.** `do_load` writes host state too
-//! (`parser.add_library` → `self.tags.update`, `base.py:669`), and the effect
-//! must be visible to a *later* compile: `Parser::parse` consults
-//! `self.host.has_tag(&command)` **first** (`parser/mod.rs:210`), so a tag
-//! registered by `{% load %}` reaches Rust only through the host. Under the rule
-//! above that is a subtraction, and the table currently keeps it as a stub
-//! anyway, because M6 has a real choice the rule does not make for it: subtract
-//! it (host tag), or give it a Rust compile function that calls one host seam
-//! (`add_library`). `tags/load.rs`'s own doc records the same measurement and
-//! the same deferral. Flagged rather than resolved, because M3 must not
-//! pre-empt M6.
+//! **`load` and `querystring` were the table's last two members under a
+//! deferred decision, and M6 resolved both by subtraction — for two different
+//! reasons, which is why they are written down separately.**
+//!
+//! `load` is A1's: `do_load` writes host state (`parser.add_library` →
+//! `self.tags.update`, `base.py:669`), and the effect must be visible to a
+//! *later* compile — `Parser::parse` consults `self.host.has_tag(&command)`
+//! **first**, so a tag a `{% load %}` registered reaches Rust only through the
+//! host. `do_load` also resolves library *names* through `parser.libraries`,
+//! which `Template.compile_nodelist` fills from `Engine.template_libraries` — a
+//! lookup Rust cannot perform and must not duplicate. So it is a host tag
+//! outright: no Rust compile function, no seam, nothing to keep in step.
+//!
+//! `querystring` is A4's, and its reason is not the rule above at all.
+//! `defaulttags.querystring` is registered by `simple_tag`
+//! (`defaulttags.py:1286`), so its compile function is *generated* —
+//! `simple_tag`'s wrapper calls `parse_bits` with `parser.compile_filter`
+//! (`library.py:454`), reads the callable's signature, and builds a
+//! `SimpleNode`. Rust has no version of that and should not grow one: the node
+//! the host builds is Django's own `SimpleNode`, holding the Python function,
+//! and a bespoke Rust node of the same name would fail the parity comparison
+//! (which is by class name) while rendering the same output — the worst shape a
+//! divergence can take. Same conclusion as `load`, different clause: `load` is
+//! state the parse accumulates, this is a compile function that is Python's
+//! because the *decorator* is.
 //!
 //! Note what the rule is **not**: it is not "the node's `render` needs the
 //! host". Every node is materialised as Django's own class and renders in
-//! Python, so that test would subtract all 24 — `NowNode.render` reads
+//! Python, so that test would subtract all of them — `NowNode.render` reads
 //! `settings.USE_TZ` and `timezone.get_current_timezone()`
 //! (`defaulttags.py:404-405`) and `now` is one of M2's nine. It is also not
 //! "`__init__` takes arguments Rust cannot build": `BlockNode.__init__(name,
@@ -76,7 +90,7 @@
 //! both are the same case. What is recorded here is the measurement, not a
 //! verdict.
 //!
-//! The count is 24 = 27 built-ins minus those three, and the metric matters:
+//! The count is 22 = 27 built-ins minus those five, and the metric matters:
 //! `Engine().template_builtins[0].tags` is 24 (`defaulttags` alone), while the
 //! union across all three builtin libraries is 27 (`defaulttags` 24 +
 //! `loader_tags` 3). Both are right answers to different questions, and this
@@ -118,12 +132,10 @@ const REGISTRY: &[Entry] = &[
     ("for", tags::for_tag::compile),
     ("if", tags::if_tag::compile),
     ("ifchanged", tags::ifchanged::compile),
-    ("load", tags::load::compile),
     ("lorem", tags::lorem::compile),
     ("now", tags::now::compile),
     ("partial", tags::partial::compile),
     ("partialdef", tags::partialdef::compile),
-    ("querystring", tags::querystring::compile),
     ("regroup", tags::regroup::compile),
     ("resetcycle", tags::resetcycle::compile),
     ("spaceless", tags::spaceless::compile),
@@ -256,18 +268,53 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_has_the_twenty_four_names_rust_owns() {
-        // 27 built-in names minus `block`, `extends`, `include`. See the module
-        // doc for why those three are absent and for the counting trap.
-        assert_eq!(builtin_tag_names().len(), 24);
+    fn the_registry_has_the_twenty_two_names_rust_owns() {
+        // 27 built-in names minus `block`, `extends`, `include`, `load` and
+        // `querystring`. See the module doc for why those five are absent and
+        // for the counting trap.
+        assert_eq!(builtin_tag_names().len(), 22);
     }
 
     #[test]
-    fn the_three_loader_tags_are_not_rust_compile_functions() {
-        for absent in ["block", "extends", "include"] {
+    fn the_five_python_owned_builtins_are_not_rust_compile_functions() {
+        // Three for M7 (§6's loader tags) and two M6 removed: `load` is host
+        // state, `querystring` is a `simple_tag`. The reasons are separate and
+        // the module doc carries both.
+        for absent in ["block", "extends", "include", "load", "querystring"] {
             assert!(
                 builtin_tag(absent).is_none(),
-                "{absent} must not be a Rust compile function (§6: Python-owned, M7)",
+                "{absent} must not be a Rust compile function (§6: Python-owned)",
+            );
+        }
+    }
+
+    #[test]
+    fn every_builtin_tag_name_is_ascii() {
+        // The premise four `py_repr_str` call sites rest on, stated once where
+        // it can fail. `{% with %}`, `{% lorem %}` and `{% resetcycle %}` all
+        // repr their *tag name* through `py_repr_str` — which is exact on ASCII
+        // only, since `char::is_control` is Rust's Cc while Python's `repr`
+        // escapes every non-printable category-C code point. Each of those
+        // sites argues the input is safe because the name is "the tag name
+        // dispatch matched against the registry, not text from the template".
+        // That sentence is only true if the registry's keys are ASCII, so the
+        // claim is checked here rather than left inside the argument.
+        //
+        // It survives M6, when a `{% load %}` makes a second tag registry
+        // reachable, because it is a claim about *our* table and not about the
+        // merged one — the merged table is held off by `ShellHost.has_tag`'s
+        // identity predicate, which routes any name Rust does not own to the
+        // host before our compile function runs. So the assertion stays a
+        // sufficient reason even though the surrounding support changed from
+        // "Rust owns the registry outright" to "the dispatch predicate filters
+        // what reaches it" (`.review/m5-seams.md`, Finding A point 3).
+        for name in builtin_tag_names() {
+            assert!(
+                name.is_ascii(),
+                "{name:?} is not ASCII: a tag name reaches `py_repr_str`, which \
+                 escapes only Cc, so a non-ASCII name would be repr'd raw where \
+                 Python escapes it. Route it through the host's `repr` instead \
+                 of widening `py_repr_str` (design spec §10.4).",
             );
         }
     }
@@ -293,25 +340,13 @@ mod tests {
         // what the Python gate consumes; this is the second opinion it is checked
         // against.
         //
-        // M5's last task rewrites this literal. Implementing eleven of the
-        // fifteen here is exactly what makes them stop being `Unimplemented`, so
-        // the pin must shrink to `load`, `partial`, `partialdef` and
-        // `querystring` in the same commit that lands the eleventh tag. A pin
-        // that did not have to move would not have been a pin.
-        //
-        // **It moves once per task, not once per milestone**, which is the
-        // smaller thing the same argument buys: the fan-out tasks land their
-        // tags one group at a time, and a literal left at fifteen until the end
-        // would fail every commit in between. **All eleven M5 tags have landed**
-        // — `cycle`, `filter`, `firstof`, `for`, `if`, `ifchanged`, `lorem`,
-        // `regroup`, `url`, `widthratio` and `with` — so the four names left are
-        // exactly the ones M5 was never going to touch. `querystring` is §D1's
-        // move to M6; `load`, `partial` and `partialdef` are M6's and M13's.
-        //
-        // This is the last time this literal moves for M5, and it is what Task
-        // 7's Step D checks: `builtin_tag_stubs() & M5_TAGS` is empty iff the
-        // eleven are all gone from here.
-        let stubs = ["load", "partial", "partialdef", "querystring"];
+        // **All eleven M5 tags landed**, leaving the four names M5 was never
+        // going to touch; **M6 then took two of them out of the table
+        // entirely** — `load` and `querystring` are host-owned now, so they are
+        // not stubs, they are absent. Two names remain, both M13's, and the
+        // literal shrinks with them here rather than at the end of the
+        // milestone, which is what keeps every commit in between green.
+        let stubs = ["partial", "partialdef"];
         assert_eq!(
             builtin_tag_stubs(),
             stubs,
@@ -323,9 +358,10 @@ mod tests {
         }
         // The *implemented* names, which is the other half of the same pin:
         // every table entry is either here or in `stubs`, and the two halves
-        // move in opposite directions as M5 lands. The nine are M2's; the
-        // eleven after them landed across M5's tasks, and this list is now
-        // complete for the milestone.
+        // move in opposite directions. The nine are M2's, the eleven after them
+        // landed across M5's tasks, and M6 removed two names from the table
+        // rather than implementing them — so this list is 20 and `stubs` is 2,
+        // summing to the registry's 22.
         let mut expected: Vec<&str> = [
             "autoescape",
             "comment",

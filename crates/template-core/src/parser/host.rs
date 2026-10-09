@@ -20,16 +20,45 @@ use crate::parser::error::Error;
 use crate::token::Token;
 
 pub trait Host {
-    /// Whether `command` is a tag the host can compile.
+    /// Whether `command` is a tag the **host** will compile.
     ///
-    /// Called for every block tag that Rust has no compile function for, which
-    /// at M2 is every block tag until `builtin_tag` answers.
+    /// Django's own test, plus one clause. `parser.tags` is one dict and
+    /// `Parser.add_library` updates it in place (`base.py:669-670`), so a
+    /// library loaded *after* the engine's builtins wins — which is why the
+    /// parse asks the host first. But every built-in has an entry in
+    /// `parser.tags` too, so a bare membership test would route `{% for %}` to
+    /// Python and Rust's compile functions would never run. The shell's
+    /// `ShellHost.has_tag` therefore excludes a name whose entry is still
+    /// Django's own builtin callable *and* is Rust's.
+    ///
+    /// Measured on the pinned tree, which is what the identity clause rests on:
+    /// with `p = Parser(tokens, builtins=Engine().template_builtins)`,
+    /// `p.tags["comment"] is <the engine's builtin>` is `True`, and after
+    /// `p.add_library(lib)` for a library registering `comment` it is `False`.
     fn has_tag(&self, command: &str) -> bool;
 
-    /// Compile `command`, given the token dispatch matched on.
+    /// Compile `command` in Python, against the parser's remaining tokens.
     ///
-    /// Called only after `has_tag` returned true for the same `command`.
-    fn call_tag(&self, command: &str, token: &Token) -> Result<NodeDesc, Error>;
+    /// `tokens` is everything the caller has not consumed, **in parse order**.
+    /// The host may consume any prefix of it (a block tag's `parser.parse(...)`,
+    /// `tag_27584.badtag`'s re-entrant parse) and may push tokens back
+    /// (`Parser.prepend_token`); the second element of the return is what is
+    /// left, and the caller **replaces** its cursor with it rather than
+    /// counting. Replacing and not counting is what makes `prepend_token`
+    /// correct without a special case — Django's own `Parser.parse` leaves the
+    /// end tag on the stack for `delete_first_token` to remove
+    /// (`base.py:564-569`), and a count would have to know that dance rather
+    /// than observe it.
+    ///
+    /// The host holds no borrow of the caller's parser — it *is* the caller's
+    /// counterpart on the Python side (§5.2, `ParserHandle`), which is why the
+    /// tokens travel by value.
+    fn call_tag(
+        &self,
+        command: &str,
+        token: &Token,
+        tokens: &[Token],
+    ) -> Result<(NodeDesc, Vec<Token>), Error>;
 
     /// Django's two filter checks, in Django's order: `Parser.find_filter`
     /// (`base.py:684-692`, which raises `Invalid filter: '%s'`) and then
@@ -200,7 +229,12 @@ impl Host for NoHost {
         false
     }
 
-    fn call_tag(&self, _command: &str, _token: &Token) -> Result<NodeDesc, Error> {
+    fn call_tag(
+        &self,
+        _command: &str,
+        _token: &Token,
+        _tokens: &[Token],
+    ) -> Result<(NodeDesc, Vec<Token>), Error> {
         // Unreachable through `Parser::parse`, which consults `has_tag` first.
         // A panic here rather than a silent `Err` so that a future dispatch bug
         // is loud; `parse` never lets it out of a Rust test.

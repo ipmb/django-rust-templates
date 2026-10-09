@@ -223,13 +223,46 @@ def materialise_node(desc, origin=None, resolve_ref=None, register_ref=None, par
     # descriptor whose attributes were reordered, or whose first value is not
     # the handle at all, into a silently wrong node. The missing-resolver case
     # is left to `_decode_value`, which is already loud about it.
+    #
+    # The shape is a contract, not a convention, so the *whole* of it is
+    # checked rather than the one attribute that happens to be wanted.
+    # `NodeDesc::host` emits exactly `node` and nothing else — no children,
+    # because the node it names is already built and the table is its only
+    # input, and no second attribute. Reading the handle out of whatever the
+    # attribute list holds would accept a descriptor carrying nodelists or
+    # extra attributes and then silently drop them, and a dropped child
+    # nodelist renders wrong rather than raising. Measured before the check
+    # was written: both a `(name, NodeRef)` plus a second attribute and a
+    # descriptor with one child nodelist materialised the held node and said
+    # nothing.
     if class_name == HOST_NODE:
-        ref = dict(attrs).get("node")
+        if nodelists:
+            raise LookupError(
+                f"a {HOST_NODE} descriptor carries no nodelists; "
+                f"got {len(nodelists)}"
+            )
+        if len(attrs) != 1 or attrs[0][0] != "node":
+            raise LookupError(
+                f"a {HOST_NODE} descriptor carries exactly one attribute, "
+                f"'node'; got {list(attrs)!r}"
+            )
+        ref = attrs[0][1]
         if not isinstance(ref, _native.NodeRef):
             raise LookupError(
                 f"a {HOST_NODE} descriptor must carry a 'node' NodeRef; got {ref!r}"
             )
         node = _decode_value(ref, resolve_ref)
+        # An empty slot is a valid descriptor over a broken table, and it is
+        # checked here because its symptom is *worse* than the wrong-type case
+        # above rather than merely different: `node.token = ...` on a `None`
+        # raises `AttributeError: 'NoneType' object has no attribute 'token'
+        # and no __dict__ for setting new attributes` (measured), which names
+        # neither the descriptor, the slot, nor the parse it came from.
+        if node is None:
+            raise LookupError(
+                f"the {HOST_NODE} descriptor's {ref!r} is an empty "
+                "reference-table slot"
+            )
         node.token = _decode_token(token) if token is not None else None
         node.origin = origin
         return node

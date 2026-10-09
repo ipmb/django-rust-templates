@@ -297,7 +297,8 @@ mod tests {
             &self,
             _command: &str,
             _token: &Token,
-        ) -> Result<crate::parser::desc::NodeDesc, Error> {
+            _tokens: &[Token],
+        ) -> Result<(crate::parser::desc::NodeDesc, Vec<Token>), Error> {
             unreachable!("Rejecting compiles no tags")
         }
 
@@ -361,7 +362,8 @@ mod tests {
             &self,
             _command: &str,
             _token: &Token,
-        ) -> Result<crate::parser::desc::NodeDesc, Error> {
+            _tokens: &[Token],
+        ) -> Result<(crate::parser::desc::NodeDesc, Vec<Token>), Error> {
             unreachable!("Binding compiles no tags")
         }
 
