@@ -196,13 +196,18 @@ test would catch. Each has a test in the task that owns the code.
    `extend_nodelist`. A Rust implementation that puts it on the parser, or on the
    node, passes every single-tag test and fails `{% extends %}` ordering. (Task 2)
 2. **`token.contents.split()[0]` is not `split_contents()`.** Tag *dispatch* uses
-   the raw `str.split` first word, so `{% if(x) %}` dispatches `if(x)`;
-   `split_contents` is for the tag's arguments afterwards. Using the M1 splitter
-   for dispatch changes which tags are found. (Task 2)
-   It is Python's `str.split`, so it splits on `str.isspace()` — use
-   `pyunicode::split`, never `str::split_whitespace`. The two tables differ on
-   U+001C–U+001F, which M1 shipped divergently until commit `1a013ae`, found by
-   a corpus entry of exactly this shape. (Task 2)
+   the raw `str.split` first word; `split_contents` is for a tag's arguments
+   afterwards. Using the M1 splitter for dispatch changes which tags are found —
+   but **not** on `{% if(x) %}`, an earlier version of this plan's example and
+   the wrong one to test: `smart_split` yields `if(x)` as a single bit, so both
+   splitters agree. The real discriminators are a **quoted first word**
+   (`{% 'a b' %}` → `'a` raw, `'a b'` through smart_split) and the
+   U+001C–U+001F table difference. Task 2's two tests use exactly those, after
+   the wrong example was found by checking it against Django rather than by
+   reasoning about it. (Task 2)
+   Being Python's `str.split`, it splits on `str.isspace()` — use
+   `pyunicode::split`, never `str::split_whitespace`; M1 shipped that
+   divergence until commit `1a013ae`. (Task 2)
 3. **`prepend_token`, not a consumed token.** On reaching `parse_until` the
    terminator is pushed *back*; the caller then consumes it with `next_token()`.
    A parser that consumes it produces `endfor`-shaped nodes or silently drops a
@@ -652,7 +657,7 @@ wrong.
 Add above the `#[cfg(test)]` block in `crates/template-core/src/text.rs`:
 
 ```rust
-/// `get_text_list(items, last_word)` (`django/utils/text.py:290`).
+/// `get_text_list(items, last_word)` (`django/utils/text.py:282`).
 ///
 /// Joins with `", "` and the final item with `last_word`: `"a, b or c"`, and
 /// notably `"a or b"` for two items — with no comma. The parser's
@@ -951,7 +956,9 @@ pub fn builtin_tag(_command: &str) -> Option<CompileFn> {
 //!
 //! - tags are dispatched on `token.contents.split()[0]`, the **raw** first word
 //!   — `split_contents` is for a tag's arguments afterwards, and the two
-//!   disagree on `{% if(x) %}`;
+//!   disagree on a quoted first word, `{% 'a b' %}` giving `'a` raw and
+//!   `'a b'` through `smart_split` (they do *not* disagree on `{% if(x) %}`,
+//!   which is one bit either way, so that is not the case to test);
 //! - reaching `parse_until` **prepends** the terminator and returns, leaving the
 //!   caller to consume it;
 //! - `tokens` is reversed, so `delete_first_token` deletes `tokens[-1]`;
@@ -1106,12 +1113,20 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 TokenType::Block => {
-                    // The raw first word, not `split_contents()`: `{% if(x) %}`
-                    // dispatches on `if(x)`, and using M1's splitter here would
-                    // dispatch on `if` (Review Focus item 2). Django reaches
-                    // `next(bits)` on an exhausted iterator only for an empty
-                    // `contents`, which is the `Empty block tag` case below.
-                    let Some(command) = token.contents.split_whitespace().next() else {
+                    // The raw first word — `token.contents.split()[0]`
+                    // (`base.py:561`), not `split_contents()` (Review Focus
+                    // item 2). The two part company on a *quoted* first word:
+                    // `{% 'a b' %}` dispatches on `'a` raw and on `'a b'` via
+                    // smart_split, so routing dispatch through M1's splitter
+                    // would look up a different tag. They also part company on
+                    // U+001C-U+001F, which is why this is `pyunicode::split`
+                    // and not `split_whitespace`.
+                    //
+                    // Django wraps the index in `try/except IndexError`
+                    // (`base.py:561-562`), which is how empty contents is
+                    // handled — not `next(bits)`, whose exhaustion is
+                    // `split_contents`' failure mode on a different code path.
+                    let Some(command) = pyunicode::split(&token.contents).first().copied() else {
                         return Err(self.error(
                             &token,
                             Error::syntax(format!("Empty block tag on line {}", token.lineno)),
@@ -4394,7 +4409,7 @@ Checked while writing this plan, in the pinned tree and this workspace:
    about shipped M1 code: fixed there as commit `1a013ae` before M2 began, so
    this plan depends on the corrected table rather than documenting a
    divergence.
-6. **`get_text_list`'s algorithm**, read from `django/utils/text.py:290` rather
+6. **`get_text_list`'s algorithm**, read from `django/utils/text.py:282` rather
    than from a running import: calling it requires `settings.USE_I18N`, so it
    raises `ImproperlyConfigured` on a bare interpreter. The two-item case has no
    comma.
