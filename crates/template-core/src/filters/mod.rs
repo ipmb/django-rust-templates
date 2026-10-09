@@ -88,7 +88,12 @@ pub mod wordcount;
 pub mod wordwrap;
 pub mod yesno;
 
-pub use host::{FilterCall, FilterHost, NoFilterHost, NumberFormatArgs, TestFilterHost};
+pub use host::{FilterCall, FilterHost, NoFilterHost, NumberFormatArgs};
+// Test-only, and re-exported under the same gate for the same reason it is
+// `#[cfg(test)]` in `host.rs`: a filter module's `mod tests` reaches it, and
+// nothing in a real build should be able to.
+#[cfg(test)]
+pub use host::TestFilterHost;
 pub use value::{Value, ValueId};
 
 /// The three flags Django records per filter, by the names it records them under.
@@ -532,13 +537,74 @@ mod tests {
         "yesno",
     ];
 
-    /// The filters whose bodies are still stubs.
+    /// The filters whose bodies are still stubs: the 55 of the 57 that M4 has
+    /// not landed yet.
     ///
-    /// Written as an alias while all 57 are stubs — a second literal copy of the
-    /// same 57 names would be a list with no way to be wrong *and* no way to be
-    /// right — and replaced by the literal remainder in the commit that lands the
-    /// first group.
-    const STILL_STUBBED: [&str; 57] = MEASURED_NAMES;
+    /// A literal rather than an alias of [`MEASURED_NAMES`] now that the first
+    /// group has landed, because the two are no longer the same set and an alias
+    /// would have to be trimmed in place to say so. The 55 are the 57 minus
+    /// `lower` and `upper`, which Task 3 implements as the corpus's seed.
+    ///
+    /// **The central commit that lands a group moves that group's names out of
+    /// this list**, in the same commit — and the assertion below is what makes
+    /// forgetting fail rather than pass.
+    const STILL_STUBBED: [&str; 55] = [
+        "add",
+        "addslashes",
+        "capfirst",
+        "center",
+        "cut",
+        "date",
+        "default",
+        "default_if_none",
+        "dictsort",
+        "dictsortreversed",
+        "divisibleby",
+        "escape",
+        "escapejs",
+        "escapeseq",
+        "filesizeformat",
+        "first",
+        "floatformat",
+        "force_escape",
+        "get_digit",
+        "iriencode",
+        "join",
+        "json_script",
+        "last",
+        "length",
+        "linebreaks",
+        "linebreaksbr",
+        "linenumbers",
+        "ljust",
+        "make_list",
+        "phone2numeric",
+        "pluralize",
+        "pprint",
+        "random",
+        "rjust",
+        "safe",
+        "safeseq",
+        "slice",
+        "slugify",
+        "stringformat",
+        "striptags",
+        "time",
+        "timesince",
+        "timeuntil",
+        "title",
+        "truncatechars",
+        "truncatechars_html",
+        "truncatewords",
+        "truncatewords_html",
+        "unordered_list",
+        "urlencode",
+        "urlize",
+        "urlizetrunc",
+        "wordcount",
+        "wordwrap",
+        "yesno",
+    ];
 
     #[test]
     fn the_registry_is_the_measured_57() {
@@ -559,6 +625,17 @@ mod tests {
     /// table. The expected set is spelled out here rather than derived from the
     /// same four constants [`REGISTRY`] uses, or this test would agree with any
     /// constant the registry picked.
+    ///
+    /// **That independence is what licenses the constants at all.**
+    /// [`FilterFlags::SAFE`], `SAFE_AUTOESCAPE`, `LOCALTIME` and `NONE` are each
+    /// shared by many rows, so a single wrong constant would be wrong in every
+    /// one of them at once — and the four constants are exactly the kind of
+    /// duplication a later reader deletes as "redundant with its uses". It is
+    /// not redundant: this test's names and flags are written out by hand, so
+    /// they are a second opinion rather than the constants repeated. Deriving
+    /// them from `FilterFlags::SAFE` here would remove the guard without
+    /// touching a constant, and the four names above would silently become four
+    /// aliases.
     #[test]
     fn the_flags_are_the_measured_ones() {
         let safe_names: [&str; 36] = [

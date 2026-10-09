@@ -78,14 +78,20 @@ impl Value {
     /// `BigInt` reports `"int"`: the variant is a Rust representation of a Python
     /// `int` outside `i64`, and `("int", …)` is the expectation Django has.
     ///
-    /// **`Opaque` reports `"object"`, which is a known limitation rather than an
-    /// answer.** The host owns that type and a `&'static str` cannot ask it, so a
-    /// corpus row whose result is genuinely an `Opaque` (a `datetime` returned by
-    /// `first`, say) would compare `"object"` against `"datetime"` and report a
-    /// mismatch that is not one. Task 3's harness must therefore route an
-    /// `Opaque` result's name through the host, or drop the type half of the
-    /// comparison for that row — not "fix" it here, which would mean this method
-    /// returning a `String` and a host call on every filter result.
+    /// **`Opaque` reports `"object"`, which is not an answer and must never be
+    /// compared.** The host owns that type and a `&'static str` cannot ask it, so
+    /// asking *this* method what an `Opaque` is would be the `len(arguments) >
+    /// 100` shape: a comparison that passes for every `Opaque` regardless, and so
+    /// checks nothing. §D5's type half therefore belongs **in Python**, where the
+    /// Django value and the materialised Rust result are both in hand and
+    /// `type(x).__name__` is available for either — Task 3's harness compares it
+    /// there, not here.
+    ///
+    /// What is left is this method's real scope: `template-core`'s own unit
+    /// tests, which compare two `Value`s and have no Python to ask. `"object"` is
+    /// the honest name for "a Python object this crate cannot name", and a
+    /// caller that finds itself wanting a *type* for an `Opaque` wants the
+    /// harness instead.
     pub fn type_name(&self) -> &'static str {
         match self {
             Value::None => "NoneType",

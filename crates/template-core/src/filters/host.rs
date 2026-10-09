@@ -11,7 +11,7 @@
 //! **The trait is settled before the fan-out and this file is not edited
 //! afterwards** (§10.4): the seven group tasks each own one filter module and
 //! none of them owns this one, so an agent that finds an operation missing stops
-//! and reports rather than adding it. That is what makes the 36 methods below a
+//! and reports rather than adding it. That is what makes the 35 methods below a
 //! contract rather than a suggestion.
 //!
 //! Three implementations exist, and they are three names rather than two
@@ -22,10 +22,15 @@
 //! to need it must be caught by a test rather than by luck — so collapsing them
 //! would let a wrong filter pass.
 
+#[cfg(test)]
 use std::cell::RefCell;
 
 use crate::filters::value::Value;
-use crate::parser::error::{Error, PyErrorKind};
+use crate::parser::error::Error;
+// Only the test-only `TestFilterHost` names an exception class; a real host
+// reports one it caught rather than one it was handed.
+#[cfg(test)]
+use crate::parser::error::PyErrorKind;
 use crate::pynum::IntValue;
 
 /// What a filter body is handed besides its value and its argument.
@@ -210,12 +215,16 @@ pub trait FilterHost {
     /// so the tag grammar, the entity handling and the malformed-input behaviour
     /// are all Python's.
     fn strip_tags(&self, text: &str) -> String;
-    /// `django.utils.text.slugify` — reaches `unicodedata` NFKD. Rust owns the
-    /// two regexes and their order; the normalisation is the host's.
+    /// `django.utils.text._slugify` (`text.py:473-476`), **whole**: NFKD, the
+    /// combining-mark strip, the two `re.sub`s and the `.lower()`.
+    ///
+    /// Whole rather than a `normalize_nfkd` the body would wrap, because the
+    /// lowercasing inside it is Final_Sigma — the same reason
+    /// [`FilterHost::str_lower`] exists — and because a whole method is what
+    /// leaves no uncalled sibling: with the body owning the regexes,
+    /// `unicode_normalize_nfkd` would have had `slugify` as its only caller,
+    /// which is the `repr` mistake one method along.
     fn slugify(&self, text: &str) -> String;
-    /// `unicodedata.normalize("NFKD", text)`, which `slugify` needs and which is
-    /// a large table rather than a rule.
-    fn unicode_normalize_nfkd(&self, text: &str) -> String;
     /// `django.utils.html.urlize` — a regex over `settings.URLIZE_ASSUME_HTTPS`,
     /// so the setting and the regex engine are both the host's.
     fn urlize(&self, text: &str, limit: Option<usize>, autoescape: bool) -> String;
@@ -261,8 +270,24 @@ pub trait FilterHost {
     fn date_format(&self, value: &Value, format: &str) -> Result<String, Error>;
     /// `django.utils.formats.time_format`, for the same reason.
     fn time_format(&self, value: &Value, format: &str) -> Result<String, Error>;
-    /// `django.utils.timesince.timesince` — the clock.
-    fn timesince(&self, then: &Value, now: &Value) -> String;
+    /// `django.utils.timesince.timesince`, **with Django's own signature**.
+    ///
+    /// `timeuntil` is not `timesince` with the arguments swapped: Django's
+    /// `timesince(d, now, reversed=False)` swaps `d` and `now` *after*
+    /// normalising the timezones (`timesince.py:60-70`), so
+    /// `now.astimezone(d.tzinfo)` expresses one operand in the other's zone and
+    /// the calendar fields `total_months` reads (`:83`) are zone-dependent. A
+    /// caller-side swap normalises the opposite way and reports different months
+    /// for two aware datetimes in different zones.
+    ///
+    /// `now` is an `Option` for the same reason: `timeuntil_filter` passes
+    /// `arg=None` straight through, and `now` is filled from `d.tzinfo` *before*
+    /// the swap, so a swap performed by the caller would have to pass `d = None`
+    /// and die at `:61` on `d.year`.
+    ///
+    /// `reversed` is therefore a parameter here rather than a property of the
+    /// call site, because it is only expressible on Python's side of the seam.
+    fn timesince(&self, d: &Value, now: Option<&Value>, reversed: bool) -> String;
     /// `django.utils.formats.number_format`, in the three shapes the two callers
     /// use. The struct is [`NumberFormatArgs`].
     fn number_format(&self, args: NumberFormatArgs<'_>) -> String;
@@ -285,7 +310,7 @@ fn refused(operation: &'static str) -> Error {
     Error::host(format!("no host answers `{operation}`"))
 }
 
-/// The panic the 16 non-`Result` operations give when nobody answers them.
+/// The panic the 15 non-`Result` operations give when nobody answers them.
 ///
 /// Those methods cannot return the refusal as a value, so the refusal is the
 /// panic's message — and it is the same text [`refused`] produces, so "the host
@@ -391,10 +416,6 @@ impl FilterHost for NoFilterHost {
         refused_panic("slugify")
     }
 
-    fn unicode_normalize_nfkd(&self, _text: &str) -> String {
-        refused_panic("unicode_normalize_nfkd")
-    }
-
     fn urlize(&self, _text: &str, _limit: Option<usize>, _autoescape: bool) -> String {
         refused_panic("urlize")
     }
@@ -446,7 +467,7 @@ impl FilterHost for NoFilterHost {
         Err(refused("time_format"))
     }
 
-    fn timesince(&self, _then: &Value, _now: &Value) -> String {
+    fn timesince(&self, _d: &Value, _now: Option<&Value>, _reversed: bool) -> String {
         refused_panic("timesince")
     }
 
@@ -478,13 +499,38 @@ impl FilterHost for NoFilterHost {
 /// [`TestFilterHost::calls`] can be reimplemented in Rust and still pass.
 ///
 /// The field order is the trait's order, so a reader can walk the two together.
-/// Non-`Result` operations (the 16 that return a bare `String`, `bool` or
+/// Non-`Result` operations (the 15 that return a bare `String`, `bool` or
 /// `Value`) panic when unset rather than defaulting, for the same reason: a
 /// sentinel could silently satisfy an assertion.
+///
+/// `#[cfg(test)]`, because the only thing that needs it is a test: this crate's
+/// `cargo test` compiles every `#[cfg(test)] mod tests` in `filters/<name>.rs`
+/// against the same crate, so it is visible everywhere an agent's filter tests
+/// live. Shipping it in the library would put 35 `Option` fields and two
+/// `RefCell`s in the real build, reachable from a non-test path with nothing to
+/// stop it. The one cost is that a *doc* test cannot demonstrate it — doc tests
+/// link against the crate compiled normally — so its demonstrations live in the
+/// `mod tests` below rather than in a fenced example.
+#[cfg(test)]
 #[derive(Default)]
 pub struct TestFilterHost {
-    calls: RefCell<Vec<&'static str>>,
-    raises: RefCell<Vec<(&'static str, PyErrorKind)>>,
+    // Crate-visible rather than private, and the reason is a Rust rule worth
+    // stating: functional-update syntax (`..TestFilterHost::default()`) requires
+    // *every* field to be visible at the construction site, so two private fields
+    // here would stop a filter module's test from scripting any of the 35 answers
+    // — the struct's whole purpose. `pub(crate)` is the narrowest visibility that
+    // restores it, and it costs nothing in this struct's case, since the struct is
+    // itself `#[cfg(test)]` and so unconstructible from outside the crate anyway.
+    //
+    // Reading a recorded call goes through [`TestFilterHost::calls`] and
+    // [`TestFilterHost::assert_called`]; scripting a failure, through
+    // [`TestFilterHost::raise_on`]. Those three are the API a filter test wants,
+    // and reaching past them to these `RefCell`s is possible here where it was
+    // not before — the trade this struct's first real users forced, and one whose
+    // worst case is a test that fabricates the evidence it then asserts on, which
+    // a reviewer sees in the diff.
+    pub(crate) calls: RefCell<Vec<&'static str>>,
+    pub(crate) raises: RefCell<Vec<(&'static str, PyErrorKind)>>,
 
     pub to_str: Option<String>,
     pub to_int: Option<IntValue>,
@@ -509,7 +555,6 @@ pub struct TestFilterHost {
     pub str_title: Option<String>,
     pub strip_tags: Option<String>,
     pub slugify: Option<String>,
-    pub unicode_normalize_nfkd: Option<String>,
     pub urlize: Option<String>,
     pub truncate: Option<String>,
     pub wrap: Option<String>,
@@ -528,6 +573,7 @@ pub struct TestFilterHost {
     pub now: Option<Value>,
 }
 
+#[cfg(test)]
 impl TestFilterHost {
     /// The operation names this host was asked for, in order.
     pub fn calls(&self) -> Vec<&'static str> {
@@ -595,6 +641,7 @@ impl TestFilterHost {
     }
 }
 
+#[cfg(test)]
 impl FilterHost for TestFilterHost {
     fn to_str(&self, _value: &Value) -> Result<String, Error> {
         self.record("to_str")?;
@@ -722,13 +769,6 @@ impl FilterHost for TestFilterHost {
             .unwrap_or_else(|| refused_panic("slugify"))
     }
 
-    fn unicode_normalize_nfkd(&self, _text: &str) -> String {
-        self.record_plain("unicode_normalize_nfkd");
-        self.unicode_normalize_nfkd
-            .clone()
-            .unwrap_or_else(|| refused_panic("unicode_normalize_nfkd"))
-    }
-
     fn urlize(&self, _text: &str, _limit: Option<usize>, _autoescape: bool) -> String {
         self.record_plain("urlize");
         self.urlize
@@ -803,7 +843,7 @@ impl FilterHost for TestFilterHost {
             .ok_or_else(|| refused("time_format"))
     }
 
-    fn timesince(&self, _then: &Value, _now: &Value) -> String {
+    fn timesince(&self, _d: &Value, _now: Option<&Value>, _reversed: bool) -> String {
         self.record_plain("timesince");
         self.timesince
             .clone()

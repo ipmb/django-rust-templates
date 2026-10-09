@@ -6,13 +6,19 @@
 use pyo3::create_exception;
 use pyo3::exceptions::{
     PyAttributeError, PyException, PyIndexError, PyKeyError, PyNotImplementedError, PyRuntimeError,
-    PyStopIteration, PyTypeError, PyValueError,
+    PyStopIteration, PyTypeError, PyValueError, PyZeroDivisionError,
 };
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyDict, PyList, PyTuple};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+
+// The filter seam: the real `FilterHost`, the value interner, and
+// `FilterExpression.resolve`'s loop. A module rather than a section of this file
+// because it is a self-contained subsystem with one entry point, and because
+// `lib.rs` is already the parser's, the resolver's and the renderer's.
+mod filters;
 
 // Aliased to keep the call site readable: `CoreLexer` names the crate's lexer,
 // as opposed to anything Python-side that might later be called a lexer.
@@ -46,6 +52,96 @@ fn builtin_tag_names() -> Vec<&'static str> {
 #[pyfunction]
 fn engine_version() -> &'static str {
     template_core::version()
+}
+
+/// Every built-in filter this engine implements, ascending — the Rust registry's
+/// names.
+///
+/// The cross-check lives where both languages exist, for `builtin_tag_names`'
+/// reason: Django's registry is only readable from Python, so
+/// `tests/test_filter_inventory.py` is the test that compares the two, and this
+/// is the half it cannot read any other way.
+#[pyfunction]
+fn filter_names() -> Vec<&'static str> {
+    template_core::filters::filter_names()
+}
+
+/// `(is_safe, needs_autoescape, expects_localtime)` for one built-in filter.
+///
+/// A tuple rather than three functions because the three flags are one row of
+/// §10.3's milestone table and are compared together; and because the absence
+/// Django distinguishes — `cut` and `escapejs` have **no** `is_safe` attribute at
+/// all — is already invisible here: this returns the `bool` that
+/// `getattr(f, "is_safe", False)` yields, which is what every reader of the
+/// attribute does. `tests/test_filter_inventory.py` asserts both halves, so the
+/// absence stays visible where it is real.
+///
+/// A name that is not a built-in filter is a `KeyError` rather than a default row:
+/// three `False`s would be a plausible-looking answer for a typo.
+#[pyfunction]
+fn filter_flags(name: &str) -> PyResult<(bool, bool, bool)> {
+    let entry = template_core::filters::filter(name)
+        .ok_or_else(|| PyKeyError::new_err(format!("`{name}` is not a built-in filter")))?;
+    Ok((
+        entry.flags.is_safe,
+        entry.flags.needs_autoescape,
+        entry.flags.expects_localtime,
+    ))
+}
+
+/// Run one built-in filter over one value: `FilterExpression.resolve`'s loop.
+///
+/// The **only** entry point the corpus and the shell use, and deliberately the
+/// only one: `filter_flags` reports flags and this applies them, so a test that
+/// called a filter's body directly would be testing a path no template reaches.
+/// `arg` is `None` for a filter written without an argument; `autoescape` and
+/// `use_tz` are the context's, and exist because seven filters branch on the
+/// first and two on the second (§D1).
+#[pyfunction]
+#[pyo3(signature = (name, value, arg = None, autoescape = true, use_tz = true))]
+fn filter(
+    py: Python<'_>,
+    name: &str,
+    value: &Bound<'_, PyAny>,
+    arg: Option<&Bound<'_, PyAny>>,
+    autoescape: bool,
+    use_tz: bool,
+) -> PyResult<Py<PyAny>> {
+    filters::run_filter(py, name, value, arg, autoescape, use_tz)
+}
+
+/// A filter failure (or a filter stub) as a Python exception.
+///
+/// Lives in `lib.rs` beside `parse_error` because it is the same job — carrying a
+/// core `Error` back across the FFI — and because the exception *classes* it names
+/// are this crate's.
+///
+/// `FilterHost`'s payload carries the class **and** the message separately, which
+/// is why a body's `except IndexError` sees an `IndexError` rather than a generic
+/// error. The exception *object* is reconstructed from the class name rather than
+/// being the one Python raised, because an exception crossing `template-core`'s
+/// error type cannot keep its identity — the boundary `ErrorKind::FilterHost`'s
+/// own doc records. For the six classes Django's filters catch the reconstruction
+/// is faithful; a class that is neither one of those nor in `builtins` keeps its
+/// name in the message rather than being lost.
+fn filter_py_error(error: &Error) -> PyErr {
+    let ErrorKind::FilterHost(inner) = &error.kind else {
+        // An `Unimplemented` is a filter this engine has not built. Anything else
+        // is a parser error, which a filter body cannot produce.
+        return match error.kind {
+            ErrorKind::Unimplemented(_) => UnimplementedTag::new_err(error.message()),
+            _ => ParseError::new_err(error.message()),
+        };
+    };
+    match inner.kind.name() {
+        "AttributeError" => PyAttributeError::new_err(inner.message.clone()),
+        "IndexError" => PyIndexError::new_err(inner.message.clone()),
+        "KeyError" => PyKeyError::new_err(inner.message.clone()),
+        "TypeError" => PyTypeError::new_err(inner.message.clone()),
+        "ValueError" => PyValueError::new_err(inner.message.clone()),
+        "ZeroDivisionError" => PyZeroDivisionError::new_err(inner.message.clone()),
+        other => PyException::new_err(format!("{other}: {}", inner.message)),
+    }
 }
 
 /// Every code point `pyunicode::is_space` accepts, ascending.
@@ -1328,6 +1424,9 @@ fn render(
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(builtin_tag_names, m)?)?;
     m.add_function(wrap_pyfunction!(engine_version, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_names, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_flags, m)?)?;
+    m.add_function(wrap_pyfunction!(filter, m)?)?;
     m.add_function(wrap_pyfunction!(whitespace_codepoints, m)?)?;
     m.add_function(wrap_pyfunction!(decimal_digit_codepoints, m)?)?;
     m.add_function(wrap_pyfunction!(python_upper, m)?)?;

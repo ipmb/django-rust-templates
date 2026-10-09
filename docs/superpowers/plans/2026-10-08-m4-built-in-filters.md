@@ -268,7 +268,7 @@ through `str_lower` as well.
 The three neighbouring counts for the *first* metric, each correct for its own
 question and each wrong for this one: **57** registered filters; **31** reference
 *any* `django.utils` name, which sweeps in `mark_safe` (a primitive Rust
-reimplements as `Value::Safe`); **26** reference a utility living in a module that
+reimplements as `Value::Safe`); **27** reference a utility living in a module that
 imports something stateful, which wrongly sweeps in `escape`, `join`, `escapeseq`,
 `force_escape`, `linenumbers` and `linebreaks` because `strip_tags` shares a file
 with them. Classifying at module granularity is the mistake; the delegation is a
@@ -328,6 +328,47 @@ A body that checked the incoming value would be right on every case anyone would
 think to write and wrong on the only case where the distinction exists. `__proxy__`
 is already on the wire from Task 6, so this is reachable, and Task 8's group
 carries the case.
+
+**Open, and blocking the fan-out: no body can check it as the trait stands.** The
+paragraph above is a requirement, not an implementation, and Task 3 measured the
+gap rather than closing it:
+
+```text
+proxy = lazy(lambda s: mark_safe(s), str)("<b>hi</b>")
+  lower:  Django -> (SafeString, '<b>hi</b>')   ours -> (str, '<b>hi</b>')   DIVERGES
+  upper:  Django -> (str, '<B>HI</B>')          ours -> (str, '<B>HI</B>')   agrees
+```
+
+`upper` agrees because `is_safe=False` disables both halves; `lower` diverges
+because `@stringfilter`'s half fires on the *coerced* value while the loop's half
+(`base.py:816`) tests the value the filter was handed, which for a lazy operand is
+not `SafeData`. The claim that "was the coerced value safe" is decidable at the
+call because `Value::Safe` is a variant holds for a `str` subclass and **fails
+here**: a body receives `to_str`'s Rust `String`, which carries no safety, and the
+incoming `Value` is an interned `Opaque`. So the requirement needs a seam
+operation, and every `@stringfilter` body needs it — which is why this lands
+before the fan-out rather than during it.
+
+Two shapes were considered:
+
+* **`FilterHost::coerced_is_safe(&Value) -> bool`, called by each of the 29
+  `@stringfilter` bodies.** Keeps `FilterFlags` as Django's three measured flags,
+  and needs no new registry field. But it puts one subtle rule in 29 files written
+  by several agents, which is the risk this very section warns about, multiplied.
+* **A `stringfilter: bool` on `FilterEntry`, with the FFI applying the wrapper
+  half once.** This is what Django does — `@stringfilter` *is* a shared wrapper —
+  and it makes the rule single-site, with the flag as data in the registry file no
+  fan-out agent edits, so `cut` needs no opt-out (its `is_safe` is absent, so
+  neither half can fire). The cost is a fourth field on the registry entry whose
+  business is not one of the three measured flags; it is kept off `FilterFlags`
+  for exactly that reason, so Task 3's flag round-trip still pins Django's three.
+
+The second is the one being taken. This is a correction to the "no fourth flag"
+sentence above, and the sentence's stated reason does not survive inspection: a
+`stringfilter: bool` is data, not a wrapper in a shared *file* that an agent
+cannot reach, and `cut`'s special case is `cut`'s own body behaviour
+(`mark_safe` only when `arg != ";"`, `defaultfilters.py:447-450`) rather than
+something the wrapper has to be talked out of.
 
 **D4 — M4 does not implement `conditional_escape` at all; it calls the host's.
 This is a correction, and it removes the milestone-boundary problem rather than
@@ -893,7 +934,6 @@ pub trait FilterHost {
     /// `django.utils.text.slugify` — reaches `unicodedata` NFKD. Rust owns the
     /// two regexes and their order; the normalisation is the host's.
     fn slugify(&self, text: &str) -> String;
-    fn unicode_normalize_nfkd(&self, text: &str) -> String;
     /// `django.utils.html.urlize` — regex over `settings.URLIZE_ASSUME_HTTPS`.
     fn urlize(&self, text: &str, limit: Option<usize>, autoescape: bool) -> String;
     /// `Truncator.chars` / `.words` (`text.py:193-261`), **whole**. Delegated
@@ -927,7 +967,15 @@ pub trait FilterHost {
     fn localtime(&self, value: Value, use_tz: bool) -> Result<Value, Error>;
     fn date_format(&self, value: &Value, format: &str) -> Result<String, Error>;
     fn time_format(&self, value: &Value, format: &str) -> Result<String, Error>;
-    fn timesince(&self, then: &Value, now: &Value) -> String;
+    /// `django.utils.timesince.timesince`, with **Django's own signature**.
+    /// `timeuntil` is not a caller-side argument swap: Django swaps `d` and
+    /// `now` *after* normalising the timezones (`timesince.py:60-70`), and the
+    /// calendar fields `total_months` reads (`:83`) are zone-dependent, so a
+    /// swap performed here would report different months for two aware
+    /// datetimes in different zones. `now` is an `Option` for the same reason:
+    /// `timeuntil_filter` passes `arg=None` through and `now` is filled from
+    /// `d.tzinfo` before the swap.
+    fn timesince(&self, d: &Value, now: Option<&Value>, reversed: bool) -> String;
     fn number_format(&self, args: NumberFormatArgs<'_>) -> String;
     fn gettext(&self, text: &str) -> String;
     fn ngettext(&self, singular: &str, plural: &str, n: u64) -> String;
@@ -1304,6 +1352,8 @@ git commit -m "filters: the value model, the host seam and the registry in full"
 **Files:**
 - Modify: `crates/template-py/src/lib.rs` (`filter_names`, `filter_flags`, `filter`)
 - Create: `crates/template-py/src/filters.rs` (the `FilterHost` implementation and the value interner)
+- Modify: `crates/template-core/src/filters/upper.rs`, `lower.rs` (stub → body; see Step 4b)
+- Modify: `crates/template-core/src/filters/mod.rs` (shrink `STILL_STUBBED` to the literal 55)
 - Create: `scripts/filter_probe.py`
 - Create: `tests/filter_cases.py`
 - Create: `tests/test_filter_parity.py`
@@ -1475,6 +1525,48 @@ test used:
 At Task 3 the corpus holds `upper` and `lower` only; §D6 says the rest arrive with
 their groups.
 
+**The stub set is measured, not restated.** `every_implemented_filter_has_cases`
+compares the corpus's filter names against the filters whose body is no longer a
+stub, where "is a stub" is *observed* — `_native.filter(name, None)` raising
+`UnimplementedTag` naming that filter, the same rule the Rust guard's
+`stub_error` applies from the other side. `every_stub_is_named` then pins the
+**count** (55 at Task 3, decreasing by each group's size in the commit that lands
+it) and prints the names in its failure message.
+
+There is deliberately **no Python list of 55 names**, which is a deviation from
+this plan's earlier wording. Which filters are stubs is a Rust fact; its
+authoritative statement is `STILL_STUBBED` in `filters/mod.rs`, where
+`every_registry_entry_is_a_stub_at_m4` checks it against the bodies themselves in
+both directions. A Python literal would be a second copy of that fact, and its
+only possible failure — drift between the copies — is caught by neither side's
+mechanism so much as by whichever the author happened to edit: it would cost a
+debugging session at commit time and catch nothing a body-level guard does not.
+
+- [ ] **Step 4b: Land `upper` and `lower`, and shrink the stub list**
+
+These two bodies are Step 4's dependency, not Task 4's: the corpus compares them,
+and Step 5's gate has to be green before the commit, so a Task-3 commit whose
+corpus holds two filters whose bodies are still stubs cannot pass its own
+`every_implemented_filter_has_cases`. `upper` and `lower` are also the pair that
+proves the seam in both directions — `upper` is entirely Rust (`pyunicode::case`,
+`is_safe=False`), `lower` is entirely the host (`str_lower`, `is_safe=True`) — so
+landing them here is what makes Task 3's FFI a *demonstrated* surface rather than
+a declared one.
+
+`upper`'s body is `call.host.to_str` then `pyunicode::case::upper_str`;
+`lower`'s is `call.host.to_str` then `call.host.str_lower`, with no Rust
+fallback, because there is no per-code-point `lower` to call (Task 1).
+
+**`lower` is `is_safe=True`, not the `False` Task 4's bullet says** — measured:
+`@register.filter(is_safe=True)` at `defaultfilters.py:247`, and the flag table
+below already lists it among the 36. `upper`'s decorator passes
+`is_safe=False` explicitly (`:358`), which is why the two differ.
+
+In `mod.rs`, `STILL_STUBBED` stops being an alias of `MEASURED_NAMES` and becomes
+the literal remainder, `[&str; 55]`. The guard is observed failing in the
+intended direction first: put `"upper"` back in the literal while its body is
+real, and it reports `declared but already implemented: ["upper"]`.
+
 - [ ] **Step 5: Run the gate and commit**
 
 ```bash
@@ -1550,29 +1642,22 @@ concretely.
 
 ---
 
-### Task 4: case and simple text — 8 filters
+### Task 4: case and simple text — 6 filters
 
-`upper`, `lower`, `capfirst`, `title`, `cut`, `addslashes`, `make_list`, `wordcount`
+`capfirst`, `title`, `cut`, `addslashes`, `make_list`, `wordcount`
 
-The group that Task 1 unblocks, and the one that proves the seam end-to-end.
+The group Task 1 unblocks. **`upper` and `lower` shipped in Task 3** as the
+corpus's seed (Step 4b there), which is why this group is six and not eight: what
+remains is the case work that needs no new seam — except `title`, which is
+entirely the host's.
 
-- `upper` (`:358-362`) — `@stringfilter`, `is_safe=False`, body is
-  `pyunicode::case::upper_str`. **The parity test is Task 1's, over all code
-  points; this task's tests are the three interesting shapes** — `"ß"` (Rust and
-  Python both give `SS`), `U+A7D3` (Python gives itself, Rust gives `U+A7D2`),
-  and a non-`str` input (`upper(5)` is `"5"`, because `@stringfilter` coerces).
-- `lower` (`:247-251`) — `@stringfilter`, `is_safe=False`, body is **the host's
-  `str_lower`** — not `pyunicode::case`, because there is no per-code-point
-  `lower` to call (Task 1). `str.lower()` is
-  context-sensitive: `"ΟΣ"|lower` is `"ος"` (Final_Sigma), and no per-code-point
-  table can express that. **Put the three context shapes in the corpus** —
-  `"ΟΣ"` → `"ος"`, `"ΟΣΑ"` → `"οσα"`, `"Σ1"` → `"σ1"` — because they differ only
-  by context and a per-character implementation gets two of the three right by
-  accident.
 - `capfirst` (`:71-76`) — `value and value[0].upper() + value[1:]`. The empty
   string returns itself, not `""`-built-from-nothing; `value[0]` is a **code
   point**, so `capfirst("ßx")` is `"SSx"` and the string grows by one character.
-  Measured, not derived.
+  Measured, not derived. It is the second and last caller of
+  `pyunicode::case::upper_str` (the first being Task 3's `upper`), and it shares
+  that table's suppression of the 28 code points — so `capfirst("ꟓ")` is
+  itself, not `"꟒"`.
 - `title` (`:297-303`) — `@stringfilter`, `is_safe=True`, body is **the host's
   `str_title`**, followed by two Rust regexes:
   `re.sub("([a-z])'([A-Z])", lambda m: m[0].lower(), …)` then
@@ -1584,7 +1669,14 @@ The group that Task 1 unblocks, and the one that proves the seam end-to-end.
   lowercasing each run's remainder. A from-first-principles version reproduced
   every one of the 1,112,064 single code points and still failed **444 of
   400,000** random strings, every failure a final sigma. So it is a host call,
-  and Task 1's `is_cased` helper is **not** written.
+  and Task 1's `is_cased` helper is **not** written. The two regexes are the one
+  part of `title` that *is* Rust's, and for a measured reason worth recording so
+  nobody "fixes" it later: enumerating every code point in both patterns shows
+  the only cased characters a match can hold are ASCII `a-z` and `A-Z` (`\d`
+  matches 760 code points and **none** of them is cased), so `.lower()` on a
+  match has no Final_Sigma question to answer — unlike `str.title()`'s own
+  run-remainder lowercasing, inside the host call, which is where the 444
+  failures came from.
 - `cut` (`:441-450`) — `@stringfilter`, `is_safe` **absent**. Body carries three
   measured subtleties: `arg` is **not** coerced by `str()` (only `value` is, by
   the wrapper), `str.replace` of an empty `arg` raises `ValueError` — measured,
@@ -1816,14 +1908,15 @@ its own task rather than folded into Task 8.
   removed in Django 5.0, so the body is `_slugify(value)` from
   `django.utils.text`, which is `unicodedata.normalize("NFKD", …)` then a
   combining-mark strip, then `re.sub(r"[^\w\s-]", "")`, `.strip().lower()` and
-  `re.sub(r"[-\s]+", "-", …)`. **`normalize` is the host's**
-  (`unicode_normalize_nfkd`) because NFKD is a large Unicode table and §D2's rule
-  covers it; **the two regexes and the ordering are Rust's**, and the `\w` class
-  is M1's Python-faithful one, which is why `slugify("á")` and `slugify("²")`
-  differ. **The `.lower()` is the host's `str_lower`** — same reason as the
-  `lower` filter (Final_Sigma), and it is the second of the two consumers §D7.1
-  and Task 1's "no `lower`" note point at. The corpus needs a slug that reaches
-  it: `slugify("ΟΣ")` → `"ος"`, not `"οσ"`.
+  `re.sub(r"[-\s]+", "-", …)`. **The whole of `_slugify` is the host's**
+  (`slugify`), because NFKD is a large Unicode table and §D2's rule covers it, and
+  because the `.lower()` inside it is Final_Sigma — so the host call is one
+  method rather than a normalise plus a `str_lower`. There is deliberately **no
+  `unicode_normalize_nfkd` method**: `slugify` is its only would-be caller, and a
+  second uncalled method is the `repr` mistake one along. **The two regexes and
+  the ordering are Rust's**, and the `\w` class is M1's Python-faithful one,
+  which is why `slugify("á")` and `slugify("²")` differ. The corpus needs a slug
+  that reaches the host's lowercasing: `slugify("ΟΣ")` → `"ος"`, not `"οσ"`.
 
 ### Task 10: dates and elapsed time — 4 filters
 
