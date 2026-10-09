@@ -662,6 +662,27 @@ impl FilterHost for PyFilterHost<'_> {
         self.is_safe_value(value)
     }
 
+    fn is_tuple(&self, value: &Value) -> bool {
+        // Only an `Opaque` can be one: the host's `classify` never flattens a
+        // tuple into a `Value::List`, and a `str`, `int`, `float`, `bool` or
+        // `None` is not a tuple under any reading. So the fast path is a
+        // refusal rather than a question, and only the `Opaque` arm pays for an
+        // `isinstance` — which is the arm that *needs* it, since `__class__` of
+        // an arbitrary object is Python's to walk (§D2).
+        match value {
+            Value::Opaque(_) => {
+                let Ok(object) = self.object(value) else {
+                    return false;
+                };
+                object
+                    .bind(self.py)
+                    .is_instance(&self.py.get_type::<PyTuple>())
+                    .unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
     fn mark_safe(&self, value: Value) -> Value {
         // Infallible because the trait says so; see `mark_safe_checked` for the
         // loop's error-reporting path. The fallback is reachable only for an

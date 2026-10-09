@@ -11,7 +11,7 @@
 //! **The trait is settled before the fan-out and this file is not edited
 //! afterwards** (§10.4): the seven group tasks each own one filter module and
 //! none of them owns this one, so an agent that finds an operation missing stops
-//! and reports rather than adding it. That is what makes the 40 methods below a
+//! and reports rather than adding it. That is what makes the 41 methods below a
 //! contract rather than a suggestion.
 //!
 //! Three implementations exist, and they are three names rather than two
@@ -296,7 +296,32 @@ pub trait FilterHost {
     /// `""`. Coercing at the seam would silently pick one branch for both.
     fn sort_by_property(&self, value: &Value, prop: &Value, reverse: bool) -> Result<Value, Error>;
 
-    // --- the one type question Rust cannot answer ---------------------------
+    // --- the type questions Rust cannot answer ------------------------------
+    /// `stringformat`'s `isinstance(value, tuple)` (`:289`) — the test that
+    /// decides whether the operand is stringified before `%` sees it.
+    ///
+    /// The branch is load-bearing rather than defensive, and measured on the
+    /// pinned tree: `stringformat((1, 2, 3), "s")` is `"(1, 2, 3)"` *through this
+    /// test*, where `"%s" % (1, 2, 3)` alone raises `TypeError: not all arguments
+    /// converted during string formatting` — which the filter's own
+    /// `except (ValueError, TypeError)` catches, so its answer without the test
+    /// is `""`. A **list** is the opposite case and needs no test:
+    /// `stringformat([1, None], "s")` is `"[1, None]"`, because CPython unpacks a
+    /// **tuple** operand and treats every other sequence as a single value. That
+    /// asymmetry is why the source tests for `tuple` and not for `Sequence`, and
+    /// why a Rust `matches!(value, Value::List(_))` would be exactly backwards.
+    ///
+    /// Rust cannot ask: a tuple crosses the FFI as `Value::Opaque` — the host's
+    /// `classify` interns it as one deliberately, *because* flattening it into
+    /// `Value::List` would leave [`FilterHost::as_nested_sequence`] and
+    /// [`FilterHost::get_index`] answering with a list's semantics — and
+    /// `isinstance` against an `Opaque` is a `__class__` walk the host owns (§D2).
+    ///
+    /// A bare predicate, unlike [`FilterHost::as_nested_sequence`] below, and
+    /// §D7.1's "one method, not a predicate plus an iteration" is no objection:
+    /// that argument is against *splitting* a semantic unit, and this question
+    /// has nothing to be fused with.
+    fn is_tuple(&self, value: &Value) -> bool;
     /// `unordered_list`'s nested-sequence test (`:695-706`). `Some(items)` when
     /// **both** halves hold — `isinstance(next_item, (list, tuple,
     /// types.GeneratorType))` *and* `iter(next_item)` does not raise — and `None`
@@ -491,7 +516,7 @@ fn refused(operation: &'static str) -> Error {
     Error::host(format!("no host answers `{operation}`"))
 }
 
-/// The panic the 16 non-`Result` operations give when nobody answers them.
+/// The panic the 17 non-`Result` operations give when nobody answers them.
 ///
 /// Those methods cannot return the refusal as a value, so the refusal is the
 /// panic's message — and it is the same text [`refused`] produces, so "the host
@@ -562,6 +587,10 @@ impl FilterHost for NoFilterHost {
 
     fn is_safe(&self, _value: &Value) -> bool {
         refused_panic("is_safe")
+    }
+
+    fn is_tuple(&self, _value: &Value) -> bool {
+        refused_panic("is_tuple")
     }
 
     fn mark_safe(&self, _value: Value) -> Value {
@@ -705,14 +734,14 @@ impl FilterHost for NoFilterHost {
 /// [`TestFilterHost::calls`] can be reimplemented in Rust and still pass.
 ///
 /// The field order is the trait's order, so a reader can walk the two together.
-/// Non-`Result` operations (the 16 that return a bare `String`, `bool` or
+/// Non-`Result` operations (the 17 that return a bare `String`, `bool` or
 /// `Value`) panic when unset rather than defaulting, for the same reason: a
 /// sentinel could silently satisfy an assertion.
 ///
 /// `#[cfg(test)]`, because the only thing that needs it is a test: this crate's
 /// `cargo test` compiles every `#[cfg(test)] mod tests` in `filters/<name>.rs`
 /// against the same crate, so it is visible everywhere an agent's filter tests
-/// live. Shipping it in the library would put 40 `Option` fields and two
+/// live. Shipping it in the library would put 41 `Option` fields and two
 /// `RefCell`s in the real build, reachable from a non-test path with nothing to
 /// stop it. The one cost is that a *doc* test cannot demonstrate it — doc tests
 /// link against the crate compiled normally — so its demonstrations live in the
@@ -723,7 +752,7 @@ pub struct TestFilterHost {
     // Crate-visible rather than private, and the reason is a Rust rule worth
     // stating: functional-update syntax (`..TestFilterHost::default()`) requires
     // *every* field to be visible at the construction site, so two private fields
-    // here would stop a filter module's test from scripting any of the 40 answers
+    // here would stop a filter module's test from scripting any of the 41 answers
     // — the struct's whole purpose. `pub(crate)` is the narrowest visibility that
     // restores it, and it costs nothing in this struct's case, since the struct is
     // itself `#[cfg(test)]` and so unconstructible from outside the crate anyway.
@@ -750,6 +779,7 @@ pub struct TestFilterHost {
     pub percent_format: Option<Value>,
     pub percent_mapping: Option<Value>,
     pub is_safe: Option<bool>,
+    pub is_tuple: Option<bool>,
     pub mark_safe: Option<Value>,
     pub conditional_escape: Option<Value>,
     pub sort_by_property: Option<Value>,
@@ -924,6 +954,11 @@ impl FilterHost for TestFilterHost {
     fn is_safe(&self, _value: &Value) -> bool {
         self.record_plain("is_safe");
         self.is_safe.unwrap_or_else(|| refused_panic("is_safe"))
+    }
+
+    fn is_tuple(&self, _value: &Value) -> bool {
+        self.record_plain("is_tuple");
+        self.is_tuple.unwrap_or_else(|| refused_panic("is_tuple"))
     }
 
     fn mark_safe(&self, _value: Value) -> Value {

@@ -643,35 +643,33 @@ mod tests {
         "yesno",
     ];
 
-    /// The filters whose bodies are still stubs: the 32 of the 57 that M4 has
+    /// The filters whose bodies are still stubs: the 28 of the 57 that M4 has
     /// not landed yet.
     ///
     /// A literal rather than an alias of [`MEASURED_NAMES`] now that groups have
     /// landed, because the two are no longer the same set and an alias would have
-    /// to be trimmed in place to say so. The 32 are the 57 minus `lower` and
+    /// to be trimmed in place to say so. The 28 are the 57 minus `lower` and
     /// `upper` (Task 3's corpus seed), minus Task 4's six — `capfirst`,
     /// `title`, `cut`, `addslashes`, `make_list`, `wordcount` — minus Task 5's
     /// eight: `center`, `ljust`, `rjust`, `truncatechars`, `truncatechars_html`,
     /// `truncatewords`, `truncatewords_html`, `wordwrap` — and minus Task 6's
     /// nine: `first`, `last`, `length`, `slice`, `join`, `random`, `dictsort`,
-    /// `dictsortreversed`, `unordered_list`.
+    /// `dictsortreversed`, `unordered_list` — and minus Task 7's first wave of
+    /// four, `add`, `divisibleby`, `get_digit` and `stringformat`.
     ///
     /// **The central commit that lands a group moves that group's names out of
     /// this list**, in the same commit — and the assertion below is what makes
     /// forgetting fail rather than pass.
-    const STILL_STUBBED: [&str; 32] = [
-        "add",
+    const STILL_STUBBED: [&str; 28] = [
         "date",
         "default",
         "default_if_none",
-        "divisibleby",
         "escape",
         "escapejs",
         "escapeseq",
         "filesizeformat",
         "floatformat",
         "force_escape",
-        "get_digit",
         "iriencode",
         "json_script",
         "linebreaks",
@@ -683,7 +681,6 @@ mod tests {
         "safe",
         "safeseq",
         "slugify",
-        "stringformat",
         "striptags",
         "time",
         "timesince",
@@ -829,9 +826,36 @@ mod tests {
         };
         let stubbed: Vec<&str> = REGISTRY
             .iter()
-            .filter(|entry| match (entry.run)(Value::None, None, &call) {
-                Err(error) => stub_error(entry.name, &error),
-                Ok(_) => false,
+            .filter(|entry| {
+                // A body whose **first** host interaction is one of the trait's
+                // non-`Result` methods meets `NoFilterHost`'s `refused_panic`
+                // before it can return anything — `is_tuple` for `stringformat`
+                // (measured; `if isinstance(value, tuple)` is the source's first
+                // line), `mark_safe` for `safe`/`safeseq` when Tasks 9-10 land.
+                // That is the designed refusal working and it is **not a stub**:
+                // a stub returns `unimplemented_filter` without touching the host
+                // at all. A panic is caught rather than propagated because this
+                // test's question is which names still raise `UnimplementedTag`,
+                // and a panic has already answered it — the alternative is that
+                // every non-`Result`-first body makes this guard unusable, which
+                // is a hole in the detector, not a property of the filters.
+                //
+                // **This makes the test depend on unwinding.** `catch_unwind`
+                // cannot catch anything under `panic = "abort"`, which is the
+                // setting that travels with the `lto`/`codegen-units` already in
+                // `[profile.release]` — so if it is ever added, `cargo test` on
+                // the default (unwind) profile stays green and `cargo test
+                // --release` dies by signal instead of reporting a failure. The
+                // panic-free shape, if that day comes, is a host that *records*
+                // being touched and returns dummies, so the detector asks its
+                // question rather than inferring it from a panic.
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    (entry.run)(Value::None, None, &call)
+                }));
+                match outcome {
+                    Ok(Err(error)) => stub_error(entry.name, &error),
+                    Ok(Ok(_)) | Err(_) => false,
+                }
             })
             .map(|entry| entry.name)
             .collect();

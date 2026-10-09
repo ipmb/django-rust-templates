@@ -876,7 +876,20 @@ pub struct NumberFormatArgs<'a> {
     /// collapse them — but the caller must not, since that would hide which
     /// branch `floatformat` took.
     pub use_l10n: Option<bool>,
-    /// Django's `force_grouping`, `False` on every built-in call path.
+    /// Django's `force_grouping`.
+    ///
+    /// **An earlier revision of this doc said `False` on every built-in call
+    /// path, and that is wrong.** `floatformat`'s `g`/`gu`/`ug` suffixes set it
+    /// (`:142-148`), and the difference is observable. Measured, each pair
+    /// holding precision fixed so that only grouping moves: `floatformat(10000,
+    /// "g")` is `'10,000'` where `floatformat(10000)` is `'10000'`, and
+    /// `floatformat(6666.6666, "2g")` is `'6,666.67'` where
+    /// `floatformat(6666.6666, "2")` is `'6666.67'`. All four are `SafeString`,
+    /// so only the text can see the difference. (An earlier revision paired
+    /// `"2g"` against the *default* argument `'6666.7'`, which is `p = -1` —
+    /// that pair moved precision and grouping together and so demonstrated
+    /// neither. The reviewer caught it; `"2"` is the isolating partner.)
+    /// `filesizeformat`'s one call (`:912`) is the `false` case.
     pub force_grouping: bool,
 }
 
@@ -2432,9 +2445,11 @@ pub struct ParsedDecimal {
 ///
 /// One method rather than three, because every step reads or is bounded by the
 /// thread-local context; a Rust caller computing its own `prec` is the bug this
-/// seam exists to prevent. `places` is `abs(p)`; `integral` is `m`'s truthiness,
-/// passed rather than recomputed so the source's single `int(d) - d` stays
-/// single.
+/// seam exists to prevent. `places` is `abs(p)`; `integral` is **`not m`** —
+/// whether the *unrounded* value is a whole number — passed rather than
+/// recomputed so the source's single `int(d) - d` stays single. (`:198` is
+/// `-tupl[2] if m else tupl[2]`, so `m` truthy is `integral == false`; this is
+/// the one place the seam's polarity is inverted from the source's own name.)
 fn decimal_quantize(
     &self,
     decimal: &Value,
@@ -2449,8 +2464,8 @@ pub struct DecimalTuple {
     pub digits: Vec<u8>,
     pub exponent: i64,
     /// `bool(rounded_d)` — the second half of `:210`'s `if sign and rounded_d`.
-    /// A separate field from `integral`, which is the *unrounded* value's
-    /// truthiness; see **4**.
+    /// A separate field from `integral`, which asks whether the *unrounded*
+    /// value is a whole number (`not m`); see **4**.
     pub truthy: bool,
 }
 
@@ -2571,6 +2586,34 @@ the plan got wrong and the rest of which it got only partly:
   `(None, "d") -> ""`, `(42, "z") -> ""`, and `([1], "s") -> "[1]"` — so the
   refusal is the `%` operator's, and `str(arg)` alone is Rust's.
 
+* **Two filters, the same `is_safe=True`, and bodies that differ on safety.**
+  `floatformat` **`mark_safe`s in the body** (`:185`, `:213`), so its two normal
+  returns are `SafeString` while its three `return input_val` arms are plain
+  `str` — measured `floatformat(34.0) -> '34'` safe, `floatformat('NaN') ->
+  'NaN'` and `floatformat(1.5, 'abc') -> '1.5'` unsafed. `filesizeformat` does
+  **not**: its `avoid_wrapping` is a plain `str.replace`
+  (`django/utils/html.py:502-507`) and its input is an `int`, which is not
+  `SafeData`, so every one of its rows is an unsafed `str` — measured
+  `filesizeformat(1024) -> '1.0\xa0KB'`, unsafed. A body mirrored from the other
+  gets the safety wrong in both directions, and §D5's safety half is the only
+  thing that can see it.
+* **`yesno` and `pluralize` can raise from the `arg`'s *type*, and `yesno`'s
+  class is `AttributeError`.** Measured `yesno(True, 5)` raises
+  `AttributeError: 'int' object has no attribute 'split'` — the guard is absent,
+  so a Rust body must **mint** the class (`cut.rs`'s `PyErrorKind::TypeError`
+  helper is the pattern) rather than coercing with `to_str`, which would answer
+  `'yes'` where Django raises. Same shape in `pluralize`: measured
+  `pluralize(0, 5)` raises `TypeError: argument of type 'int' is not a container
+  or iterable` out of `"," not in arg`. Both are body tests, not corpus rows —
+  see `tests/filter_cases.py`'s "a row cannot express an exception".
+* **The deferred `floatformat(1.5, "-999999")` question is closed: there is no
+  anomaly.** Measured, the quoted-constant row and the bare-int row are
+  **identical** — 1,000,001 characters each, same digest — because both reach
+  `p = int(arg)` and what fixes the rounding position is the `2*(Emax + prec)`
+  clamp, not the argument's shape. The row is kept out of the corpus for
+  **size**, not for disagreement, and the same path is covered by the small
+  negative rows (`-3`).
+
 **4. `DecimalTuple` needs the rounded value's truthiness, and `integral` does not
 cover it — a review finding.** `:210` is `if sign and rounded_d`, a truthiness
 test on the value **after** the quantization, three lines after `m` asked the
@@ -2586,7 +2629,10 @@ is decided, and the corpus can see it because it only takes a plain template:
 
 A `DecimalTuple` of `(sign, digits, exponent)` would emit `-0.00` for the first
 two, so the tuple carries `truthy` too. It is not derivable from the parse side:
-`ParsedDecimal::integral` is `m`'s truthiness, and `m` is truthy for `-0.0001`.
+`ParsedDecimal::integral` is **`not m`**, so it is `false` for `-0.0001` — the
+unrounded value is not whole — while the rounded `Decimal('-0.00')` is falsy.
+Reading `integral` as `m`'s own truthiness is the same mistake in the other
+direction, and a body that made it would emit `-0.00`.
 
 The same review round resolved the `scaleb` disagreement that had been left open,
 and the resolution is worth recording because it is the seventh instance of the
@@ -2600,6 +2646,40 @@ raises `InvalidOperation` for `|n| > 2*(Emax + prec)` in either direction, but
 that describes the filter and the `Overflow` reading described a direction it
 never takes. It was **not** an interpreter difference; the 3.9 hypothesis would
 have been a wrong fix for a real disagreement.
+
+**5. The wave-1 dispatch found one more type question, and `is_tuple` is the
+seam's first addition after Phase A.** Measuring `stringformat`'s tuple branch
+before dispatching showed `FilterHost` could not ask `isinstance(value, tuple)`
+at all (`:289`), and the branch is load-bearing rather than defensive:
+
+```text
+  stringformat((1, 2, 3), "s")  ->  '(1, 2, 3)'    through the tuple test
+  "%s" % (1, 2, 3)              ->  TypeError: not all arguments converted
+  stringformat([1, None], "s")  ->  '[1, None]'    and needs no test at all
+```
+
+CPython unpacks a **tuple** operand and treats every other sequence as a single
+value, so the source tests for `tuple` and not `Sequence` — and a Rust
+`matches!(value, Value::List(_))` would be exactly backwards. A tuple crosses the
+FFI as `Value::Opaque` (`classify` interns it as one *deliberately*, so that
+`as_nested_sequence` and `get_index` keep list semantics off it), so this is a
+`__class__` question and §D2 puts it on the host.
+
+**§10.4's admissibility rule, stated by the reviewer: an addition is admissible
+when it comes with the measurement that forced it, and inadmissible when it comes
+with a reason.** `is_tuple` came with the rows above, so it is traceable to the
+same evidence a test would carry. The alternative was dispatching an agent into a
+guaranteed stop-and-report — the gap found by the party with the least context,
+under pressure to ship a module, with a §D7 workaround as the path of least
+resistance.
+
+It is a **bare** predicate and is not fused with anything, unlike
+`as_nested_sequence` below it: that fusion is justified because its `isinstance`
+and its `iter()`/`TypeError` guard are *inseparable* — splitting them would make
+Rust reimplement Python's exception classification — whereas `is_tuple` has no
+exception interplay and `to_str` already stands beside it. Fusing would buy one
+FFI crossing and cost a method whose name describes a conditional rather than an
+operation. The trait is **41 methods, 17 of them non-`Result`**.
 
 **§11 for this group.** The central mutation is on the seam itself and it is the
 one §11's "moves 0 rows" rule exists for:

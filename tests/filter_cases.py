@@ -1404,4 +1404,347 @@ CASES: list[dict] = [
         "filter": "unordered_list",
         "value": ["<a>", ["<b>"]],
     },
+    # --- Task 7, wave 1: add, divisibleby, get_digit, stringformat ---------
+    #
+    # `add`'s three arms, and the safety asymmetry that is the reason two of
+    # these rows exist. `is_safe=False` means the loop never marks the answer,
+    # but the *value* can still carry a mark: `SafeString.__add__` returns a
+    # `SafeString`, while `str.__add__` on a plain left operand returns a plain
+    # `str` even when the argument is a `SafeString`. The pair below is the two
+    # directions of that, and a body that read the flag alone would get both
+    # wrong the same way.
+    {
+        "name": "add/ints",
+        "filter": "add",
+        "value": 1,
+        "arg": 2,
+    },
+    {
+        "name": "add/numeric-strings",
+        "filter": "add",
+        "value": "1",
+        "arg": "2",
+    },
+    {
+        # `int(1.5) + int(1)` is `2`, not `2.5`: the first arm truncates.
+        "name": "add/floats-truncate",
+        "filter": "add",
+        "value": 1.5,
+        "arg": 1,
+    },
+    {
+        "name": "add/bool-is-an-int",
+        "filter": "add",
+        "value": True,
+        "arg": 1,
+    },
+    {
+        # An `IntValue::Big` on both sides — canonical decimal text, so a body
+        # that ran `i64` arithmetic would overflow here.
+        "name": "add/big-ints",
+        "filter": "add",
+        "value": 2**70,
+        "arg": 2,
+    },
+    {
+        # Arm 2, the one no `Value` variant can express in Rust: `str.__add__`.
+        "name": "add/strings-concatenate",
+        "filter": "add",
+        "value": "a",
+        "arg": "b",
+    },
+    {
+        # Arm 3's bare `except Exception` — reached because `int("2.5")` is a
+        # `ValueError` and `1 + "2.5"` is a `TypeError`.
+        "name": "add/unparseable-string-is-empty",
+        "filter": "add",
+        "value": 1,
+        "arg": "2.5",
+    },
+    {
+        "name": "add/str-plus-int-is-empty",
+        "filter": "add",
+        "value": "a",
+        "arg": 1,
+    },
+    {
+        "name": "add/list-plus-int-is-empty",
+        "filter": "add",
+        "value": [1],
+        "arg": 2,
+    },
+    {
+        "name": "add/none-is-empty",
+        "filter": "add",
+        "value": None,
+        "arg": 1,
+    },
+    {
+        # `mark_safe("a") + "b"` is a `SafeString`, so the answer is marked
+        # although `is_safe=False`. The **mark is the value's**, not the flag's.
+        "name": "add/safe-left-operand-keeps-the-mark",
+        "filter": "add",
+        "value": mark_safe("a"),
+        "arg": "b",
+    },
+    {
+        # The mirror: a plain `str` on the left wins, so `str.__add__` returns a
+        # plain `str` and the argument's mark is dropped.
+        "name": "add/plain-left-operand-drops-the-marks",
+        "filter": "add",
+        "value": "a",
+        "arg": mark_safe("b"),
+    },
+
+    # `divisibleby` has **no `try`**, so its failures escape and cannot be rows
+    # above; what is left to pin is that every surviving arm answers a Python
+    # `bool`. Measured rows only.
+    {
+        "name": "divisibleby/divisible",
+        "filter": "divisibleby",
+        "value": 4,
+        "arg": 2,
+    },
+    {
+        "name": "divisibleby/not-divisible",
+        "filter": "divisibleby",
+        "value": 5,
+        "arg": 2,
+    },
+    {
+        "name": "divisibleby/zero-is-divisible",
+        "filter": "divisibleby",
+        "value": 0,
+        "arg": 2,
+    },
+    {
+        # `int(4.9)` is `4`, so this is the truncating conversion, not a modulo.
+        "name": "divisibleby/float-truncates",
+        "filter": "divisibleby",
+        "value": 4.9,
+        "arg": 2,
+    },
+    {
+        "name": "divisibleby/numeric-string",
+        "filter": "divisibleby",
+        "value": "4",
+        "arg": 2,
+    },
+    {
+        "name": "divisibleby/big-int",
+        "filter": "divisibleby",
+        "value": 2**70,
+        "arg": 2,
+    },
+    {
+        "name": "divisibleby/negative",
+        "filter": "divisibleby",
+        "value": -4,
+        "arg": 2,
+    },
+
+    # `get_digit`'s two early returns and its `IndexError` arm. The `mark_safe`
+    # rows are the ones that show the early return hands back *the input as it
+    # was*, marking included.
+    {
+        "name": "get_digit/ones",
+        "filter": "get_digit",
+        "value": 123,
+        "arg": 1,
+    },
+    {
+        "name": "get_digit/hundreds",
+        "filter": "get_digit",
+        "value": 123,
+        "arg": 3,
+    },
+    {
+        # Past the end: `str(123)[-4]` is an `IndexError`, answered `0`.
+        "name": "get_digit/past-the-end-is-zero",
+        "filter": "get_digit",
+        "value": 123,
+        "arg": 4,
+    },
+    {
+        # `arg < 1` returns the value unchanged — an `int` 123, not a string.
+        "name": "get_digit/zero-arg-returns-the-value",
+        "filter": "get_digit",
+        "value": 123,
+        "arg": 0,
+    },
+    {
+        "name": "get_digit/negative-arg-returns-the-value",
+        "filter": "get_digit",
+        "value": 123,
+        "arg": -1,
+    },
+    {
+        # The sign is a character in `str(-123)`, so digit 1 is `3` and digit 3
+        # is `1`; the `-` is only reachable at `arg == 4`.
+        "name": "get_digit/negative-value-indexes-digits",
+        "filter": "get_digit",
+        "value": -123,
+        "arg": 1,
+    },
+    {
+        # `int("abc")` is the caught `ValueError`, so the value comes back as it
+        # was — a `SafeString` here, which is the marking half of the early
+        # return.
+        "name": "get_digit/non-numeric-value-returns-it-marked",
+        "filter": "get_digit",
+        "value": mark_safe("abc"),
+        "arg": 1,
+    },
+    {
+        "name": "get_digit/string-digits",
+        "filter": "get_digit",
+        "value": "0123",
+        "arg": 1,
+    },
+    {
+        "name": "get_digit/float-arg-truncates",
+        "filter": "get_digit",
+        "value": 123,
+        "arg": 1.9,
+    },
+    {
+        "name": "get_digit/bool-value",
+        "filter": "get_digit",
+        "value": True,
+        "arg": 1,
+    },
+    {
+        # A `Big` value: `str(10**30)` has 31 digits, so digit 1 is `0` and the
+        # conversion must not go through `i64`.
+        "name": "get_digit/big-value",
+        "filter": "get_digit",
+        "value": 10**30,
+        "arg": 1,
+    },
+    {
+        "name": "get_digit/big-arg",
+        "filter": "get_digit",
+        "value": 123,
+        "arg": 10**30,
+    },
+
+    # `stringformat` is `is_safe=True`, so the loop marks the answer when the
+    # **pre-filter** value is `SafeData`. The tuple rows are the ones `is_tuple`
+    # exists for, and they are expressible here as a real Python tuple value.
+    {
+        "name": "stringformat/str",
+        "filter": "stringformat",
+        "value": "AbC",
+        "arg": "s",
+    },
+    {
+        "name": "stringformat/width",
+        "filter": "stringformat",
+        "value": "AbC",
+        "arg": "10s",
+    },
+    {
+        "name": "stringformat/int-decimal",
+        "filter": "stringformat",
+        "value": 42,
+        "arg": "d",
+    },
+    {
+        "name": "stringformat/float-two-places",
+        "filter": "stringformat",
+        "value": 1.23456,
+        "arg": ".2f",
+    },
+    {
+        "name": "stringformat/hex",
+        "filter": "stringformat",
+        "value": 42,
+        "arg": "x",
+    },
+    {
+        "name": "stringformat/char",
+        "filter": "stringformat",
+        "value": 65,
+        "arg": "c",
+    },
+    {
+        "name": "stringformat/octal",
+        "filter": "stringformat",
+        "value": 42,
+        "arg": "o",
+    },
+    {
+        # `None` is not special to `%s`: it is `str(None)`.
+        "name": "stringformat/none-is-none",
+        "filter": "stringformat",
+        "value": None,
+        "arg": "s",
+    },
+    {
+        # A list is **not** unpacked — CPython unpacks a tuple and treats every
+        # other sequence as a single operand.
+        "name": "stringformat/list-is-one-operand",
+        "filter": "stringformat",
+        "value": [1, None],
+        "arg": "s",
+    },
+    {
+        # The `isinstance(value, tuple)` branch: stringified first, so `%s`
+        # receives `"(1, 2)"` where the bare operator would raise `TypeError:
+        # not all arguments converted during string formatting`.
+        "name": "stringformat/tuple-is-stringified",
+        "filter": "stringformat",
+        "value": (1, 2),
+        "arg": "s",
+    },
+    {
+        "name": "stringformat/tuple-with-width",
+        "filter": "stringformat",
+        "value": (1, 2),
+        "arg": "10s",
+    },
+    {
+        # The one-element tuple keeps its trailing comma in `repr`.
+        "name": "stringformat/one-element-tuple",
+        "filter": "stringformat",
+        "value": (1,),
+        "arg": "s",
+    },
+    {
+        "name": "stringformat/empty-tuple",
+        "filter": "stringformat",
+        "value": (),
+        "arg": "s",
+    },
+    {
+        # The refusal arm: `%d` of a `str` is a `TypeError`, caught, answered `""`.
+        "name": "stringformat/bad-spec-is-empty",
+        "filter": "stringformat",
+        "value": "abc",
+        "arg": "d",
+    },
+    {
+        # `SafeString` in, `SafeString` out: the loop marks because the
+        # pre-filter value is `SafeData`, not because the body did.
+        "name": "stringformat/safe-value-marks-the-result",
+        "filter": "stringformat",
+        "value": mark_safe("AbC"),
+        "arg": "s",
+    },
+    {
+        # The mirror of the row above, and the sharpest one: `mark_safe(42)` is
+        # the `SafeString` `"42"`, whose `%d` fails — and the resulting empty
+        # string is **marked**, because the loop tests the pre-filter value. With
+        # a plain `42` the same failure is an unmarked `""`.
+        "name": "stringformat/safe-value-marks-even-the-failure",
+        "filter": "stringformat",
+        "value": mark_safe(42),
+        "arg": "d",
+    },
+    {
+        "name": "stringformat/plain-value-is-not-marked",
+        "filter": "stringformat",
+        "value": "AbC",
+        "arg": "s",
+    },
 ]
