@@ -54,6 +54,14 @@ CONTEXT = {"x": "abc", "y": "abc"}
 # before the load, the third got the shadow.
 DJANGO_ANSWER = "ABCshadowed-abc"
 
+# The same sandwich with its first use inside a `{% with %}`, which reaches a
+# different arm of `_decode_value`: `{% with %}` builds `extra_context` as
+# `AttrValue::Map` (`with.rs:79`), so the value is a `FilterExpr` *inside a
+# dict* and is decoded by `_impl/parser.py`'s dict comprehension rather than by
+# the top-level `AttrValue::FilterExpr` arm the row above exercises.
+WITH_SOURCE = "{% with v=x|upper %}{{ v }}{% endwith %}{% load shadow %}{{ y|upper }}"
+WITH_ANSWER = "ABCshadowed-abc"
+
 
 def shadowing_engine():
     """An `Engine` whose loadable library rebinds a builtin filter name."""
@@ -106,6 +114,38 @@ class FilterRebindingTests(unittest.TestCase):
             "the fixture stopped being a sandwich: nothing was rebound",
         )
         self.assertEqual(ours, theirs, f"template: {SOURCE!r}")
+
+    def test_the_dict_arm_threads_the_resolver_into_its_filter_expressions(self):
+        """The row above reaches *one* arm of `_decode_value`; this reaches another.
+
+        **Measured: dropping `resolve_ref` from the dict comprehension at
+        `_impl/parser.py`'s `isinstance(value, dict)` branch leaves the whole
+        Python suite green — 235 tests, no failure.** The reviewer found this
+        while verifying the sandwich's oracle, and it is the reason this row
+        exists rather than a preference for another template.
+
+        It is not a *silent* mutation, which is the consolation: with the
+        resolver dropped, a `FilterExpr` whose descriptor carries no handle
+        (`AttrValue::FilterExpr` sends `refs=None`) raises the `LookupError` the
+        materialiser raises rather than resolving late. But "loud if a user ever
+        writes it" is not a test, and until this row nothing in the suite wrote
+        it — `{% with %}`'s own tests exercise the tag, not the rebinding
+        window, so they agree with Django under the mutation too.
+
+        `{% with %}` is the tag to use because `with.rs:79` puts its
+        `extra_context` in an `AttrValue::Map`. `{% url %}` reaches the same arm
+        (`url.rs:81`) but cannot carry the sandwich, since a URL tag renders no
+        filter to compare.
+        """
+        ours = render_string(WITH_SOURCE, dict(CONTEXT), engine=shadowing_engine())
+        theirs = shadowing_engine().from_string(WITH_SOURCE).render(Context(CONTEXT))
+
+        self.assertEqual(
+            theirs,
+            WITH_ANSWER,
+            "the fixture stopped being a sandwich: nothing was rebound",
+        )
+        self.assertEqual(ours, theirs, f"template: {WITH_SOURCE!r}")
 
     def test_materialisation_uses_the_bound_function_not_a_second_lookup(self):
         """The mechanism, observable before `{% load %}` exists.
