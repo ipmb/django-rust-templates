@@ -198,6 +198,7 @@ defaultfilters.py:642-648	django/template/defaultfilters.py	642	648	return rando
 defaultfilters.py:651-665	django/template/defaultfilters.py	651	665	-	-
 defaultfilters.py:651-666	django/template/defaultfilters.py	651	666	return value[slice(*bits)]	return value  # Fail silently.
 defaultfilters.py:669-743	django/template/defaultfilters.py	669	743	-	-
+defaultfilters.py:669-737	django/template/defaultfilters.py	669	737	def unordered_list(value, autoescape=True):	return mark_safe(list_formatter(value))
 defaultfilters.py:708-714	django/template/defaultfilters.py	708	714	if isinstance(next_item, (list, tuple, types.GeneratorType)):	yield item, next_item
 defaultfilters.py:745-754	django/template/defaultfilters.py	745	754	-	-
 defaultfilters.py:757-776	django/template/defaultfilters.py	757	776	get_digit	-

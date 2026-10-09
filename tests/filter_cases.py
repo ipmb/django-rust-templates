@@ -1471,7 +1471,8 @@ CASES: list[dict] = [
         "value": [{"_a": 1}],
         "arg": "_a",
     },
-    # --- unordered_list (`:669`, needs_autoescape, recursive, tabs) -------
+    # --- unordered_list (`defaultfilters.py:669-737`, needs_autoescape,
+    #     recursive, tabs)
     {
         "name": "unordered_list/single",
         "filter": "unordered_list",
