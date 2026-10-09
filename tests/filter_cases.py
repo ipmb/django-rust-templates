@@ -65,15 +65,41 @@ half of the failing branch, not a detector. Measured, dropping the key from each
 of the three `context` rows changes the answer for **two** of them and not for
 this one.
 
-**A `CASES` row cannot carry an exception, and that is why there is a second
-list.** `resolve` propagates one rather than returning it, so a `CASES` row whose
-*point* is that Django raises would abort the comparison instead of making it.
-An exception is nonetheless an **answer**, and an observable one: a filter body's
-own `try`/`except` branches on the exception's *class*, so the class is part of
-what parity means and is compared in [`ERROR_CASES`] below, where both engines
-must raise it. Rows whose input survives the filter's own `try` are a different
-thing and stay here, where they are common: the `dictsort` rows that end in `""`
-are three different caught arms.
+**A `CASES` row cannot carry an exception, and an error therefore has two homes
+rather than one.** `resolve` propagates an exception rather than returning it, so
+a `CASES` row whose *point* is that Django raises would abort the comparison
+instead of making it — which is why there is an [`ERROR_CASES`] list below. The
+list does not, however, *replace* the body tests the filters already have, and
+the split between the two homes is by **who authors the message**:
+
+* **A message passed through from CPython** — a real host call's refusal, like
+  `first(5)`'s `'int' object is not subscriptable` or `random({...})`'s
+  `KeyError: 0` — is Python's on both sides, so no comparison of the two can be
+  wrong about its wording. What a *body* test adds is **propagation**: that the
+  body lets the host's error escape rather than swallowing it into `""` or a
+  default. That test asserts the class and never the message, and it is the only
+  place an agent can see the behaviour — §10.4 gives an agent
+  `cargo test -p template-core` and never `maturin develop`, so a Python-side row
+  is invisible to the party writing the filter. `ERROR_CASES` then adds what only
+  the integration can see: the real host's text, against Django's, pinned.
+* **A message synthesised in Rust** — `cut.rs`'s `not_a_string`, which exists
+  because no host operation performs the `str.replace` — is a value this engine
+  *composes* rather than *obtains*. No body test can validate one: the body
+  produces the string and the test restates it, so the two can only agree.
+  `ERROR_CASES` is the only check that exists on such a message, and the body test
+  beside it is a restatement to **delete** rather than to keep.
+
+**That is the third form of one rule, and it is the rule that governs this whole
+file: parity validates agreement, never correctness.** Shared inputs are invisible
+to it — a row handing both engines one generator scores the second against an
+exhausted iterator, and a dropped `context` key moves both engines together (see
+[`case_value`] and `expected`) — and so are values one side composes, because
+there is nothing on the other side for them to agree with. Each time this has
+bitten M4 it has arrived looking like a new problem. It is the same one.
+
+The rows whose input survives the filter's own `try` are a different thing and
+stay here, where they are common: the `dictsort` rows that end in `""` are three
+different caught arms.
 
 Rows for a filter arrive in **the commit that lands its group** (§D6), so the
 set of filters named here is a statement about M4's progress as well as about
@@ -1777,6 +1803,13 @@ CASES: list[dict] = [
 # filter was written without one, and `"arg": None` means the explicit `None`
 # token (`{{ x|cut:None }}`). `value_factory` is available for the one reason it
 # is above — a one-shot input — and `raises`/`message` are the row's assertion.
+#
+# **A row here is not a replacement for a body test.** They check different
+# things and the split is by who authors the message: a message passed through
+# from CPython is checked here for its *wording* and in the body for
+# *propagation* (the class alone), where a message synthesised in Rust is checked
+# only here — the module doc's rule. Deleting a propagation test because a row
+# covers the same input would trade a check an agent can run for one it cannot.
 ERROR_CASES: list[dict] = [
     # --- cut: `str.replace`'s argument refusal, which no host performs -------
     {

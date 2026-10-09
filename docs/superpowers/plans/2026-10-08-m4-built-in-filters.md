@@ -2280,21 +2280,40 @@ quietly fixed in code.
    key, and the five generator rows use it. It is a distinct key rather than
    "call `value` if it is callable", because a callable is a legitimate input
    (`x|default:func`) that would otherwise be silently read as a factory.
-3. **A corpus row cannot express an exception — and that is exactly why
-   `ERROR_CASES` exists.** `resolve` propagates it rather than returning it, so a
+3. **A corpus row cannot express an exception — and an error therefore has two
+   homes, not one.** `resolve` propagates it rather than returning it, so a
    `CASES` row whose *point* is that Django raises would abort the comparison
    instead of making it. Nine candidate rows were measured and dropped for this
    reason, and their inputs became **body tests**: the raising rows of
    `first`/`last`/`random` (`first(5)`'s `TypeError`, `first({})`'s `KeyError`) and
-   `join`'s `autoescape=False` non-str-separator `AttributeError`. Dropping them
-   is nonetheless wrong, and the reason is that an exception is an **answer** —
-   the class is what a filter body's own `except` branches on, which makes it
-   exactly the kind of thing `first({})` *does* rather than a detail of how it
-   fails. So the raising inputs get a second list, `ERROR_CASES` in
-   `tests/filter_cases.py`, where both engines must raise the same class **and the
-   same message**; its first two rows are `cut`'s `TypeError`s (`47edea3`). Moving
-   these three filters' rows into it is a change to landed modules and is pending
-   the reviewer's call, so the body tests stand until then.
+   `join`'s `autoescape=False` non-str-separator `AttributeError`. Dropping them is
+   nonetheless wrong — an exception is an **answer**, since the class is what a
+   filter body's own `except` branches on — so those inputs also get
+   `ERROR_CASES`, the second list in `tests/filter_cases.py`, where both engines
+   must raise the same class **and the same message**. Its first two rows are
+   `cut`'s `TypeError`s (`47edea3`).
+
+   **Both homes stay, and the split is by who authors the message** — the
+   reviewer's resolution of the question this section had left open. A message
+   *passed through from CPython* is Python's on both sides, so the body test
+   checks **propagation** (the class, never the message) and `ERROR_CASES` checks
+   the wording against Django; the body test is also the only signal available to
+   the agent writing the filter, because §10.4 gives an agent `cargo test -p
+   template-core` and never `maturin develop`, so a Python-side row is invisible
+   to it. A message *synthesised in Rust* (`cut.rs`'s `not_a_string`, because no
+   host operation performs the `str.replace`) is checked **only** by
+   `ERROR_CASES`, since a body test asserting the string the body also produces
+   can only agree with it — so `cut`'s two body error tests are restatements to
+   delete, to be removed when `cut.rs` and `tests/test_filter_parity.py` are next
+   open in the same commit.
+
+   This is the third form of one rule, now stated as the governing principle in
+   `tests/filter_cases.py`'s module doc: **parity validates agreement, never
+   correctness.** Shared inputs are invisible to it (a shared generator, or a
+   dropped `context` key that moves both engines together); two runs that change
+   together are invisible to it (hence the pinned literals); and values one side
+   *composes* are invisible to it, because there is nothing on the other side to
+   agree with. Each has arrived looking like a new problem.
 
 **And the one body this section got wrong, found by the same measurement.** The
 `if children:` rule above is **not** `!children.is_empty()`: Django tests the
