@@ -1060,9 +1060,24 @@ pub trait FilterHost {
     /// `django.utils.encoding.iri_to_uri`. `iriencode`'s entire body is this
     /// one call (`defaultfilters.py:225-227`).
     fn iri_to_uri(&self, text: &str) -> String;
-    /// `urllib.parse.quote` — `urlencode`'s body, with the `safe` set Rust
-    /// selects (`:365-380`).
-    fn quote(&self, text: &str, safe: &str) -> String;
+    /// `urllib.parse.quote` — `urlencode`'s **whole body**
+    /// (`defaultfilters.py:365-380`), with Django's own two lines around it:
+    /// `safe` is [`Option<&Value>`] rather than `Option<&str>` because the
+    /// argument's *type* is what Python observes. Rust used to classify it —
+    /// absent-or-`None` to `"/"`, a `str` to itself, "everything else is
+    /// iterated by `quote` and raises" — and **the third case is false**:
+    /// measured on the pinned tree, `safe=[1]` is `'a%20b%2Fc'`, `safe=[]` is
+    /// the same, `safe=b'/'` is `'a%20b/c'`, while `[-1]` raises `ValueError`
+    /// and `[1.0]` raises a `TypeError` *about a comparison*. That is
+    /// `bytes([c for c in safe if c < 128])`, not a case analysis, and §D7.1
+    /// already answers for it: hand the object through and let Python decide.
+    /// The seam's `object()` makes the hand-off lossless (`Value::Opaque` is
+    /// the same Python object back), so every shape above is a parity row.
+    ///
+    /// **Fallible**, unlike `iri_to_uri` beside it: a refusal out of Python
+    /// (`'int' object is not iterable`, `bytes must be in range(0, 256)`) is
+    /// Django's own and reaches the author unchanged.
+    fn quote(&self, text: &str, safe: Option<&Value>) -> Result<String, Error>;
     fn json_dumps(&self, value: &Value) -> Result<String, Error>;
     fn pformat(&self, value: &Value) -> Result<String, Error>;
     fn random_choice(&self, value: &Value) -> Result<Value, Error>;
@@ -3131,16 +3146,23 @@ which is the raw-token defect this corpus has already been fixed for once.
   filter is the clearest case in M4 of why the trait had to be derived rather
   than written from a reading — it was in the 18 from the start, and it had no
   method.
-- `urlencode` (`:365-380`) — `arg=None` means `safe=None` means Django's default
-  safe set; then `quote(value, safe=safe)`. Host for `quote`, Rust for the
-  `safe`-set selection — which is three cases rather than two, and they are
-  measured: the absent argument and an explicit `None` both select `"/"`, a `str`
-  selects itself (`""` escapes everything), and `quote` **iterates** anything else
-  so every other value raises `TypeError` — `'int' object is not iterable` for a
-  scalar and `'<' not supported between instances of 'str' and 'int'` for
-  anything iterable, whatever its contents (`bytes` is the exception and is
-  decoded, which no trait method can do). The message therefore names the
-  argument's *type*, which is why this filter's rows carry both shapes.
+- `urlencode` (`:365-380`) — **Django's body is two lines and Rust's is the same
+  two lines**: `kwargs["safe"] = safe` unless it is `None`, then
+  `quote(value, **kwargs)`. Host for `quote`, Rust for the `if` — and the `if` is
+  the whole of it, because the argument is *not* classified here. An earlier
+  revision had Rust select among three cases (absent-or-`None` → `"/"`, a `str` →
+  itself, everything else "iterated by `quote` so it raises"), and **the third
+  case is false**: measured, `safe=[1]` answers `'a%20b%2Fc'`, `safe=[]` answers
+  the same, `safe=b'/'` answers `'a%20b/c'`, `[-1]` raises `ValueError: bytes must
+  be in range(0, 256)` and `[1.0]` raises `TypeError: 'float' object cannot be
+  interpreted as an integer`. That is `bytes([c for c in safe if c < 128])` in
+  `urllib/parse.py`, not a case analysis — and §D7.1 says a parameter Python
+  inspects by *type* is passed through as a [`Value`]. So `quote` takes
+  `Option<&Value>` and this filter's rows are all **parity**: the shapes that
+  answer (`[1]`, `[]`, `b'/'`, `bytearray(b'/')`) are `CASES` rows and the four
+  that refuse (`5`, `True`, `5.0`, `["/"]`) are `ERROR_CASES` rows carrying
+  Python's own messages. The classifier raised for the first two, which is the
+  wrong direction for a drop-in — a template Django renders must render.
 
 **Three of these twelve — `linebreaks`, `linebreaksbr`, `linenumbers` — can never
 be given an argument, and each carries an `ERROR_CASES` row for the refusal rather

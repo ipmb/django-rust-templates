@@ -3143,6 +3143,343 @@ CASES: list[dict] = [
         "filter": "escapejs",
         "value": None,
     },
+    # --- striptags (`:528-532`, is_safe=True, `@stringfilter`) ---------------
+    #
+    # The whole body is the host's `strip_tags`, so what these rows pin is the
+    # Python tag grammar rather than Rust: the stripper is an `HTMLParser` fed
+    # `convert_charrefs=False` (`html.py:181-197`), and the two rows that matter
+    # most are the entity one (a body that *decoded* entities would differ on a
+    # row that looks like it should round-trip) and the deep-nesting one.
+    {
+        "name": "striptags/basic",
+        "filter": "striptags",
+        "value": "<b>hi</b> <i>there</i>",
+    },
+    {
+        # **Not** decoded: `&#65;` stays `&#65;` and is not `A`. This is the row
+        # a hand-written Rust stripper fails while looking right.
+        "name": "striptags/entities-are-kept-verbatim",
+        "filter": "striptags",
+        "value": "a &amp; b &lt;c&gt; &#65;",
+    },
+    {
+        "name": "striptags/comment",
+        "filter": "striptags",
+        "value": "a <!-- c --> <b>x</b>",
+    },
+    {
+        # No `>` anywhere, so the iteration loop never runs and the text is the
+        # answer unchanged — the malformed input Django leaves alone.
+        "name": "striptags/unclosed-tag-without-gt",
+        "filter": "striptags",
+        "value": "a <b b",
+    },
+    {
+        "name": "striptags/nested",
+        "filter": "striptags",
+        "value": "<div><span><b>x</b></span></div>",
+    },
+    {
+        # **The row the depth guard must not fire on.** 50 balanced tags go in
+        # *one* `_strip_once` iteration, so the iteration counter — which is what
+        # `MAX_STRIP_TAGS_DEPTH = 50` (`html.py:220-222`) bounds — reaches 1. A
+        # body that counted nesting instead would raise here and answer nothing.
+        "name": "striptags/balanced-50-deep",
+        "filter": "striptags",
+        "value": "<d>" * 50 + "x" + "</d>" * 50,
+    },
+    {
+        "name": "striptags/balanced-100-deep",
+        "filter": "striptags",
+        "value": "<d>" * 100 + "x" + "</d>" * 100,
+    },
+    {
+        # `is_safe=True` with a `SafeData` input: the marking is the FFI loop's
+        # (`base.py:816`), so the body returns a plain `str` and this row is what
+        # says the loop still marks it.
+        "name": "striptags/safe-input-marks-the-result",
+        "filter": "striptags",
+        "value": mark_safe("<b>hi</b>"),
+    },
+    # --- linebreaks (`:485-494`, is_safe=True, needs_autoescape) ------------
+    {
+        # Escaping, the `\n{2,}` paragraph split and the escape-**before**-`<br>`
+        # order, all in one row: `'more'.` is `&#x27;more&#x27;` and the single
+        # `\n` inside a paragraph is a `<br>`, while `\n\n` is a new `<p>`.
+        "name": "linebreaks/escapes-and-splits-paragraphs",
+        "filter": "linebreaks",
+        "value": "First line.\nSecond <line> & 'more'.\n\nNew paragraph here.",
+    },
+    {
+        # **Pinned**, because this row is the group's `autoescape=False`
+        # detector and parity alone cannot fail on it: drop the key and both
+        # engines escape, so a body that never read `autoescape` stays green.
+        # The literal is what reddens. See the module doc on `expected`.
+        "name": "linebreaks/autoescape-false-does-not-escape",
+        "filter": "linebreaks",
+        "value": "First line.\nSecond <line> & 'more'.\n\nNew paragraph here.",
+        "context": {"autoescape": False},
+        "expected": "<p>First line.<br>Second <line> & 'more'.</p>\n\n<p>New paragraph here.</p>",
+    },
+    {
+        # `autoescape and not isinstance(value, SafeData)` — the second half of
+        # the same expression, which no `context` key can reach.
+        "name": "linebreaks/safe-data-skips-escaping",
+        "filter": "linebreaks",
+        "value": mark_safe("First line.\nSecond <line> & 'more'.\n\nNew paragraph here."),
+    },
+    {
+        # `normalize_newlines` runs **before** the split, so `\r\n` is one `\n`
+        # and a lone `\r` is another: a body that split first would answer
+        # `'<p>a</p>\n\n<p>b</p>…'`.
+        "name": "linebreaks/normalizes-crlf-and-cr",
+        "filter": "linebreaks",
+        "value": "a\r\nb\rc\n\nd",
+    },
+    {
+        # `re.split("\n{2,}")` consumes the whole **run**: three newlines are one
+        # paragraph break, not a break plus a leading newline. The body that fails
+        # this is a plain `split("\n\n")`, which answers `'<p>a</p>\n\n<p><br>b</p>'`.
+        "name": "linebreaks/run-of-newlines-is-one-break",
+        "filter": "linebreaks",
+        "value": "a\n\n\nb",
+    },
+    {
+        "name": "linebreaks/trailing-newline",
+        "filter": "linebreaks",
+        "value": "a\n",
+    },
+    {
+        "name": "linebreaks/all-newlines",
+        "filter": "linebreaks",
+        "value": "\n\n",
+    },
+    {
+        "name": "linebreaks/empty",
+        "filter": "linebreaks",
+        "value": "",
+    },
+    {
+        "name": "linebreaks/single-line",
+        "filter": "linebreaks",
+        "value": "just one line",
+    },
+    # --- linebreaksbr (`:497-509`, is_safe=True, needs_autoescape) ----------
+    {
+        # No paragraph split here at all: `\n\n` is two `<br>`s.
+        "name": "linebreaksbr/escapes-newlines",
+        "filter": "linebreaksbr",
+        "value": "First line.\nSecond <line> & 'more'.\n\nNew paragraph here.",
+    },
+    {
+        # **Pinned**, for `linebreaks`' reason above.
+        "name": "linebreaksbr/autoescape-false-does-not-escape",
+        "filter": "linebreaksbr",
+        "value": "First line.\nSecond <line> & 'more'.\n\nNew paragraph here.",
+        "context": {"autoescape": False},
+        "expected": "First line.<br>Second <line> & 'more'.<br><br>New paragraph here.",
+    },
+    {
+        "name": "linebreaksbr/safe-data-skips-escaping",
+        "filter": "linebreaksbr",
+        "value": mark_safe("First line.\nSecond <line> & 'more'.\n\nNew paragraph here."),
+    },
+    {
+        "name": "linebreaksbr/normalizes-crlf",
+        "filter": "linebreaksbr",
+        "value": "a\r\nb",
+    },
+    {
+        # `"a\n"` is `'a<br>'`: the trailing newline becomes a break like any
+        # other, which is the row a body using `split`/`join` gets wrong.
+        "name": "linebreaksbr/trailing-newline",
+        "filter": "linebreaksbr",
+        "value": "a\n",
+    },
+    {
+        # All five characters `escape` touches, in one row, with the `\n` that
+        # must survive as the only thing replaced: `&#x27;` is the apostrophe
+        # and `&quot;` is the quote, so a body that escaped only `<>&` differs.
+        "name": "linebreaksbr/all-five-escapes-before-the-br",
+        "filter": "linebreaksbr",
+        "value": "<>&''\n\"",
+    },
+    # --- linenumbers (`:230-245`, is_safe=True, needs_autoescape) -----------
+    {
+        # 12 lines, so the width is `len("12") == 2` — and the padding is the
+        # row: `'01. line 1'`, not `'1. line 1'`.
+        "name": "linenumbers/pads-to-the-digit-count",
+        "filter": "linenumbers",
+        "value": "\n".join(f"line {i}" for i in range(1, 13)),
+    },
+    {
+        # **Pinned**, for `linebreaks`' reason above.
+        "name": "linenumbers/autoescape-false-does-not-escape",
+        "filter": "linenumbers",
+        "value": "\n".join(f"line {i}" for i in range(1, 13)),
+        "context": {"autoescape": False},
+        "expected": "\n".join(f"{i:02}. line {i}" for i in range(1, 13)),
+    },
+    {
+        # 100 lines makes the width three, so the *same* first line is
+        # `'001. line 1'` — the row that separates a computed width from a
+        # constant one.
+        "name": "linenumbers/hundred-lines-pad-to-three",
+        "filter": "linenumbers",
+        "value": "\n".join(f"line {i}" for i in range(1, 101)),
+    },
+    {
+        "name": "linenumbers/escapes-each-line",
+        "filter": "linenumbers",
+        "value": "<a>\n<b>",
+    },
+    {
+        "name": "linenumbers/safe-data-skips-escaping",
+        "filter": "linenumbers",
+        "value": mark_safe("<a>\n<b>"),
+    },
+    {
+        "name": "linenumbers/single-line",
+        "filter": "linenumbers",
+        "value": "only",
+    },
+    {
+        # One empty line, so `'1. '` — with the trailing space. A body that
+        # answered `''` passes every row above.
+        "name": "linenumbers/empty-is-one-empty-line",
+        "filter": "linenumbers",
+        "value": "",
+    },
+    {
+        # **There is no `normalize_newlines` in this body.** `"a\r\nb"` keeps its
+        # `\r` and numbers two lines, where `linebreaks` on the same input would
+        # have folded it — the row that catches a body sharing the wrong helper
+        # with its neighbours in Task 8.
+        "name": "linenumbers/keeps-carriage-return",
+        "filter": "linenumbers",
+        "value": "a\r\nb",
+    },
+    # --- iriencode (`:223-228`, is_safe=True, `@stringfilter`) --------------
+    #
+    # The whole body is `iri_to_uri`, so these rows pin the host's function
+    # rather than anything Rust decides.
+    {
+        "name": "iriencode/plain",
+        "filter": "iriencode",
+        "value": "abc",
+    },
+    {
+        # `/` and `?`, `=`, `&`, `#` are all left alone by `iri_to_uri` while
+        # the space and the non-ASCII are quoted — so this row separates
+        # `iri_to_uri` from `quote`, which the filter below uses.
+        "name": "iriencode/mixed",
+        "filter": "iriencode",
+        "value": "a b/c?d=e&f#g h iéü",
+    },
+    {
+        "name": "iriencode/already-quoted-is-idempotent",
+        "filter": "iriencode",
+        "value": "a%20b",
+    },
+    {
+        "name": "iriencode/int-coerces",
+        "filter": "iriencode",
+        "value": 5,
+    },
+    {
+        "name": "iriencode/safe-input-marks-the-result",
+        "filter": "iriencode",
+        "value": mark_safe("abc"),
+    },
+    # --- urlencode (`:365-379`, is_safe=False, `@stringfilter`) -------------
+    #
+    # Django's body is two lines — `kwargs["safe"] = safe` unless it is `None`,
+    # then `quote(value, **kwargs)` — and the rows below are the whole of what
+    # those two lines do. The `arg_variable` rows are the point of the group:
+    # `quote`'s non-`str` branch is `bytes([c for c in safe if c < 128])`
+    # (`urllib/parse.py`, `quote_from_bytes`), which **answers** for an
+    # all-`int` container and for `bytes`, so a body that classified the
+    # argument in Rust and raised would redden three of these rows.
+    {
+        "name": "urlencode/default-safe-is-slash",
+        "filter": "urlencode",
+        "value": "a b/c?d=e&f#g",
+    },
+    {
+        # `safe=''` escapes the `/` too — the only difference from the default.
+        "name": "urlencode/safe-empty-quotes-the-slash",
+        "filter": "urlencode",
+        "value": "a b/c?d=e&f#g",
+        "arg": "",
+    },
+    {
+        # Non-empty but none of `a`,`b`,`c` occurs in the input, so this row's
+        # answer equals `safe=''`'s — which is why it is here beside it: the two
+        # rows together say the selection is a *set membership*, not a string
+        # comparison.
+        "name": "urlencode/safe-abc-is-not-in-the-input",
+        "filter": "urlencode",
+        "value": "a b/c?d=e&f#g",
+        "arg": "abc",
+    },
+    {
+        # An explicit `None` is the absent argument: Django's `if safe is not
+        # None` leaves `kwargs` empty, so `quote`'s own `'/'` default applies.
+        "name": "urlencode/safe-none-is-the-default",
+        "filter": "urlencode",
+        "value": "a b/c?d=e&f#g",
+        "arg": None,
+    },
+    {
+        "name": "urlencode/safe-slash-explicit",
+        "filter": "urlencode",
+        "value": "a b/c",
+        "arg": "/",
+    },
+    {
+        # `is_safe=False`, so nothing is marked and the `SafeString` input comes
+        # back as a plain `str`.
+        "name": "urlencode/safe-value-is-never-marked",
+        "filter": "urlencode",
+        "value": mark_safe("a b/c"),
+    },
+    {
+        "name": "urlencode/int-coerces",
+        "filter": "urlencode",
+        "value": 5,
+    },
+    {
+        "name": "urlencode/unicode",
+        "filter": "urlencode",
+        "value": "éü 中",
+    },
+    {
+        # `safe=[1]` **answers**: the comprehension keeps `1`, `bytes([1])` is
+        # `b'\x01'`, and `'\x01'` is not in the input, so the answer is
+        # `safe=''`'s. A body that synthesised a refusal for a non-`str`
+        # argument fails here rather than passing.
+        "name": "urlencode/safe-int-list-answers",
+        "filter": "urlencode",
+        "value": "a b/c",
+        "arg_variable": [1],
+    },
+    {
+        # `safe=[]` keeps nothing, so this too is `safe=''`'s answer.
+        "name": "urlencode/safe-empty-list-answers",
+        "filter": "urlencode",
+        "value": "a b/c",
+        "arg_variable": [],
+    },
+    {
+        # `bytes` is not a `str`, so it takes the comprehension — over the
+        # *integers* `b'/'` yields, `47 < 128` holds, and `bytes([47])` is
+        # `b'/'`: the `/` stays. The row that would fail for `quote` being
+        # handed a Rust `&str` of the argument rather than the object.
+        "name": "urlencode/safe-bytes-answers",
+        "filter": "urlencode",
+        "value": "a b/c",
+        "arg_variable": b"/",
+    },
 ]
 
 
@@ -3189,21 +3526,48 @@ CASES: list[dict] = [
 # only here — the module doc's rule. Deleting a propagation test because a row
 # covers the same input would trade a check an agent can run for one it cannot.
 #
-# **Absent by decision: any argument at all on the five `needs_autoescape` filters
-# whose own second parameter is named `autoescape`** — `linebreaks`,
-# `linebreaksbr`, `linenumbers`, `unordered_list`, `urlize`. Django's loop calls
+# **The five `needs_autoescape` filters whose own second parameter is named
+# `autoescape` can never be given an argument, and the four rows at the foot of
+# this list are that refusal.** They are `linebreaks`, `linebreaksbr`,
+# `linenumbers`, `unordered_list` and `urlize`. Django's loop calls
 # `func(obj, autoescape=..., *arg_vals)` (`base.py:813`), so the positional
 # argument binds to `autoescape` as well and **every** such token raises
 # `TypeError: <py_func>() got multiple values for argument 'autoescape'`
-# (measured; `<py_func>` is `linebreaks_filter` for `linebreaks` and the filter
-# name for the other four). `_native.filter` takes `autoescape` as a value, so it
-# has no keyword to collide with, and the message needs the *callable's* Python
-# name, which a name-keyed seam does not have. A row here would therefore have to
-# pin a divergence rather than a parity. The behaviour is not lost where it is
-# observable: it is CPython's binding of the *call* and not a body's decision, so
-# it belongs to whoever makes the call, and M9 inherits it exactly when the shim
-# exposes these filters as Python functions carrying Django's own signatures. The
-# full statement is on `filter` in `crates/template-py/src/lib.rs`.
+# (measured over an `int`, `None`, `str`, `float`, `bool` and a resolved
+# variable, one message per filter; `<py_func>` is `linebreaks_filter` for
+# `linebreaks`, and the filter name for the other four). `args_check`
+# (`base.py:822`) counts `autoescape` among the filter's own parameters, so the
+# parse **accepts** the token and the refusal is at call time, which is why the
+# class is a `TypeError` and not a `TemplateSyntaxError`.
+#
+# **These five were absent by decision until the M4 review, and the decision was
+# wrong in a form worth keeping.** The argument for excluding them was that
+# `_native.filter` takes `autoescape` as a *value*, so it has no keyword to
+# collide with, and that the message needs the *callable's* Python name, which a
+# name-keyed seam does not have; the collision was therefore CPython's binding of
+# the *call* and not a body's decision, so it belonged to whoever makes the call
+# — M9, when the shim exposes these filters as Python functions carrying Django's
+# own signatures. Both premises are true and the conclusion did not follow: they
+# are true *of the seam* and false *of the body*, and a body is what stands where
+# the refusal happens. The argument was rejected by pointing at a row this list
+# already holds — `cut/non-string-argument` above, whose message is
+# Rust-synthesised (`cut.rs`'s `not_a_string`) because no host operation produces
+# it. "The seam cannot produce this text" is exactly that row's situation, so the
+# argument proves too much. The unknown callable name is a cost instead: it is a
+# per-module constant in each refusing filter, and §10.4 records the consequence
+# — a Django release could rename `linebreaks_filter` without changing any
+# behaviour, and a message-bearing row is what fails when it does.
+#
+# Each of the five carries a plain `arg` and no `arg_variable`, deliberately and
+# not by omission: the refusal never consults the argument, so a second,
+# variable-shaped row for the same filter would pin this module's token plumbing
+# rather than a body. The `autoescape` branches these filters *do* have are pinned
+# in `CASES` by the `context` key, which needs no argument.
+#
+# **`urlize` is the fifth and its row is not here yet, which is a stage rather
+# than a second decision.** Its body is still a stub, and a row whose body is a
+# stub reddens the gate without describing anything; the row lands with the body,
+# under Task 9, beside that task's other five filters.
 ERROR_CASES: list[dict] = [
     # --- cut: `str.replace`'s argument refusal, which no host performs -------
     {
@@ -3418,5 +3782,166 @@ ERROR_CASES: list[dict] = [
         "value_factory": LOUD_STR,
         "raises": "BoomError",
         "message": "loud",
+    },
+    # --- `base.py:813`'s collision: a `needs_autoescape` filter whose own second
+    #     parameter is called `autoescape` cannot take an argument at all --------
+    #
+    # One row per filter and one message per filter, because the text names the
+    # *callable* and not the argument — measured over an `int`, `None`, `str`,
+    # `float`, `bool` and a resolved variable, all six giving the same string. So
+    # the `arg` below is arbitrary and `5` is chosen only to match the code block
+    # in `crates/template-py/src/lib.rs`; a row with a different argument would
+    # assert the same bytes. The full statement, including why these were absent
+    # until the M4 review, is the `ERROR_CASES` preamble above.
+    {
+        # The callable's name is `linebreaks_filter`, not the registered
+        # `linebreaks`, so this row is also the one place the module's own name
+        # for a filter is pinned — a pin bump could rename the `def` without
+        # changing behaviour, and this row would fail (§10.4).
+        "name": "linebreaks/argument",
+        "filter": "linebreaks",
+        "value": "x",
+        "arg": 5,
+        "raises": "TypeError",
+        "message": "linebreaks_filter() got multiple values for argument 'autoescape'",
+    },
+    {
+        # The other four name the registered name, because for them the two
+        # coincide — which is what makes this quartet a check on the pairing
+        # rather than four copies of one string.
+        "name": "linebreaksbr/argument",
+        "filter": "linebreaksbr",
+        "value": "x",
+        "arg": 5,
+        "raises": "TypeError",
+        "message": "linebreaksbr() got multiple values for argument 'autoescape'",
+    },
+    {
+        "name": "linenumbers/argument",
+        "filter": "linenumbers",
+        "value": "x",
+        "arg": 5,
+        "raises": "TypeError",
+        "message": "linenumbers() got multiple values for argument 'autoescape'",
+    },
+    {
+        # `unordered_list` was landed under Task 6 and answered an argument until
+        # this row's body change, which is why it is the one of the four whose
+        # refusal is not part of a filter's first landing.
+        "name": "unordered_list/argument",
+        "filter": "unordered_list",
+        "value": "x",
+        "arg": 5,
+        "raises": "TypeError",
+        "message": "unordered_list() got multiple values for argument 'autoescape'",
+    },
+    # --- striptags (`strip_tags`, `html.py:210-232`) -------------------------
+    {
+        # **The one row in this list whose exception class is not a builtin.**
+        # `strip_tags` counts iterations and raises bare — `raise
+        # SuspiciousOperation` at `html.py:221`, with no argument, which is why
+        # the message below is the empty string and not a sentence. The class is
+        # `django.core.exceptions`', not Rust's to synthesise, and the row works
+        # because the seam keeps the exception *object* across the FFI
+        # (`PyFilterHost::take_raised`), so it arrives as itself and
+        # `assert_raises_same` compares the name it really has.
+        #
+        # The value is `<` **51** times then `a>` 51 times, measured: 50 answers
+        # `''` and 51 raises. The check is at the *top* of the loop, so with 50
+        # the final strip empties the value and `while "<" in value` exits first;
+        # with 51 one pair is left and the counter is already 50. The balanced
+        # 100-deep row above is the contrast: balanced tags go in one iteration.
+        #
+        # (`html.py:214`'s other guard, `long_open_tag_without_closing_re =
+        # r"<[a-zA-Z][^>]{1000,}"`, is not reachable from here — it wants a
+        # single 1000-character tag, and this value has none.)
+        "name": "striptags/depth-limit-raises-suspiciousoperation",
+        "filter": "striptags",
+        "value": "<" * 51 + "a>" * 51,
+        "raises": "SuspiciousOperation",
+        "message": "",
+    },
+    {
+        # **The *other* guard**, and the reason both rows exist: `strip_tags` has
+        # two, they are not the same check, and each is reachable only from its
+        # own shape. This one is caught before the loop starts, by
+        # `long_open_tag_without_closing_re = r"<[a-zA-Z][^>]{1000,}"`
+        # (`html.py:47`, `:214`): one `<` followed by a letter and then 1000+
+        # characters with no `>` in them — here `<a` × 501, which is 1002
+        # characters and 501 `<`. A body that ported only the iteration counter
+        # answers `''` on this row.
+        #
+        # Taken from `.django/tests/utils_tests/test_html.py:204-217`, the same
+        # place the row above comes from.
+        "name": "striptags/long-open-tag-raises-suspiciousoperation",
+        "filter": "striptags",
+        "value": ">" + "<a" * 501,
+        "raises": "SuspiciousOperation",
+        "message": "",
+    },
+    {
+        # The same guard, at the boundary shape Django's own test uses: 50 `<a`
+        # pairs followed by 950 bare `a`s — so the *count* of `<` is exactly 50
+        # and the regex's `[^>]{1000,}` still holds, since the 950 `a`s extend
+        # the run past 1000 characters. The row separates "50 or more `<`" from
+        # "50 or more `<` **in one unclosed run**", which is what the guard
+        # actually tests.
+        "name": "striptags/long-open-tag-at-fifty-raises",
+        "filter": "striptags",
+        "value": "<a" * 50 + "a" * 950,
+        "raises": "SuspiciousOperation",
+        "message": "",
+    },
+    # --- urlencode (`quote`, `urllib/parse.py`) ------------------------------
+    #
+    # Everything here is Python's own refusal, passed through unchanged, and the
+    # four rows below are the ones that *do* refuse. The shapes that **answer**
+    # (`safe=[1]`, `safe=[]`, `safe=b"/"`) are `CASES` rows above — an earlier
+    # revision listed them here as divergences, which was backwards: this body
+    # has no `try`, so a refusal reaching a template author is Python's, and a
+    # shape Django renders must render.
+    {
+        # Not iterable, so `quote_from_bytes` never reaches the comprehension:
+        # `'int' object is not iterable`, the same refusal `str(int)` would give.
+        "name": "urlencode/non-iterable-int-argument",
+        "filter": "urlencode",
+        "value": "a b/c",
+        "arg": 5,
+        "raises": "TypeError",
+        "message": "'int' object is not iterable",
+    },
+    {
+        # `bool` is an `int` subclass and is *also* not iterable — the row that
+        # separates "not a `str`" from "not iterable", since a body branching on
+        # `isinstance(safe, str)` and then raising would have to pick one of these
+        # two messages for both.
+        "name": "urlencode/non-iterable-bool-argument",
+        "filter": "urlencode",
+        "value": "a b/c",
+        "arg": True,
+        "raises": "TypeError",
+        "message": "'bool' object is not iterable",
+    },
+    {
+        "name": "urlencode/non-iterable-float-argument",
+        "filter": "urlencode",
+        "value": "a b/c",
+        "arg": 5.0,
+        "raises": "TypeError",
+        "message": "'float' object is not iterable",
+    },
+    {
+        # **Iterable, and still refusing** — but inside the comprehension, not
+        # at iteration: `c < 128` compares a `str` to an `int`, so the message
+        # names the comparison rather than the iteration. This is the row that
+        # makes a `Vec<i64>`-shaped seam wrong: `quote`'s `safe` is not a
+        # sequence of small integers, it is whatever the author wrote, and
+        # `["/"]` gets one comparison in before it fails.
+        "name": "urlencode/iterable-of-str-argument",
+        "filter": "urlencode",
+        "value": "a b/c",
+        "arg_variable": ["/"],
+        "raises": "TypeError",
+        "message": "'<' not supported between instances of 'str' and 'int'",
     },
 ]

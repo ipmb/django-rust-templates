@@ -468,13 +468,32 @@ pub trait FilterHost {
     /// boundary in the way: `{{ x|iriencode }}` with `x = "\ud800"` raises at the
     /// FFI in both engines (`test_lone_surrogate_raises_at_the_ffi_boundary`).
     fn iri_to_uri(&self, text: &str) -> String;
-    /// `urllib.parse.quote` — `urlencode`'s body (`:365-379`), with the `safe`
-    /// set Rust selects from `arg`/the default.
+    /// `urllib.parse.quote` called the way `urlencode`'s body calls it
+    /// (`:365-379`): with the `safe` keyword **omitted** when `safe` is `None`,
+    /// and otherwise with that object passed through as it is.
     ///
-    /// Infallible for `iri_to_uri`'s reason, and measured the same way: the
-    /// surrogate that makes `quote("\ud800", safe="")` raise `UnicodeEncodeError`
-    /// is the input a `&str` cannot hold.
-    fn quote(&self, text: &str, safe: &str) -> String;
+    /// `safe` is `Option<&Value>` rather than `Option<&str>` per **§D7.1**:
+    /// `quote` observes the argument's *type*, not its text. `isinstance(safe,
+    /// str)` selects the `safe.encode('ascii', 'ignore')` branch and every other
+    /// object goes to `bytes([c for c in safe if c < 128])` (`urllib/parse.py`,
+    /// `quote_from_bytes`), which **answers** for an all-`int` container
+    /// (measured: `safe=[1]` is `'a%20b%2Fc'`), for `bytes` (`safe=b'/'` is
+    /// `'a%20b/c'`) and for `[]`, and refuses with a *different* class or message
+    /// for `[-1]`, `[1.0]` and `['/']`. A `&str` parameter would force a body to
+    /// run that dispatch in Rust and synthesise the exceptions of a branch it
+    /// cannot see — which is what an earlier `(&str, &str)` signature did, and
+    /// why `urlencode`'s rows were divergence rows instead of parity rows.
+    ///
+    /// `None` covers **two** Django tokens — the absent argument and an explicit
+    /// `None` — because the body's `if safe is not None` leaves `kwargs` empty
+    /// for both, so they are one call.
+    ///
+    /// **Fallible**, unlike `iri_to_uri`: the non-`str` branch raises, and
+    /// `host_error` keeps Python's own exception object for it. The lone
+    /// surrogate that makes `quote("\ud800", safe="")` raise
+    /// `UnicodeEncodeError` stays unreachable for `iri_to_uri`'s reason — a
+    /// `&str` cannot hold one.
+    fn quote(&self, text: &str, safe: Option<&Value>) -> Result<String, Error>;
     /// `json.dumps` — `json_script` (`:85-91`), whose separators and
     /// `ensure_ascii` are Django's `_json_script` choice.
     fn json_dumps(&self, value: &Value) -> Result<String, Error>;
@@ -770,8 +789,8 @@ impl FilterHost for NoFilterHost {
         refused_panic("iri_to_uri")
     }
 
-    fn quote(&self, _text: &str, _safe: &str) -> String {
-        refused_panic("quote")
+    fn quote(&self, _text: &str, _safe: Option<&Value>) -> Result<String, Error> {
+        Err(refused("quote"))
     }
 
     fn json_dumps(&self, _value: &Value) -> Result<String, Error> {
@@ -1181,9 +1200,9 @@ impl FilterHost for TestFilterHost {
             .unwrap_or_else(|| refused_panic("iri_to_uri"))
     }
 
-    fn quote(&self, _text: &str, _safe: &str) -> String {
-        self.record_plain("quote");
-        self.quote.clone().unwrap_or_else(|| refused_panic("quote"))
+    fn quote(&self, _text: &str, _safe: Option<&Value>) -> Result<String, Error> {
+        self.record("quote")?;
+        self.quote.clone().ok_or_else(|| refused("quote"))
     }
 
     fn json_dumps(&self, _value: &Value) -> Result<String, Error> {

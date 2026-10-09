@@ -669,21 +669,15 @@ mod tests {
     /// and a number in prose that nothing checks is a defect this project has
     /// paid for more than once. The array's length is the count, and the
     /// assertion below is what makes a stale entry fail rather than pass.
-    const STILL_STUBBED: [&str; 16] = [
+    const STILL_STUBBED: [&str; 10] = [
         "date",
-        "iriencode",
         "json_script",
-        "linebreaks",
-        "linebreaksbr",
-        "linenumbers",
         "phone2numeric",
         "pprint",
         "slugify",
-        "striptags",
         "time",
         "timesince",
         "timeuntil",
-        "urlencode",
         "urlize",
         "urlizetrunc",
     ];

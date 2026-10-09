@@ -918,18 +918,33 @@ impl FilterHost for PyFilterHost<'_> {
         self.utility_text("iri_to_uri", "django.utils.encoding", "iri_to_uri", text)
     }
 
-    fn quote(&self, text: &str, safe: &str) -> String {
+    /// `urllib.parse.quote` with `urlencode`'s own kwargs construction
+    /// (`defaultfilters.py:365-379`): the `safe` keyword is omitted when the
+    /// argument is `None` and the object itself is passed otherwise.
+    ///
+    /// The argument is converted back through [`PyFilterHost::object`], which is
+    /// lossless in both directions that matter here — a `list` of values is
+    /// rebuilt as a `list`, and anything this crate interns (`bytes`, a
+    /// `bytearray`, a `dict`, a generator) is **the same object**, taken from the
+    /// interner by id. So `quote` sees exactly what it would have seen in Django,
+    /// and its `bytes([c for c in safe if c < 128])` branch is Python's answer
+    /// rather than a Rust reconstruction of it.
+    fn quote(&self, text: &str, safe: Option<&Value>) -> Result<String, Error> {
         let py = self.py;
         let outcome = (|| {
-            let kwargs = PyDict::new(py);
-            kwargs.set_item("safe", safe)?;
-            let quoted = py
-                .import("urllib.parse")?
-                .getattr("quote")?
-                .call((PyString::new(py, text),), Some(&kwargs))?;
-            quoted.extract::<String>()
+            let quoted = py.import("urllib.parse")?.getattr("quote")?;
+            let value = PyString::new(py, text);
+            let result = match safe {
+                None => quoted.call1((value,))?,
+                Some(safe) => {
+                    let kwargs = PyDict::new(py);
+                    kwargs.set_item("safe", self.object(safe)?)?;
+                    quoted.call((value,), Some(&kwargs))?
+                }
+            };
+            result.extract::<String>()
         })();
-        outcome.unwrap_or_else(|e| self.infallible_failure("quote", e))
+        outcome.map_err(|e| self.host_error("quote", e))
     }
 
     fn json_dumps(&self, value: &Value) -> Result<String, Error> {

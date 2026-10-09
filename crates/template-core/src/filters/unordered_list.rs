@@ -101,7 +101,7 @@
 
 use crate::filters::host::{FilterCall, NestedSequence};
 use crate::filters::value::Value;
-use crate::parser::error::Error;
+use crate::parser::error::{Error, PyErrorKind};
 
 /// One `walk_items` pair: an item, and the nested sequence that belongs under it
 /// if the next element was one (`None` when it was a plain item).
@@ -193,8 +193,30 @@ pub(crate) fn list_formatter(
     Ok(output.join("\n"))
 }
 
+/// The `base.py:813` collision: `unordered_list`'s own second parameter is named
+/// `autoescape`, and Django's loop passes `autoescape` by keyword **before** the
+/// positional argument, so *any* argument raises before the body is entered.
+///
+/// Measured on the pinned tree over an `int`, `None`, a `str`, a `float`, a
+/// `bool` and a resolved variable: one message, naming the filter's own `def`
+/// name (which for `unordered_list` is also its registered name).
+fn argument_collision() -> Error {
+    Error::filter_host(
+        PyErrorKind::TypeError,
+        "unordered_list",
+        "unordered_list() got multiple values for argument 'autoescape'",
+    )
+}
+
 /// `unordered_list`'s body: format, then `mark_safe`.
-pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
+pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
+    // The argument is unreachable in Django, so it is unreachable here too. It
+    // used to be ignored — the body answered where Django raised, which is the
+    // wrong direction for a drop-in — and the corpus row
+    // `unordered_list/argument` is what pins the refusal.
+    if arg.is_some() {
+        return Err(argument_collision());
+    }
     // `list_formatter(value)` -> `walk_items(value)` -> `iter(value)`. A
     // non-iterable value raises here and, with no `try` around it, escapes
     // (measured `unordered_list(5)` is a `TypeError`).
