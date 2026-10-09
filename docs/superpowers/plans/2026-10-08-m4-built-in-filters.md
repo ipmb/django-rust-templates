@@ -3240,16 +3240,43 @@ its own task rather than folded into Task 8.
   the same `ERROR_CASES` refusal row as the other four — `urlize/argument` — and
   no `parity` row with an `arg` or an `arg_variable`; unlike `urlizetrunc`, whose
   `limit` comes *before* `autoescape` and is therefore reachable.
-- `json_script` (`:85-92`) — `element_id=None`, `is_safe=True`; escapes `<`, `>`
-  and `&` in `json.dumps(value)` under `django.utils.html.json_script`. Host for
-  `json_dumps`, Rust for the escaping and the `<script id=…>` assembly **if** the
-  probe shows the assembly is separable from the dump; if it is not, the whole
-  thing is the host call and the task says so rather than splitting it.
+- `json_script` (`:85-92`) — `element_id=None`, `is_safe=True`; the body is
+  `_json_script(value, element_id)` and nothing else, where `_json_script` is
+  `django.utils.html.json_script` (`html.py:95-114`). **Measured, the assembly is
+  separable from the dump, which is what the probe was for:**
+  `json_str = json.dumps(value, cls=encoder or DjangoJSONEncoder).translate(
+  _json_script_escapes)` is one statement and the `<script …>` wrapping is the
+  next, so the host method is `json_dumps` and Rust owns
+  `_json_script_escapes` (`html.py:88-92`, exactly three entries — `>` `<` `&` to
+  `>` `<` `&`) and the two templates.
+
+  **And the probe was worth running: the seam's `json_dumps` was wrong twice, and
+  neither error was visible anywhere.** `PyFilterHost` passed
+  `separators=(",", ":")` and `ensure_ascii=True` where Django passes neither —
+  the first is a real divergence (measured, Django's `json_script({"a": 1})` is
+  `'{"a": 1}'` with the space) and the second was right only because `True` is
+  `json.dumps`' default. It also omitted `cls=DjangoJSONEncoder`, which is not a
+  formatting difference at all: measured, `json_script({"d": date(2026, 10, 8)})`
+  is `'{"d": "2026-10-08"}'` where the plain encoder raises
+  `TypeError: Object of type date is not JSON serializable`. **No gate could see
+  it** — `json_script` was a stub and this was the method's only caller, so the
+  whole of `json_dumps` was dead code behind a live doc comment. Corrected in
+  `crates/template-py/src/filters.rs`, with the measurement in the comment; the
+  corpus rows below are what hold it.
 - `pprint` (`:990-996`) — **Review Focus 5**: no upstream test, so its oracle is
   `pprint.pformat` called directly in `tests/test_filter_parity.py` rather than
   through a template. Its `except Exception` arm returns
-  `"Error in formatting: %s: %s"` with the exception class name, and that arm is
-  reachable — an object whose `__repr__` raises. The corpus must include one.
+  `"Error in formatting: %s: %s" % (e.__class__.__name__, e)`, and **measured,
+  that arm is reachable and its text is reproducible**: an object whose
+  `__repr__` raises `ValueError("boom repr")` gives
+  `'Error in formatting: ValueError: boom repr'`, on the object itself and on it
+  nested in a list or a dict. So the body needs the *host's* failure in two
+  pieces — the class **name** and `str(error)` — which is what
+  `PyErrorKind::name()` and the kept exception object are for, and the corpus
+  needs a `value` class whose `__repr__` raises (there is already a `LOUD_STR`
+  in `tests/filter_cases.py` whose `__str__` raises; this needs its `__repr__`
+  twin). The dump itself is `FilterHost::pformat`, whole — `pprint`'s width,
+  sorting and recursion are not Rust's.
 - `phone2numeric` (`:984-988`) — `django.utils.text.phone2numeric`, a
   `str.translate` over a fixed 26-letter table; pure, so it is Rust's, and the
   table is in the module.

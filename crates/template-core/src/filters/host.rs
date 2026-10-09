@@ -494,8 +494,21 @@ pub trait FilterHost {
     /// `UnicodeEncodeError` stays unreachable for `iri_to_uri`'s reason — a
     /// `&str` cannot hold one.
     fn quote(&self, text: &str, safe: Option<&Value>) -> Result<String, Error>;
-    /// `json.dumps` — `json_script` (`:85-91`), whose separators and
-    /// `ensure_ascii` are Django's `_json_script` choice.
+    /// The `json.dumps` inside `django.utils.html.json_script` (`html.py:103`):
+    /// **`json.dumps(value, cls=DjangoJSONEncoder)`**, whole, with `json`'s own
+    /// default separators.
+    ///
+    /// Both halves of that are load-bearing and both were got wrong once, in
+    /// `PyFilterHost`: the separators are `(", ", ": ")` and not `(",", ":")`,
+    /// and the encoder is what makes a `date`, `Decimal` or `UUID` serialisable
+    /// at all rather than a `TypeError`. Measured on the pinned tree,
+    /// `json_script({"a": 1})` is `'{"a": 1}'` and
+    /// `json_script({"d": date(2026, 10, 8)})` is `'{"d": "2026-10-08"}'`.
+    /// `ensure_ascii` needs no mention: `True` is `json.dumps`' default.
+    ///
+    /// **The escaping and the `<script>` wrapping are the caller's**, not this
+    /// method's — `json_script`'s Rust body owns `_json_script_escapes`
+    /// (`html.py:88-92`, three entries) and the two templates.
     fn json_dumps(&self, value: &Value) -> Result<String, Error>;
     /// `pprint.pformat` — `pprint` (`:990-996`).
     fn pformat(&self, value: &Value) -> Result<String, Error>;

@@ -950,12 +950,31 @@ impl FilterHost for PyFilterHost<'_> {
     fn json_dumps(&self, value: &Value) -> Result<String, Error> {
         let py = self.py;
         let outcome = (|| {
+            // **Django's own call, and an earlier revision of these two lines was
+            // not.** `django.utils.html.json_script` (`html.py:103-105`) is
+            // `json.dumps(value, cls=encoder or DjangoJSONEncoder)` — **default
+            // separators**, and the encoder is what makes a `date`, `Decimal` or
+            // `UUID` serialisable at all. The revision here passed
+            // `separators=(",", ":")` and `ensure_ascii=True`, on a reading that
+            // `json_script`'s output is compact; it is not. Measured on the pinned
+            // tree: `json_script({"a": 1})` is `'{"a": 1}'` with the space, where
+            // the tight separators give `'{"a":1}'`, and
+            // `json_script({"d": date(2026, 10, 8)})` is
+            // `'{"d": "2026-10-08"}'` where they raise
+            // `TypeError: Object of type date is not JSON serializable`.
+            // `ensure_ascii` is `json.dumps`' own default and so is correctly
+            // absent: `"\uXXXX"` for non-ASCII was right by accident, not by
+            // choice.
+            //
+            // The defect was invisible until Task 9 because `json_script` was a
+            // stub and this was its only caller; no gate could see it. Recorded
+            // rather than silently corrected, because the same reading could be
+            // made again elsewhere in the seam.
             let kwargs = PyDict::new(py);
-            // Django's own choice for `json_script` (`defaultfilters.py:82-91`):
-            // no spaces, and `\uXXXX` for non-ASCII so the script body stays
-            // ASCII whatever the page's encoding.
-            kwargs.set_item("separators", (",", ":"))?;
-            kwargs.set_item("ensure_ascii", true)?;
+            let encoder = py
+                .import("django.core.serializers.json")?
+                .getattr("DjangoJSONEncoder")?;
+            kwargs.set_item("cls", encoder)?;
             let dumped = py
                 .import("json")?
                 .getattr("dumps")?

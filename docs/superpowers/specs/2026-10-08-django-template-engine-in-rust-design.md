@@ -1079,6 +1079,22 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   `_tag_re_split_positions` are private and have no caller anywhere in the
   tree, so they need not be modelled.
 
+- **A seam method whose only caller is still a stub is unverified code with a
+  verified doc comment, and the two can disagree indefinitely.** Measured:
+  `PyFilterHost::json_dumps` passed `separators=(",", ":")` and `ensure_ascii`
+  where `django.utils.html.json_script` (`html.py:103`) passes neither, and
+  omitted `cls=DjangoJSONEncoder` — so `json_script({"a": 1})` would have come
+  back `'{"a":1}'` where Django answers `'{"a": 1}'`, and a `date` inside the
+  value would have raised `TypeError` where Django serialises it. It survived
+  from Task 2 to Task 9 because `json_script` was a stub and no other body calls
+  the method: no unit test can reach it, `cargo test` never ran it, and the
+  milestone's own corpus could not name it. **What found it was writing the
+  brief for the task that would consume it** — reading the source the seam method
+  claims to wrap, rather than the seam method's claim about the source. The rule
+  this gives: when a task's brief names a host method, re-derive that method
+  against the pinned source before the task starts, because the corpus that would
+  otherwise catch it is written from the same claim.
+
 - **Every exception this engine synthesises names Django's own function, and a
   Django release can rename one.** `Error::filter_host`'s message is a
   transcription of what the pinned tree raises, so it is only as stable as the
@@ -1096,6 +1112,15 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   (`unordered_list`, `linebreaks`, `linebreaksbr`, `linenumbers`, `urlize`) and
   every other row that pins a text — whenever the Django pin moves: a
   synthesised message is correct for one pin at a time.
+  **And say which kind of pin-bump item each one is, because the checklist mixes
+  two that are not run the same way.** An item that **fails loudly on a bump** —
+  this row, the parity corpus, the inventory test, `py_repr_str`'s ASCII diff —
+  is watched by the gate and needs no one to remember it; an item that **needs
+  manual re-measurement** — §10.4's per-module class scan, the Unicode tables the
+  generators write — compares generated or scanned data and stays green until
+  someone re-runs it, so its trigger has to be written down. A checklist where a
+  reader cannot tell the two apart reads as coverage and is worse than none, for
+  the reason the class-scan bullet above gives about stale deferred lists.
 
 ## 11. Review workflow
 
