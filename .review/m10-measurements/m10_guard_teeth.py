@@ -35,28 +35,45 @@ Each variant runs against a scratch copy of the real `_impl`, with the real
 `DECLARED` and `COMPARED_PATH`, so the only differences between cells are the
 guard revision and the one planted file.
 
+**The scratch tree comes from :data:`IMPL_REV`, not from the working tree.**
+The first version copied the live `_impl`, which made this table a function of
+*when* it was run: Task 7 landed six `loaders/` files in a later commit, so the
+"before" column began reporting its plants against a tree the revision it
+documents never had, and the reviewer got a different table than the one
+recorded. A measurement that moves when unrelated work lands is not a
+measurement. `--impl-rev` re-points it when the frontier genuinely moves.
+
 Run it:
 
     .venv/bin/python -I .review/m10-measurements/m10_guard_teeth.py
 """
 
 import argparse
+import io
 import pathlib
-import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import types
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 GUARD_SOURCE = ROOT / "scripts" / "check_transcriptions.py"
-REAL_IMPL = ROOT / "python" / "django_rust_templates" / "_impl"
+IMPL_PREFIX = "python/django_rust_templates/_impl"
 
 # The guard as it was at the commit Task 6 fixed — the last revision whose
 # `marked` clause has both defects. A SHA rather than `HEAD~1`, because this
 # script is re-run long after the commit it measures and `HEAD~1` would then be
 # the fixed guard, quietly turning the "before" column into a second "after".
 BEFORE_REV = "7f73841"
+
+# The `_impl` tree this table is about: the one Task 7 left, which is the first
+# tree that exercises the defect (it holds the first file in a subpackage) and
+# the last one the live guard's tables describe. A SHA for the same reason as
+# `BEFORE_REV` — and for the further reason that the `before` clause is only
+# clean against a tree whose subpackage files it cannot see, which was true at
+# Task 6 and is not true of whatever the tree holds today.
+IMPL_REV = "f979c7f"
 
 # A name Django does not have, so the planted file is nobody's shadow and
 # `_shim.shadowing_files()` is unaffected — this is about the guard's own clause.
@@ -95,18 +112,42 @@ def source_of(revision: str) -> str:
     return shown.stdout
 
 
-def cell(label: str, guard, plant: str | None):
+def materialise(destination: pathlib.Path, revision: str) -> pathlib.Path:
+    """Write the ``_impl`` tree of ``revision`` into ``destination``.
+
+    Through ``git archive`` rather than ``shutil.copytree``, so the tree is the
+    one that revision recorded however much later this is run. Read as a tar
+    stream in memory: the point is the bytes git has, and going via the working
+    tree to get them would reintroduce exactly the coupling this removes.
+    """
+    archived = subprocess.run(
+        ["git", "archive", "--format=tar", f"{revision}:{IMPL_PREFIX}"],
+        cwd=ROOT,
+        capture_output=True,
+    )
+    if archived.returncode != 0:
+        sys.exit(
+            f"cannot read {IMPL_PREFIX} at {revision}: "
+            f"{archived.stderr.decode(errors='replace').strip()}"
+        )
+    destination.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(archived.stdout)) as archive:
+        archive.extractall(destination, filter="data")
+    return destination
+
+
+def cell(label: str, guard, plant: str | None, revision: str):
     """Run ``guard.check()`` over a scratch ``_impl``, optionally with a plant."""
     with tempfile.TemporaryDirectory() as tmp:
-        impl = pathlib.Path(tmp) / "_impl"
-        shutil.copytree(REAL_IMPL, impl)
+        impl = materialise(pathlib.Path(tmp) / "_impl", revision)
         if plant is not None:
             planted = impl / plant
             planted.parent.mkdir(parents=True, exist_ok=True)
             # A real transcription's bytes under a subpackage path, or a marker
             # with a body, so the planted file is a transcription as far as every
-            # clause here is concerned.
-            source = (REAL_IMPL / "base.py").read_text()
+            # clause here is concerned. Taken from the scratch tree rather than
+            # the working tree, for the reason `materialise` exists.
+            source = (impl / "base.py").read_text()
             if plant == PROBE:
                 source = (
                     "# TRANSCRIBED: django/template/loaders/probe.py "
@@ -134,6 +175,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--before", default=BEFORE_REV,
                         help="the revision whose guard has both defects")
+    parser.add_argument("--impl-rev", default=IMPL_REV,
+                        help="the revision whose _impl tree every cell runs against")
     args = parser.parse_args()
 
     before = source_of(args.before)
@@ -155,9 +198,14 @@ def main() -> int:
     ):
         print(f"=== {label} ===")
         guard = load_guard(label, source)
-        cell("clean scratch tree", guard, None)
-        cell(f"planted {PROBE}", guard, PROBE)
-        cell(f"planted {MISKEYED} (a real transcription's bytes)", guard, MISKEYED)
+        cell("clean scratch tree", guard, None, args.impl_rev)
+        cell(f"planted {PROBE}", guard, PROBE, args.impl_rev)
+        cell(
+            f"planted {MISKEYED} (a real transcription's bytes)",
+            guard,
+            MISKEYED,
+            args.impl_rev,
+        )
         print()
 
     print("=== summary ===")
