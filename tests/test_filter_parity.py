@@ -191,6 +191,23 @@ class FilterParityTests(unittest.TestCase):
                     rust_result,
                     membership=case.get("membership", False),
                 )
+                if "expected" in case:
+                    # The literal as well as the comparison, on the rows whose
+                    # answer turns on a `context` key. A body that ignored the
+                    # key would move Django's answer and ours together — drop
+                    # `autoescape` and both engines escape — so the comparison
+                    # above stays green on exactly the rows that exist to test
+                    # it. This string is the claim those rows make, which is why
+                    # only the rows that *depend* on a key carry one; see
+                    # `tests/filter_cases.py` on `expected`. Same rule as
+                    # `test_render_parity.py`'s four pinned strings.
+                    self.assertEqual(
+                        rust_result,
+                        case["expected"],
+                        f"{case['name']}: the pinned literal — parity is two "
+                        f"engines agreeing, and on this row they can agree on "
+                        f"the wrong answer",
+                    )
                 # The token is asserted to be what the row meant, so that a row
                 # whose `arg` fails to render (or renders as a variable rather
                 # than a constant) is a failure rather than a quietly different

@@ -63,8 +63,14 @@
 //! `i64::MAX`, a negative one to `i64::MIN`), which is faithful because Python
 //! clamps a slice bound to the sequence's own length anyway.
 //!
-//! A `TypeError` from `value[slice]` (a `dict` is unhashable-by-slice) is also
-//! caught — measured `slice_filter({}, "1")` is `{}`.
+//! The subscript can refuse as well, and **which class it refuses with is the
+//! interpreter's, not the filter's**: measured, `{}[slice(1)]` is `KeyError:
+//! slice(None, 1, None)` on the pinned 3.14.4 — slices became hashable in 3.12,
+//! which is this package's declared floor (`requires-python = ">=3.12"`) — and
+//! `TypeError: unhashable type: 'slice'` on the system 3.9.6. The source names
+//! all three classes in one `except`, so the answer is `{}` either way (measured
+//! `slice_filter({}, "1")` is `{}`); the class only matters to a unit test,
+//! which has to raise the one the pinned interpreter actually produces.
 
 use crate::filters::host::FilterCall;
 use crate::filters::value::Value;

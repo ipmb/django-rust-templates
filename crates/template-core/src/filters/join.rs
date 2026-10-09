@@ -43,6 +43,15 @@
 //!   catches, returning the value (measured `join((1, 2), "-", autoescape=False)`
 //!   is the tuple `(1, 2)`).
 //!
+//! **Django's own comment on that `except` — `# Fail silently if arg isn't
+//! iterable.` — names the wrong cause for the second case.** On the
+//! `autoescape=False` branch the `TypeError` comes from `str.join` meeting a
+//! non-`str` *element*, with the value iterated perfectly well; only the first
+//! case is about iterability at all. Both are `TypeError` and both return the
+//! value, so one comment covers two different faults and survives — but a body
+//! written to the comment's letter would ask "does it iterate?" and get
+//! `join((1, 2), "-", autoescape=False)` wrong.
+//!
 //! The result is `mark_safe`d in **both** branches — `join([0, 1, 2], "glue")`
 //! and `join({"a": 1, "b": 2}, "-", autoescape=False)` are both `SafeString`.
 //!

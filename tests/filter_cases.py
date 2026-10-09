@@ -35,14 +35,35 @@ lets a row be `mark_safe("AbC")` — and the safety rows are the point of this
 file. A textual format would have needed a second, private encoding for
 `safestring` and then a reason to trust it.
 
-**Two optional keys change what the row is, and both exist because the default
-would quietly score a different question.** `value_factory` replaces `value` for
-a **one-shot** input — a generator is consumed by whichever side reads it first,
-so a shared one makes the second side's answer a statement about an exhausted
-iterator; see [`case_value`]. `context` overrides the `Context` the loop reads
-`autoescape` and `use_tz` off, which is how the `needs_autoescape` filters get
-both branches: `join` with and without escaping answers different text from the
-same input, so nothing but the key can tell the two rows apart.
+**Three optional keys change what the row is, and each exists because the
+default would quietly score a different question.** `value_factory` replaces
+`value` for a **one-shot** input — a generator is consumed by whichever side
+reads it first, so a shared one makes the second side's answer a statement about
+an exhausted iterator; see [`case_value`]. `context` overrides the `Context` the
+loop reads `autoescape` and `use_tz` off, which is how the `needs_autoescape`
+filters get both branches: `join` with and without escaping answers different
+text from the same input, so nothing but the key can tell the two rows apart.
+
+**`expected` pins the literal, and it is for the rows a comparison cannot fail.**
+The comparison is two engines agreeing; where a broken body moves **both** engines
+the same way it moves the answer and the comparison together, and the row stays
+green. That is exactly what a lost `context` key does — a body that never reads
+`autoescape` agrees with a Django also told to ignore it — so such a row carries
+the text it must produce and the harness asserts the literal **as well as** the
+comparison. This is the same rule, for the same reason, as the four `expected`
+strings in `tests/test_render_parity.py`: comparing two runs that changed
+together would keep passing, and on these rows the string is the whole claim.
+Measured: dropping the key escapes the items on both sides of
+`join/autoescape-false-does-not-escape`, and escapes every level of
+`unordered_list/autoescape-false-nested` — those two are pinned below.
+
+**Carrying a key is not depending on it**, and only the rows that *depend* are
+pinned. `join/typeerror-returns-the-value-not-escaping` has an `autoescape` key
+and answers the int `5` whether it is read or not, so a literal there would pin
+nothing the comparison does not already see — the row is the `autoescape=False`
+half of the failing branch, not a detector. Measured, dropping the key from each
+of the three `context` rows changes the answer for **two** of them and not for
+this one.
 
 **A row cannot express an exception.** `resolve` propagates it rather than
 returning it, so a case whose *point* is that Django raises is a Rust body test,
@@ -1102,11 +1123,16 @@ CASES: list[dict] = [
         "arg": ", ",
     },
     {
+        # **Pinned**, because this row is the group's `autoescape=False`
+        # detector and parity alone cannot fail on it: drop the key and both
+        # engines escape, so a body that never read `autoescape` stays green.
+        # The literal is what reddens. See the module doc on `expected`.
         "name": "join/autoescape-false-does-not-escape",
         "filter": "join",
         "value": ["a", "<b>"],
         "arg": ", ",
         "context": {"autoescape": False},
+        "expected": "a, <b>",
     },
     {
         "name": "join/empty-list-is-the-empty-string",
@@ -1124,6 +1150,12 @@ CASES: list[dict] = [
         "arg": ", ",
     },
     {
+        # Carries an `autoescape` key and does **not** depend on it: `join(5,
+        # ", ")` raises `TypeError` and returns the value in both branches, so
+        # this answers the int `5` either way (measured). It is here as the
+        # failing branch's non-escaping half and is deliberately **not** pinned
+        # — an `expected` here would assert something the comparison already
+        # sees. See the module doc on `expected`.
         "name": "join/typeerror-returns-the-value-not-escaping",
         "filter": "join",
         "value": 5,
@@ -1357,10 +1389,15 @@ CASES: list[dict] = [
         # The group's second `context` row, and the only one that shows the
         # escaper being *chosen* rather than applied: nested, so the recursion
         # must carry the choice down rather than re-deciding per level.
+        #
+        # **Pinned**, and for the same reason as the join row above: with the
+        # key ignored every level escapes on both sides, so this row is a
+        # detector only if the literal is asserted. See the module doc.
         "name": "unordered_list/autoescape-false-nested",
         "filter": "unordered_list",
         "value": ["<a>", ["<b>"]],
         "context": {"autoescape": False},
+        "expected": "\t<li><a>\n\t<ul>\n\t\t<li><b></li>\n\t</ul>\n\t</li>",
     },
     {
         "name": "unordered_list/autoescape-true-nested",
