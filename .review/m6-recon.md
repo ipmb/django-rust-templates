@@ -307,8 +307,9 @@ since the first file finished:
 | `436747d` + `9eb488d` | `crates/template-core/src/parser/tags/url.rs` | *none entered* | **0 rows read, 0 wrong** — the first batch that stranded nothing at all, and the mechanism is worth keeping. `url.rs`'s five rows were all **quoted** by the naming pass, and a quoted row is never in the stranded bucket; the one unquoted row it had (`defaulttags.py:1514-1586`) was pruned by the correction commit (it is now `1514-1584`) before it could enter. So this batch neither confirms nor refutes the "clean batch" prediction — it never reached the list |
 | `93bc8ba` | `crates/template-core/src/filters/urlizetrunc.rs` | *none entered* | **0 rows read, 0 wrong** — the second batch to strand nothing, and the same mechanism: the module's three anchors were `defaultfilters.py:386`, `:389-400` and `:399`, all already **quoted** by `urlize.rs`, `host.rs` and `filter_cases.py`, and the one row it added (`defaultfilters.py:398`) is cited by the pass that added it. Two batches in a row now strand nothing, and neither is evidence for the "clean batch" prediction — both are evidence that a file whose rows are *all* quoted cannot feed the list, which is the list's own limit, not the file's quality |
 | `b8f72be` + `b5d05f7` | `crates/template-core/src/parser/tags/ifchanged.rs` | `defaulttags.py:1023-1073` | **1 row read, 1 wrong** — and it is the first entry the list has caught since the ten blank-ended rows, so it is worth its own note (below). Corrected to `1023-1062` in `b5d05f7`, which requotes the row, so it did not stay on the list |
+| `d09f40c` + `3f0aac0` | `tests/test_materialise.py` | `base.py:1036`, `defaulttags.py:262`, `engine.py:62-63` | **3 rows read, 1 wrong** — `engine.py:62-63` is over-wide by one line (the claimed `template_builtins` is set at 63; 62 sets `self.builtins`, which the claim never mentions, and `template_libraries` at 61 is not in the span either), fixed in `98587b3`. The other two are right: `base.py:1036` is `token = None` at class level, `defaulttags.py:262` is `IfChangedNode.__init__`. All three stayed unquoted, so they remain on the list — see below |
 
-Twenty-eight rows have passed through; twelve were wrong or cited for the wrong
+Thirty-one rows have passed through; thirteen were wrong or cited for the wrong
 line. (Two batches, `url.rs` and `urlizetrunc.rs`, stranded none — see the
 table.) Eight were wrong in a *span's* end (`base.py:959-1029` ends on a blank
 line, `:963-995` runs past the arms it claims, `:999-1029` misses two of its
@@ -316,16 +317,21 @@ three branches, `html.py:412-415` is a neighbouring `@cached_property`,
 `base.py:771-774` / `base.py:804-810` each end one statement past the construct
 they enumerate, `defaulttags.py:1352-1419` ends two blank lines past its
 function, and `defaulttags.py:1023-1073` ends eleven lines past its function,
-inside the next one) and four were wrong in the line itself (`html.py:246` is
+inside the next one), four were wrong in the line itself (`html.py:246` is
 blank, `base.py:999` is not the guard it is cited as, `base.py:972` is right for
 one of its two sites and wrong for the other, and `base.py:697-701` is a regex
-rather than the `compile_filter` its sentence is about). All twelve came from a
-file whose citations had never been read in context, and the span ones are
-invisible to a check that only asks whether some line inside the span exists.
+rather than the `compile_filter` its sentence is about), and **one is the
+thirteenth shape: over-wide at the *start*** (`engine.py:62-63`). That one is
+worth the separate clause because the other twelve can all be described as "the
+span reaches past what the sentence names", which suggests a rule about ends;
+`engine.py:62-63` shows the same defect can be a line at the front, where a
+detector looking for overruns will not look. All thirteen came from a file whose
+citations had never been read in context, and the span ones are invisible to a
+check that only asks whether some line inside the span exists.
 
-`defaulttags.py:1023-1073` is the twelfth and it is the interesting one, because
+`defaulttags.py:1023-1073` is the interesting one, because
 it is the first defect the stranded list has caught since the ten blank-ended
-rows — the other eleven came from a naming pass or from the blank-end sweep.
+rows — the other twelve came from a naming pass or from the blank-end sweep.
 Its end line, `"\n".join(sorted(parser.libraries)),` at 1073, is *real code*, so
 the blank-end detector could not fire on it; the overrun is invisible until you
 look at what 1073 belongs to, which is `find_library`'s `raise`, eleven lines
@@ -506,10 +512,31 @@ numbers in this paragraph are otherwise "two right answers to two questions":
 | any `def`, methods included | 15 | 3 |
 | module-level `def`/`class` only | 6 | 3 |
 
-The reviewer reported 7 and 2. Their two are both in the three, so the rule is
-sound and their reading of the two spans is right; the divergence is the same
-class of disagreement this whole project keeps producing, and the third hit is
-the reason to spend a sentence on it.
+The reviewer reported 7 and 2, and neither is a third granularity. The 7 was
+never "all spans crossing a boundary": it was "crossing, *and not ending on the
+owner's last line*" — the second exemption already applied — so it is not
+comparable to either unfiltered column above, and the comparable figure under
+their mapping is the 15. The 2 was an undercount, from two defects in their
+script, and each is worth naming because each is a way a span detector loses
+hits **in silence**:
+
+- `ast` puts `FunctionDef.lineno` on the `def`, not on the decorator — decorators
+  live in `decorator_list` with their own linenos — so a decorator line maps to
+  *no* definition at all. Their `owner()` returned `None` and the anchor
+  `continue`d out of the run. That is exactly `html.py:210-232`, the third hit.
+  This is the strongest argument for the mapping fix in the note below: a rule
+  that drops anchors without recording the omission is worse than one that
+  reports a false positive, because nothing in the output says the run was
+  incomplete.
+- They compared definitions **by name** rather than by identity (their
+  `os_[2] != oe[2]`), so a span crossing from `Variable.resolve` into
+  `FilterExpression.resolve` compares equal and is skipped. Two same-named
+  methods are the common case in this file set, so this is an independent hole,
+  not a variant of the first.
+
+So the rule is sound and their two spans are two of the three; what they need is
+the mapping fix below, which their own two defects describe better than the count
+does.
 
 The three, each read against `.django/` @ 6.0.9 before being believed:
 
@@ -547,6 +574,44 @@ replacements, all the same width as what they replaced, so nothing rewrapped,
 and the first correction whose repair was a *reuse* of an existing neighbour
 rather than a new row.
 
+## Two more shorthand classes, both of which the counts conflate
+
+`SHORTHAND_RE` is `r"`:(\d+)(?:-(\d+))?`"` — it matches a backticked `:N` and
+nothing else, so `unmigrated` counts three things as one. Sweeping all 56
+remaining occurrences and reading them separates them:
+
+- **Citation-shaped prose that is not a citation.** Four in
+  `tests/test_materialise.py`, all the trailing argument of the template token
+  `x|upper:1:2` (`` `:2` is left over ``). No file can ever be named, so no
+  naming pass can clear them, and `--frozen` could never be reached while they
+  stood. The repair is to the *prose*, not to a number: each became "the `2`",
+  which cannot be read as a line number (`3f0aac0`). The convention ("a
+  backticked `:N` is line N of the file named nearby") is load-bearing — it is
+  what lets a reader resolve a shorthand and what lets the metric count one — and
+  prose that borrows the shape without the meaning breaks it even though a human
+  reader, who can see the full token three words earlier, is not confused. So the
+  tool is right to fire and the prose is what changes.
+- **Shorthands citing a *repo* file rather than a Django one.** Two known, both
+  handled the same way but for a different reason. `tests/test_materialise.py:1070`
+  cited `:207` and `:48-59` for `tags/mod.rs` — and both numbers were also wrong
+  against the file, so the sentence was rewritten with `parser/tags/mod.rs`
+  throughout (`d09f40c`). `filters/striptags.rs:55` cites
+  `crates/template-py/src/filters.rs:854`, `` `:248` `` and `` `:1528` `` for the
+  `strip_tags` → `host_error` → `report` path; that file's pass is still pending,
+  and a first read is the reason it needs one rather than a rename — `:248` is
+  `fn host_error` and right, but the *named* `:854` is inside `comma_bits`
+  (`for bit in argument.call_method1("split", (",",))?.try_iter()?`), nowhere
+  near the sentence's subject, so at least one number on that line is wrong.
+  A `.rs` path is invisible to `ANCHOR_RE` by design — the manifest is Django
+  anchors — so naming the file is the whole repair, which is exactly what the
+  metric asks for; the numbers still have to be read.
+
+Both classes are the same observation from two sides: `unmigrated` is a regex
+count, and a regex cannot tell a Django line citation from a citation-shaped
+string. That is not a defect in the metric — "shorthand anchor(s) naming no file"
+is a *true* description of all three kinds — but it means the count is a
+triage queue, not a to-do list, and the read is what divides it.
+
 ## Three notes from the review that outlive their findings
 
 - **A withdrawn finding, and its cause.** The reviewer briefly reported
@@ -558,12 +623,27 @@ rather than a new row.
   paragraph in the write-up, because it is the sweep's own failure mode
   occurring in the conversation *about* the sweep.
 - **An internal disagreement between two citations of one line is itself a
-  signature, and it is checkable.** Found in `ifchanged.rs`, whose two
-  citations of Django's `nodelist_false = NodeList()` gave it as `` `:1057-1058` ``
-  and `` `:1058` ``, disagreeing with each other — and both were wrong; the line
-  is 1060. Mechanically: two rows whose snippets are the same text at different
-  line numbers. It is a candidate sixth detector, and it is cheap. It is *not*
-  adopted here, and it is recorded as a candidate rather than quietly run.
+  signature, but its rate cannot be measured against the manifest.** Found in
+  `ifchanged.rs`, whose two citations of Django's `nodelist_false = NodeList()`
+  gave it as `` `:1057-1058` `` and `` `:1058` ``, disagreeing with each other —
+  and both were wrong; the line is 1060. Mechanically the signature is two sites
+  whose snippets are the same text at different line numbers. The reviewer tried
+  to hand over the false-positive rate and the attempt is the finding: grouping
+  manifest rows by `(file, snippet)` gives 20 texts appearing at more than one
+  start line out of 335, and nearly all are legitimate — the text genuinely
+  occurs several times (`return input_val` at 163/177/182), or one row is a span
+  and the other a line inside it (`defaultfilters.py:44-48` vs `:46`). Filter
+  both and essentially nothing survives — but that is not a low rate, it is
+  **the wrong population**: the manifest holds only rows that pass `--check`, and
+  a row with a wrong number cannot be in it, while the disagreement the
+  signature is for is precisely two *wrong* numbers for one line.
+  `ifchanged.rs`'s two were never manifest rows; they were prose citations, both
+  wrong, with the line at 1060. So the signature's domain is citations in the
+  tree **before** naming, and its rate can only be collected during a sweep, by
+  noting each time two sentences cite one construct at different numbers and
+  whether that disagreement meant a defect. It stays a candidate; the reason is
+  stronger than "nobody has measured it" — the artifact anyone would reach for
+  to measure it cannot contain the phenomenon.
 - **Publish the denominator with the ratio.** "28 rows / 12 wrong" is only a
   fact when the 28 is the row count that entered the stranded list and the 12
   is the number of those whose spans were wrong. A ratio without its base is
