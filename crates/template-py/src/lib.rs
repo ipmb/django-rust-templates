@@ -1122,7 +1122,7 @@ struct FilterCheckHost<'py> {
     /// rows use.
     check_filter: Option<Bound<'py, PyAny>>,
     /// The shell's `token -> FilterExpression` callable — that is, Django's own
-    /// `Parser.compile_filter` (`base.py:697-701`), which is
+    /// `Parser.compile_filter` (`base.py:676`), which is
     /// `TemplateIfParser.create_var`'s
     /// `self.template_parser.compile_filter(value)` (`defaulttags.py:929`).
     ///

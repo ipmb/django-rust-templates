@@ -346,7 +346,7 @@ def _materialise_operand(lookup, value, parser=None):
     """One of a ``FilterExpression``'s operands, as Django's own 2-tuple.
 
     ``(lookup, value)`` is the shape Django holds — ``args`` is a list of pairs
-    and ``resolve`` unpacks it (`base.py:804-810`), and ``args_check`` counts it
+    and ``resolve`` unpacks it (`base.py:804-809`), and ``args_check`` counts it
     (`base.py:822-826`) — so this returns the pair rather than the value.
 
     ``False`` means a **constant**, and Django holds its *value*:
@@ -360,7 +360,7 @@ def _materialise_operand(lookup, value, parser=None):
 
     ``True`` means a lookup, and the ``Variable`` is kept for the context —
     ``resolve`` reads this flag to choose between ``mark_safe(arg)`` and
-    ``arg.resolve(context)`` (`base.py:804-810`).
+    ``arg.resolve(context)`` (`base.py:804-809`).
 
     ``resolve({})`` cannot raise ``VariableDoesNotExist`` for a constant: that
     is raised by ``_resolve_lookup``, reached only ``if self.lookups is not
@@ -382,7 +382,7 @@ def template_for(nodelist, engine=None, parser=None):
     directly, because **rendering a nodelist requires a bound context** and binding is
     a `Template`-level act: Django's `Template.render` enters
     `context.bind_template(self)`, and the render path reads `context.template.engine`
-    in five places — `string_if_invalid` for a failed lookup (`base.py:793`,
+    in six places — `string_if_invalid` for a failed lookup (`base.py:793`,
     `base.py:997`, `base.py:1005`, `base.py:1011`, `base.py:1024`) and `engine.debug`
     for the annotated traceback (`base.py:1054`). With `context.template` left `None`,
     `{{ nope }}` raises `AttributeError: 'NoneType' object has no attribute 'engine'`
@@ -475,7 +475,7 @@ def compile_filter(parser):
     ``TemplateIfParser.create_var``'s
     ``self.template_parser.compile_filter(value)`` (``defaulttags.py:929``) —
     the ``FilterExpression`` behind one ``{% if %}`` operand. Django's own
-    ``Parser.compile_filter`` *is* that call (``base.py:697-701``:
+    ``Parser.compile_filter`` *is* that call (``base.py:676``:
     ``return FilterExpression(token, self)``), so this hands the bound method
     over rather than wrapping it.
 
@@ -553,7 +553,7 @@ def _materialise_filter_expression(desc, parser=None, resolve_ref=None):
             _materialise_operand(lookup, value, parser) for lookup, value in wire_args
         ]
         if handle is None:
-            # `find_filter`, then `args_check`, then append — `base.py:771-774`.
+            # `find_filter`, then `args_check`, then append — `base.py:771-773`.
             func = parser.find_filter(name)
             FilterExpression.args_check(name, func, args)
         elif resolve_ref is None:

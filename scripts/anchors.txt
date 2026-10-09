@@ -39,7 +39,6 @@ base.py:688-699	django/template/base.py	688	699	-	-
 base.py:690-698	django/template/base.py	690	698	re.escape(")")	-
 base.py:695	django/template/base.py	695	-	-	-
 base.py:696	django/template/base.py	696	-	-	-
-base.py:697-701	django/template/base.py	697	701	-	-
 base.py:701-775	django/template/base.py	701	775	-	-
 base.py:701-719	django/template/base.py	701	719	-	-
 base.py:703-712	django/template/base.py	703	712	-	-
@@ -57,7 +56,7 @@ base.py:758-761	django/template/base.py	758	761	-	-
 base.py:768	django/template/base.py	768	-	args.append((False, Variable(constant_arg).resolve({})))	-
 base.py:771	django/template/base.py	771	-	-	-
 base.py:771-772	django/template/base.py	771	772	-	-
-base.py:771-774	django/template/base.py	771	774	-	-
+base.py:771-773	django/template/base.py	771	773	filter_func = parser.find_filter(filter_name)	filters.append((filter_func, args))
 base.py:773	django/template/base.py	773	-	filters.append((filter_func, args))	-
 base.py:774	django/template/base.py	774	-	-	-
 base.py:783	django/template/base.py	783	-	self.is_var = isinstance(var_obj, Variable)	-
@@ -66,7 +65,6 @@ base.py:793	django/template/base.py	793	-	string_if_invalid = context.template.e
 base.py:800-806	django/template/base.py	800	806	-	-
 base.py:803-819	django/template/base.py	803	819	expects_localtime	-
 base.py:804-809	django/template/base.py	804	809	arg_vals = []	arg_vals.append(arg.resolve(context))
-base.py:804-810	django/template/base.py	804	810	-	-
 base.py:806-807	django/template/base.py	806	807	-	-
 base.py:811	django/template/base.py	811	-	obj = template_localtime(obj, context.use_tz)	-
 base.py:813	django/template/base.py	813	-	func(obj, autoescape=context.autoescape, *arg_vals)	-
