@@ -216,15 +216,15 @@ pub fn builtin_tag(command: &str) -> Option<CompileFn> {
 /// Every command name in the registry, ascending — **including the stubs**.
 ///
 /// The name says what the function answers, because the old one
-/// (`builtin_tag_names`) did not, and the misreading it invited has now been made
-/// three times: this is the registry's *keys*, not the set of tags Rust
-/// implements. A stub is a key whose body raises `Unimplemented`, so anyone who
-/// takes this list whole claims `partial` and `partialdef` for Rust and then has
-/// to hand them back — measured at 245 failures of the 1547 when `ShellHost`
-/// did exactly that. The implemented set is this minus
-/// [`builtin_tag_stub_names`], and the subtraction is written at each call site
-/// rather than offered as a third function because two spellings of one set is
-/// the drift this table exists to prevent.
+/// (`builtin_tag_names`, its name until M9's rename) did not, and the misreading
+/// it invited has now been made three times: this is the registry's *keys*, not
+/// the set of tags Rust implements. A stub is a key whose body raises
+/// `Unimplemented`, so anyone who takes this list whole claims `partial` and
+/// `partialdef` for Rust and then has to hand them back — measured at 245
+/// failures of the 1547 when `ShellHost` did exactly that. The implemented set is
+/// this minus [`builtin_tag_stub_names`], and the subtraction is written at each
+/// call site rather than offered as a third function because two spellings of
+/// one set is the drift this table exists to prevent.
 pub fn builtin_tag_names_including_stubs() -> Vec<&'static str> {
     REGISTRY.iter().map(|(name, _)| *name).collect()
 }

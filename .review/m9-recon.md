@@ -271,7 +271,8 @@ prints the progress meter and therefore the only one whose count means anything)
 - `template_tests.test_logging.VariableResolveLoggingTests.test_log_on_variable_does_not_exist_not_silent`
 - `template_tests.test_logging.VariableResolveLoggingTests.test_log_on_variable_does_not_exist_silent`
 
-Both are the same defect: Django's outer handler (`base.py:1014-1020`) emits
+Both are the same defect: Django's outer handler emits a log line naming the
+variable that failed (`base.py:1014-1020` is that log call)
 
 ```python
 logger.debug(

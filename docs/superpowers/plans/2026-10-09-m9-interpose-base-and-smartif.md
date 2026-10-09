@@ -951,7 +951,7 @@ EOF
 
 ### Task 5: The resolver seam — `Variable._resolve_lookup`, with the failing `bit` on the wire
 
-Recon finding 4: wiring `Variable._resolve_lookup` to `_native.resolve` leaves **exactly two** failures, both the same defect. `LookupOutcome::Escaped` carries no `bit`, so the host's outer handler (`base.py:1014-1020`) cannot log the variable that failed:
+Recon finding 4: wiring `Variable._resolve_lookup` to `_native.resolve` leaves **exactly two** failures, both the same defect. `LookupOutcome::Escaped` carries no `bit`, so the host's outer handler cannot log the variable that failed (`base.py:1014-1020` is the log call it reaches):
 
 ```python
 logger.debug(
@@ -2116,9 +2116,11 @@ which is at **`base.py:94`**; `base.py:994` was cited for the
 `base.py:1015-1021` was a loose range whose end line is the closing paren of the
 `logger.debug` call, so its endpoint quoted `)`. All three were written from the
 plan's own prose rather than read off the tree — the plan's Step 4 doc-comment
-itself says "(`base.py:1014-1020`)", which is the handler's `except` line
+itself said "(`base.py:1014-1018`)", which is the handler's `except` line
 followed by the log call's first three lines and omits both `template_name` and
-`exc_info`. The repaired citations are `base.py:94`, `base.py:989`, and
+`exc_info`; Task 7's close-out widened that span to `1014-1020`, which includes
+both, and the distinction is exactly why the citation must name its unit (see
+the note below). The repaired citations are `base.py:94`, `base.py:989`, and
 `base.py:1015-1020`, each with a snippet authored from the sentence's own claim
 (`logging.getLogger("django.template")`, `raise VariableDoesNotExist(`, and
 `exc_info=True,` at the endpoint) rather than left unquoted.
@@ -2388,6 +2390,26 @@ the five plan sites, in `.review/m9-recon.md` and in the spec, and given a
 manifest entry whose snippet is the log message and whose end snippet is
 `exc_info=True` — so the number now carries its own claim instead of relying on
 the reader to re-read the file.
+
+**That correction left a granularity question, and it is worth settling once
+rather than per sentence.** The handler is `base.py:1014-1026` — the `except` at
+1014 through the `raise` at 1026, both arms (`silent_variable_failure`
+substitutes at 1024, the else re-raises at 1026). The log call is what
+`1014-1020` covers: the `except` line through `exc_info=True` on 1020,
+deliberately *not* ending on the bare `)` at 1021 — which is why the manifest
+entry's end snippet is `exc_info=True` and not a closing paren. **Both spans are
+in `scripts/anchors.txt`** (`:179` for the handler, snippet
+`silent_variable_failure`; `:180` for the log call, snippet the log message and
+end snippet `exc_info=True`), so neither is a bare number. The rule that follows
+is the one this project already applies elsewhere: **a citation's noun must name
+the unit its span covers** — "the handler" takes `1014-1026`, and a sentence
+whose claim is the log takes the log's span. Two sentences attached
+`1014-1020` to the word "handler" rather than to a logging claim (Task 5's
+opening, and `.review/m9-recon.md` §4) and were reworded; the spec's citation
+needs no change, because it qualifies the noun in place — "the handler
+(`base.py:1014-1020`, the `bit`-and-`exc_info` logging)". A fourth — finding
+(5) above — quoted the *corrected* span while describing the old one, which is
+the same error one step further in.
 
 **What the milestone hands forward.** The reviewer's dispatch is the last step
 after the docs commit; §10.4 of the design spec now carries the six things M9
