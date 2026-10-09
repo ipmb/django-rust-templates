@@ -32,8 +32,8 @@
 //!   field's type — a `Vec<String>` would hold those names — it is that no
 //!   per-node value can carry state that the *second* `{% block %}` needs to see.
 //!   `do_block` also recurses through `parser.parse(("endblock",))`.
-//! - `extends` reads `parser.origin.template_name` (`:308`) and inspects the
-//!   just-parsed nodelist through `get_nodes_by_type` (`:311`) — a query over
+//! - `extends` reads `parser.origin.template_name` (`:305`) and inspects the
+//!   just-parsed nodelist through `get_nodes_by_type` (`:308`) — a query over
 //!   *materialised* nodes, which do not exist at compile time.
 //! - `include` reaches `parser.compile_filter` and the loader machinery.
 //!
