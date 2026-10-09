@@ -506,10 +506,20 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         no-op has nothing to refuse: the row would assert nothing while staying
         green, which is how it read before the teardown fix made the state at row
         start explicit.
+
+        **The message is asserted, because the meter's scope is the part that
+        moved.** Since the scope correction ``unshimmed()`` counts the *engine*,
+        not the package the engine lives in, so "these modules" would read as
+        every module Django still serves — eleven — where one is listed. The
+        subject here is the scope word; the named module is asserted too, so the
+        message and the meter cannot drift apart.
         """
         _shim.uninstall()
-        with self.assertRaises(_shim.ShimError):
+        with self.assertRaises(_shim.ShimError) as ctx:
             _shim.install(strict=True)
+        message = str(ctx.exception)
+        self.assertIn("engine modules", message, "the message does not name its scope")
+        self.assertIn("django.template.library", message, "the message is not the meter's")
 
 
 class NamespaceTests(unittest.TestCase):

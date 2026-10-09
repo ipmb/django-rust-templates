@@ -642,8 +642,9 @@ def install(strict: bool = False) -> None:
         remaining = unshimmed()
         if remaining:
             raise ShimError(
-                "strict mode: the engine is not wholly ours, and these modules "
-                "are still served by Django's own code: " + ", ".join(remaining)
+                "strict mode: the engine is not wholly ours, and these engine "
+                "modules are still served by Django's own code: "
+                + ", ".join(remaining)
             )
 
 
