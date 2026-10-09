@@ -80,6 +80,16 @@ CASES = [
     "١٢٣",
     "1_000",
     "١_٢",
+    # **PEP 515 lexical rejections, not value questions.** `12_` here and `1__0`
+    # above must stay `literal=None` with the whole token as a lookup. A
+    # canonicaliser that stripped underscores *before* validating would accept
+    # both and quietly turn two legal Django variable names into literals — a
+    # live divergence, since `{{ 12_ }}` renders as a variable in Django.
+    "12_",
+    # And the same underscore rule on the **float** branch, which is a separate
+    # code path: `1_0.5` is 10.5, so a float implementation that rejected `_`
+    # would diverge here while every integer row above still passed.
+    "1_0.5",
     # **`9223372036854775808` and `99999999999999999999` are the `BigInt` arm.**
     # Python's `int` is arbitrary-precision and these are valid templates that
     # render their own digits; saturating to `i64::MAX` renders a wrong number.
@@ -124,6 +134,14 @@ ERROR_CASES = [
     ("--5", "Invalid character ('-') in variable name: '--5'"),
     ("a+b-c", "Invalid character ('+') in variable name: 'a+b-c'"),
     ("-a", "Invalid character ('-') in variable name: '-a'"),
+    # **The interaction between the float branch and the character rules.**
+    # `float('-2.')` succeeds, so `-2.` reaches the character loop with a literal
+    # already assigned; the trailing dot makes it non-numeric, the string branch
+    # finds neither a quote nor a valid name, and the `-` rule reports last. A
+    # port that checked for the character rules *first* would still get this
+    # message — which is why the pin that matters is `2.` above, and this row is
+    # here so the two paths cannot be unified into one.
+    ("-2.", "Invalid character ('-') in variable name: '-2.'"),
 ]
 
 
