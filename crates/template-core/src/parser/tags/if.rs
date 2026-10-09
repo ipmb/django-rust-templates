@@ -2,22 +2,22 @@
 //!
 //! The tag is small; what makes it M5's largest is that its condition is a
 //! **parse tree Python has to hold**. `do_if` runs
-//! `TemplateIfParser(parser, bits).parse()` (`:995`) and `IfNode.render` calls
-//! `condition.eval(context)` on the result (`:326`), so the arena
+//! `TemplateIfParser(parser, bits).parse()` (`defaulttags.py:995`) and `IfNode.render` calls
+//! `condition.eval(context)` on the result (`defaulttags.py:326`), so the arena
 //! `smartif.rs` builds has to cross as shape, and the materialiser rebuilds
 //! real `smartif` nodes from it — see [`IfConditionDesc`].
 //!
 //! # The four-part body, and the one line that is not smartif's
 //!
 //! 1. `TemplateIfParser(parser, bits).parse()` for the first condition
-//!    (`:993-995`) — errors here are smartif's, and they are the *only* errors a
+//!    (`defaulttags.py:993-995`) — errors here are smartif's, and they are the *only* errors a
 //!    malformed condition can produce.
-//! 2. `parser.parse(("elif", "else", "endif"))`, then `next_token()` (`:996`).
-//! 3. A `while token.contents.startswith("elif")` loop (`:1001-1006`) — note
+//! 2. `parser.parse(("elif", "else", "endif"))`, then `next_token()` (`defaulttags.py:996`).
+//! 3. A `while token.contents.startswith("elif")` loop (`defaulttags.py:1001-1006`) — note
 //!    **`startswith`**, not `==`: `Parser.parse` stops on
 //!    `token.contents.split()[0] in parse_until`, so `{% elif foo %}` terminates
 //!    the body and its contents are `"elif foo"` (`base.py:561-564`).
-//! 4. An optional `else`, then the `endif` check (`:1009-1018`).
+//! 4. An optional `else`, then the `endif` check (`defaulttags.py:1009-1018`).
 //!
 //! The `endif` check is the only message this file owns, and it is reached by a
 //! construct the plan's draft got wrong. `{% if a %}{% endif %}{% endif %}` does
@@ -41,7 +41,7 @@
 //!
 //! # `{% if %}` is the only tag whose node has *positional-only* nodelists
 //!
-//! `IfNode.__init__(self, conditions_nodelists)` (`:1024-1025`) takes one
+//! `IfNode.__init__(self, conditions_nodelists)` (`defaulttags.py:1024-1025`) takes one
 //! argument and holds the branch bodies *inside* it, so there is no parameter a
 //! branch nodelist could be a keyword for. The descriptor therefore carries N
 //! unnamed nodelists and the branches name them by position
@@ -81,7 +81,7 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
     if terminator.contents == "else" {
         let index = nodelists.len();
         nodelists.push(parser.parse(&["endif"])?);
-        // `conditions_nodelists.append((None, nodelist))` (`:1011`): the `None`
+        // `conditions_nodelists.append((None, nodelist))` (`defaulttags.py:1011`): the `None`
         // condition is what `IfNode.render` reads as "this is the else", and it
         // is emitted rather than left out because the tuple is positional.
         branches.push(AttrValue::Tuple(vec![
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn elif_branches_come_back_in_source_order_and_each_names_its_own_body() {
         // The order is load-bearing twice over: `IfNode.render` takes the *first*
-        // truthy condition (`:323-333`), and the `NodeListRef` index only means
+        // truthy condition (`defaulttags.py:323-333`), and the `NodeListRef` index only means
         // anything if the nodelists were pushed in the same order as the branches.
         let node = compile("{% if a %}1{% elif b %}2{% elif c %}3{% else %}4{% endif %}");
         let branches = branches(&node);
@@ -407,7 +407,7 @@ mod tests {
     #[test]
     fn a_body_error_precedes_the_next_branchs_condition() {
         // `do_if` builds a branch's condition *then* parses its body, per branch
-        // (`:995-996`, then `:1002-1003`), so the first body's unknown tag is
+        // (`defaulttags.py:995-996`, then `defaulttags.py:1002-1003`), so the first body's unknown tag is
         // reported before the `elif`'s empty condition is ever looked at. The
         // tempting opposite reading — "conditions are compiled first" — is true
         // *within* one condition (see the two tests below) and false across

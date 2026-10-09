@@ -186,6 +186,7 @@ defaulttags.py:106-112	django/template/defaulttags.py	106	112	-	-
 defaulttags.py:262	django/template/defaulttags.py	262	-	-	-
 defaulttags.py:265	django/template/defaulttags.py	265	-	self._varlist = varlist	-
 defaulttags.py:323	django/template/defaulttags.py	323	-	-	-
+defaulttags.py:323-333	django/template/defaulttags.py	323	333	for condition, nodelist in self.conditions_nodelists:	return nodelist.render(context)
 defaulttags.py:326	django/template/defaulttags.py	326	-	condition.eval(context)	-
 defaulttags.py:403	django/template/defaulttags.py	403	-	tzinfo = timezone.get_current_timezone() if settings.USE_TZ else None	-
 defaulttags.py:439	django/template/defaulttags.py	439	-	-	-
@@ -208,11 +209,19 @@ defaulttags.py:922	django/template/defaulttags.py	922	-	error_class = TemplateSy
 defaulttags.py:928	django/template/defaulttags.py	928	-	self.template_parser.compile_filter(value)	-
 defaulttags.py:928-929	django/template/defaulttags.py	928	929	TemplateLiteral(self.template_parser.compile_filter(value), value)	-
 defaulttags.py:929	django/template/defaulttags.py	929	-	return TemplateLiteral(self.template_parser.compile_filter(value), value)	-
-defaulttags.py:932-1021	django/template/defaulttags.py	932	1021	do_if	-
+defaulttags.py:932-1021	django/template/defaulttags.py	932	1021	@register.tag("if")	-
 defaulttags.py:993	django/template/defaulttags.py	993	-	condition = TemplateIfParser(parser, bits).parse()	-
-defaulttags.py:995	django/template/defaulttags.py	995	-	conditions_nodelists = [(condition, nodelist)]	-
+defaulttags.py:993-995	django/template/defaulttags.py	993	995	condition = TemplateIfParser(parser, bits).parse()	conditions_nodelists = [(condition, nodelist)]
+defaulttags.py:995	django/template/defaulttags.py	995	-	-	-
+defaulttags.py:995-996	django/template/defaulttags.py	995	996	-	-
+defaulttags.py:996	django/template/defaulttags.py	996	-	token = parser.next_token()	-
+defaulttags.py:1001-1006	django/template/defaulttags.py	1001	1006	-	-
+defaulttags.py:1002-1003	django/template/defaulttags.py	1002	1003	-	-
+defaulttags.py:1009-1018	django/template/defaulttags.py	1009	1018	-	-
+defaulttags.py:1011	django/template/defaulttags.py	1011	-	-	-
 defaulttags.py:1013-1017	django/template/defaulttags.py	1013	1017	if token.contents != "endif"	-
 defaulttags.py:1023-1073	django/template/defaulttags.py	1023	1073	-	-
+defaulttags.py:1024-1025	django/template/defaulttags.py	1024	1025	-	-
 defaulttags.py:1065-1075	django/template/defaulttags.py	1065	1075	-	-
 defaulttags.py:1086-1095	django/template/defaulttags.py	1086	1095	-	-
 defaulttags.py:1099	django/template/defaulttags.py	1099	-	-	-
