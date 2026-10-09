@@ -661,20 +661,18 @@ mod tests {
     /// `dictsortreversed`, `unordered_list` — Task 7's three waves:
     /// `add`, `divisibleby`, `get_digit`, `stringformat`; then `pluralize`,
     /// `yesno`, `default`, `default_if_none`; then `filesizeformat` and
-    /// `floatformat`; and Task 8 wave A's six — `escape`, `escapejs`,
-    /// `escapeseq`, `force_escape`, `safe`, `safeseq`. The wave numbering matches
+    /// `floatformat`; Task 8 wave A's six — `escape`, `escapejs`,
+    /// `escapeseq`, `force_escape`, `safe`, `safeseq`; and Task 9 wave A's
+    /// three — `phone2numeric`, `pprint`, `slugify`. The wave numbering matches
     /// `tests/test_filter_parity.py`'s, which counts the same three.
     ///
     /// **Deliberately no count in this doc**: it said 26 while the array held 22,
     /// and a number in prose that nothing checks is a defect this project has
     /// paid for more than once. The array's length is the count, and the
     /// assertion below is what makes a stale entry fail rather than pass.
-    const STILL_STUBBED: [&str; 10] = [
+    const STILL_STUBBED: [&str; 7] = [
         "date",
         "json_script",
-        "phone2numeric",
-        "pprint",
-        "slugify",
         "time",
         "timesince",
         "timeuntil",

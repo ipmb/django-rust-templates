@@ -234,6 +234,26 @@ class LOUD_STR:
         return "LOUD_STR()"
 
 
+class LOUD_REPR:
+    """An object whose `repr()` raises — the input `pprint`'s `except` arm renders.
+
+    `pprint` (`:990-996`) is `pformat(value)` inside a `try`, and the arm answers
+    `"Error in formatting: %s: %s" % (e.__class__.__name__, e)`. Reaching it needs
+    a `__repr__` that raises, which is why [`LOUD_STR`] cannot stand in: its
+    `__repr__` returns a string, so `pformat` *succeeds* on it and a row built on
+    it would assert the successful path twice while looking like it tested the
+    arm. The class name is `BoomError`, the same as `upper/raising-str`'s, so both
+    rows say the same thing about the name the seam carries — it is the
+    exception's own `__class__.__name__`, not a name `builtins` can instantiate.
+    """
+
+    class BoomError(ValueError):
+        """An `Exception` subclass, so `except Exception` catches it."""
+
+    def __repr__(self):
+        raise LOUD_REPR.BoomError("boom repr")
+
+
 def case_value(case):
     """The row's input, **built fresh for each side**.
 
@@ -3480,6 +3500,245 @@ CASES: list[dict] = [
         "value": "a b/c",
         "arg_variable": b"/",
     },
+    # --- Task 9, wave A: `slugify`, `phone2numeric`, `pprint` ----------------
+    #
+    # All three bodies are thin on purpose, and that is why these three groups
+    # are long. Each delegates its real work to a host operation and owns only
+    # the part no host performs: `slugify` (`:266-274`) and `phone2numeric`
+    # (`:984-987`) wrap `django.utils.text` helpers, and `pprint` (`:990-996`)
+    # owns its `except` arm and nothing else. So no row here asserts "the
+    # algorithm is right" — the host's own suite does that — only *which*
+    # operation the body chose and *what it handed it*, one measured input per
+    # branch, which is the only thing a thin body can get wrong.
+    #
+    # **`slugify` is `@stringfilter` and `is_safe=True`.** The decorator runs
+    # `str(value)` (`defaultfilters.py:38-52`) before the body sees anything, so
+    # the `5` and `None` rows below are statements about that coercion rather
+    # than about this body, and no refusal is available to it.
+    {
+        "name": "slugify/ascii-punctuation",
+        "filter": "slugify",
+        "value": "Hello, World!",
+    },
+    {
+        "name": "slugify/collapses-space-runs",
+        "filter": "slugify",
+        "value": "  hello  world  ",
+    },
+    {
+        "name": "slugify/collapses-hyphen-runs",
+        "filter": "slugify",
+        "value": "a--b",
+    },
+    {
+        "name": "slugify/strips-leading-trailing",
+        "filter": "slugify",
+        "value": "-a-b-",
+    },
+    {
+        # `\w` holds `_`, so the underscore is neither punctuation nor a
+        # whitespace run — the one character that survives both `re.sub`s.
+        "name": "slugify/underscore-survives",
+        "filter": "slugify",
+        "value": "a_b",
+    },
+    {
+        # NFKD decomposes `ß` to `ss`, so the ascii drop never sees it; the row
+        # that fails for a body lowering *before* normalising.
+        "name": "slugify/ascii-fold",
+        "filter": "slugify",
+        "value": "Straße",
+    },
+    {
+        "name": "slugify/combining-mark-drops",
+        "filter": "slugify",
+        "value": "á",
+    },
+    {
+        # NFKD maps the superscript to a plain digit — the row that pins the
+        # normalisation step rather than the two `re.sub`s.
+        "name": "slugify/superscript-folds-to-digit",
+        "filter": "slugify",
+        "value": "²",
+    },
+    {
+        # Greek is not decomposed by NFKD and the ascii encode drops it whole,
+        # so the answer is `""` — not `"ος"`, and not a refusal.
+        "name": "slugify/non-ascii-drops-to-empty",
+        "filter": "slugify",
+        "value": "ΟΣ",
+    },
+    {
+        "name": "slugify/email",
+        "filter": "slugify",
+        "value": "hello@example.com",
+    },
+    {
+        "name": "slugify/mixed-case-and-digit",
+        "filter": "slugify",
+        "value": "CamelCase 42",
+    },
+    {
+        # Tab and newline are `\s`, so they join the space run and collapse with
+        # it: `[-\s]+` is one character class, not two passes.
+        "name": "slugify/whitespace-runs-including-tabs",
+        "filter": "slugify",
+        "value": "a b\tc\nd",
+    },
+    {
+        # `@stringfilter`: an `int` arrives already `str()`d.
+        "name": "slugify/coerces-non-string",
+        "filter": "slugify",
+        "value": 5,
+    },
+    {
+        "name": "slugify/coerces-none",
+        "filter": "slugify",
+        "value": None,
+    },
+    {
+        # Safe in, safe out — by the loop's `is_safe` rule, not the body's.
+        "name": "slugify/safe-input",
+        "filter": "slugify",
+        "value": mark_safe("AbC dEf"),
+    },
+    # **`phone2numeric` has no `@stringfilter`**, and that is its whole shape:
+    # `phone.lower()` (`text.py:344`) is a `str` method, so the argument's *type*
+    # is observed and a non-`str` must raise rather than become `str(value)`.
+    # Those refusals are `ERROR_CASES` rows. The rows that matter here are the
+    # two lowercasing ones — `final-sigma` and `rust-only-lower-code-point` —
+    # each of which fails for a body that lowered in Rust instead of delegating.
+    {
+        "name": "phone2numeric/letters-and-punctuation",
+        "filter": "phone2numeric",
+        "value": "800-COLLECT",
+    },
+    {
+        "name": "phone2numeric/1-800-flowers",
+        "filter": "phone2numeric",
+        "value": "1-800-FLOWERS",
+    },
+    {
+        "name": "phone2numeric/mixed-case",
+        "filter": "phone2numeric",
+        "value": "aBc",
+    },
+    {
+        "name": "phone2numeric/letters-then-upper-tail",
+        "filter": "phone2numeric",
+        "value": "abcXYZ",
+    },
+    {
+        # Punctuation and the underscore are not in the table, so
+        # `char2number.get(c, c)` returns them unchanged.
+        "name": "phone2numeric/punctuation-passes-through",
+        "filter": "phone2numeric",
+        "value": "a-b_c",
+    },
+    {
+        "name": "phone2numeric/digits-pass-through",
+        "filter": "phone2numeric",
+        "value": "123-456",
+    },
+    {
+        "name": "phone2numeric/empty",
+        "filter": "phone2numeric",
+        "value": "",
+    },
+    {
+        "name": "phone2numeric/non-ascii-not-mapped",
+        "filter": "phone2numeric",
+        "value": "éè",
+    },
+    {
+        "name": "phone2numeric/safe-input",
+        "filter": "phone2numeric",
+        "value": mark_safe("800-COLLECT"),
+    },
+    {
+        # **Final_Sigma**: CPython's `str.lower()` answers `"ος"` (final form),
+        # where Rust's `char::to_lowercase` answers `"οσ"`. The scripted test in
+        # `phone2numeric.rs` pins the same input; this row pins it through the
+        # engine, where the host is whatever `str_lower` really calls.
+        "name": "phone2numeric/final-sigma",
+        "filter": "phone2numeric",
+        "value": "ΟΣ",
+    },
+    {
+        # **U+A7CE** is one of the 28 code points an exhaustive 0..0x10FFFF diff
+        # found where Rust's `char::to_lowercase` maps and CPython's `str.lower`
+        # does not — this CPython has no name for the character at all, which is
+        # what a Unicode-table version gap looks like. So the answer is the
+        # character itself, and the row distinguishes "the host lowers" from
+        # "something lowers": a Rust `to_lowercase` would answer a *different*
+        # character here, still outside the a–z table. Written as an escape
+        # because the codepoint is the whole point of the row.
+        "name": "phone2numeric/rust-only-lower-code-point",
+        "filter": "phone2numeric",
+        "value": "꟎",
+    },
+    # **`pprint` is `pformat(value)` and its `except` arm**, so its rows are the
+    # input classes `pformat` renders differently plus the single one that makes
+    # it raise. `is_safe=True` marks through the loop, so the body returns a
+    # plain `str` and the safe row below is the loop's doing.
+    {
+        "name": "pprint/list",
+        "filter": "pprint",
+        "value": [1, 2, 3],
+    },
+    {
+        "name": "pprint/dict",
+        "filter": "pprint",
+        "value": {"a": 1, "b": 2},
+    },
+    {
+        "name": "pprint/string",
+        "filter": "pprint",
+        "value": "abc",
+    },
+    {
+        "name": "pprint/int",
+        "filter": "pprint",
+        "value": 5,
+    },
+    {
+        "name": "pprint/none",
+        "filter": "pprint",
+        "value": None,
+    },
+    {
+        "name": "pprint/bool",
+        "filter": "pprint",
+        "value": True,
+    },
+    {
+        "name": "pprint/empty-list",
+        "filter": "pprint",
+        "value": [],
+    },
+    {
+        "name": "pprint/empty-dict",
+        "filter": "pprint",
+        "value": {},
+    },
+    {
+        "name": "pprint/tuple",
+        "filter": "pprint",
+        "value": (1, 2),
+    },
+    {
+        "name": "pprint/safe-input",
+        "filter": "pprint",
+        "value": mark_safe("abc"),
+    },
+    {
+        # The reachable `except Exception` arm: `pformat` calls `__repr__`, which
+        # raises, and Django *answers* with the formatted error string rather
+        # than propagating. `LOUD_REPR` and not `LOUD_STR` — see its docstring.
+        "name": "pprint/repr-raises",
+        "filter": "pprint",
+        "value": LOUD_REPR(),
+    },
 ]
 
 
@@ -3943,5 +4202,60 @@ ERROR_CASES: list[dict] = [
         "arg_variable": ["/"],
         "raises": "TypeError",
         "message": "'<' not supported between instances of 'str' and 'int'",
+    },
+    # --- phone2numeric: `str.lower`'s refusal, on a filter with no `@stringfilter`
+    #
+    # `phone2numeric` (`:984-987`) is one of the four filters the 29 exclude from
+    # `@stringfilter` (`tests/test_filter_inventory.py`'s `STRINGFILTER`), so its
+    # argument is **not** coerced: `"".join(char2number.get(c, c) for c in
+    # phone.lower())` (`text.py:344`) calls a `str` method on whatever it was
+    # handed, and the refusal is CPython's `AttributeError`. The class name is
+    # the message's whole content — `type(value).__name__` — which is why these
+    # rows assert it rather than the text around it, and why `True` is here
+    # beside `5`: it is an `int` subclass whose own name is what Python prints.
+    #
+    # The body synthesises the message rather than passing one through, because
+    # no host operation performs `str.lower` on a whole value (`str_lower` takes
+    # a `&str`, which only a `str` can supply) — the same shape as
+    # `cut/non-string-argument`, and Rust-authored for the same reason.
+    {
+        "name": "phone2numeric/int",
+        "filter": "phone2numeric",
+        "value": 5,
+        "raises": "AttributeError",
+        "message": "'int' object has no attribute 'lower'",
+    },
+    {
+        # `bool` is an `int` subclass and is *still* named `'bool'` — the row
+        # that fails for a body classifying the value as an integer.
+        "name": "phone2numeric/bool",
+        "filter": "phone2numeric",
+        "value": True,
+        "raises": "AttributeError",
+        "message": "'bool' object has no attribute 'lower'",
+    },
+    {
+        "name": "phone2numeric/float",
+        "filter": "phone2numeric",
+        "value": 5.0,
+        "raises": "AttributeError",
+        "message": "'float' object has no attribute 'lower'",
+    },
+    {
+        # **`None` is not special-cased here**, unlike `date`/`time`, which answer
+        # `""` for it (§10.4). This path has no `if value is None`: the
+        # generator calls `.lower()` on it and CPython refuses.
+        "name": "phone2numeric/none",
+        "filter": "phone2numeric",
+        "value": None,
+        "raises": "AttributeError",
+        "message": "'NoneType' object has no attribute 'lower'",
+    },
+    {
+        "name": "phone2numeric/list",
+        "filter": "phone2numeric",
+        "value": ["a"],
+        "raises": "AttributeError",
+        "message": "'list' object has no attribute 'lower'",
     },
 ]
