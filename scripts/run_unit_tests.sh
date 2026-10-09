@@ -26,6 +26,16 @@
 #
 # Set DJANGO_RUST_TEMPLATES=0 to run the same labels against stock Django, which
 # is how you tell a failure of ours from a failure of the harness's.
+#
+# **This script alone does not clear a commit.** It runs the unit suite and the
+# shim check and nothing else, and at least one class of defect is visible only
+# to `check.sh`: a citation of a file the anchor manifest does not carry passes
+# every row here and fails there. That is worth stating rather than leaving to be
+# discovered, because the failure mode is a green run that a contributor reads as
+# "done" — the same shape as `check.sh --fast` printing `all checks passed` while
+# a module's rows are collected by nothing, which is the thing
+# `tests/test_collected_tests.py` exists to make visible. The two entry points
+# prove different things; this one's proof is the narrower.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

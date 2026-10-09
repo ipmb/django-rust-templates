@@ -631,6 +631,18 @@ def _refuse_if_incomplete() -> None:
     install *repeatable*: the second call now takes this path and refuses again,
     where before the check could not fire twice for the same reason it could not
     fire once.
+
+    **A refused install is not rolled back, and the caller owes it one of two
+    things.** The refusal leaves the installing path's finder in place, holding
+    the paths it captured — including any that made the engine incomplete — so a
+    caller who *catches this and carries on* is holding a shim installed from a
+    state it was told is unacceptable. That is not a supported pattern, and
+    saying so is what turns the leftover finder from an undocumented
+    consequence into a contract: handle the refusal by calling
+    [`uninstall`] and fixing the cause, or by letting the exception end the
+    process. There is no third answer where the shim is left installed *and*
+    the refusal is treated as advisory. Both unit rows that trigger this clean
+    up in a `finally` for exactly that reason.
     """
     remaining = unshimmed()
     if remaining:
