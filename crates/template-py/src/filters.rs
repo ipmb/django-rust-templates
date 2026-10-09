@@ -22,9 +22,14 @@
 //! `base.py:803-819` does three things around a filter body — `template_localtime`
 //! before the call when `expects_localtime` is set, the `autoescape` keyword when
 //! `needs_autoescape` is set, and `mark_safe` after the call when `is_safe` is set
-//! *and* the pre-filter value was `SafeData`. Only the first and third are here;
-//! the `@stringfilter` coercion is inside each body (§D3), so the loop and the
-//! bodies together are the whole of what Django does. The corpus exercises this
+//! *and* the pre-filter value was `SafeData`. All three are here, and so is the
+//! fourth thing Django does around a body: `@stringfilter`'s wrapper
+//! (`defaultfilters.py:38-52`), which coerces `str(first)` **before** the body runs
+//! and marks the result safe when the coerced value was `SafeData`. That is why
+//! the registry carries `stringfilter` and why this is one loop rather than 29
+//! bodies each remembering a two-line rule — the second of them, `cut`, reads the
+//! safety of the value it was handed, so the coercion has to happen on this side
+//! of the seam and produce a safety-carrying [`Value`]. The corpus exercises this
 //! loop because it is the part no filter's own unit test can reach.
 
 use pyo3::exceptions::{
@@ -474,6 +479,41 @@ impl<'py> PyFilterHost<'py> {
             }
             _ => false,
         }
+    }
+
+    /// `@stringfilter`'s coercion (`defaultfilters.py:44`): `str(value)`, as the
+    /// `Value` the body is handed.
+    ///
+    /// **Not the same question as [`PyFilterHost::is_safe_value`], and that is the
+    /// whole reason this exists.** Django's wrapper rebinds `first = str(first)`
+    /// *before* calling the body, so the value a body sees is the coerced one —
+    /// and `cut` reads `isinstance(value, SafeData)` off it (`:410`). The two
+    /// questions differ on exactly one operand: an object that is not a `str`
+    /// subclass but whose `str()` is `SafeData`, which is Django's own lazy
+    /// `__proxy__`. Measured on the pinned tree: `Variable.resolve` hands the
+    /// filter the `__proxy__` itself — *not* `SafeData` — and `str()` of it is a
+    /// `SafeString`, so `x|lower` over one is `SafeString` while the loop's own
+    /// test (`base.py:816`) says no.
+    ///
+    /// [`PyFilterHost::classify`] **is** the safety question, so this asks it by
+    /// classifying the coerced object rather than by writing a second
+    /// `isinstance`: the classifier puts a `str` in [`Value::Safe`] only after
+    /// asking `isinstance(x, SafeData)`, so a hand-written test here could drift
+    /// from the one the rest of the crate relies on. It also keeps the rest of
+    /// the protocol free — a `str` subclass answering `__html__` without being
+    /// `SafeData` is markupsafe's `Markup`, and it interned as an `Opaque` here
+    /// for the same reason it is one anywhere else.
+    ///
+    /// A failure propagates, where [`PyFilterHost::is_safe_value`] answers `false`:
+    /// a `__str__` that raises is a real exception out of Django's wrapper, so
+    /// swallowing it would turn a `TypeError` into a plausible wrong string.
+    fn coerce_stringfilter(&self, value: &Value) -> Result<Value, Error> {
+        let py = self.py;
+        let outcome = (|| {
+            let coerced = self.object(value)?.bind(py).str()?;
+            self.classify(&coerced)
+        })();
+        outcome.map_err(|e| self.host_error("stringfilter", e))
     }
 }
 
@@ -939,24 +979,40 @@ impl PyFilterHost<'_> {
 }
 
 /// The loop `FilterExpression.resolve` runs around a filter body
-/// (`base.py:803-819`), and the only part of a filter Django does *not* do inside
-/// the filter itself.
+/// (`base.py:803-819`), together with the one thing Django does inside every
+/// `@stringfilter`-decorated one (`defaultfilters.py:38-52`).
 ///
 /// Split out from the `#[pyfunction]` so it can be exercised without Python's
 /// calling convention and so its order is visible in one place:
 ///
 /// ```text
 /// if expects_localtime: value = localtime(value, use_tz)
-/// is_safe_was = is_safe(value)          # the value the filter is *given*
+/// was_safe = is_safe(value)              # the value the filter is *given*
+/// if stringfilter: value = str(value)    # the coerced value the body receives
+/// coerced_is_safe = the coerced value is SafeData
 /// result = run(value, arg, call)
-/// if is_safe and is_safe_was: result = mark_safe(result)
+/// if is_safe and (was_safe or coerced_is_safe): result = mark_safe(result)
 /// ```
 ///
-/// The `is_safe` is read **before** the filter runs, which is `base.py:816`'s
-/// `isinstance(obj, SafeData)` — `obj` still holds the pre-filter value there
-/// because the result went to a separate `new_obj`. Reading it after the call
-/// would make every filter that returns a `SafeString` mark its own output, and
-/// would make `escape`'s `is_safe=True` mean nothing.
+/// **The two `is_safe` questions are different questions, which is why there are
+/// two.** `was_safe` is `base.py:816`'s `isinstance(obj, SafeData)`, and `obj`
+/// still holds the pre-filter value there because the result went to a separate
+/// `new_obj`; reading it *after* the call would make every filter that returns a
+/// `SafeString` mark its own output and would make `escape`'s `is_safe=True` mean
+/// nothing. `coerced_is_safe` is the wrapper's, and it is asked of the value the
+/// wrapper produced. The two agree for every `str` and every `str` subclass —
+/// `str(SafeString)` returns itself — and disagree on exactly one operand, a lazy
+/// `__proxy__`: not `SafeData`, but `str()` of it is. Neither subsumes the other,
+/// so the result is safe when *either* fired; `stringfilter` is the registry field
+/// that says which filters have the second site at all, and for the other 28 the
+/// union would mark safe a result Django leaves bare.
+///
+/// The coercion is applied **here, once**, rather than by each of the 29 bodies.
+/// Django rebinds `first = str(first)` before calling the body, so the body
+/// genuinely receives the coerced value — `cut` reads its safety (`:410`) — and a
+/// wrapper that handed bodies the raw value would make that filter unimplementable
+/// without a second, subtler rule that 29 separately-written bodies would each have
+/// to remember.
 pub fn run_filter(
     py: Python<'_>,
     name: &str,
@@ -982,6 +1038,21 @@ pub fn run_filter(
             .map_err(|error| crate::filter_py_error(&error))?;
     }
     let was_safe = host.is_safe(&current);
+    // The wrapper's half, and it runs for all 29 `stringfilter` filters rather
+    // than only the 29-minus-`cut`-that-are-also-`is_safe`: the coercion is the
+    // wrapper, and the safety it reports is needed by a body whether or not the
+    // loop's `mark_safe` is going to read it.
+    let (current, coerced_is_safe) = if entry.stringfilter {
+        let coerced = host
+            .coerce_stringfilter(&current)
+            .map_err(|error| crate::filter_py_error(&error))?;
+        // `isinstance(first, SafeData)` — already answered, because `classify`
+        // puts a `str` in `Value::Safe` only after asking it.
+        let safe = matches!(&coerced, Value::Safe(_));
+        (coerced, safe)
+    } else {
+        (current, false)
+    };
     let call = FilterCall {
         host: &host,
         autoescape,
@@ -989,7 +1060,7 @@ pub fn run_filter(
     };
     let result =
         (entry.run)(current, argument, &call).map_err(|error| crate::filter_py_error(&error))?;
-    let result = if entry.flags.is_safe && was_safe {
+    let result = if entry.flags.is_safe && (was_safe || coerced_is_safe) {
         host.mark_safe_checked(result)
             .map_err(|error| host.host_error("mark_safe", error))
             .map_err(|error| crate::filter_py_error(&error))?

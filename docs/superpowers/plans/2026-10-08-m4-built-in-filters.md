@@ -295,18 +295,26 @@ M15: **`{{ x|date:"Y" }}` crosses the FFI on every render, forever.** §3 makes
 performance a non-criterion, so this is acceptable — but it is acceptable
 *because it was decided*, not because nobody noticed.
 
-**D3 — `@stringfilter` is baked into each filter's body; `FilterFlags` keeps
-§5.2's three fields.** The wrapper (`defaultfilters.py:38-52`) coerces with
-`str()` and then marks safe iff the *coerced* value was `SafeData` and the inner
-function's `is_safe` is true. Reproducing that needs no fourth flag: `is_safe` is
-already carried, the coercion is part of the filter's implementation, and "was
-the coerced value safe" is decidable at the call because `Value::Safe` is a
-variant. The alternative — a `stringfilter: bool` on the registry entry and a
-generic wrapper in the seam — was rejected because it would put the wrapper's
-behaviour in a *shared* file, where §10.4's contract says a fan-out agent cannot
-reach it, and the agent implementing `cut` is exactly the one who needs
-`cut`'s special case (`mark_safe` only when `arg != ";"`,
-`defaultfilters.py:447-450`).
+**D3 — `@stringfilter` is a shared wrapper the FFI applies once, and
+`FilterFlags` keeps §5.2's three fields.** The wrapper
+(`defaultfilters.py:38-52`) coerces with `str()`, **passes the coerced value to
+the body**, and then marks the result safe iff that coerced value was `SafeData`
+and the inner function's `is_safe` is true. It is carried as a fourth,
+*structural* field — `stringfilter: bool` on `FilterEntry` — and deliberately not
+on `FilterFlags`, which stays Django's three measured attributes so Task 3's
+round-trip against the pinned registry still pins three and only three.
+
+An earlier revision of this section put the coercion inside each filter's body
+and rejected the registry field, on the argument that a `stringfilter: bool`
+would move wrapper behaviour into a *shared* file that §10.4 says a fan-out agent
+cannot reach — and that the agent implementing `cut` is exactly the one who needs
+`cut`'s special case. Both halves of that were wrong, and the correction is the
+rest of this section: the registry field is *data*, not code an agent has to
+reach, and `cut`'s special case is `cut`'s own body behaviour
+(`mark_safe` only when `arg != ";"`, `defaultfilters.py:447-450`) rather than
+something a wrapper has to be talked out of. What the field buys is that the
+wrapper's two-line rule is written **once**, on the Python side of the seam,
+instead of in 29 files written by several different agents.
 
 **Which value the body checks is settled by measurement, not by taste, and it is
 not interchangeable.** On a plain `SafeString` the two sites agree —
@@ -323,11 +331,12 @@ isinstance(str(proxy), SafeData)   : True      ← stringfilter sees this
 ```
 
 So for `{{ lazy_safe|lower }}` the two sites decide **differently**, and the
-body must check the **coerced** value, exactly as `defaultfilters.py:44-48` does.
-A body that checked the incoming value would be right on every case anyone would
-think to write and wrong on the only case where the distinction exists. `__proxy__`
-is already on the wire from Task 6, so this is reachable, and Task 8's group
-carries the case.
+wrapper must test the **coerced** value, exactly as `defaultfilters.py:44-48`
+does. A body that tested the incoming value would be right on every case anyone
+would think to write and wrong on the only case where the distinction exists.
+`__proxy__` is already on the wire from Task 6, so this is reachable, and Task 3
+carries the case as `lower/lazy-proxy-whose-str-is-safe` in
+`tests/filter_cases.py`.
 
 **Open, and blocking the fan-out: no body can check it as the trait stands.** The
 paragraph above is a requirement, not an implementation, and Task 3 measured the
@@ -356,19 +365,59 @@ Two shapes were considered:
   and needs no new registry field. But it puts one subtle rule in 29 files written
   by several agents, which is the risk this very section warns about, multiplied.
 * **A `stringfilter: bool` on `FilterEntry`, with the FFI applying the wrapper
-  half once.** This is what Django does — `@stringfilter` *is* a shared wrapper —
-  and it makes the rule single-site, with the flag as data in the registry file no
-  fan-out agent edits, so `cut` needs no opt-out (its `is_safe` is absent, so
-  neither half can fire). The cost is a fourth field on the registry entry whose
+  once.** This is what Django does — `@stringfilter` *is* a shared wrapper — and
+  it makes the rule single-site, with the flag as data in the registry file no
+  fan-out agent edits. The cost is a fourth field on the registry entry whose
   business is not one of the three measured flags; it is kept off `FilterFlags`
   for exactly that reason, so Task 3's flag round-trip still pins Django's three.
 
-The second is the one being taken. This is a correction to the "no fourth flag"
-sentence above, and the sentence's stated reason does not survive inspection: a
-`stringfilter: bool` is data, not a wrapper in a shared *file* that an agent
-cannot reach, and `cut`'s special case is `cut`'s own body behaviour
-(`mark_safe` only when `arg != ";"`, `defaultfilters.py:447-450`) rather than
-something the wrapper has to be talked out of.
+The second was taken, and review then found the half of it that the first draft
+got wrong. **The wrapper's coercion has to *replace the value the body is
+handed*, not merely report a safety flag to the loop.** Django's wrapper rebinds
+`first = str(first)` before calling the body (`defaultfilters.py:44`), so all 29
+bodies genuinely receive the coerced value — and `cut` reads its safety off it:
+
+```python
+@register.filter
+@stringfilter
+def cut(value, arg):
+    safe = isinstance(value, SafeData)     # `value` is already `str(first)`
+```
+
+If the wrapper only computed `coerced_is_safe` for the loop and passed the raw
+`Value` to the body, `cut` would have to re-derive the rule — exactly one body
+remembering the thing this design exists to make single-site. So the FFI coerces
+into a **safety-carrying `Value`** (`Value::Str` / `Value::Safe`) and hands *that*
+to the body:
+
+```text
+was_safe = is_safe(value)                 # the value the filter is *given*
+if stringfilter: value = the classified str(value)
+coerced_is_safe = matches!(value, Value::Safe(_))
+result = run(value, arg, call)
+if is_safe and (was_safe or coerced_is_safe): result = mark_safe(result)
+```
+
+`Value::Safe` **is** the coerced-value test, because `classify` puts a `str` there
+only after asking `isinstance(x, SafeData)` — so no host method was added and
+`coerced_is_safe` is not a second `isinstance` that could drift from the one the
+rest of the crate uses. A body reads the coerced value's safety as
+`matches!(value, Value::Safe(_))`, which is `cut`'s `isinstance(value, SafeData)`
+by construction. The 28 other `stringfilter` bodies are unaffected: they take
+their text through `to_str` (now a pure accessor on an already-coerced value) and
+none of them looks at safety.
+
+**Observation status, and one obligation it creates.** The *safe-marking* half is
+observed — `lower/lazy-proxy-whose-str-is-safe` in `tests/filter_cases.py` fails
+on safety alone when the union's second disjunct is dropped. The *coercion* half
+is **not yet independently observable**: no landed filter reads the coerced
+value's safety, and `upper`/`lower` produce the same answer with or without it
+because their bodies go through `to_str` either way. Its first observable
+consequence is `cut`'s `safe` variable, so **Task 4's `cut` rows must include a
+lazy `__proxy__` whose `str()` is safe, alongside a plain and a `SafeString`
+input** — with those three the coercion cannot be reverted without a red test.
+Until then this paragraph is the only record that the coercion half is pinned by
+nothing, which is why it is written down rather than assumed.
 
 **D4 — M4 does not implement `conditional_escape` at all; it calls the host's.
 This is a correction, and it removes the milestone-boundary problem rather than
@@ -1682,6 +1731,16 @@ entirely the host's.
   the wrapper), `str.replace` of an empty `arg` raises `ValueError` — measured,
   and it escapes — and the result is `mark_safe`d only when the *pre-replacement*
   value was `SafeData` **and** `arg != ";"`.
+
+  **This is the filter that reads the coerced value's safety**, so it is the one
+  whose corpus rows close the wrapper's coercion half (§D3): `cut`'s rows must
+  include a plain `str`, a `mark_safe`d `SafeString`, **and a lazy `__proxy__`
+  whose `str()` is a `SafeString`**. The body's `safe` is
+  `matches!(&value, Value::Safe(_))` — the FFI has already coerced the value it
+  hands over, so no host call is needed and the `__proxy__` row is what fails if
+  the wrapper ever stops replacing the value the body receives. Reuse the
+  module-scope `LAZY_SAFE_PROXY` in `tests/filter_cases.py` rather than building
+  a second one.
 - `addslashes` (`:60-69`) — three `replace`s in the order backslash, `"`, `'`.
 - `make_list` (`:254-263`) — `list(str(value))`, so **code points**: a combining
   sequence is two elements. An integer becomes a list of its digit characters.

@@ -7,7 +7,7 @@ project has had seven count disputes that were each two right answers to two
 unstated questions. A number in a document can be wrong indefinitely; a number in
 a test can be wrong once.
 
-Four things are pinned here:
+Five things are pinned here:
 
 1. the three counts that have been confused — 57 registered filters, 59 top-level
    `def`s, 29 `@stringfilter` bodies — and the names in each set, so the gap
@@ -18,7 +18,10 @@ Four things are pinned here:
    trap the plan's own review found;
 3. the two delegating metrics of §D2, **derived here rather than transcribed**;
 4. the Rust registry's names and flags against Django's live registry, including
-   `cut`'s and `escapejs`'s **absent** `is_safe`.
+   `cut`'s and `escapejs`'s **absent** `is_safe`;
+5. the Rust registry's `stringfilter` column against the decorators — the one
+   place the 29 can be disagreed with, since a Rust-side test of that column
+   would be the same list read twice.
 
 Django is pinned at 6.0.9 under `.django/`. These assertions are meant to fail
 loudly on a pin bump that adds or removes a filter — otherwise §10.3's milestone
@@ -599,6 +602,45 @@ class RustFilterRegistryTests(unittest.TestCase):
                     ),
                     f"`{name}`'s flags differ from Django's",
                 )
+
+    def test_the_stringfilter_set_matches_the_rust_table(self):
+        """The 29, by **registry** name, against `_native.stringfilter_filters()`.
+
+        This is the reader for `FilterEntry.stringfilter`, and the reason that
+        field is a transcription rather than something Rust derives: which bodies
+        Django decorates is *Django's* fact, and the Rust table is a hand-typed
+        copy of it. Nothing in `filters/mod.rs` can disagree with its own 57 rows
+        — a test there would be the same list read twice — so the disagreement has
+        to come from this side, from the decorators in the pinned
+        `defaultfilters.py`. That is also why `_native` exposes the field at all.
+
+        `STRINGFILTER` is keyed by `def` name, because that is where the decorator
+        sits, and the Rust table by registry name. The three renamed-and-decorated
+        bodies (`escape_filter`, `escapejs_filter`, `linebreaks_filter`) are where
+        the two differ, and the mapping is **derived** from the decorators rather
+        than written as a three-entry translation table: a hand-written table is
+        exactly the copy that would agree with a wrong Rust row, since both would
+        be ours. The set assertion on `by_def_name` is not decoration — it is what
+        catches a `str`-keyed dict quietly losing a def whose registry name is
+        already taken.
+        """
+        native = self._native()
+        by_def_name = {
+            node.name: registry_name
+            for registry_name, node in _filter_defs_by_registry_name().items()
+            if "stringfilter" in _decorator_names(node)
+        }
+        self.assertEqual(set(by_def_name), STRINGFILTER)
+        self.assertEqual(
+            set(by_def_name.values()),
+            set(native.stringfilter_filters()),
+            "the Rust `stringfilter` column is not the 29 decorated bodies: "
+            f"django={sorted(by_def_name.values())}, "
+            f"rust={sorted(native.stringfilter_filters())}",
+        )
+        # 29 by name and 29 in the table, so the comparison above cannot pass by
+        # both sides being short in the same way.
+        self.assertEqual(len(native.stringfilter_filters()), 29)
 
     def test_cut_and_escapejs_have_no_is_safe_but_report_false(self):
         """The `bool`/`hasattr` gap, asserted on both sides.

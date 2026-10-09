@@ -149,6 +149,31 @@ pub type FilterFn = fn(Value, Option<Value>, &FilterCall<'_>) -> Result<Value, E
 pub struct FilterEntry {
     pub name: &'static str,
     pub flags: FilterFlags,
+    /// Whether Django's body carries `@stringfilter` (`defaultfilters.py:38-52`).
+    ///
+    /// Structural, and deliberately **not** on [`FilterFlags`], which is Django's
+    /// three measured attributes and nothing else — the flag round-trip in this
+    /// file compares those three against the pinned registry, and a fourth field
+    /// riding along would make that comparison a statement about us instead.
+    ///
+    /// The wrapper is not decoration, and the FFI applies it **once, before the
+    /// body** — which is what Django does: `@stringfilter` rebinds
+    /// `first = str(first)` and calls the body with the coerced value, so a body
+    /// is handed a string whether its caller passed a string or not. It then marks
+    /// the result safe iff the **coerced** value is `SafeData` and the inner
+    /// function's `is_safe` is true — a test that differs from `base.py:816`'s,
+    /// which asks about the value the filter was handed. The two agree on every
+    /// `str` and every `str` subclass, because `str(SafeString)` returns itself,
+    /// and diverge on a lazy `__proxy__`: not `SafeData`, but its `str()` is.
+    /// Measured in §D3 of the plan; the corpus carries the case.
+    ///
+    /// A body that reads the value's *safety* therefore reads the coerced one,
+    /// which is Django's own semantics and what makes `cut` (`:410`) writable at
+    /// all — its `safe = isinstance(value, SafeData)` is a question about the
+    /// value the wrapper produced. `stringfilter: true` is the statement that a
+    /// body may branch on that, and that the FFI owes it a coerced `Value` rather
+    /// than the raw one.
+    pub stringfilter: bool,
     pub run: FilterFn,
 }
 
@@ -158,21 +183,25 @@ static REGISTRY: &[FilterEntry] = &[
         name: "add",
         flags: FilterFlags::NONE,
         run: add::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "addslashes",
         flags: FilterFlags::SAFE,
         run: addslashes::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "capfirst",
         flags: FilterFlags::SAFE,
         run: capfirst::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "center",
         flags: FilterFlags::SAFE,
         run: center::run,
+        stringfilter: true,
     },
     // `is_safe` is **absent**, not `False`, on the real filter —
     // `getattr(f, "is_safe", False)` (`base.py:816`, and the
@@ -183,41 +212,49 @@ static REGISTRY: &[FilterEntry] = &[
         name: "cut",
         flags: FilterFlags::NONE,
         run: cut::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "date",
         flags: FilterFlags::LOCALTIME,
         run: date::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "default",
         flags: FilterFlags::NONE,
         run: default::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "default_if_none",
         flags: FilterFlags::NONE,
         run: default_if_none::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "dictsort",
         flags: FilterFlags::NONE,
         run: dictsort::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "dictsortreversed",
         flags: FilterFlags::NONE,
         run: dictsortreversed::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "divisibleby",
         flags: FilterFlags::NONE,
         run: divisibleby::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "escape",
         flags: FilterFlags::SAFE,
         run: escape::run,
+        stringfilter: true,
     },
     // `is_safe` is **absent**, not `False`, on the real filter —
     // `getattr(f, "is_safe", False)` (`base.py:816`, and the
@@ -228,226 +265,271 @@ static REGISTRY: &[FilterEntry] = &[
         name: "escapejs",
         flags: FilterFlags::NONE,
         run: escapejs::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "escapeseq",
         flags: FilterFlags::SAFE,
         run: escapeseq::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "filesizeformat",
         flags: FilterFlags::SAFE,
         run: filesizeformat::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "first",
         flags: FilterFlags::NONE,
         run: first::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "floatformat",
         flags: FilterFlags::SAFE,
         run: floatformat::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "force_escape",
         flags: FilterFlags::SAFE,
         run: force_escape::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "get_digit",
         flags: FilterFlags::NONE,
         run: get_digit::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "iriencode",
         flags: FilterFlags::SAFE,
         run: iriencode::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "join",
         flags: FilterFlags::SAFE_AUTOESCAPE,
         run: join::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "json_script",
         flags: FilterFlags::SAFE,
         run: json_script::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "last",
         flags: FilterFlags::SAFE,
         run: last::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "length",
         flags: FilterFlags::NONE,
         run: length::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "linebreaks",
         flags: FilterFlags::SAFE_AUTOESCAPE,
         run: linebreaks::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "linebreaksbr",
         flags: FilterFlags::SAFE_AUTOESCAPE,
         run: linebreaksbr::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "linenumbers",
         flags: FilterFlags::SAFE_AUTOESCAPE,
         run: linenumbers::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "ljust",
         flags: FilterFlags::SAFE,
         run: ljust::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "lower",
         flags: FilterFlags::SAFE,
         run: lower::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "make_list",
         flags: FilterFlags::NONE,
         run: make_list::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "phone2numeric",
         flags: FilterFlags::SAFE,
         run: phone2numeric::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "pluralize",
         flags: FilterFlags::NONE,
         run: pluralize::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "pprint",
         flags: FilterFlags::SAFE,
         run: pprint::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "random",
         flags: FilterFlags::SAFE,
         run: random::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "rjust",
         flags: FilterFlags::SAFE,
         run: rjust::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "safe",
         flags: FilterFlags::SAFE,
         run: safe::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "safeseq",
         flags: FilterFlags::SAFE,
         run: safeseq::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "slice",
         flags: FilterFlags::SAFE,
         run: slice::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "slugify",
         flags: FilterFlags::SAFE,
         run: slugify::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "stringformat",
         flags: FilterFlags::SAFE,
         run: stringformat::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "striptags",
         flags: FilterFlags::SAFE,
         run: striptags::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "time",
         flags: FilterFlags::LOCALTIME,
         run: time::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "timesince",
         flags: FilterFlags::NONE,
         run: timesince::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "timeuntil",
         flags: FilterFlags::NONE,
         run: timeuntil::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "title",
         flags: FilterFlags::SAFE,
         run: title::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "truncatechars",
         flags: FilterFlags::SAFE,
         run: truncatechars::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "truncatechars_html",
         flags: FilterFlags::SAFE,
         run: truncatechars_html::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "truncatewords",
         flags: FilterFlags::SAFE,
         run: truncatewords::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "truncatewords_html",
         flags: FilterFlags::SAFE,
         run: truncatewords_html::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "unordered_list",
         flags: FilterFlags::SAFE_AUTOESCAPE,
         run: unordered_list::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "upper",
         flags: FilterFlags::NONE,
         run: upper::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "urlencode",
         flags: FilterFlags::NONE,
         run: urlencode::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "urlize",
         flags: FilterFlags::SAFE_AUTOESCAPE,
         run: urlize::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "urlizetrunc",
         flags: FilterFlags::SAFE_AUTOESCAPE,
         run: urlizetrunc::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "wordcount",
         flags: FilterFlags::NONE,
         run: wordcount::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "wordwrap",
         flags: FilterFlags::SAFE,
         run: wordwrap::run,
+        stringfilter: true,
     },
     FilterEntry {
         name: "yesno",
         flags: FilterFlags::NONE,
         run: yesno::run,
+        stringfilter: false,
     },
 ];
 
@@ -463,6 +545,22 @@ pub fn filter(name: &str) -> Option<&'static FilterEntry> {
 /// Every filter name, ascending.
 pub fn filter_names() -> Vec<&'static str> {
     REGISTRY.iter().map(|entry| entry.name).collect()
+}
+
+/// The filters whose body carries Django's `@stringfilter`, ascending.
+///
+/// The registry field's reader, and the only one: the FFI exposes it so that
+/// `tests/test_filter_inventory.py` can compare it against the 29 names it derives
+/// from the pinned `defaultfilters.py`'s AST. Which filters those are is *Django's*
+/// fact, and this module holds a transcription of it — so something on Django's
+/// side has to be able to disagree with the transcription, and nothing in this
+/// file can.
+pub fn stringfilter_names() -> Vec<&'static str> {
+    REGISTRY
+        .iter()
+        .filter(|entry| entry.stringfilter)
+        .map(|entry| entry.name)
+        .collect()
 }
 
 #[cfg(test)]

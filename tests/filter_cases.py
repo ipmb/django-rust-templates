@@ -33,7 +33,25 @@ rather than only comparing the rows it is given.
 
 from __future__ import annotations
 
+from django.utils.functional import lazy
 from django.utils.safestring import mark_safe
+
+# Django's own lazy proxy: **not** `SafeData`, but `str()` of it is a `SafeString`.
+#
+# This object is the seam `@stringfilter` exists on, and the only operand where
+# Django's two safe-marking sites disagree. `Variable.resolve` hands a filter the
+# `__proxy__` itself, so the loop's test at `base.py:816` is `False`; the wrapper
+# then coerces `str(first)` and tests *that*, which is `True`. A body handed the
+# raw value — or a wrapper that tested the raw value — answers plain `str` where
+# Django answers `SafeString`, and the two render identically, so nothing but a
+# comparison of this kind can see it.
+#
+# Built with `lazy(...)()` rather than written as a small class, because the
+# interesting thing is that this is Django's own object: a hand-written
+# not-`SafeData`-but-`str()`-is stand-in would pin our reading of the contract
+# rather than the contract. It constructs with settings unconfigured, which is
+# what lets it live at module scope here.
+LAZY_SAFE_PROXY = lazy(lambda: mark_safe("AbC"), str)()
 
 # `lower` is `is_safe=True` and `upper` is `is_safe=False` — measured, and the
 # reason the two are in this file together rather than one per group. Same
@@ -148,12 +166,25 @@ CASES: list[dict] = [
     },
     {
         # Safe in, safe out: `lower` is `is_safe=True`, so the loop marks the
-        # result. Together with `upper/safe-input-stays-safe-marked-as-plain`
-        # this is the pair that pins `FilterFlags::is_safe` reaching the loop at
-        # all, which is the "incl. `FilterFlags` round-tripping" half of M4's
-        # acceptance criterion.
+        # result. Together with `upper/safe-input-stays-plain` this is the pair
+        # that pins `FilterFlags::is_safe` reaching the loop at all, which is the
+        # "incl. `FilterFlags` round-tripping" half of M4's acceptance criterion.
         "name": "lower/safe-input-stays-safe",
         "filter": "lower",
         "value": mark_safe("AbC"),
+    },
+    {
+        # The lazy proxy, and the only row that fails if the `@stringfilter`
+        # coercion is asked of the wrong value. Django answers
+        # `SafeString("abc")`: the loop's `isinstance(obj, SafeData)` is `False`
+        # (a `__proxy__` is not `SafeData`) and the wrapper's
+        # `isinstance(str(first), SafeData)` is `True`. Dropping the wrapper's
+        # half — or asking it of the uncoerced value — gives plain `str("abc")`:
+        # the same text, the same `==`, and a different answer to what the
+        # template does with it next. This is a safety row in a file whose whole
+        # reason for existing is the safety half.
+        "name": "lower/lazy-proxy-whose-str-is-safe",
+        "filter": "lower",
+        "value": LAZY_SAFE_PROXY,
     },
 ]

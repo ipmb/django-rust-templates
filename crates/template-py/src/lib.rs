@@ -66,6 +66,25 @@ fn filter_names() -> Vec<&'static str> {
     template_core::filters::filter_names()
 }
 
+/// The built-in filters whose body carries Django's `@stringfilter`, ascending.
+///
+/// Not one of the three measured flags and deliberately not folded into
+/// `filter_flags`: `@stringfilter` is a *structural* fact about the body, not an
+/// attribute `Library.register` sets. It exists as an FFI because it must be
+/// compared against Django's live registry — `tests/test_filter_inventory.py`
+/// derives the 29 from the pinned `defaultfilters.py`'s AST, and a transcription
+/// into a Rust literal with no reader on the other side is a list nothing can
+/// disagree with.
+///
+/// The corpus pins what the flag *does*; this pins which filters have it. Both
+/// are needed, because the second can be wrong in the direction the first cannot
+/// see: a filter wrongly marked `stringfilter` only misbehaves on a lazy
+/// `__proxy__` input, which no ordinary corpus row supplies.
+#[pyfunction]
+fn stringfilter_filters() -> Vec<&'static str> {
+    template_core::filters::stringfilter_names()
+}
+
 /// `(is_safe, needs_autoescape, expects_localtime)` for one built-in filter.
 ///
 /// A tuple rather than three functions because the three flags are one row of
@@ -1425,6 +1444,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(builtin_tag_names, m)?)?;
     m.add_function(wrap_pyfunction!(engine_version, m)?)?;
     m.add_function(wrap_pyfunction!(filter_names, m)?)?;
+    m.add_function(wrap_pyfunction!(stringfilter_filters, m)?)?;
     m.add_function(wrap_pyfunction!(filter_flags, m)?)?;
     m.add_function(wrap_pyfunction!(filter, m)?)?;
     m.add_function(wrap_pyfunction!(whitespace_codepoints, m)?)?;
