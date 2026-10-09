@@ -132,8 +132,8 @@
 //!
 //! **The seam runs between the control flow and the decimal engine, and that
 //! line is §D2's rule read literally:** "what a `decimal.Context` is set to" is
-//! not a function of the filter's arguments, and `:200` reads it —
-//! `prec = max(getcontext().prec, prec)` — three lines after `:194`'s
+//! not a function of the filter's arguments, and `defaultfilters.py:200` reads it —
+//! `prec = max(getcontext().prec, prec)` — three lines after `defaultfilters.py:194`'s
 //! `Decimal(1).scaleb(-abs(p))`. The context is *observable* through the answer,
 //! not merely consulted: below `2 * (Emax + prec)` the `scaleb` silently clamps
 //! to `Decimal("0E-999999")`, so the rounding position is `999999` whatever `p`
@@ -170,7 +170,7 @@
 //! * **`inf`/`-inf`/`nan` do not raise here; they take the `int(d)` arm and come
 //!   back as `input_val`.** Measured `floatformat(inf) -> 'inf'`,
 //!   `floatformat(-inf) -> '-inf'`, `floatformat(nan) -> 'nan'`, all plain
-//!   `str`. `:181` catches `OverflowError`, so `int(Decimal("Infinity"))`'s
+//!   `str`. `defaultfilters.py:181` catches `OverflowError`, so `int(Decimal("Infinity"))`'s
 //!   `OverflowError: cannot convert float infinity to integer` never escapes —
 //!   which is why both non-finites and the sum-`0` non-finite exponent reach the
 //!   same `return input_val` arm. `"abc"` and `None` are the other arm:
@@ -180,23 +180,23 @@
 //! otherwise be guessed:
 //!
 //! * **The integer branch is the *integral-value* test, not `exponent < 0`**
-//!   (`:184`). `not m and p <= 0` asks "is the value a whole number", and
+//!   (`defaultfilters.py:184`). `not m and p <= 0` asks "is the value a whole number", and
 //!   `Decimal("1.0")` has a falsy `m` with `exponent == -1`: measured
 //!   `floatformat(1.0, -1) -> '1'` and `floatformat("1.0", -1) -> '1'` where an
 //!   exponent test takes the quantize path. `floatformat(34.0) -> '34'` is the
 //!   same arm with the default `arg=-1`, and `floatformat("34.26000", "-3") ->
 //!   '34.260'` is the quantize path taken because the value is *not* whole.
-//! * **Rounding is `ROUND_HALF_UP` on the exact decimal** (`:204`), not
+//! * **Rounding is `ROUND_HALF_UP` on the exact decimal** (`defaultfilters.py:204`), not
 //!   banker's: measured `floatformat(0.5, 0) -> '1'` and
 //!   `floatformat(2.5, 0) -> '3'`, where `round(2.5)` is `2`.
-//! * **The sign is decided on the value *after* the quantization** (`:210`,
+//! * **The sign is decided on the value *after* the quantization** (`defaultfilters.py:210`,
 //!   `if sign and rounded_d`), on a different question from `m`'s. Measured
 //!   `floatformat("-0.0001", 2) -> '0.00'` with the minus **dropped** (the
 //!   rounded `Decimal("-0.00")` is falsy) and `floatformat("-0.5", 0) -> '-1'`
 //!   with it **kept** — which is why [`DecimalTuple`] carries `truthy` beside
 //!   the parse's `integral`.
-//! * **`mark_safe` is in the body, on the two normal returns only** (`:185`,
-//!   `:213`). Measured `floatformat(34.0) -> '34'` is a `SafeString` while
+//! * **`mark_safe` is in the body, on the two normal returns only** (`defaultfilters.py:185`,
+//!   `defaultfilters.py:213`). Measured `floatformat(34.0) -> '34'` is a `SafeString` while
 //!   `floatformat(nan) -> 'nan'` and `floatformat(1.5, "abc") -> '1.5'` are
 //!   plain `str`. The three `return input_val` arms build a new
 //!   `Value::Str` and never reach the seam's `mark_safe`.
@@ -212,7 +212,7 @@ use crate::filters::value::Value;
 use crate::parser::error::{Error, ErrorKind, PyErrorKind};
 use crate::pynum::IntValue;
 
-/// `except ValueError:` on `int(arg)` (`:162`) — the one class that arm names.
+/// `except ValueError:` on `int(arg)` (`defaultfilters.py:162`) — the one class that arm names.
 /// A `TypeError` (`int(None)`, measured as `floatformat(34.0, None)`'s
 /// `int() argument must be … not 'NoneType'`) is not caught and escapes.
 fn is_value_error(error: &Error) -> bool {
@@ -222,7 +222,7 @@ fn is_value_error(error: &Error) -> bool {
     )
 }
 
-/// CPython's `arg[-1]` on an empty `str` — the read `:141` performs before any
+/// CPython's `arg[-1]` on an empty `str` — the read `defaultfilters.py:141` performs before any
 /// parse, which the dispatch has no `try` around.
 ///
 /// Synthesised here because no [`FilterHost`] method is asked for it: the
@@ -240,21 +240,22 @@ fn index_out_of_range() -> Error {
     )
 }
 
-/// `:138-151`'s whole output: the `arg` the rest of the body sees, and the two
+/// `defaultfilters.py:138-151`'s whole output: the `arg` the rest of the body sees, and the two
 /// flags both `number_format` calls take.
 struct Dispatch {
     /// `arg` with its suffix cut — `arg[:-2] or -1`, `arg[:-1] or -1` — or the
     /// argument unchanged when it is not a `str`.
     arg: Value,
-    /// `force_grouping` (`:143`, `:147`).
+    /// `force_grouping` (`defaultfilters.py:143`, `defaultfilters.py:147`).
     force_grouping: bool,
-    /// `use_l10n` (`:139`, `:144`, `:150`), which starts `True` and is passed to
-    /// `number_format` as-is — `Some(false)` for the `u`/`gu`/`ug` suffixes.
+    /// `use_l10n` (`defaultfilters.py:139`, `defaultfilters.py:144`, `defaultfilters.py:150`),
+    /// which starts `True` and is passed to `number_format` as-is — `Some(false)` for the
+    /// `u`/`gu`/`ug` suffixes.
     use_l10n: bool,
 }
 
-/// `arg[:-n] or -1` (`:145`, `:148`, `:151`): the prefix, or the `-1` the `or`
-/// supplies when cutting the suffix leaves nothing.
+/// `arg[:-n] or -1` (`defaultfilters.py:145`, `defaultfilters.py:148`, `defaultfilters.py:151`):
+/// the prefix, or the `-1` the `or` supplies when cutting the suffix leaves nothing.
 ///
 /// The result is a plain `Value::Str` even when the argument was a `SafeString`;
 /// it is only ever fed to `int()`, which cannot see the marker.
@@ -268,7 +269,7 @@ fn strip_suffix(text: &str, n: usize) -> Value {
     }
 }
 
-/// `:140-151`. `arg` is read as a `Value` and not through `to_str` because its
+/// `defaultfilters.py:140-151`. `arg` is read as a `Value` and not through `to_str` because its
 /// *type* is the branch: a non-`str` argument skips the whole block, so
 /// `floatformat(1.5, 2)` reaches `int(2)` where `floatformat(1.5, "2.5")`
 /// reaches `input_val`.
@@ -308,8 +309,8 @@ fn dispatch_suffix(arg: Option<Value>) -> Result<Dispatch, Error> {
     Ok(dispatch)
 }
 
-/// `int(arg)` (`:161`) reduced to the two questions the rest of the body asks of
-/// it — `p <= 0` (`:184`) and `abs(p)` (`:194`).
+/// `int(arg)` (`defaultfilters.py:161`) reduced to the two questions the rest of the body asks of
+/// it — `p <= 0` (`defaultfilters.py:184`) and `abs(p)` (`defaultfilters.py:194`).
 ///
 /// It is not an `i64` because Python's `int` is arbitrary-precision and
 /// `p <= 0` is answerable for a value that does not fit — measured
@@ -339,13 +340,13 @@ impl Argument {
         }
     }
 
-    /// `p <= 0` (`:184`).
+    /// `p <= 0` (`defaultfilters.py:184`).
     fn is_nonpositive(&self) -> bool {
         self.negative || self.magnitude == 0
     }
 }
 
-/// `"%d" % (int(d))` (`:187`) — the integer branch's operand, built by
+/// `"%d" % (int(d))` (`defaultfilters.py:187`) — the integer branch's operand, built by
 /// repetition rather than through a Rust format spec.
 ///
 /// Only reached when [`ParsedDecimal::integral`] holds, i.e. `int(d) - d` is
@@ -384,12 +385,12 @@ fn integer_text(digits: &[u8], exponent: i64, sign: bool) -> String {
     text
 }
 
-/// `:205-212` — the digit assembly, the `.` insertion and the sign, verbatim.
+/// `defaultfilters.py:205-212` — the digit assembly, the `.` insertion and the sign, verbatim.
 ///
 /// The source's `digits.insert(-exponent, ".")` is `insert(abs(exponent), ".")`
 /// here because the value it indexes is the *quantized* tuple's exponent, which
 /// is the target `exp`'s: `-abs(p)`, never positive. The sign is [`sign`] **and
-/// [`truthy`]** — the `if sign and rounded_d` of `:210`, whose second half is
+/// [`truthy`]** — the `if sign and rounded_d` of `defaultfilters.py:210`, whose second half is
 /// the value after rounding, not the parse's `m`.
 ///
 /// [`sign`]: DecimalTuple::sign
@@ -412,17 +413,17 @@ fn assemble(rounded: &DecimalTuple) -> String {
     digits.iter().rev().collect()
 }
 
-/// The `return input_val` arms' value: `str(text)` (`:153`), a plain `str` and
+/// The `return input_val` arms' value: `str(text)` (`defaultfilters.py:153`), a plain `str` and
 /// never `mark_safe`d — measured `floatformat("x"-argument)` is `type() is str`
 /// while `floatformat(34.0)` is a `SafeString`.
 fn input_value(input_val: &str) -> Value {
     Value::Str(input_val.into())
 }
 
-/// `mark_safe(formats.number_format(number, decimal_pos, use_l10n=…,
-/// force_grouping=…))` — the shape both normal returns have (`:185` and `:213`).
+/// `mark_safe(formats.number_format(number, decimal_pos, use_l10n=…, force_grouping=…))` — the
+/// shape both normal returns have (`defaultfilters.py:185` and `defaultfilters.py:213`).
 ///
-/// The operand is a **string**, not an `f64`: `:187` hands over `"%d" % int(d)`
+/// The operand is a **string**, not an `f64`: `defaultfilters.py:187` hands over `"%d" % int(d)`
 /// and `:214` hands over the assembled `number`, which is [`NumberFormatArgs`]'s
 /// documented str case.
 fn formatted(
@@ -443,7 +444,7 @@ fn formatted(
 /// `floatformat`'s body: the Rust dispatch, the host's decimal parse, the three
 /// `return input_val` arms in source order, and the two normal branches.
 ///
-/// `arg.unwrap_or(Value::Int(-1))` is `:95`'s default, and it applies only to a
+/// `arg.unwrap_or(Value::Int(-1))` is `defaultfilters.py:95`'s default, and it applies only to a
 /// **missing** argument: `{{ x|floatformat:None }}` is `int(None)`'s `TypeError`,
 /// measured. **The FFI cannot currently tell the two apart** — it maps an
 /// explicit `None` argument to the same `Option::None` it uses for an absent one
@@ -452,17 +453,17 @@ fn formatted(
 /// FFI's, and `Some(Value::None)` already reaches `to_int(Value::None)` → the
 /// escaping `TypeError` the moment it is sent. Reported, not worked around.
 pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
-    // `:140-151` first, before any parse: an empty-string argument raises here.
+    // `defaultfilters.py:140-151` first, before any parse: an empty-string argument raises here.
     let dispatch = dispatch_suffix(arg)?;
 
-    // `try: input_val = str(text); d = Decimal(input_val)` — `:152-159`, whose
+    // `try: input_val = str(text); d = Decimal(input_val)` — `defaultfilters.py:152-159`, whose
     // double failure is `return ""`.
     let parsed = match call.host.decimal_parse(&value)? {
         DecimalParse::Parsed(parsed) => parsed,
         DecimalParse::Unparseable => return Ok(Value::Str("".into())),
     };
 
-    // `p = int(arg)` (`:161`), with `except ValueError: return input_val`. A
+    // `p = int(arg)` (`defaultfilters.py:161`), with `except ValueError: return input_val`. A
     // `TypeError` `int(None)` is not caught and escapes.
     let p = match call.host.to_int(&dispatch.arg) {
         Ok(int) => Argument::new(int),
@@ -470,9 +471,9 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
         Err(error) => return Err(error),
     };
 
-    // `_, digits, exponent = d.as_tuple()` and the 200 refusal (`:165-177`).
+    // `_, digits, exponent = d.as_tuple()` and the 200 refusal (`defaultfilters.py:165-177`).
     // **`exponent == None` is two source arms at once**: the `TypeError` the sum
-    // catches, and the `int(d)` that raises at `:180` (`OverflowError` for an
+    // catches, and the `int(d)` that raises at `defaultfilters.py:180` (`OverflowError` for an
     // infinity, `ValueError` for a NaN) — both `return input_val`. So it is
     // tested once, here, and `integral` is never read beside it.
     let exponent = match parsed.exponent {
@@ -485,14 +486,14 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
         return Ok(input_value(&parsed.input_val));
     }
 
-    // `if not m and p <= 0:` (`:184-192`) — the integral-value test.
+    // `if not m and p <= 0:` (`defaultfilters.py:184-192`) — the integral-value test.
     if parsed.integral && p.is_nonpositive() {
         let number = integer_text(&parsed.digits, exponent, parsed.sign);
         return Ok(formatted(number, 0, &dispatch, call));
     }
 
-    // `d.quantize(...)` (`:194-204`), which is the host's whole, and then the
-    // assembly (`:205-212`) and the marked return (`:213-220`).
+    // `d.quantize(...)` (`defaultfilters.py:194-204`), which is the host's whole, and then the
+    // assembly (`defaultfilters.py:205-212`) and the marked return (`defaultfilters.py:213-220`).
     let rounded = call
         .host
         .decimal_quantize(&parsed.value, p.magnitude, parsed.integral)?;
@@ -633,7 +634,7 @@ mod tests {
         assert_eq!(h.calls(), vec!["decimal_parse", "to_int"]);
     }
 
-    /// `Unparseable` is `return ""` at `:159`, before `int(arg)` ever runs — so
+    /// `Unparseable` is `return ""` at `defaultfilters.py:159`, before `int(arg)` ever runs — so
     /// the argument is not examined and no `to_int` is recorded.
     #[test]
     fn an_unparseable_input_answers_the_empty_string() {
@@ -673,7 +674,7 @@ mod tests {
         );
     }
 
-    /// A refusal from the decimal parse escapes: `:155-159` catches exactly the
+    /// A refusal from the decimal parse escapes: `defaultfilters.py:155-159` catches exactly the
     /// two classes `decimal_parse` itself turns into `Unparseable`, so anything
     /// else is the host's to raise.
     #[test]
@@ -688,7 +689,7 @@ mod tests {
         assert_eq!(h.calls(), vec!["decimal_parse"]);
     }
 
-    /// `quantize` is not inside a `try` in the source (`:204`), so its
+    /// `quantize` is not inside a `try` in the source (`defaultfilters.py:204`), so its
     /// `InvalidOperation` at the `scaleb` boundary escapes the filter.
     #[test]
     fn a_quantize_refusal_escapes() {
@@ -749,7 +750,7 @@ mod tests {
         }
     }
 
-    /// A missing argument is the default `-1` (`:95`) and still reaches the
+    /// A missing argument is the default `-1` (`defaultfilters.py:95`) and still reaches the
     /// seam: `{{ x|floatformat }}` is measured `floatformat(34.0) -> '34'`.
     #[test]
     fn a_missing_argument_still_reaches_the_seam() {

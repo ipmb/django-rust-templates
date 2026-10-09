@@ -117,30 +117,53 @@ defaultfilters.py:78-83	django/template/defaultfilters.py	78	83	-	-
 defaultfilters.py:85-91	django/template/defaultfilters.py	85	91	-	-
 defaultfilters.py:94-220	django/template/defaultfilters.py	94	220	-	-
 defaultfilters.py:95	django/template/defaultfilters.py	95	-	def floatformat(text, arg=-1):	-
+defaultfilters.py:138-151	django/template/defaultfilters.py	138	151	force_grouping = False	arg = arg[:-1] or -1
+defaultfilters.py:139	django/template/defaultfilters.py	139	-	use_l10n = True	-
+defaultfilters.py:140-151	django/template/defaultfilters.py	140	151	if isinstance(arg, str):	arg = arg[:-1] or -1
 defaultfilters.py:141	django/template/defaultfilters.py	141	-	last_char = arg[-1]	-
+defaultfilters.py:143	django/template/defaultfilters.py	143	-	force_grouping = True	-
+defaultfilters.py:144	django/template/defaultfilters.py	144	-	use_l10n = False	-
+defaultfilters.py:145	django/template/defaultfilters.py	145	-	arg = arg[:-2] or -1	-
 defaultfilters.py:146-148	django/template/defaultfilters.py	146	148	elif last_char == "g":	arg = arg[:-1] or -1
+defaultfilters.py:147	django/template/defaultfilters.py	147	-	force_grouping = True	-
+defaultfilters.py:148	django/template/defaultfilters.py	148	-	arg = arg[:-1] or -1	-
 defaultfilters.py:149-151	django/template/defaultfilters.py	149	151	elif last_char == "u":	arg = arg[:-1] or -1
-defaultfilters.py:152-159	django/template/defaultfilters.py	152	159	-	-
+defaultfilters.py:150	django/template/defaultfilters.py	150	-	use_l10n = False	-
+defaultfilters.py:151	django/template/defaultfilters.py	151	-	arg = arg[:-1] or -1	-
+defaultfilters.py:152-159	django/template/defaultfilters.py	152	159	input_val = str(text)	return ""
 defaultfilters.py:153-154	django/template/defaultfilters.py	153	154	str(text)	-
-defaultfilters.py:153	django/template/defaultfilters.py	153	-	str(text)	-
+defaultfilters.py:153	django/template/defaultfilters.py	153	-	input_val = str(text)	-
+defaultfilters.py:155-159	django/template/defaultfilters.py	155	159	except InvalidOperation:	return ""
 defaultfilters.py:157-159	django/template/defaultfilters.py	157	159	d = Decimal(str(float(text)))	return ""
 defaultfilters.py:158-159	django/template/defaultfilters.py	158	159	except (ValueError, InvalidOperation, TypeError):	-
+defaultfilters.py:159	django/template/defaultfilters.py	159	-	return ""	-
 defaultfilters.py:161	django/template/defaultfilters.py	161	-	p = int(arg)	-
+defaultfilters.py:162	django/template/defaultfilters.py	162	-	except ValueError:	-
 defaultfilters.py:163	django/template/defaultfilters.py	163	-	return input_val	-
+defaultfilters.py:165-177	django/template/defaultfilters.py	165	177	_, digits, exponent = d.as_tuple()	return input_val
 defaultfilters.py:168-170	django/template/defaultfilters.py	168	170	except TypeError:	-
 defaultfilters.py:177	django/template/defaultfilters.py	177	-	return input_val	-
 defaultfilters.py:180	django/template/defaultfilters.py	180	-	m = int(d) - d	-
 defaultfilters.py:180-182	django/template/defaultfilters.py	180	182	m = int(d) - d	return input_val
+defaultfilters.py:181	django/template/defaultfilters.py	181	-	except (ValueError, OverflowError, InvalidOperation):	-
 defaultfilters.py:182	django/template/defaultfilters.py	182	-	return input_val	-
 defaultfilters.py:184-192	django/template/defaultfilters.py	184	192	if not m and p <= 0:	-
+defaultfilters.py:184	django/template/defaultfilters.py	184	-	if not m and p <= 0:	-
+defaultfilters.py:185	django/template/defaultfilters.py	185	-	return mark_safe(	-
 defaultfilters.py:186	django/template/defaultfilters.py	186	-	-	-
+defaultfilters.py:187	django/template/defaultfilters.py	187	-	"%d" % (int(d)),	-
 defaultfilters.py:194-205	django/template/defaultfilters.py	194	205	exp = Decimal(1).scaleb(-abs(p))	-
+defaultfilters.py:194	django/template/defaultfilters.py	194	-	exp = Decimal(1).scaleb(-abs(p))	-
+defaultfilters.py:194-204	django/template/defaultfilters.py	194	204	exp = Decimal(1).scaleb(-abs(p))	rounded_d = d.quantize(exp, ROUND_HALF_UP, Context(prec=prec))
 defaultfilters.py:197	django/template/defaultfilters.py	197	-	len(tupl[1])	-
 defaultfilters.py:200	django/template/defaultfilters.py	200	-	prec = max(getcontext().prec, prec)	-
-defaultfilters.py:205-212	django/template/defaultfilters.py	205	212	sign, digits, exponent = rounded_d.as_tuple()	-
+defaultfilters.py:204	django/template/defaultfilters.py	204	-	rounded_d = d.quantize(exp, ROUND_HALF_UP, Context(prec=prec))	-
+defaultfilters.py:205-212	django/template/defaultfilters.py	205	212	sign, digits, exponent = rounded_d.as_tuple()	number = "".join(reversed(digits))
 defaultfilters.py:206	django/template/defaultfilters.py	206	-	[str(digit) for digit in reversed(digits)]	-
 defaultfilters.py:207	django/template/defaultfilters.py	207	-	while len(digits) <= abs(exponent):	-
 defaultfilters.py:210	django/template/defaultfilters.py	210	-	if sign and rounded_d	-
+defaultfilters.py:213	django/template/defaultfilters.py	213	-	return mark_safe(	-
+defaultfilters.py:213-220	django/template/defaultfilters.py	213	220	return mark_safe(	-
 defaultfilters.py:214	django/template/defaultfilters.py	214	-	formats.number_format(	-
 defaultfilters.py:223-227	django/template/defaultfilters.py	223	227	def iriencode(value):	return iri_to_uri(value)
 defaultfilters.py:225-227	django/template/defaultfilters.py	225	227	return iri_to_uri(value)	-
