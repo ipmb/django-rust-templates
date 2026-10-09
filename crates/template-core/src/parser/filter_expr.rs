@@ -10,7 +10,7 @@
 //! # The pattern
 //!
 //! Assembled the way Django assembles `filter_raw_string` (`base.py:701-719`)
-//! from `constant_string` (`:680-699`), with two substitutions that are
+//! from `constant_string` (`:688-699`), with two substitutions that are
 //! **behavioural rather than cosmetic**:
 //!
 //! - both `\w` occurrences go through `pyregex`, and in *different spellings* —
@@ -200,7 +200,7 @@ pub fn parse_filter_expression(token: &str, host: &dyn Host) -> Result<FilterExp
                 .to_string();
 
             // **The arguments before the check.** Django builds `args` at
-            // `base.py:757-761` and only then calls `find_filter` at `:771`, and
+            // `base.py:766-770` and only then calls `find_filter` at `:771`, and
             // the order is observable: `x|does_not_exist:_bad` reports the
             // underscore error while `x|does_not_exist:-5` reports the filter
             // error.
@@ -688,7 +688,7 @@ mod tests {
 
     #[test]
     fn the_argument_variable_is_built_before_the_filter_is_checked() {
-        // Django builds `args` at `base.py:757-761` and calls `find_filter` at
+        // Django builds `args` at `base.py:766-770` and calls `find_filter` at
         // `:771`, so a bad argument name is reported by `Variable`, not by the
         // filter lookup. An implementation that asked the host first — tempting,
         // because the filter name is known earlier and the error path is
