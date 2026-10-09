@@ -101,7 +101,7 @@ code.
    still hides one, and the failure is silent acceptance rather than a wrong
    tree. **Measured zero in the pinned suite** — `{% extends %}` nested inside a
    host-owned block-level tag occurs 0 times over 1046 literals and 62 fixture
-   templates (`/tmp/m7_measure_nest2.py`), and no library returns an
+   templates (`.review/m7-measurements/m7_measure_nest2.py`), and no library returns an
    `ExtendsNode` subclass. **Owned by Task 3; the divergence is recorded, not
    fixed** (it is the same class as M6's Review Focus item 1), and the test
    asserts the *reachable* half: a second `{% extends %}` at top level is
@@ -236,28 +236,54 @@ Task 1, a `{% block %}` body is parsed by Rust, and its nested tags are Rust's.
 
 ### A2. The host predicate is a **two-clause** change, and one clause alone is a trap
 
-`ShellHost.has_tag` (`host.py:113-131`) decides who compiles a name by identity:
-`func is not self._django_tags.get(command)`, where `_django_tags` is
-`django_own_tags()` — today `dict(defaulttags.register.tags)`. The three M7 names
-are **not in that dict**: `loader_tags.register.tags` is a separate registry, and
-the two are merged by `get_installed_libraries`/`Engine`, not by either module.
-Measured on the pinned tree (`/tmp/m7_measureA.py`):
+`ShellHost.has_tag` (`host.py:113-131`) decides who compiles a name in three
+clauses: refuse nothing, refuse `_M7_OWNED`, refuse a name Rust does not own,
+then compare identity — `func is not self._django_tags.get(command)`, where
+`_django_tags` is `django_own_tags()`, today `dict(defaulttags.register.tags)`.
+
+The three M7 names are **always** in `parser.tags`, and that is the first thing
+this section measures: `Engine.default_builtins` (`engine.py:14-18`) lists
+`django.template.loader_tags` third, and `Parser.__init__` merges every builtin
+through `add_library` (`base.py:668-670`). What they are not in is
+`django_own_tags()` — a second registry — so the identity clause reads `None`
+for each of them and calls `loader_tags`' callable *"not Django's"*. Measured
+(`.review/m7-measurements/m7_measureA.py`); `True` means **the host compiles
+it**:
 
 ```text
-22, defaulttags only  (today)               block=False extends=False include=False
-25, defaulttags only  <-- the trap          block=True  extends=True  include=True
-25, defaulttags+loader_tags  <-- Design B   block=False extends=False include=False
-25, +loader_tags, library overrides block   block=True  extends=False include=False
+1  today, guard present, 22, defaulttags          block=False extends=False include=False
+2  no guard, 22, defaulttags                      block=True  extends=True  include=True
+3  no guard, 25, defaulttags   <-- the trap       block=True  extends=True  include=True
+4  no guard, 25, +loader_tags  <-- Design B       block=False extends=False include=False
+5  no guard, 25, +loader_tags, + {% load %}ed     block=True  extends=False include=False
+6  guard present, 25, +loader_tags, + {% load %}  block=False extends=False include=False
 ```
 
-`True` means *the host compiles it*. Row 3 is the wanted state; row 2 is what
-adding the names to `REGISTRY` **alone** produces, and it is worse than today —
-today the host declines (`has_tag` False) and Rust answers `Invalid block tag`,
-which is honest; under row 2 the host compiles, `{% extends %}` is accepted
-anywhere, and `extend_nodelist`'s check never runs. Row 4 is the invariant that
-must survive: a `{% load %}`ed library registering `block` still wins, because
-`add_library` is `self.tags.update(lib.tags)` (`base.py:669-670`) and the loaded
-callable is not `loader_tags.do_block`.
+Row 1 is measured on the shipping `ShellHost`; rows 2–6 model the predicate
+with `_M7_OWNED` deleted, which is half of what Task 4 does. Everything else in
+the model is read from the shipping modules (`_M7_OWNED`, `django_own_tags`,
+`_native.builtin_tag_names()`, `loader_tags.register.tags`), so the predicate
+change is the only modelled thing.
+
+Row 4 is the wanted state. **Rows 2 and 3 are the same answer, and that is the
+correction this matrix carries against its own earlier form: the registry count
+is not the deciding column.** Deleting the guard is what flips these three to
+the host, and the identity table is what flips them back — so the guard must not
+go before `django_own_tags()` is widened, which is why Task 4 makes both edits
+in one commit. Row 3, the half-fix named as the trap, is what a reviewer
+reasonably expects from "add the names to `REGISTRY` and delete the exception
+list": names in `REGISTRY`, table unwidened, and the host silently compiles a
+tag M7 owns — `{% extends %}` is then accepted anywhere and `must_be_first`
+never crosses.
+
+Rows 5 and 6 are **one input under the two forms of the predicate, and they
+disagree.** With the guard kept, a `{% load %}`ed library that registers `block`
+loses (`False`), because `_M7_OWNED` is consulted before identity. Measured on
+the shipping `ShellHost`, not modelled: `parser.tags["block"]` *is* the loaded
+callable and `has_tag` still declines. That is the bug `django_own_tags`'s
+docstring describes for `for` — so deleting the guard is not a simplification,
+it is a fix, and "a loaded library wins" is an invariant M7 *establishes* for
+these three rather than one it preserves.
 
 So Task 4 makes **both** edits in one commit:
 
@@ -266,11 +292,22 @@ So Task 4 makes **both** edits in one commit:
    `{**defaulttags.register.tags, **loader_tags.register.tags}`.
 
 The `block`/`extends`/`include` entries in `REGISTRY` arrive in Tasks 1, 3 and 4
-respectively; the predicate change is only *safe* once all three are there, so it
-lands with the last of them and the three commits in between stay green (a name
-in `REGISTRY` and in neither `django_own_tags` nor `_M7_OWNED` is unreachable
-before Task 4 — `_M7_OWNED` still refuses `block`/`extends`/`include` from the
-host, so `has_tag` returns `False` and Rust compiles them, which is correct).
+respectively, and the two edits are two different hazards, which is why the
+matrix needs both rows 2 and 3:
+
+- **Deleting the guard early** sends *any* name Rust does not yet own to the
+  host, table or no table — clause 2 is `command not in self._rust_owned`, and
+  it is consulted before identity. So the guard stays until all three names are
+  in `REGISTRY`: the commits in between keep it, `has_tag` returns `False` for
+  the three, and Rust compiles them, which is correct.
+- **Widening the table late** sends the three to the host the moment the guard
+  goes — that is row 3.
+
+Both hazards are discharged by Task 4's single commit, which lands last because
+the predicate change is only *safe* once all three names are owned. Until then
+a name in `REGISTRY` and in neither `django_own_tags()` nor `_M7_OWNED` is
+unreachable, because `_M7_OWNED` refuses the three before the ownership clause
+can see them.
 
 ### A3. `origin_template_repr` becomes `origin_template_name`, and the repr is derived
 
@@ -294,7 +331,7 @@ correction this section carries.** The reviewer read `origin=None` as
 manufacturing a state Django cannot reach, on the argument that `do_extends`
 raises `AttributeError` where Django reads `"<unknown source>"` and parses on.
 The hazard is real and the mechanism is not, and the difference changes what
-Task 2 must do. Measured (`/tmp/m7_measure_origin.py`):
+Task 2 must do. Measured (`.review/m7-measurements/m7_measure_origin.py`):
 
 ```text
 Origin(UNKNOWN_SOURCE).name            = '<unknown source>'
@@ -345,7 +382,7 @@ without it, `None` would be a silent "no check" rather than the refusal.
 The recon's §2 framed `must_be_first` on the outbound wire — the 5-tuple pinned
 by `tests/test_ref_table.py:173-181`. That is the wrong boundary. The flag that
 matters crosses **inbound**: a library tag returning a `Node` subclass with
-`must_be_first = True`. Measured (`/tmp/m7_measureB.py`), Django refuses it in a
+`must_be_first = True`. Measured (`.review/m7-measurements/m7_measureB.py`), Django refuses it in a
 non-first position with the identical message —
 
 ```text
@@ -396,7 +433,7 @@ Two things a task will trip over, both recorded rather than fixed:
   had not been run, and it returns **one**, not zero. Measured by walking every
   string literal under `tests/template_tests` with `ast`, tokenizing each with
   Django's own `Lexer` and tracking the open-tag stack
-  (`/tmp/m7_measure_nesting.py`; 1046 literals, 1046 tokenized), plus the 62
+  (`.review/m7-measurements/m7_measure_nesting.py`; 1046 literals, 1046 tokenized), plus the 62
   fixture templates under `templates/`: the only hit in either is
   `syntax_tests/i18n/test_blocktranslate.py`'s `test_with_block` —
 
@@ -464,7 +501,7 @@ the reviewer's round on this plan.
 inbound.** The 5-tuple `node_desc_to_py` emits (`lib.rs:871-915`, pinned by
 `tests/test_ref_table.py:173-181`) is a *descriptor-to-shell* wire; the flag
 that is missing is read off the *Python node the host returned*, before
-`node.unbind()`. See A4; the measurement is `/tmp/m7_measureB.py`. This plan does
+`node.unbind()`. See A4; the measurement is `.review/m7-measurements/m7_measureB.py`. This plan does
 not touch the 5-tuple.
 
 **D2 — the recon's §6 items 2 and 6 contradict each other.** Item 2 says "carry
@@ -629,15 +666,27 @@ use crate::token::Token;
 pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error> {
     let bits = pyunicode::split(&token.contents);
     if bits.len() != 2 {
+        // `bits.len() != 2` admits 0, and Django's `bits[0]` would raise
+        // `IndexError` there (`loader_tags.py:222-223`) — but `bits[0]` in Rust
+        // is a *panic*, and a panic crosses the FFI as a process-level event
+        // rather than an exception. Unreachable: `Parser::parse` splits the same
+        // contents and raises `Empty block tag on line %d` first
+        // (`base.py:560-563`), so nothing with zero bits reaches a compile
+        // function. Stated rather than assumed, in the idiom
+        // `NoHost::call_tag`'s `unreachable!` already uses.
+        let command = bits
+            .first()
+            .expect("parse rejects an empty block tag before a compile function runs");
         return Err(Error::syntax(format!(
             "'{}' tag takes only one argument",
-            bits[0]
+            command
         )));
     }
     let block_name = bits[1].to_string();
 
-    // Django raises **before** appending (`loader_tags.py:228-232`), so a third
-    // `{% block a %}` reports the second as the one that already had the name.
+    // Django raises **before** appending (`loader_tags.py:227-234`), so the
+    // occurrence that raises is never recorded and `loaded_blocks` holds only
+    // names whose block compiled.
     if parser.loaded_blocks().iter().any(|name| *name == block_name) {
         return Err(Error::syntax(format!(
             "'{}' tag with name '{}' appears more than once",
@@ -1232,7 +1281,7 @@ impl NodeListDesc {
     /// `class <name>(ExtendsNode|BlockNode|IncludeNode)` exists anywhere under
     /// `tests/template_tests`, and `{% extends %}` nested inside a
     /// host-owned block-level tag occurs 0 times, over 1046 string literals and
-    /// 62 fixture templates (`/tmp/m7_measure_nest2.py`). The *neighbouring*
+    /// 62 fixture templates (`.review/m7-measurements/m7_measure_nest2.py`). The *neighbouring*
     /// case is not zero — a nested `{% block %}` occurs once, in
     /// `test_blocktranslate.py`; see A5. Review Focus item 3.
     pub fn get_nodes_by_type(&self, class_name: &str) -> Vec<&NodeDesc> {
@@ -1482,7 +1531,15 @@ with `from django.template import loader_tags as _loader_tags` beside the
 `defaulttags` import, and the docstring's last paragraph replaced by the
 measurement A2 records: `loader_tags.register.tags`'s keys are exactly
 `['block', 'extends', 'include']`, its dict is disjoint from `defaulttags`', and
-without the merge all three would route to the host.
+the three reach the identity clause at all only because
+`Engine.default_builtins` (`engine.py:14-18`) lists
+`django.template.loader_tags` third and `add_library` (`base.py:668-670`) merges
+it into `parser.tags` — so the clause reads `None` for all three, `func is not
+None` holds, and without the merge all three would route to the host. The
+paragraph must also record the guard's cost, since that is why the clause is
+deleted rather than kept: `_M7_OWNED` is consulted *before* identity, so today a
+`{% load %}`ed library that registers `block` loses (measured — the parser's
+`block` *is* the loaded callable and `has_tag` still returns `False`).
 
 Update `parser/mod.rs`'s host-first comment (`:309-317`) — "a custom library that
 redefines a built-in name wins" is still true, and now so is the case where the
@@ -1496,11 +1553,16 @@ In `tests/test_inheritance_gate.py`:
 def test_the_host_declines_every_name_rust_owns():
     """A2: the predicate must say 'Rust's' for all three, with no exception list.
 
-    Before `django_own_tags` merged `loader_tags`, this returned True for all
-    three: `loader_tags.register.tags` is a second dict, so
-    `self._django_tags.get("block")` was None and `func is not None` held. That
-    is the trap row of the plan's A2 matrix — a half-fix that compiles
-    `{% extends %}` anywhere.
+    This is row 4 of the plan's A2 matrix, and it is deliberately two
+    assertions: that the parser's `block` really is `loader_tags`' callable
+    (row 3's precondition — the identity clause can only work if the callable
+    it compares against is the one it finds), and that the host declines.
+
+    **It does not fail before Step 5's edits, and it is not meant to.** Today's
+    `_M7_OWNED` clause returns `False` first, so the test passes on the
+    pre-M7 tree too; it goes red only if the guard is deleted *without* the
+    table being widened (A2's rows 2 and 3). It is a pin on the end state, not
+    a red-then-green step.
     """
     from django.template import loader_tags
 
@@ -1516,7 +1578,15 @@ def test_the_host_declines_every_name_rust_owns():
 
 
 def test_a_loaded_library_still_shadows_a_built_in():
-    """A2's row 4: the identity clause survives the widening."""
+    """A2's rows 5 and 6: the identity clause reaches a `{% load %}`ed override.
+
+    **This is Step 6's failing test.** Before Step 5 it returns `False` — the
+    `_M7_OWNED` clause is consulted before identity, so a library registering
+    `block` loses — and Step 5 is what makes it `True`. Note the shadowing is
+    established *for* these three names, not preserved for them; the same
+    override of `comment` already worked (M6's gate,
+    `tests/test_load_shadowing.py`).
+    """
     from django.template import Engine, Library
 
     from django_rust_templates.host import ShellHost
@@ -1534,9 +1604,10 @@ def test_a_loaded_library_still_shadows_a_built_in():
     self.assertIs(ShellHost(parser).has_tag("block"), True)
 ```
 
-Run it **before** Step 5's edits: the first test must fail on `block` (and would
-pass on nothing else), which is the trap made visible. Then apply Step 5 and
-re-run.
+Run both **before** Step 5's edits: `test_a_loaded_library_still_shadows_a_built_in`
+must fail (`False is not True`) and `test_the_host_declines_every_name_rust_owns`
+must pass — that asymmetry *is* the guard's cost, and it is why Step 5 does both
+edits. Then apply Step 5 and re-run: both green.
 
 - [ ] **Step 7: Corpus rows**
 
@@ -1605,7 +1676,7 @@ git commit -m "M7 Task 4: {% include %}, and the two-clause host predicate"
 
 **Declared environment:** this is a `template-py` change, so `maturin develop` is
 required before the Python test. The behaviour is measured, not assumed
-(`/tmp/m7_measureB.py`, on the pinned tree):
+(`.review/m7-measurements/m7_measureB.py`, on the pinned tree):
 
 ```text
 {% load mylib %}{% first_tag %}                     -> OK  'F'
@@ -1848,12 +1919,20 @@ number only for as long as the thing it numbered holds still." Take each number
 from the command that produces it in this step; do not restate a number measured
 in an earlier session.
 
-**And copy the measurement scripts A3/A4/A5 cite into `.review/` beside the
-seams file, under their `/tmp` names.** They are evidence for four claims that
-no test carries — the two-clause predicate's matrix, the origin's unknown-source
-value, the inbound `must_be_first`, and A5's nesting predicate — and `/tmp` does
-not survive. `.review/` is the dated-record home for exactly this, and a
-divergence recorded with an unrunnable argument is one nobody re-examines.
+**The measurement scripts A3/A4/A5 cite are already preserved, and this step
+re-runs them rather than copying them.** They lived under `/tmp/`, which does not
+survive; they are now in `.review/m7-measurements/` with a `README.md` mapping
+each script to the claim it carries and the plan section that cites it, and every
+citation in this plan names that path. They are evidence for four claims no test
+carries — the two-clause predicate's matrix, the origin's unknown-source value,
+the inbound `must_be_first`, and A5's nesting predicate. `.review/` is the
+dated-record home for exactly this, and a divergence recorded with an unrunnable
+argument is one nobody re-examines.
+
+Run each one — `.venv/bin/python -I .review/m7-measurements/<name>.py` — and
+confirm it still reproduces the figure its section states. A script that runs and
+prints something else is the correction this step exists to catch; the run is
+recorded in `m7-seams.md` with the date, not assumed from the README.
 
 - [ ] **Step 2: Update the spec**
 
