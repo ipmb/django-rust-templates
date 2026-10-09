@@ -238,6 +238,7 @@ const LIBRARY_REGISTRY: &[Entry] = &[
     ("get_current_timezone", tags::tz::get_current_timezone),
     ("get_media_prefix", tags::static_tag::compile),
     ("get_static_prefix", tags::static_tag::compile),
+    ("localize", tags::l10n::localize),
     ("localtime", tags::tz::localtime),
     ("static", tags::static_tag::compile),
     ("timezone", tags::tz::timezone),
@@ -566,7 +567,7 @@ mod tests {
     }
 
     #[test]
-    fn the_library_registry_holds_the_seven_names_m12_has_landed_so_far() {
+    fn the_library_registry_holds_the_eight_names_m12_has_landed_so_far() {
         // The literal, because the *set* is a claim about Django's libraries and
         // not a consequence of anything in this file. `tests/test_tag_inventory.py`
         // cross-checks `REGISTRY` against Django's built-in registry; the library
@@ -575,8 +576,9 @@ mod tests {
         // arriving without a task agreeing to it.
         //
         // Four at Task 3 (`cache`, `static`, and the two `static.py` prefix
-        // readers), three more at Task 4 (`tz`'s three tags). Task 7 adds `tz`'s
-        // three *filters* and moves none of these names: filters are not tags and
+        // readers), three more at Task 4 (`tz`'s three tags), one more at Task 5
+        // (`l10n`'s single tag, `localize`). Task 7 adds the nine *filters* of the
+        // five libraries and moves none of these names: filters are not tags and
         // never enter this table.
         assert_eq!(
             library_tag_names(),
@@ -585,6 +587,7 @@ mod tests {
                 "get_current_timezone",
                 "get_media_prefix",
                 "get_static_prefix",
+                "localize",
                 "localtime",
                 "static",
                 "timezone",

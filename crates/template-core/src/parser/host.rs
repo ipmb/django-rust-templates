@@ -63,8 +63,8 @@ pub trait Host {
     /// [`Host::check_filter`]'s default rests on.
     ///
     /// It is *not* "is this name in the host's tag dict": returning `true` for
-    /// every loaded name would claim the 14 library tags Rust does not compile
-    /// (`trans`, `timezone`, `localize`, …) and send them to
+    /// every loaded name would claim the 10 library tags Rust does not compile
+    /// (`trans`, `blocktranslate`, `get_available_languages`, …) and send them to
     /// `Invalid block tag`. The caller consults this and then asks the *registry*,
     /// which is what makes the pair safe. The shell's implementation is a bare
     /// `command in self.parser.tags` for that reason: the second half of the

@@ -313,7 +313,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
 
         The cache-drop below is not incidental. The row writes a module and
         expects the finder to see it, but ``install()`` returns early when the
-        shim is already installed (``_shim.py:550``), and a session-start install
+        shim is already installed (``_shim.py:551``), and a session-start install
         (which ``check.sh`` now does, so every test module binds the same
         classes) means the shim *is* already installed by the time this row
         runs. A ``django.template.backends`` cached earlier in the session then
@@ -573,11 +573,19 @@ class NamespaceTests(unittest.TestCase):
         here, where the set is written out.
 
         It is **2** in M12 Task 4, which interposes ``tz`` — the third library,
-        one module, so the delta is one and the set below is the arithmetic
-        again. The plan's Step 7 says this commit's line is
+        one module, so the delta is one and the set below was the arithmetic
+        again. The plan's Step 7 says that commit's line is
         ``the second count is 1``; that assumed Task 3 left the count at 2 and
         Task 3 measured 3, so the plan is off by one and the measured line is
         ``the second count is 2``. See the commit message.
+
+        It is **1** in M12 Task 5, which interposes ``l10n`` — the fourth
+        library, one module, so the delta is one again and the singleton set
+        below is the arithmetic. **The plan's Task 5 Step 7 subject reads
+        ``the second count is 2``, and that is wrong for the same off-by-one
+        reason:** it is written as if the count arrives at 2 here, but Task 4
+        already measured 2 and left ``i18n`` alone, so one more file moves
+        2 → 1. ``i18n`` is the last of the five and Task 6 takes it to 0.
         """
         _shim.install()
         self.assertEqual(_shim.unshimmed(), _shim.unshimmed(scope="django.template"))
@@ -586,7 +594,6 @@ class NamespaceTests(unittest.TestCase):
             sorted(_shim.unshimmed(scope="django.templatetags")),
             [
                 "django.templatetags.i18n",
-                "django.templatetags.l10n",
             ],
         )
 

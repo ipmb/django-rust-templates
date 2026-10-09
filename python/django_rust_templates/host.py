@@ -398,7 +398,8 @@ class ShellHost:
         # host was the one place that read the keys as the registry.
         # M12 widens this with the `django.templatetags` names Rust has a real
         # body for — `cache`, `static` and the two prefix tags, plus `tz`'s three
-        # tag names as of Task 4. **Those, not the 18 the five libraries
+        # tag names as of Task 4 and `l10n`'s one (`localize`) as of Task 5.
+        # **Those, not the 18 the five libraries
         # register**, and the difference is a
         # correctness boundary rather than bookkeeping: `library_tag_loaded`
         # below is `command in parser.tags`, which is true for *every* name a
@@ -454,9 +455,11 @@ class ShellHost:
         `add_library` merges a loaded library's tags into it
         (`base.py:668-670`), so the name is present in exactly the second case.
         Answering from `_library_tag_tables()` instead would say `True` for all
-        18 library names, 14 of which are Python's — see `__init__` for why
-        `_rust_owned` carries the four that have Rust bodies and this method is
-        the coarser question that only the Rust arm may narrow.
+        18 library names, 10 of which are Python's as of M12 Task 5 (the
+        library table's 18 minus the eight Rust bodies `LIBRARY_REGISTRY` has) —
+        see `__init__` for why `_rust_owned` carries the eight that have Rust
+        bodies and this method is the coarser question that only the Rust arm may
+        narrow.
         """
         return command in self.parser.tags
 

@@ -55,6 +55,7 @@ from django.template.defaulttags import (
 )
 from django.template.loader_tags import BlockNode, ExtendsNode, IncludeNode
 from django.templatetags.cache import CacheNode
+from django.templatetags.l10n import LocalizeNode
 from django.templatetags.static import PrefixNode, StaticNode
 from django.templatetags.tz import (
     GetCurrentTimezoneNode,
@@ -153,6 +154,12 @@ NODE_CLASSES = {
     "IfChangedNode": _ifchanged_factory,
     "IfNode": IfNode,
     "IncludeNode": IncludeNode,
+    # M12 Task 5's, `django.templatetags.l10n`'s one node. An ordinary keyword
+    # constructor — `LocalizeNode.__init__(self, nodelist, use_l10n)`
+    # (`l10n.py:24`) — so the bare class is the factory, like every entry here
+    # but `IfChangedNode`. Its `render` stays our transcription's Python: only
+    # the compile function (`{% localize %}`'s) is Rust's.
+    "LocalizeNode": LocalizeNode,
     "LocalTimeNode": LocalTimeNode,
     "LoremNode": LoremNode,
     "NowNode": NowNode,

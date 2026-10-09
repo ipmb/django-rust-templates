@@ -1305,7 +1305,7 @@ class FilterRoutingTests(unittest.TestCase):
         """The premise, on its own, so a green counter cannot be the whole story.
 
         `Parser.find_filter(name)` is the handle the parse keeps
-        (`_impl/parser.py:528`) and the object the routing compares against, so
+        (`_impl/parser.py:535`) and the object the routing compares against, so
         this asserts the *identity* the routing will test — ours, from our file —
         rather than a name. Two claims, because interposing the file is not the
         same as the registry being the one the parser reads: `register` could be
@@ -2278,6 +2278,118 @@ class TzInterpositionTests(unittest.TestCase):
                 self.assertEqual([type(node).__name__ for node in nodes], [class_name])
                 self.assertIs(type(nodes[0]), getattr(tz, class_name))
                 self.assertIn("_impl", inspect.getfile(type(nodes[0])))
+
+
+class L10nInterpositionTests(unittest.TestCase):
+    """M12 Task 5: ``l10n`` is our module — one tag, one node class, two filters to Task 7.
+
+    ``django.templatetags.l10n`` is the fourth of the milestone's five libraries
+    and the smallest: 60 lines, one class (``LocalizeNode``), one tag
+    (``{% localize %}``) and two filters. The tag is the only one in the
+    milestone whose compile function is **variadic in what it accepts** — `on`,
+    `off`, and *nothing* — and the "nothing" form is the one most easily mistaken
+    for "accepts anything", which is why the rejected fourth form (a first bit
+    that is neither ``on`` nor ``off``, and a second bit at all) is asserted in
+    ``l10n.rs``'s own Rust tests, measured against Django rather than read off
+    the prose.
+
+    **The render stays Python's, and that is the coupling test, not a shortcut.**
+    ``LocalizeNode.render`` flips ``context.use_l10n`` and calls the body's
+    render; the tag's *compile* function is Rust's. The ``django.utils.formats``
+    delegation lives in the two *filters* (``l10n.py:8,16``), whose bodies are
+    M12 Task 7's Rust port — so this task transcribes their Python (the file is
+    the unit of transcription) and delegates nothing.
+
+    The routing claim is the instrument ``.review/m12-measurements/
+    m12_measure_tag_routing.py``'s ``theirs/theirs`` for ``localize`` flipping to
+    ``ours/ours``, 11/7 → 10/8; the row below is the direct-entry version, so a
+    green instrument is not the whole story.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _shim.install()
+
+    def test_l10n_resolves_to_our_file(self):
+        import importlib
+
+        module = importlib.import_module("django.templatetags.l10n")
+        self.assertIn("_impl", module.__file__, module.__file__)
+
+    def test_the_localize_tag_compiles_to_our_node_class(self):
+        """The routing claim, end to end, for the tag and all three accepted forms.
+
+        A real ``Engine`` with the library spelled as a dotted path — the route
+        ``{% load l10n %}`` takes and the route the suite takes — for the reason
+        ``TzInterpositionTests`` states: a bare ``Engine()`` cannot see
+        ``django.templatetags.l10n`` at all (measured — ``'l10n' is not a
+        registered tag library``), so a row against one would measure the probe.
+        ``use_l10n`` is asserted because it is the *only* attribute the descriptor
+        carries and it is the argument the compile function branches on: nothing,
+        ``on`` and ``off`` are three inputs and the node distinguishes two, so a
+        port that read only ``bits[1]`` would build ``True`` for the bare form by
+        accident and the two-argument forms correctly — the bare form is the one
+        that catches the difference.
+        """
+        import importlib
+        import inspect
+
+        l10n = importlib.import_module("django.templatetags.l10n")
+
+        engine = Engine(libraries={"l10n": "django.templatetags.l10n"})
+        for source, class_name, use_l10n in [
+            ("{% load l10n %}{% localize %}x{% endlocalize %}", "LocalizeNode", True),
+            ("{% load l10n %}{% localize on %}x{% endlocalize %}", "LocalizeNode", True),
+            (
+                "{% load l10n %}{% localize off %}x{% endlocalize %}",
+                "LocalizeNode",
+                False,
+            ),
+        ]:
+            with self.subTest(source=source):
+                template = engine.from_string(source)
+                nodes = [
+                    node
+                    for node in template.nodelist
+                    if type(node).__name__ not in ("TextNode", "LoadNode")
+                ]
+                self.assertEqual([type(node).__name__ for node in nodes], [class_name])
+                self.assertIs(type(nodes[0]), getattr(l10n, class_name))
+                self.assertIn("_impl", inspect.getfile(type(nodes[0])))
+                self.assertIs(nodes[0].use_l10n, use_l10n)
+
+    def test_the_two_filters_are_registered_by_our_module(self):
+        """Task 7's two filters, pinned as **coverage** and not as a Rust body.
+
+        ``localize`` and ``unlocalize`` (``l10n.py:8,16``) are the module's two
+        filters, and Task 7 is the task that gives them Rust bodies. This task
+        transcribes their Python — the file is the unit of transcription, and a
+        per-file table cannot express a half-transcribed module — so the claim
+        this commit can make is the interposition one: both names resolve to
+        callables defined by *our* file, which is the object the filter predicate
+        compares against once Task 7 widens ``django_own_filters()``.
+
+        Nothing here asserts a Rust body exists, because none does yet — and an
+        assertion that the registry *lacks* the names would redden the very
+        commit that adds them, which is the negative-fixture expiry
+        ``FabricatedNameTests`` documents. So the row is the positive identity
+        claim only.
+        """
+        import importlib
+        import inspect
+
+        l10n = importlib.import_module("django.templatetags.l10n")
+        for name in ("localize", "unlocalize"):
+            with self.subTest(name=name):
+                func = l10n.register.filters.get(name)
+                self.assertIsNotNone(
+                    func, f"{name} is not in our l10n registry at all"
+                )
+                self.assertIn(
+                    "_impl",
+                    inspect.getfile(func),
+                    f"{name} resolves to {inspect.getfile(func)}, not our file",
+                )
 
 
 class DefaultTagsInterpositionTests(unittest.TestCase):

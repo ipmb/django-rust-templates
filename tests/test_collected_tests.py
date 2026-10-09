@@ -146,7 +146,16 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # pieces move no count — the `m12_not_a_tag` → `unregistered_tag` rename is a
 # rename, and the Rust-side rows are `cargo test`'s, not this suite's. `git diff
 # tests/` since `f89a9d4` is `+2` rows in one file, no removals.
-PINNED = 410
+#
+# 410 → 414 is M12 Task 5, **four** rows in two files: three in
+# `test_interposition.py::L10nInterpositionTests` (the module resolves to `_impl`;
+# the tag and its three accepted forms compile to our `LocalizeNode`; and the two
+# filters resolve to our module — one row, the `localize`/`unlocalize` subtests)
+# and one in `test_materialise.py` (`LocalizeNode` is registered and is ours).
+# `git diff tests/` since `b83ec01` is `+4` rows in two files, no removals, so
+# 410 + 4 = 414 — measured by discovery before the pin moved, and the failure text
+# before the pin moved read `discovery found 414 tests, the pin says 410`.
+PINNED = 414
 
 
 def collected() -> unittest.TestSuite:

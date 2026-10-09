@@ -163,6 +163,7 @@ SHADOWING = {
     # interposed. Upstream's `__init__.py` is 0 bytes, so there is no behaviour
     # in it to transcribe and nothing is lost by leaving the package Django's.
     "templatetags/cache.py": "transcribed",
+    "templatetags/l10n.py": "transcribed",
     "templatetags/static.py": "transcribed",
     "templatetags/tz.py": "transcribed",
     "utils.py": "transcribed",

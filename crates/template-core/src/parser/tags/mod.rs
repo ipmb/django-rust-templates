@@ -30,6 +30,7 @@ pub mod for_tag;
 pub mod if_tag;
 pub mod ifchanged;
 pub mod include;
+pub mod l10n;
 pub mod lorem;
 pub mod now;
 pub mod partial;

@@ -87,6 +87,15 @@ MODULES = {
     # `do_timezone`, the helper registered as the `timezone` filter, stays
     # Python-side too; the commit says why.
     "templatetags/tz.py": "django/templatetags/tz.py",
+    # M12 Task 5's, the fourth of the five, and the smallest: one class
+    # (`LocalizeNode`), one tag, two filters. Pin-plus-marker like the three
+    # above, and for their reason — Rust compiles the one tag name, so its body
+    # (`localize_tag`) is unreachable through the host, and the two filters are
+    # Task 7's Rust bodies. The `django.utils.formats` delegation the two filters
+    # make stays Python's here (the tag's *render*, `LocalizeNode.render`, is
+    # Python's too, and is our transcription's), so nothing in this file
+    # delegates to Rust and the generator can write the whole of it.
+    "templatetags/l10n.py": "django/templatetags/l10n.py",
     # M11's first, and the only one this table names yet. Unlike M10's loader
     # files it is a module the tag and filter corpus renders through, so a
     # verbatim transcription here moves the *registry's* owner and the node

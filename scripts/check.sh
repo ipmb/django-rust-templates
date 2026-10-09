@@ -55,16 +55,16 @@ step "python anchor manifest"
 # an edit being written, which is what a gate is for. The unquoted rows are
 # *not* failed on: an unquoted row records no claim to falsify, and the ones left
 # are cited only from files that never held a shorthand, so no naming pass will
-# come back for them. They stood at 104 when `--frozen` was earned and are **155**
-# after M12 Tasks 3 and 4: Task 3's 23 `cache.py`/`static.py` anchors seed unquoted
-# by design, and Task 4's eighteen `tz.py` anchors mostly do too —
-# `_seed_snippet` requires the quoted span to occur on exactly *one* line of the
-# file, and the spans our three new modules quote beside their anchors
-# (`tokens[-1]`, `split_contents`, `use_tz = True`) recur throughout theirs. Two
-# of Task 4's seeded rows were *wrong* rather than merely unquoted and were
-# repaired by hand, which is the seed step behaving as its doc predicts: it
-# drafted `tz.py:146-147` with a snippet that lives on 149 and `tz.py:193-194`
-# with one that lives on 195. The number in this
+# come back for them. They stood at 104 when `--frozen` was earned and are **157**
+# after M12 Tasks 3, 4 and 5: Task 3's 23 `cache.py`/`static.py` anchors seed
+# unquoted by design, Task 4's eighteen `tz.py` anchors mostly do too, and Task 5
+# added two more — `_seed_snippet` requires the quoted span to occur on exactly
+# *one* line of the file, and the spans our three new modules quote beside their
+# anchors (`tokens[-1]`, `split_contents`, `use_tz = True`, `LocalizeNode.render`)
+# recur throughout theirs. Task 3's and Task 4's seeded rows were *wrong* rather
+# than merely unquoted in a couple of places and were repaired by hand, and Task
+# 5's were the same: the seed drafted `l10n.py:52-53` and `l10n.py:52-57` with
+# snippets that live on 55 and 58, and both were re-quoted by hand. The number in this
 # comment is a measurement and moves with the tree; the property that matters is
 # that `--check` counts them out loud rather than passing them as verified.
 "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_python_anchors.py" --check --frozen

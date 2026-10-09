@@ -403,6 +403,20 @@ COMPARED_PATH = {
     # `test_the_compared_path_is_the_measured_one` would fail in the commit that
     # added it.
     "templatetags/tz.py": [],
+    # M12 Task 5's, measured with the same instrument rather than copied:
+    # `m9_measure_parse_path.py templatetags/l10n.py` reports **0 of 6**
+    # functions over both corpora (hand-written 166: 0; generated 400: 0), and
+    # the 6 is `definitions()`' counting unit — three module-level defs
+    # (`localize`, `unlocalize`, `localize_tag`) plus three methods on
+    # `LocalizeNode` (`__init__`, `__repr__`, `render`). The zero has
+    # `cache.py`'s reason, one library over: `tests/parser_corpus.py`'s
+    # `{% load %}` rows reach the `template_tests.*` libraries and never
+    # `django.templatetags.l10n`, so every one of the 6 is defined and simply not
+    # entered. The re-measurement row keeps it honest — a corpus that grew a
+    # `{% load l10n %}` row would move this entry, and
+    # `test_the_compared_path_is_the_measured_one` would fail in the commit that
+    # added it.
+    "templatetags/l10n.py": [],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])
@@ -930,6 +944,36 @@ DECLARED = {
                 (1, 2),
                 None,
                 "# TRANSCRIBED: django/templatetags/tz.py (Django 6.0.9)",
+            ),
+        ],
+    ),
+    # M12 Task 5's, the fourth of the five and the same shape: the pin plus a
+    # two-line marker, `None` on the upstream side, nothing else. The module
+    # opens with imports, so the marker is a comment on line 1 and the region is
+    # `(1, 2)`.
+    #
+    # Verbatim is right for the one tag body even though Rust compiles its name:
+    # `has_tag` answers False for a Rust-owned name the template loaded, so
+    # `localize_tag` is a body nothing calls — the same case `defaulttags.py` and
+    # the three modules above are kept verbatim for. **The render and the
+    # filters stay Python's, and the marker's meaning is why that is a
+    # transcription rather than a delegation:** `LocalizeNode.render` is our
+    # transcription's Python (only the *compile* function is Rust's), and the two
+    # filters (`l10n.py:8,16`, whose bodies make the `django.utils.formats`
+    # calls) are Task 7's Rust
+    # bodies — transcribed-verbatim here for the reason `tz.py`'s are: the unit
+    # of transcription is the file, and a per-file table cannot express a
+    # half-transcribed module. The generated marker line says the upstream path
+    # and the pin and nothing more, which is what every marker in this table
+    # says; the "the formats delegation stays Python's" claim lives here, where
+    # the guard reads it, as it does for the four modules above.
+    "templatetags/l10n.py": (
+        "django/templatetags/l10n.py",
+        [
+            (
+                (1, 2),
+                None,
+                "# TRANSCRIBED: django/templatetags/l10n.py (Django 6.0.9)",
             ),
         ],
     ),

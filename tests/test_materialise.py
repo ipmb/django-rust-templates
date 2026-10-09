@@ -346,6 +346,25 @@ class MaterialiseTests(unittest.TestCase):
                 self.assertIsNotNone(cls, f"{name} is not in NODE_CLASSES")
                 self.assertIn("_impl", inspect.getfile(cls))
 
+    def test_the_l10n_node_class_is_registered_and_is_ours(self):
+        """M12 Task 5: the class ``l10n.rs`` emits is materialisable.
+
+        ``StaticEmitterRegistryTests`` below checks the *membership* generically,
+        by reading the class names out of the Rust source. This is the
+        direct-entry half the plan's Step 1 asks for, and the ``_impl``
+        assertion is the part the generic row does not make: a registry carrying
+        ``LocalizeNode`` pointing at Django's own class would satisfy membership
+        and fail here. ``LocalizeNode`` is the milestone's only node whose
+        constructor is ``(nodelist, use_l10n)`` — a body and a boolean, no
+        expression — so it is also the class a descriptor with the wrong kwarg
+        spelling would fail to build rather than build wrongly.
+        """
+        import inspect
+
+        cls = materialiser.NODE_CLASSES.get("LocalizeNode")
+        self.assertIsNotNone(cls, "LocalizeNode is not in NODE_CLASSES")
+        self.assertIn("_impl", inspect.getfile(cls))
+
     def test_the_refusal_is_live_for_block_translate_node_until_task_6(self):
         """Review Focus 4, pinned while it is still observable.
 
@@ -1086,7 +1105,7 @@ _CFG_TEST = "#[cfg(test)]"
 _TAG_MODULES = PROJECT_ROOT / "crates" / "template-core" / "src" / "parser" / "tags"
 
 # `NodeDesc::new("X")` / `NodeDesc::with_nodelist("X", ...)`. `\s*` spans the
-# newline in `tags/mod.rs:190`, where the class name starts on the following line.
+# newline in `tags/mod.rs:191`, where the class name starts on the following line.
 _CLASS = re.compile(r'NodeDesc::(?:new|with_nodelist)\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)"')
 _TEXT = re.compile(r"NodeDesc::text\s*\(")
 
