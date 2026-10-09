@@ -75,6 +75,27 @@ class CaseSensitivityTests(unittest.TestCase):
             ["/DIR1/index.HTML"],
         )
 
+    def test_the_directorys_case_is_not_folded_onto_the_name(self):
+        """Upstream's own *input*, which has exactly one answer here.
+
+        Django asks this in the same `source_checker` block as the row above:
+        the name `/DIR1/index.HTML` against directories spelled `/dir1` and
+        `/DIR2`, expected back as `["/DIR1/index.HTML"]`. Measured here it is
+        `[]`, because `safe_join`'s containment guard compares
+        `/DIR1/index.HTML` against `/dir1/` **unfolded** and so rejects both
+        directories.
+
+        That `[]` is doing work the row above cannot do. It is a
+        platform-independent property of the loader this milestone now owns, and
+        it is the only thing here that would notice the guard starting to fold —
+        `test_directory_security` would not, because folding there makes the
+        guard *more* permissive in the same direction, so its rejections stay
+        rejections. The row above keeps upstream's question (pairing the name
+        with matching-case directories, which is the half that can be ported);
+        this one keeps upstream's input, which is the half that cannot.
+        """
+        self.assertEqual(sources(["/dir1", "/DIR2"], "/DIR1/index.HTML"), [])
+
     def test_a_case_mismatch_is_not_a_template_where_the_volume_is_case_sensitive(self):
         """The filesystem half, with the expectation *measured* rather than assumed.
 

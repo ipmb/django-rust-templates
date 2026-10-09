@@ -170,15 +170,28 @@ def _invoked(value):
     return None
 
 
+def _defining_file(written):
+    """The file ``written`` was defined in, or ``None`` if ``inspect`` cannot say.
+
+    The ``None`` is deliberately the *only* answer for both of the facts
+    ``inspect`` can fail on — "this is not a function" and "I cannot find its
+    source" — because for :func:`_owning_file` they want the same treatment.
+    :func:`_is_foreign` is the one caller that has to tell them apart, and it
+    does so by asking :func:`_innermost` and ``inspect.isbuiltin`` first rather
+    than by reading a second meaning into this ``None``.
+    """
+    try:
+        return os.path.realpath(inspect.getsourcefile(written))
+    except (OSError, TypeError):
+        return None
+
+
 def _owning_file(value):
     """The file the function behind ``value`` was written in, or ``None``."""
     written = _innermost(value)
     if written is None:
         return None
-    try:
-        return os.path.realpath(inspect.getsourcefile(written))
-    except (OSError, TypeError):
-        return None
+    return _defining_file(written)
 
 
 def _is_ours(value, module):
@@ -200,6 +213,72 @@ def _is_ours(value, module):
         hasattr(type(value), "__get__")
         and getattr(type(value), "__module__", None) == module.__name__
     )
+
+
+def _is_foreign(value, module):
+    """Whether an unrecognised member is **positively** somebody else's.
+
+    This is the reviewer's finding, and it is the same defect as ``args_check``
+    one level up. :func:`residue` used to filter by :func:`_is_ours`, which asks
+    :func:`_owning_file` — which asks :func:`_innermost`, *the table whose
+    incompleteness residue exists to detect*. The check was asking the thing it
+    was checking. Measured, with a descriptor class defined in another module
+    holding a function the subject module wrote (``Lazy``, in the row that now
+    pins this):
+
+        _innermost -> the Lazy *instance*      _invoked -> None
+        _callable_member -> True               _is_ours -> False
+        residue -> []                          definitions -> {}
+        instrumented -> no complaint
+
+    Silently uncounted, no ``UnhandledMember`` — ``args_check`` again, surviving
+    inside the guard written to make ``args_check`` impossible.
+
+    Why it happened: for an unhandled member ``_innermost`` falls through to
+    ``return value`` — the descriptor *instance* — and ``getsourcefile`` on an
+    instance raises, so the owning file is unknown and `_is_ours`'s first arm is
+    False; the second arm needs the descriptor **class** to have been written in
+    the module being measured. But every kind that has actually caused trouble
+    here — ``staticmethod``, ``property``, ``cached_property``, ``lru_cache`` —
+    is defined *elsewhere*, so that arm fires only for the rarest shape there
+    is: a descriptor class written inside the file being measured.
+
+    The precise statement is that :func:`_owning_file` returns ``None`` for two
+    different facts — "this holds no function I can find" and "I cannot see
+    through this kind" — and the old arm read both as *not ours*. For
+    :func:`definitions` that conflation is harmless. For :func:`residue`, which
+    is the one place where *I don't know* has to be loud, it was the whole
+    defect.
+
+    So the polarity is inverted: report unless positively foreign.
+
+    1. ``ismemberdescriptor`` / ``isgetsetdescriptor`` — C slot wrappers and
+       ``__dict__``/``__weakref__``, which cannot hold a Python function at all;
+    2. a builtin — there is no Python source anywhere for it, so it cannot be a
+       ``def`` this module wrote. This is what excludes ``TokenType._new_member_``
+       (``object.__new__``), the same family as the ``__new__``
+       :func:`_innermost` already drops deliberately;
+    3. a known owning file that is not this module's — somebody else's ``def``;
+    4. **an unknown owning file is reported**, which is the arm that was
+       missing. A shape this table cannot see through is exactly what residue is
+       for, so it cannot also be a reason to stay quiet.
+
+    **Do not reach for ``inspect.isroutine`` here.** It includes
+    ``ismethoddescriptor``, which is true for any object with ``__get__`` and no
+    ``__set__`` — so it swallows precisely the case being hunted. Measured by the
+    reviewer on the example above: ``inspect.isroutine(Lazy_instance)`` is
+    ``True``, and a draft of this rule using it returned ``[]`` for the very case
+    it was written to catch.
+    """
+    if inspect.ismemberdescriptor(value) or inspect.isgetsetdescriptor(value):
+        return True
+    written = _innermost(value)
+    if written is None or inspect.isbuiltin(written):
+        return True
+    source = _defining_file(written)
+    if source is None:
+        return False
+    return source != os.path.realpath(module.__file__)
 
 
 def _callable_member(value):
@@ -241,13 +320,20 @@ def residue(module):
     :func:`_invoked` has no case for is reported, so a descriptor kind nobody
     has written a case for fails loudly rather than quietly going uncounted —
     which is how ``args_check`` went uncounted for two milestones.
+
+    **The filter is :func:`_is_foreign` and not :func:`_is_ours`**, which is the
+    reviewer's second finding: asking ``_is_ours`` made this function consult
+    :func:`_innermost`, the table it exists to check, and the shape it could not
+    see through was therefore also the shape it stayed quiet about. The
+    polarity matters because *unknown* has to be loud here and quiet in
+    :func:`definitions`, and one predicate cannot mean both.
     """
     return sorted(
         name if owner is module else f"{label_of(owner)}.{name}"
         for owner, name, value in members(module)
         if _invoked(value) is None
         and _callable_member(value)
-        and _is_ours(value, module)
+        and not _is_foreign(value, module)
     )
 
 

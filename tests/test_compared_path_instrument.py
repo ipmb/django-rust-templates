@@ -22,6 +22,7 @@ about and asserts on a measurement rather than on the table's contents, so the
 instrument and the pin cannot agree with each other about a wrong number.
 """
 
+import inspect
 import pathlib
 import sys
 import types
@@ -56,6 +57,23 @@ def _hand_rolled(self):
 
 class Subject:
     attribute = HandRolledDescriptor(_hand_rolled)
+
+
+class ForeignKind:
+    """A descriptor kind ``_invoked`` has no case for, defined in *this* file.
+
+    The module under instrument in the row below is not this one, which is the
+    shape every kind that has actually caused trouble has: ``staticmethod``,
+    ``property``, ``cached_property`` and ``lru_cache`` are all defined in other
+    modules, so ``_is_ours``'s fallback arm — "the descriptor's class was
+    written here" — fires for none of them.
+    """
+
+    def __init__(self, func):
+        self.func = func
+
+    def __get__(self, instance, owner):
+        return self.func.__get__(instance, owner)
 
 
 class DescriptorCountingTests(unittest.TestCase):
@@ -244,6 +262,83 @@ class DescriptorCountingTests(unittest.TestCase):
             "a declared region covering the compared path was not refused: "
             f"{failures}",
         )
+
+    def test_a_descriptor_from_another_module_is_reported(self):
+        """The reviewer's finding: the filter *was* the hole, one level up.
+
+        ``residue`` used to ask ``_is_ours``, which asks ``_owning_file``, which
+        asks ``_innermost`` — the table whose incompleteness ``residue`` exists
+        to detect. The check was asking the thing it was checking, so an
+        unhandled kind was invisible exactly when it was unhandleable: the
+        descriptor's *instance* has no source of its own, ``getsourcefile``
+        raises, and the fallback arm needed the descriptor's class to have been
+        written in the module under instrument — true for none of
+        ``staticmethod``, ``property``, ``cached_property`` or ``lru_cache``,
+        which is to say true for none of the shapes that have ever mattered.
+
+        Both halves are asserted, because either alone is satisfied by a wrong
+        instrument: ``_is_ours`` is False, so the old filter could not have
+        reported this member, and ``residue`` reports it anyway.
+
+        The subject is built by ``exec`` into a fresh module rather than by
+        assigning this file's classes to it, because ``classes()`` sweeps only
+        classes whose ``__module__`` names the module being swept — so a class
+        borrowed from here would be invisible to the sweep for a reason that has
+        nothing to do with the predicate under test, and the row would pass or
+        fail for the wrong cause.
+        """
+        from tests.compared_path import UnhandledMember, _is_ours, instrumented, residue
+
+        subject = types.ModuleType("elsewhere")
+        subject.__file__ = str(PROJECT_ROOT / "tests" / "elsewhere.py")
+        subject.__dict__["ForeignKind"] = ForeignKind
+        exec(
+            compile(
+                "def _reached(self):\n"
+                "    return 'elsewhere'\n"
+                "\n"
+                "class Subject:\n"
+                "    reached = ForeignKind(_reached)\n",
+                subject.__file__,
+                "exec",
+            ),
+            subject.__dict__,
+        )
+
+        value = vars(subject.Subject)["reached"]
+        self.assertIsInstance(value, ForeignKind, "the premise of this row")
+        self.assertFalse(
+            _is_ours(value, subject),
+            "the premise: with this answer the old filter could not report it",
+        )
+        self.assertEqual(residue(subject), ["Subject.reached"])
+
+        with self.assertRaises(UnhandledMember) as caught:
+            with instrumented(subject):
+                pass  # pragma: no cover — the context manager raises on entry
+        self.assertIn("Subject.reached", str(caught.exception))
+
+    def test_a_builtin_member_is_not_reported(self):
+        """The rule's builtin arm, which is load-bearing rather than tidy.
+
+        ``TokenType._new_member_`` is ``object.__new__``: a C function with no
+        Python source anywhere, so ``getsourcefile`` raises and the owning file
+        is *unknown* — the same fact as the row above, and the rule now reports
+        unknown. Without this arm the member would be reported and every
+        instrumentation of ``base.py`` would raise, including every parity
+        harness. ``TokenType.__new__`` is excluded one level down for the same
+        reason (it is ``Enum.__new__``, written in ``enum.py``).
+        """
+        import django.template.base as base
+
+        from tests.compared_path import _innermost, residue
+
+        member = vars(base.TokenType)["_new_member_"]
+        self.assertTrue(
+            inspect.isbuiltin(_innermost(member)),
+            "the premise: this member resolves to something with no source",
+        )
+        self.assertNotIn("TokenType._new_member_", residue(base))
 
     def test_the_residue_check_is_silent_on_the_transcriptions(self):
         """The control for the row above, and the reason it is not vacuous.

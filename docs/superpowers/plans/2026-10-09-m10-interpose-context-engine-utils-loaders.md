@@ -2042,6 +2042,57 @@ more members joined `definitions` without joining any pin — `Origin.loader_nam
 reviewer's scenario run for real: a synthetic declared region on 827-844 is
 injected into `DECLARED` and the guard's own `check()` must refuse it.
 
+**Reviewer finding, fixed in the close-out: `residue()` was silent for exactly
+the kind it exists to catch — the same defect one level up.**
+
+`residue` filtered by `_is_ours`, which asks `_owning_file`, which asks
+`_innermost` — **the table whose incompleteness `residue` exists to detect. The
+check was asking the thing it was checking.** Measured, with a descriptor class
+defined in another module holding a function the subject module wrote:
+
+    _innermost -> the Lazy *instance*    _invoked -> None
+    _callable_member -> True             _is_ours -> False
+    residue -> []                        definitions -> {}
+    instrumented -> no complaint
+
+Silently uncounted, no `UnhandledMember` — `args_check` again, surviving inside
+the guard written to make `args_check` impossible.
+
+The mechanism: for an unhandled member `_innermost` falls through to `return
+value`, the descriptor *instance*; `getsourcefile` on an instance raises, so the
+owning file is unknown and `_is_ours`'s first arm is False; the second arm needs
+the descriptor **class** to have been written in the module being measured — and
+every kind that has ever caused trouble here (`staticmethod`, `property`,
+`cached_property`, `lru_cache`) is defined elsewhere. So the arm meant to catch
+"a kind nobody has written a case for" fired only for the rarest shape there is.
+**`_owning_file` returns `None` for two different facts — "no function here" and
+"I cannot see through this kind" — and the old arm read both as *not ours*.** For
+`definitions` that conflation is harmless; for `residue`, the one place where
+*I don't know* has to be loud, it was the whole defect.
+
+The fix inverts the polarity: report unless **positively** foreign
+(`_is_foreign`). Skip `ismemberdescriptor`/`isgetsetdescriptor` (C slot and
+`__dict__`/`__weakref__`, which cannot hold a Python function); skip a builtin
+(no Python source anywhere, so it cannot be a `def` this module wrote — this is
+what excludes `TokenType._new_member_`, i.e. `object.__new__`, the same family
+as the `__new__` already dropped deliberately); skip a known owning file that is
+not this module's; and **report an unknown owning file**, which is the arm that
+was missing.
+
+Measured on the closed tree: **0 members reported over all twelve
+`COMPARED_PATH` modules** — so the rule is free — and `['Subject.reached']` on
+the `Lazy` case. Two rows pin it, both asserting the premise as well as the
+verdict: the foreign-descriptor case asserts `_is_ours` is False *and* that
+`residue` reports anyway (either alone is satisfied by a wrong instrument), and
+the builtin arm asserts `_innermost` really is a C function before asserting it
+goes unreported.
+
+**One trap, measured rather than reasoned about.** `inspect.isroutine` is not
+the exclusion to reach for: it includes `ismethoddescriptor`, true for any
+object with `__get__` and no `__set__`, so it swallows precisely the case being
+hunted — `inspect.isroutine(Lazy_instance)` is `True`, and the reviewer's first
+draft of the rule returned `[]` for the very example it was written to catch.
+
 ---
 
 ### Task 8: §2's case-sensitivity hole
@@ -2207,6 +2258,18 @@ about — the name's case is preserved, not folded onto the directory's — and 
 docstring records why. The `False` is also the confirmation that upstream's row
 is skipped here for the reason §2 gives: the guard is `normcase`, evaluated
 before any file is opened.
+
+**And upstream's input is pinned too, not only left in that paragraph** (the
+reviewer's SHOULD-FIX, and the reason is this project's own rule — a measurement
+that lives only in prose has the lifetime of prose). The `[]` is doing work the
+substituted row cannot: it is the only thing in the tree that would notice
+`safe_join`'s containment guard starting to *fold*, and
+`test_directory_security` would not, because folding there makes the guard more
+permissive in the same direction and its rejections stay rejections. So
+`test_the_directorys_case_is_not_folded_onto_the_name` asserts
+`sources(["/dir1", "/DIR2"], "/DIR1/index.HTML") == []`. The two rows now cover
+upstream's question and upstream's input separately: the first is the half that
+can be ported, the second the half that cannot.
 
 **And the filesystem row's branch is measured too.** On this volume
 `Path(tmpdir, "PROBE.HTML").exists()` is True, so `case_sensitive` is False and
