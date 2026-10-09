@@ -305,9 +305,11 @@ since the first file finished:
 | `02348ff` | `crates/template-core/src/filters/urlize.rs` | `defaultfilters.py:493`, `html.py:492` | 2 read; **0 wrong** — both had just been read in context by the naming pass that rewrote the sentences citing them |
 | `3f5a7fa` | `crates/template-core/src/parser/tags/regroup.rs` | `base.py:75`, `defaulttags.py:1352-1419` | 2 read; **1 wrong** (`1352-1419` ends two blank lines past `regroup`, whose last statement is 1417) — fixed in `061990a`. `base.py:75` is `VARIABLE_ATTRIBUTE_SEPARATOR = "."`, right |
 | `436747d` + `9eb488d` | `crates/template-core/src/parser/tags/url.rs` | *none entered* | **0 rows read, 0 wrong** — the first batch that stranded nothing at all, and the mechanism is worth keeping. `url.rs`'s five rows were all **quoted** by the naming pass, and a quoted row is never in the stranded bucket; the one unquoted row it had (`defaulttags.py:1514-1586`) was pruned by the correction commit (it is now `1514-1584`) before it could enter. So this batch neither confirms nor refutes the "clean batch" prediction — it never reached the list |
+| `93bc8ba` | `crates/template-core/src/filters/urlizetrunc.rs` | *none entered* | **0 rows read, 0 wrong** — the second batch to strand nothing, and the same mechanism: the module's three anchors were `defaultfilters.py:386`, `:389-400` and `:399`, all already **quoted** by `urlize.rs`, `host.rs` and `filter_cases.py`, and the one row it added (`defaultfilters.py:398`) is cited by the pass that added it. Two batches in a row now strand nothing, and neither is evidence for the "clean batch" prediction — both are evidence that a file whose rows are *all* quoted cannot feed the list, which is the list's own limit, not the file's quality |
 
 Twenty-seven rows have passed through; eleven were wrong or cited for the wrong
-line. (A seventh batch, `url.rs`, stranded none — see the table.) Seven were wrong in a *span's* end (`base.py:959-1029` ends on a blank
+line. (An eighth batch, `urlizetrunc.rs`, stranded none, as did the seventh,
+`url.rs` — see the table.) Seven were wrong in a *span's* end (`base.py:959-1029` ends on a blank
 line, `:963-995` runs past the arms it claims, `:999-1029` misses two of its
 three branches, `html.py:412-415` is a neighbouring `@cached_property`,
 `base.py:771-774` / `base.py:804-810` each end one statement past the construct
@@ -429,3 +431,28 @@ in a signature and a docstring the claim was silent about.
 stranded list, the naming read (prose and numbers), and this blank-end signal.
 None of the three was in the plan; the plan had only the manifest and its
 `--check`. Worth saying in the M6 write-up.
+
+## Naming rewraps, and the wrapper had one bug the numbered lists could show
+
+Every naming pass rewraps the paragraphs it widens — naming costs 14 to 17
+columns, so a paragraph near the file's width goes over. The helper has been
+reused six times unchanged (`url.rs`, `for.rs`, the ten blank-ended rows,
+`smartif.rs`): flatten the words, merge backticked spans until backtick parity
+is even, greedy-wrap at the file's width, then guard the round-trip (the words
+come back identical, every line keeps the lead, no line is wider than the lead
+plus the widest token). It takes a single lead, and six times that was enough.
+
+`urlizetrunc.rs` is where it was not. Two of its paragraphs are numbered items
+in `//!` prose, and Django's own continuation indent — `//! 1. ` on the first
+line, `//!    ` on the rest — is not decoration: it aligns the continuation
+under the text, and flattening it to `//! ` silently unindents the whole item.
+The first run of that pass did exactly that, and the diff showed it. The fix is
+a second lead, `wrap(words, first_lead, cont_lead)`, and it is worth recording
+because it is the one failure mode the round-trip guard cannot catch: the words
+come back identical and every line still starts with *a* lead. Only reading the
+diff catches it, which is the same lesson as the rest of this recon — a
+guard checks what it was told to check.
+
+That pass (`93bc8ba`) named seven anchors, all correct, and stranded nothing.
+It is the first batch where the naming read found no error at all, after
+`url.rs`'s four and `for.rs`'s eight.
