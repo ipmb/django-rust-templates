@@ -307,6 +307,30 @@ TEMPLATES = [
     # A block nested in a block: the inner one is a child of the outer's
     # nodelist, and both names are recorded in the order they compiled.
     "{% block a %}{% block b %}x{% endblock %}{% endblock %}",
+    # --- M7: `{% extends %}` ------------------------------------------------
+    # The tag that **swallows the rest of the template**: `do_extends` ends with
+    # an unbounded `parser.parse()` (`loader_tags.py:307`), so everything after
+    # it is this node's child rather than its sibling. The first row is the
+    # minimal case and the second is the shape that makes that visible — the
+    # block is *inside* the ExtendsNode's nodelist, which is why
+    # `ExtendsNode.__init__`'s `nodelist.get_nodes_by_type(BlockNode)` finds it.
+    "{% extends \"base.html\" %}",
+    "{% extends \"base.html\" %}{% block a %}x{% endblock %}",
+    # The variable form, which is why this tag splits with `split_contents()`.
+    "{% extends parent %}",
+    # A leading TextNode does **not** make it non-first — `extend_nodelist`
+    # flips `contains_nontext` only for a node that is not a `TextNode`
+    # (`base.py:602-612`, the raise and the flag it reads). The `{{ }}` variant,
+    # which does raise, is an error row.
+    "x{% extends \"base.html\" %}",
+    # --- M7: the walk `{% extends %}` drives, on the shape that would break a
+    # name-driven one. `IfNode` answers `child_nodelists`' `"nodelist"` with a
+    # **synthesised property** over `conditions_nodelists`
+    # (`defaulttags.py:314-320`) and Rust emits those branches under empty
+    # names, so a walk that visited only *named* nodelists would find nothing
+    # here while Django finds the block — silently, in `ExtendsNode.blocks`.
+    "{% if x %}{% block a %}x{% endblock %}{% endif %}",
+    "{% extends \"base.html\" %}{% block a %}A{% endblock %}{% if x %}{% block b %}B{% endblock %}{% endif %}",
 ]
 
 

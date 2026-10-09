@@ -498,6 +498,101 @@ impl NodeDesc {
     }
 }
 
+impl NodeListDesc {
+    /// `NodeList.get_nodes_by_type(nodetype)` — `base.py:1093-1098`, whose
+    /// per-node half is `Node.get_nodes_by_type` (`base.py:1070-1082`).
+    ///
+    /// **Pre-order, document order, and that is the contract** rather than an
+    /// incidental of the loop: `Node.get_nodes_by_type` appends `self` *before*
+    /// extending with its children's results, and `NodeList`'s maps over the
+    /// list in order. `ExtendsNode.__init__` folds the result into
+    /// `self.blocks = {n.name: n …}` (`loader_tags.py:94`), and that dict's key
+    /// order is this list's — `test_parser_parity`'s `describe` compares it with
+    /// `.items()`, unsorted — so a walk that visited children first, or that
+    /// sorted, materialises a different `blocks` and the parity comparison says
+    /// so.
+    ///
+    /// The fold's *other* observable, "a repeated name keeps the last node", is
+    /// **not** reachable from a tree Rust builds: `{% block %}`'s own
+    /// duplicate-name check (`parser.loaded_blocks`) refuses the repeat inside
+    /// one Rust parse, and the duplicate can only arrive through a
+    /// host-compiled block — the fork A5 records, which this walk cannot see
+    /// because a host node carries no nodelists.
+    ///
+    /// **Descending into every nodelist is the same traversal as Django's
+    /// `child_nodelists` walk, for every node Rust builds** — and the reason is
+    /// worth stating, because the obvious reading of the two walks says
+    /// otherwise. Django's `Node.get_nodes_by_type` iterates
+    /// `self.child_nodelists`, a per-class tuple of *attribute names*
+    /// (`base.py:1035`), so it descends only into the attributes that tuple
+    /// lists; this function descends into all of them, whatever they are
+    /// called. The two agree because a descriptor's nodelist names are exactly
+    /// the constructor parameters the materialiser passes as kwargs, and a node
+    /// class that takes a nodelist as a kwarg names it in `child_nodelists` —
+    /// `BlockNode`, `ExtendsNode` and `IncludeNode` are `("nodelist",)`,
+    /// `ForNode` is `("nodelist_loop", "nodelist_empty")`, `IfChangedNode` is
+    /// `("nodelist_true", "nodelist_false")`.
+    ///
+    /// `IfNode` is the case that breaks that reading and still agrees, so it is
+    /// written down rather than left to the pattern: it overrides neither
+    /// `child_nodelists` — inheriting `("nodelist",)` — nor `nodelist`, which is
+    /// a **property** returning `NodeList(self)` over an `__iter__` that yields
+    /// every branch's nodes (`defaulttags.py:314-320`). Its branch lists live in
+    /// `conditions_nodelists`, which is *not* in `child_nodelists`, and Django
+    /// reaches them through the property. Rust emits those branches as
+    /// **empty-named** nodelists — the materialiser's marker for "positional
+    /// only", see below — and this function descends into a nodelist by
+    /// position and not by name, so it reaches the same nodes. A walk that
+    /// skipped empty-named nodelists would be the one divergence here, which is
+    /// what Task 3's `get_nodes_by_type_reaches_a_node_inside_an_if_branch`
+    /// exists to catch.
+    ///
+    /// **And `IfNode` is the only such class, which is measured rather than
+    /// generalised from.** All 34 `Node` subclasses in the pinned tree were
+    /// classified by where each `child_nodelists` name resolves
+    /// (`.review/m7-measurements/m7_measure_child_nodelists.py`): **exactly one
+    /// names a property** — `IfNode` — and the rest name either an instance
+    /// attribute set in `__init__` or an attribute the class never sets at all.
+    /// The second group is the other half of the equivalence and is worth
+    /// naming, because it is where the two walks *look* different without
+    /// differing: Django reads `getattr(self, attr, None)` and then tests
+    /// **truthiness** (`base.py:1079-1080`), so a class whose `child_nodelists`
+    /// names an attribute it never assigns — `CycleNode`, `DebugNode`,
+    /// `FirstOfNode`, `IncludeNode`, `LoremNode`, `NowNode`, `PartialNode`,
+    /// `PrefixNode`, `RegroupNode`, `ResetCycleNode`, `TagHelperNode`,
+    /// `TemplateTagNode`, `VerbatimNode`, `WidthRatioNode` — contributes
+    /// nothing to Django's walk and has no such nodelist in Rust for this one to
+    /// descend into. An absent nodelist and an empty one are the same to *this*
+    /// function's result for the same reason: both contribute no nodes.
+    ///
+    /// **One recorded divergence, measured zero in the pinned suite.** A
+    /// descriptor whose `class_name` is [`HOST_NODE`] carries no nodelists at
+    /// all (see `NodeDesc::host`), so the traversal is a no-op on it and the
+    /// only way the two walks can differ is by *matching*: a host tag that
+    /// returned a real `ExtendsNode` or `BlockNode` would match Django's
+    /// `isinstance` and cannot match this, which compares class **names**.
+    /// Measured on the pin, so that this is a bound and not a hope: no
+    /// `class <name>(ExtendsNode|BlockNode|IncludeNode)` exists anywhere under
+    /// `tests/template_tests`, and `{% extends %}` nested inside a host-owned
+    /// block-level tag — the shape that would put one there — occurs 0 times
+    /// over 1046 string literals and 62 fixture templates
+    /// (`.review/m7-measurements/m7_measure_nest2.py`). The *neighbouring* case
+    /// is not zero: a nested `{% block %}` occurs once, in
+    /// `test_blocktranslate.py::test_with_block`; see A5.
+    pub fn get_nodes_by_type(&self, class_name: &str) -> Vec<&NodeDesc> {
+        let mut found = Vec::new();
+        for node in &self.nodes {
+            if node.class_name == class_name {
+                found.push(node);
+            }
+            for (_name, child) in &node.nodelists {
+                found.extend(child.get_nodes_by_type(class_name));
+            }
+        }
+        found
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -449,15 +449,26 @@ Two things a task will trip over, both recorded rather than fixed:
   hit is a scanner artifact (`{% endbadtag %}` is not a known end tag), not a
   second case.
 
-  **And the divergence is one message wide, not structural.**
-  `ExtendsNode.__init__` builds `self.blocks` from
-  `nodelist.get_nodes_by_type(BlockNode)` (`LT:94`) over *materialised* nodes,
-  which both parsers produce, so a block compiled by either is visible to the
-  other at render time. What the split can change is exactly the parse-time
-  `'block' tag with name '…' appears more than once` refusal — a duplicate split
-  across the two counters — and nothing about the rendered tree. Saying what
-  does **not** diverge is what makes a recorded divergence usable; "two counters
-  that cannot see each other" read as though the tree differed too.
+  **The divergence is a missing refusal, and the refusal is load-bearing — but
+  the thing it protects is a *render*, so "one message wide" understates it.**
+  `ExtendsNode.__init__` builds `self.blocks` as a dict comprehension keyed by
+  name, `{n.name: n for n in nodelist.get_nodes_by_type(BlockNode)}` (`LT:94`),
+  over *materialised* nodes, which both parsers produce. A dict keyed by name
+  keeps the **last** insertion, so where two blocks share a name the later one
+  silently wins. In stock Django that pairing is unreachable: `do_block` raises
+  `'block' tag with name '…' appears more than once` (`LT:227-234`) before the
+  template ever renders, so the dict never sees a duplicate. Under the split a
+  duplicate that straddles the two counters is **not** refused — each counter
+  sees only its own half — so both nodes reach `self.blocks` and the **later one
+  renders**. The observable difference in that one template is therefore not a
+  missing message but a different `{% block %}` body: stock raises, ours renders
+  the wrong half. Saying what does **not** diverge is what makes a recorded
+  divergence usable, and the part that does not is every template without a
+  straddling duplicate — there the two counters agree and the trees are
+  identical. The earlier wording, "the split can change nothing about the
+  rendered tree", read the unreachability of the duplicate as though it followed
+  from the dict being shared; it is the refusal, not the dict, that keeps stock
+  Django out of the case.
 - `do_block` uses `token.contents.split()`, **not** `split_contents()`, and
   Django's own comment says why (`LT:218-219`: the tag "doesn't accept variable as
   arguments"). Rust must call `crate::pyunicode::split`
@@ -492,10 +503,12 @@ cache is keyed on. It does **not** pin that the template is materialised once
 
 ## D. Corrections this plan makes
 
-Six, each with the artifact it corrects and the measurement behind it. The first
+Seven, each with the artifact it corrects and the measurement behind it. The first
 two correct `.review/m7-recon.md` (the recon precedes and is corrected by the
-plan, as M6's did); the rest correct derived artifacts, and D5/D6 came out of
-the reviewer's round on this plan.
+plan, as M6's did); D3–D6 correct derived artifacts, and D5/D6 came out of the
+reviewer's round on this plan; **D7 was written at Task 3's execution** and
+corrects this plan's own Task 3, which is the one place a plan's errors cost a
+run rather than a line of prose.
 
 **D1 — the recon's §2 frames `must_be_first` on the outbound wire. It crosses
 inbound.** The 5-tuple `node_desc_to_py` emits (`lib.rs:871-915`, pinned by
@@ -571,6 +584,62 @@ when the snippet occurs nowhere in here" — the report's own warning that
 `--update` is the wrong direction for a wrong citation), and it belongs in its
 own commit with its own review. It is scheduled as the commit immediately after
 this plan revision and is recorded here so it is not rediscovered at M8.
+
+**D7 — Task 3's draft carried five statements that are false on the pin, and
+three of them are the kind a test would have caught.** Corrected in Task 3's own
+steps, and recorded here because each is a fact about Django rather than a
+typo — the next task that touches `{% extends %}` should not re-derive them:
+
+| The draft said | The pin says | How it showed |
+| --- | --- | --- |
+| `{% if x %}{% extends "a" %}{% endif %}` compiles, so it is the walk's test case | **raises** `Invalid block tag on line 1: 'endif'` — `do_extends`' unbounded parse eats the enclosing end tag | a run, in both engines |
+| `IfNode.child_nodelists` is `()`, so the branch lists are unreachable by name | it is `('nodelist',)` — inherited — and `nodelist` is a **property** over `conditions_nodelists` (`defaulttags.py:314-320`), so there is no attribute to name at all | read at the pin |
+| `parent_name` is an `AttrValue::Ref` | it is an `AttrValue::FilterExpr` — `compile_filter`'s output | `no field is_var on &Box<FilterExprDesc>` |
+| `ErrorKind::Syntax` compares as a unit variant | it is a **tuple variant carrying the message** | it did not compile |
+| a lone `{% extends "a" %}` is `ErrorKind::Unimplemented` | it **compiles** — the assertion is that it does | it did not compile |
+
+The last two are the pair worth keeping: both were written as *assertions*, and
+both were wrong in the direction that makes a milestone look unfinished when it
+is done. A claim in a test fails at the next run; the same claim in prose beside
+a skipped test is the one that survives.
+
+Two corrections that are ours rather than Django's: `do_extends` is at
+`loader_tags.py:292` (`:291` is its `@register.tag("extends")` decorator, and the
+tool's rule is that the number holds the text the sentence names), and
+`nodelist = parser.parse()` is at `:307`, not `:309` — the draft's number was
+two lines late, at the `raise` that follows the check. `:309` had been copied
+into three files; the anchor guard is what found it, because a snippet-keyed row
+cannot stay green on a number that points at the wrong line.
+
+**D7 also closes a class the plan had carried unexecuted since Task 2**:
+`assert_eq!(kind, ErrorKind::Syntax)` appears seven times across this plan's
+Task 2 and Task 4 blocks, and `ErrorKind::Syntax` is a **tuple variant**
+(`parser/error.rs:109`) — it does not compile. Task 2's three were corrected in
+the code at execution and the plan was not updated with them; Task 4's four were
+still waiting to be hit. All seven now read `matches!(kind,
+ErrorKind::Syntax(_))`. This is the D7 pattern a second time: a plan's assertion
+is only as good as a run, and a plan step nobody has executed is prose wearing a
+checkbox.
+
+**D7's third and fourth instances were found by the anchor guard, not by a
+run, and both are wrong *claims about Django* rather than wrong numbers** — the
+class a test cannot catch, because the test asserts the engine's behaviour and
+the engine was built from the claim:
+
+| The claim | The pin says | Where it was |
+| --- | --- | --- |
+| `ExtendsNode.get_parent` calls `self.parent_name.resolve(context, ignore_failures=True)` | `parent = self.parent_name.resolve(context)` (`loader_tags.py:118`) — **there is no `ignore_failures` in `loader_tags.py` at all**; the seven call sites of that argument in the pinned tree are all in `defaulttags.py` | `extends.rs`'s seam comment |
+| `extend_nodelist`'s `contains_nontext` check is at `base.py:510` | it is at `base.py:602-612`; `:510` is a comment about custom tag data stored on the parser — an unrelated paragraph that happens to be 100 lines earlier | `parser_corpus.py`'s `x{% extends %}` row |
+
+Both were seeded as *unquoted* manifest rows, which is the mechanism: an
+unquoted row checks only that the line exists, and both lines exist and are
+unrelated. Authoring the snippet — the tool's own rule, "the snippet be authored
+from the sentence's own claim in the same edit that names the file" — is what
+made the numbers' wrongness visible, and it is why this commit quotes every row
+it adds rather than leaving them as line-existence checks. **The lesson
+generalises past this task: a new anchor added unquoted is a claim nobody
+re-measures, and the seven rows this task would have added that way included two
+that were false.**
 
 ---
 
@@ -1168,7 +1237,7 @@ mod tests {
     #[test]
     fn the_three_failures_carry_djangos_exact_text() {
         let unknown = construct_relative_path(None, "'./base.html'", false).unwrap_err();
-        assert_eq!(unknown.kind, ErrorKind::Syntax);
+        assert!(matches!(unknown.kind, ErrorKind::Syntax(_)));
         // Verbatim (`loader_tags.py:266-269`); note it does **not** quote
         // `relative_name`, unlike the other two. The literal is long on purpose:
         // rustfmt does not wrap it, and a wrapped literal would hide the space
@@ -1180,7 +1249,7 @@ mod tests {
 
         let outside = construct_relative_path(Some("index.html"), "'../../x.html'", false)
             .unwrap_err();
-        assert_eq!(outside.kind, ErrorKind::Syntax);
+        assert!(matches!(outside.kind, ErrorKind::Syntax(_)));
         assert_eq!(
             outside.message(),
             "The relative path ''../../x.html'' points outside the file hierarchy that \
@@ -1192,7 +1261,7 @@ mod tests {
 
         let same = construct_relative_path(Some("index.html"), "'./index.html'", false)
             .unwrap_err();
-        assert_eq!(same.kind, ErrorKind::Syntax);
+        assert!(matches!(same.kind, ErrorKind::Syntax(_)));
         assert_eq!(
             same.message(),
             "The relative path ''./index.html'' was translated to template name \
@@ -1407,18 +1476,42 @@ git commit -m "M7 Task 2: the origin threaded to the parser and the tree; constr
 
 - [ ] **Step 1: Write the failing `get_nodes_by_type` test**
 
+**Corrected at execution time (D7): the source below is `{% block %}`, not
+`{% extends %}`.** The draft wrapped `{% extends "a" %}` in an `{% if %}` and
+that raises — on the pin, `Invalid block tag on line 1: 'endif'` — because
+`do_extends` ends with an unbounded `parser.parse()` and eats the enclosing end
+tag. The branch list is what this test is for and `{% block %}` reaches it
+without that accident. The draft's *reason* was wrong too: `IfNode` does not
+have an empty `child_nodelists`. It inherits `("nodelist",)`, and `nodelist` is
+a **property** over `conditions_nodelists` (`defaulttags.py:314-320`) — so what
+a name-driven Rust walk misses is not an unnamed attribute but a
+`child_nodelists` entry with no stored attribute behind it at all. See D7.
+
 ```rust
 #[test]
-fn get_nodes_by_type_reaches_an_extends_node_inside_an_if_branch() {
-    // `{% if x %}{% extends "a" %}{% endif %}` — Django's walk reaches it,
-    // because `IfNode.child_nodelists` is `()` and the branch lists live inside
-    // `conditions_nodelists`, which Rust emits as empty-named nodelists
-    // (`desc.rs:649-650`). A walk that only followed *named* nodelists would
-    // miss it.
-    let tree = compile("{% if x %}{% extends \"a\" %}{% endif %}");
-    assert_eq!(tree.get_nodes_by_type("ExtendsNode").len(), 1);
-    assert!(tree.get_nodes_by_type("BlockNode").is_empty());
+fn get_nodes_by_type_reaches_a_node_inside_an_if_branch() {
+    // The walk, through the one node shape that would break a name-driven
+    // traversal: `IfNode` emits its branch lists as empty-named nodelists, and
+    // Django reaches the same nodes through `nodelist`, a property over
+    // `conditions_nodelists` (`defaulttags.py:314-320`).
+    let tree = nodelist("{% if x %}{% block a %}{% endblock %}{% endif %}");
+    assert_eq!(tree.get_nodes_by_type("BlockNode").len(), 1);
+    assert!(tree.get_nodes_by_type("ExtendsNode").is_empty());
+    assert_eq!(tree.get_nodes_by_type("IfNode").len(), 1);
 }
+```
+
+`compile` asserts a single top-level node, and this source has one — but
+`extends_must_be_the_first_non_text_node` (Step 4) needs the whole nodelist, so
+Step 3's helper pair in `tags/mod.rs` is `support::nodelist`, not only
+`support::compile`:
+
+```rust
+    /// Parse `source` with no host, and return the whole top-level nodelist.
+    pub(crate) fn nodelist(source: &str) -> NodeListDesc {
+        let mut parser = Parser::new(Lexer::new(source).tokenize(), &NoHost);
+        parser.parse(&[]).expect("expected a successful parse")
+    }
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -1430,14 +1523,25 @@ Expected: FAIL to compile — no such method on `NodeListDesc`.
 
 ```rust
 impl NodeListDesc {
-    /// `NodeList.get_nodes_by_type(nodetype)` — `base.py:1092-1104`.
+    /// `NodeList.get_nodes_by_type(nodetype)` — `base.py:1093-1098`, whose
+    /// per-node half is `Node.get_nodes_by_type` (`base.py:1070-1082`).
     ///
     /// Django's `NodeList` version delegates to each node's, which tests
     /// `isinstance(self, nodetype)` and then recurses into `child_nodelists`.
     /// The descriptor has the class **name**, and Rust emits only child
     /// nodelists — including `IfNode`'s branch lists, whose names are empty
-    /// (`desc.rs:649-650`) — so the two walks visit the same set for every node
-    /// Rust builds.
+    /// (`desc.rs:543-546`, emitted at `if.rs:109`) — so the two walks visit the
+    /// same set for every node Rust builds.
+    ///
+    /// **Pre-order, and document order is the contract**, not an incidental:
+    /// `ExtendsNode.blocks` is a dict folded from this list, and `describe`
+    /// descends it without sorting.
+    ///
+    /// **The fold's "a repeated name keeps the last" is not reachable from a
+    /// Rust tree.** `{% block %}`'s duplicate-name check refuses the repeat, so
+    /// the only way two same-named blocks reach one nodelist is through a
+    /// host-compiled block — the fork A5 records, and there it changes a
+    /// *render*, not just a message (D7).
     ///
     /// **One recorded divergence:** a descriptor whose `class_name` is
     /// [`HOST_NODE`] names a Python node Rust must not read, so it is neither
@@ -1466,40 +1570,114 @@ impl NodeListDesc {
 }
 ```
 
-- [ ] **Step 4: Write the failing `extends` test**
+- [ ] **Step 4: Write the failing `extends` tests**
+
+**Corrected at execution time (D7), three times.** (a) `parent_name` is an
+`AttrValue::FilterExpr`, not `AttrValue::Ref` — the parent name is
+`parser.compile_filter`'s output and `Ref` is a different variant. (b)
+`ErrorKind::Syntax` **carries the message**, so `assert_eq!(error.kind,
+ErrorKind::Syntax)` does not compile: it is a tuple variant and the assertion is
+against the whole thing. (c) The draft asserted `failure("{% extends \"a\" %}")`
+is `ErrorKind::Unimplemented` — the opposite of the truth, and the kind of
+statement that would have been written into prose if the test had been skipped:
+a lone `{% extends "a" %}` **compiles**, and the assertion is that it does.
 
 ```rust
 #[test]
 fn extends_carries_the_parent_as_a_compiled_filter_expression() {
     let node = compile("{% extends \"base.html\" %}");
     assert_eq!(node.class_name, "ExtendsNode");
-    assert!(matches!(node.attr("parent_name"), Some(AttrValue::Ref(_))));
-    assert_eq!(node.nodelist("nodelist").map(|n| n.nodes.len()), Some(0));
+    let AttrValue::FilterExpr(expression) = attr(&node, "parent_name") else {
+        panic!("parent_name is a FilterExpr");
+    };
+    // The token is the *quoted* literal: `compile_filter` sees what
+    // `construct_relative_path` returned, and that keeps the original quoting.
+    assert_eq!(expression.token, "\"base.html\"");
+    let (is_var, _) = &expression.var;
+    assert!(!is_var, "a literal, not a lookup");
+    assert_eq!(node.nodelists[0].0, "nodelist");
+    assert_eq!(node.nodelists[0].1.nodes.len(), 0);
 }
 
 #[test]
-fn a_second_extends_is_rejected_but_a_nested_one_is_unreachable() {
+fn a_second_extends_is_rejected_from_inside_the_first() {
+    // `do_extends`'s unbounded parse (`LT:307`) makes the second one a child of
+    // the first, so the check is a scan of that child nodelist — and the
+    // **token** is what makes the shape observable: it is the *first*
+    // `{% extends %}`, the frame the check ran in. Measured on the pin: Django
+    // reports `(2, "extends 'a'", 1, None)`.
     let error = failure("{% extends \"a\" %}{% extends \"b\" %}");
-    assert_eq!(error.kind, ErrorKind::Syntax);
-    // `do_extends` ends with an unbounded `parser.parse()` (`LT:309`), so the
-    // second `{% extends %}` is always consumed as a top-level sibling — which
-    // is why the check is a scan of the nodelist just parsed.
-    assert_eq!(failure("{% extends \"a\" %}").kind, ErrorKind::Unimplemented);
+    assert_eq!(
+        error.kind,
+        ErrorKind::Syntax(
+            "'extends' cannot appear more than once in the same template".to_string()
+        ),
+    );
+    let token = error.token.expect("the tag's own token is attached");
+    assert_eq!(token.contents, "extends \"a\"");
 }
 
 #[test]
 fn extends_takes_exactly_one_argument() {
-    assert_eq!(failure("{% extends %}").kind, ErrorKind::Syntax);
-    assert_eq!(failure("{% extends \"a\" \"b\" %}").kind, ErrorKind::Syntax);
+    assert_eq!(
+        failure("{% extends %}").kind,
+        ErrorKind::Syntax("'extends' takes one argument".to_string()),
+    );
+    assert_eq!(
+        failure("{% extends \"a\" \"b\" %}").kind,
+        ErrorKind::Syntax("'extends' takes one argument".to_string()),
+    );
+}
+
+#[test]
+fn extends_must_be_the_first_non_text_node() {
+    // `must_be_first`, and both sides of the `contains_nontext` test are here
+    // because only one of them raises.
+    assert_eq!(
+        failure("{{ x }}{% extends \"a\" %}").kind,
+        ErrorKind::Syntax(
+            "{% extends \"a\" %} must be the first tag in the template.".to_string()
+        ),
+    );
+    assert_eq!(
+        failure("{% block b %}y{% endblock %}{% extends \"a\" %}").kind,
+        ErrorKind::Syntax(
+            "{% extends \"a\" %} must be the first tag in the template.".to_string()
+        ),
+    );
+    // Text before it is the **control**: `extend_nodelist` flips
+    // `contains_nontext` only for a node that is not a `TextNode`, so this one
+    // compiles — and a port that used "is the nodelist empty" instead would
+    // raise here too. Two top-level nodes, hence `nodelist` and not `compile`.
+    let tree = nodelist("x{% extends \"a\" %}");
+    assert_eq!(
+        tree.nodes
+            .iter()
+            .map(|node| node.class_name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["TextNode", "ExtendsNode"],
+    );
 }
 ```
 
 - [ ] **Step 5: Write `extends.rs`**
 
-```rust
-//! `{% extends %}` — `django.template.loader_tags.do_extends` (`loader_tags.py:291`).
+**Corrected at execution time (D7).** `AttrValue` is imported by the `tests`
+module, not the module body — the body builds a `FilterExpr` through
+`compile_filter` and never names the variant, so a top-level import is an unused
+one and `clippy -D warnings` rejects it. `.first()` is the third call in the
+chain and is what A4's inbound rule reads; the draft's version omitted it and
+the port would have accepted `{{ x }}{% extends "a" %}`.
 
-use crate::parser::desc::{AttrValue, NodeDesc};
+```rust
+//! `{% extends %}` — `django.template.loader_tags.do_extends` (`loader_tags.py:292`).
+//!
+//! The only built-in whose `CompileFn` ends by **consuming the rest of the
+//! template** — `nodelist = parser.parse()` with no `parse_until`
+//! (`loader_tags.py:307`) — and most of what looks surprising about this tag
+//! follows from that one line.
+
+use crate::parser::desc::NodeDesc;
 use crate::parser::error::Error;
 use crate::parser::relative::construct_relative_path;
 use crate::parser::tags::split_contents;
@@ -1507,19 +1685,22 @@ use crate::parser::Parser;
 use crate::token::Token;
 
 pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error> {
-    // `split_contents()`, not `contents.split()`: `{% extends %}` takes a
-    // *variable* as readily as a literal (`LT:296-299`), so the quoting is
-    // `compile_filter`'s business below.
+    // `split_contents()`, not `contents.split()`: Django takes a *variable* as
+    // readily as a literal here (`loader_tags.py:296-299`).
     let mut bits = split_contents(token)?;
     if bits.len() != 2 {
-        return Err(Error::syntax(format!("'{}' takes one argument", bits[0])));
+        // `bits.len() != 2` admits 0, and Django's `% bits[0]` would raise
+        // `IndexError` there. `Parser::parse` splits the same contents and
+        // raises `Empty block tag on line %d` first (`base.py:560-563`).
+        let command = bits
+            .first()
+            .expect("parse rejects an empty block tag before a compile function runs");
+        return Err(Error::syntax(format!("'{command}' takes one argument")));
     }
-    let resolved =
-        construct_relative_path(parser.origin_template_name(), &bits[1], false)?;
-    bits[1] = resolved;
+    bits[1] = construct_relative_path(parser.origin_template_name(), &bits[1], false)?;
     // The parent is a host-built `FilterExpression`: `ExtendsNode.get_parent`
     // calls `self.parent_name.resolve(context, ignore_failures=True)`
-    // (`LT:123`), which only a real one answers.
+    // (`loader_tags.py:123`), which only a real one answers.
     let parent_name = parser.compile_filter(&bits[1])?;
     let nodelist = parser.parse(&[])?;
     if !nodelist.get_nodes_by_type("ExtendsNode").is_empty() {
@@ -1528,9 +1709,13 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
             bits[0]
         )));
     }
+    // `.first()` is `ExtendsNode.must_be_first = True` (`loader_tags.py:87`),
+    // the only built-in that sets it, read by `extend_nodelist` when this node
+    // is appended.
     Ok(NodeDesc::new("ExtendsNode")
         .attr("parent_name", parent_name)
-        .nodelist("nodelist", nodelist))
+        .nodelist("nodelist", nodelist)
+        .first())
 }
 ```
 
@@ -1547,15 +1732,21 @@ and add `"ExtendsNode": ExtendsNode,` to `NODE_CLASSES`.
 
 - [ ] **Step 7: Corpus rows**
 
-`tests/parser_corpus.py`:
+`tests/parser_corpus.py` — **corrected at execution time (D7)**: six rows, not
+three. The `{% if %}`-wrapped row is in the draft and is a parity row, not the
+`{% block %}`-in-an-`{% if %}` row Step 1 was rewritten to; the `{% block %}`
+rows are what make the unbounded parse visible to the parity harness.
 
 ```python
     "{% extends \"base.html\" %}",
     "{% extends \"base.html\" %}{% block a %}x{% endblock %}",
     "{% extends parent %}",
+    "x{% extends \"base.html\" %}",
+    "{% if x %}{% block a %}x{% endblock %}{% endif %}",
+    "{% extends \"base.html\" %}{% block a %}A{% endblock %}{% if x %}{% block b %}B{% endblock %}{% endif %}",
 ```
 
-`tests/parser_error_corpus.py`:
+`tests/parser_error_corpus.py` — four rows, and the fourth is not in the draft:
 
 ```python
     ("{% extends %}", "'extends' takes one argument"),
@@ -1564,31 +1755,68 @@ and add `"ExtendsNode": ExtendsNode,` to `NODE_CLASSES`.
         "{% extends \"a\" %}{% extends \"b\" %}",
         "'extends' cannot appear more than once in the same template",
     ),
+    ("{{ x }}{% extends \"a\" %}", "{% extends \"a\" %} must be the first tag in the template."),
 ```
 
-Add to `tests/parser_error_corpus.py`'s module docstring the note that the two
-relative-path messages are **not** reachable from a bare `from_string` origin
-(they need a template name), so their rows carry an explicit origin — see Task
-2's `_native.parse(..., origin_template_name=...)` call sites.
+The two relative-path messages are **not** reachable from a bare `from_string`
+origin — they need a template name — so they go into a **separate module-level
+list** of `(source, origin_template_name, expected)` triples, not into `ERRORS`:
+
+```python
+ORIGIN_ERRORS = [
+    ("{% extends '../../x.html' %}", "index.html", "..."),
+    ("{% extends './index.html' %}", "/index.html", "..."),
+]
+```
+
+**Both test harnesses needed the origin threaded (D7), and that is a change to
+two files the draft does not list.** Django's `do_extends` reads
+`parser.origin.template_name` (`loader_tags.py:305`) and a bare `Parser(...)` has
+`origin=None`, so `django_failure` in `tests/test_parser_errors.py` and
+`django_parse` in `tests/test_parser_parity.py` each raised
+`AttributeError: 'NoneType' object has no attribute 'template_name'` on the ten
+new rows. `Parser`'s fourth positional argument is `origin`:
+`Origin(UNKNOWN_SOURCE, origin_name)` — whose `template_name` is the second
+argument — with `Origin(UNKNOWN_SOURCE)` where the row carries none. `Template`
+defaults that itself (`base.py:151-154`), which is why the corpus never hit it
+before.
 
 - [ ] **Step 8: Run the guards, then the gates**
 
-Run: `source scripts/env.sh && cargo test -p template-core && cargo clippy --workspace --all-targets -- -D warnings && maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m pytest tests/ -x -q`
-Expected: all pass.
+Run: `source scripts/env.sh && cargo test -p template-core && cargo clippy --workspace --all-targets -- -D warnings && maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m unittest discover -s tests -t . -p 'test_*.py' && ./scripts/check.sh --fast`
+
+Expected: all pass. **The last two are the corrected commands (D7): there is no
+`pytest` in this project**, and the anchor gate is a gate — Step 6 shifted two
+lines in `tags/mod.rs`, so `scripts/anchors.txt` moves with it and `--check
+--frozen` is what notices.
 
 Observe the walk's guard failing: change `get_nodes_by_type` to skip nodelists
 whose name is empty and confirm Step 1's test fails — that is the branch the
 `{% if %}`-wrapped case exists for.
 
+Observe the `.first()` guard failing: drop `.first()` from Step 5's chain and
+confirm `extends_must_be_the_first_non_text_node` fails — the only assertion
+that covers it.
+
 - [ ] **Step 9: Commit**
+
+**Corrected at execution time (D7)**: two files the draft's list omits —
+`tests/test_parser_errors.py` and `tests/test_parser_parity.py`, both edited in
+Step 7 to thread the origin — plus `scripts/anchors.txt` and the two citing
+files the line shift moved.
 
 ```bash
 git add crates/template-core/src/parser/tags/extends.rs \
         crates/template-core/src/parser/tags/mod.rs \
         crates/template-core/src/parser/desc.rs \
         crates/template-core/src/parser/registry.rs \
+        crates/template-core/src/parser/relative.rs \
         python/django_rust_templates/_impl/parser.py \
-        tests/test_tag_inventory.py tests/parser_corpus.py tests/parser_error_corpus.py
+        tests/test_tag_inventory.py tests/parser_corpus.py \
+        tests/parser_error_corpus.py tests/test_parser_errors.py \
+        tests/test_parser_parity.py tests/test_materialise.py \
+        scripts/anchors.txt \
+        docs/superpowers/specs/2026-10-08-django-template-engine-in-rust-design.md
 git commit -m "M7 Task 3: {% extends %}, and the descriptor-tree walk"
 ```
 
@@ -1638,10 +1866,10 @@ fn include_reads_with_and_only() {
 
 #[test]
 fn includes_three_option_failures_are_djangos() {
-    assert_eq!(failure("{% include %}").kind, ErrorKind::Syntax);
-    assert_eq!(failure("{% include \"a\" with %}").kind, ErrorKind::Syntax);
-    assert_eq!(failure("{% include \"a\" only only %}").kind, ErrorKind::Syntax);
-    assert_eq!(failure("{% include \"a\" nope %}").kind, ErrorKind::Syntax);
+    assert!(matches!(failure("{% include %}").kind, ErrorKind::Syntax(_)));
+    assert!(matches!(failure("{% include \"a\" with %}").kind, ErrorKind::Syntax(_)));
+    assert!(matches!(failure("{% include \"a\" only only %}").kind, ErrorKind::Syntax(_)));
+    assert!(matches!(failure("{% include \"a\" nope %}").kind, ErrorKind::Syntax(_)));
 }
 ```
 

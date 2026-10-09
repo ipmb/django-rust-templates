@@ -48,10 +48,12 @@ for _path in (DJANGO_CHECKOUT, DJANGO_TESTS):
         sys.path.insert(0, str(_path))
 
 from django.template.base import (  # noqa: E402
+    UNKNOWN_SOURCE,
     DebugLexer,
     Lexer,
     Node,
     NodeList,
+    Origin,
     Parser,
 )
 from django.template.base import FilterExpression, Variable  # noqa: E402
@@ -117,7 +119,17 @@ def django_parse(source, debug=False):
     # `Engine.template_libraries`.
     engine = _library_engine()
     return Parser(
-        lexer.tokenize(), engine.template_libraries, engine.template_builtins
+        lexer.tokenize(),
+        engine.template_libraries,
+        engine.template_builtins,
+        # A real `Parser` always carries an `Origin`: `Template.compile_nodelist`
+        # passes `self.origin`, which `Template.__init__` defaults to
+        # `Origin(UNKNOWN_SOURCE)` (`base.py:151-154`). `origin=None` was fine
+        # until M7 because nothing read it; `do_extends` does
+        # (`parser.origin.template_name`, `loader_tags.py:305`), and it raises
+        # `AttributeError` on `None`. The corpus never passes a template *name*,
+        # so the unknown origin is the faithful default here.
+        Origin(UNKNOWN_SOURCE),
     ).parse()
 
 

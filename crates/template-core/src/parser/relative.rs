@@ -59,9 +59,26 @@ pub fn construct_relative_path(
     }
     // `relative_name[0] == relative_name[-1]` on the *raw* input, so a quoted
     // name is re-quoted with double quotes and an unquoted one is not quoted at
-    // all. Compare bytes rather than chars: the first must already be one of the
-    // two quote characters (ASCII) for this to be true, so the last byte being
-    // equal cannot be a UTF-8 continuation byte.
+    // all.
+    //
+    // Byte comparison, not char, and the invariant that makes it equivalent is
+    // worth stating because it is the whole safety argument: **no codepoint at
+    // or above U+0080 has a byte equal to `"` or `'` in its UTF-8 encoding** —
+    // every continuation byte is `0b10xxxxxx`, and the lead bytes are all ≥
+    // `0xC2`. So on the right-hand side, a last byte equal to the first (which
+    // the `&&` has already required to be `0x22` or `0x27`) *is* that character,
+    // and there is no char-boundary arithmetic to get wrong. The left-hand side
+    // is ASCII-only by the same `matches!`, so `bytes.first()` cannot be a
+    // continuation byte either.
+    //
+    // The near-miss this rules out: `&relative_name[relative_name.len() - 1..]`
+    // is the spelling that looks equivalent and is not. It panics when the final
+    // character is multi-byte *and* the leading quote never closed, so the
+    // multi-byte character is what ends the string: `{% extends "./café %}` —
+    // the lexer ends the tag at `%}`, `split_contents` yields `"./café`, and
+    // byte index `len() - 1` is `é`'s continuation byte, not a char boundary.
+    // Django is fine there (`'"' == 'é'` is False) and so is the byte compare;
+    // only the naive slice is not, which is why the check is on bytes.
     let bytes = relative_name.as_bytes();
     let has_quotes = matches!(bytes.first(), Some(b'"' | b'\'')) && bytes.first() == bytes.last();
     Ok(if has_quotes {

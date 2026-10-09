@@ -28,14 +28,20 @@ for _path in (DJANGO_CHECKOUT, DJANGO_TESTS):
         sys.path.insert(0, str(_path))
 
 from django.template import defaulttags  # noqa: E402
-from django.template.base import DebugLexer, Lexer, Parser  # noqa: E402
+from django.template.base import (  # noqa: E402
+    UNKNOWN_SOURCE,
+    DebugLexer,
+    Lexer,
+    Origin,
+    Parser,
+)
 from django.template.engine import Engine  # noqa: E402
 from django.template.exceptions import TemplateSyntaxError  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 from django_rust_templates.host import ShellHost  # noqa: E402
 from tests.parser_corpus import LIBRARIES  # noqa: E402
-from tests.parser_error_corpus import ERRORS  # noqa: E402
+from tests.parser_error_corpus import ERRORS, ORIGIN_ERRORS  # noqa: E402
 from tests.test_tag_inventory import M5_TAGS  # noqa: E402
 
 # A bare `Parser(tokens)` registers **no** tags: Django's built-ins live in
@@ -60,12 +66,23 @@ def lexer(source, debug):
     return DebugLexer(source) if debug else Lexer(source)
 
 
-def django_failure(source, debug=False):
-    """The exception Django's own parser raises, or None."""
+def django_failure(source, debug=False, origin_name=None):
+    """The exception Django's own parser raises, or None.
+
+    `origin_name` is `Origin.template_name`. A real `Parser` always carries an
+    `Origin` — `Template.compile_nodelist` passes `self.origin`, which
+    `Template.__init__` defaults to `Origin(UNKNOWN_SOURCE)` (`base.py:151-154`)
+    — so the default here is the **unknown** origin, whose `template_name` is
+    `None`, and not `origin=None`. That distinction became load-bearing in M7:
+    with `Parser(..., origin=None)`, `do_extends`'s `parser.origin.template_name`
+    raises `AttributeError: 'NoneType' object has no attribute 'template_name'`,
+    which is a harness artifact and not something any template can reach.
+    """
     parser = Parser(
         lexer(source, debug).tokenize(),
         _ENGINE.template_libraries,
         _ENGINE.template_builtins,
+        Origin(UNKNOWN_SOURCE, origin_name),
     )
     try:
         parser.parse()
@@ -74,7 +91,7 @@ def django_failure(source, debug=False):
     return None
 
 
-def ours_failure(source, debug=False):
+def ours_failure(source, debug=False, origin_name=None):
     """The exception `_native.parse` raises, or None.
 
     `compile_filter` is passed because M5's `{% if %}` needs it: the operand's
@@ -93,6 +110,12 @@ def ours_failure(source, debug=False):
     knows, so every M6 error row would fail with `Invalid block tag on line 1:
     'load'` instead of the message under test — a corpus that agrees with itself
     about the wrong thing.
+
+    `origin_name` crosses as the **attribute** and not as an `Origin`
+    (design A3): Rust holds `Option<String>`, `None` means the unknown origin,
+    and the `Origin` object itself stays on this side. The two `Parser`s above
+    and below therefore agree on `template_name` and nothing else, which is all
+    `{% extends %}` reads.
     """
     parser = Parser(
         lexer(source, debug).tokenize(),
@@ -101,7 +124,11 @@ def ours_failure(source, debug=False):
     )
     try:
         _native.parse(
-            source, debug, compile_filter=parser.compile_filter, host=ShellHost(parser)
+            source,
+            debug,
+            origin_template_name=origin_name,
+            compile_filter=parser.compile_filter,
+            host=ShellHost(parser),
         )
     except Exception as exc:  # noqa: BLE001
         return exc
@@ -221,6 +248,30 @@ class ErrorParityTests(unittest.TestCase):
                 theirs = token_shape(django_failure(source, debug=True).token)
                 self.assertEqual(ours, theirs)
                 self.assertIsNotNone(ours, "debug parsing must still fail")
+
+    def test_the_origin_carrying_rows_match_django(self):
+        """The rows that need a template *name* on the origin — message and token.
+
+        `construct_relative_path`'s last two failures are unreachable from a bare
+        `from_string` origin, so nothing in `ERRORS` can cover them and the Rust
+        side's unit tests are the only place their text is pinned until here.
+        A Rust unit test pins *our* expectation; this pins Django's, which is the
+        different claim the rest of the corpus makes.
+
+        Both sides get the same name and reach it by different routes — Django
+        through a real `Origin` on a real `Parser`, Rust through the bare
+        `template_name` attribute — which is A3's whole content, so a row that
+        passes here is evidence for the seam rather than only for the message.
+        """
+        for source, origin_name, expected in ORIGIN_ERRORS:
+            with self.subTest(source=source, origin=origin_name):
+                theirs = django_failure(source, origin_name=origin_name)
+                ours = ours_failure(source, origin_name=origin_name)
+                self.assertIsNotNone(theirs, "Django accepted this template")
+                self.assertIsNotNone(ours, "we accepted this template")
+                self.assertEqual(str(theirs), expected)
+                self.assertEqual(str(ours), expected)
+                self.assertEqual(token_shape(ours.token), token_shape(theirs.token))
 
     def test_the_exception_types_differ_by_design(self):
         # Design decision 2: Rust owns the message and the token; Python owns the

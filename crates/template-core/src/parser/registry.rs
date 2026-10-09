@@ -8,13 +8,13 @@
 //! and a tag that is not implemented yet is a stub in its own file rather than a
 //! missing entry.
 //!
-//! **Four built-in names are deliberately absent**, and a test asserts their
-//! absence. `extends` and `include` are §6's — Python's, supplied through the
-//! host seam, M7's. `load` and `querystring` are §6's too, and M6 took them out
-//! of the table; the paragraphs below record which of the rule's clauses each one
-//! falls under. An entry here would be a promise this project has already decided
-//! not to keep. The mechanical reason — the one to reach for when the next
-//! built-in's side has to be decided — is the rule below.
+//! **Three built-in names are deliberately absent**, and a test asserts their
+//! absence. `include` is §6's — Python's, supplied through the host seam, M7's.
+//! `load` and `querystring` are §6's too, and M6 took them out of the table; the
+//! paragraphs below record which of the rule's clauses each one falls under. An
+//! entry here would be a promise this project has already decided not to keep.
+//! The mechanical reason — the one to reach for when the next built-in's side has
+//! to be decided — is the rule below.
 //!
 //! **The rule behind that subtraction, stated rather than listed**, because
 //! "which built-ins does Rust own" has now been asked four times and each time a
@@ -26,33 +26,45 @@
 //! `NodeDesc` is one node's worth of data and cannot carry a value that
 //! accumulates across siblings, which is what all three of these are.
 //!
-//! - `block` **was the rule's third case, and M7 removed it** — the one entry
-//!   here that left the subtracted list, so the reasoning is worth keeping.
+//! - `block` **and `extends` were the rule's last two cases, and M7 removed
+//!   both** — the only two entries that have left the subtracted list, so the
+//!   reasoning is worth keeping. They left for two *different* versions of the
+//!   same move, and telling them apart is what makes the rule usable on the next
+//!   built-in.
+//!
 //!   `do_block` writes `parser.__loaded_blocks` (`loader_tags.py:227-232`), a
 //!   value that accumulates across siblings, and a `NodeDesc` cannot carry it —
 //!   which is why the rule subtracted `block` for as long as that state lived
 //!   only in Django's parser. M7 added the field to **Rust's** `Parser`
 //!   (`mod.rs`, `loaded_blocks`), so every occurrence **Rust compiles** now
 //!   reads and writes that state in the same place, and the rule's test is
-//!   *satisfied* rather than excepted — for those occurrences. The state did not
-//!   *move*, though: it forked. A `{% block %}` inside a **host** tag's body is
-//!   still compiled by Django's `do_block` and still accumulates in Django's
-//!   `parser.__loaded_blocks`, two counters that cannot see each other. That is
-//!   A5's recorded divergence, reached exactly once in the pinned suite
+//!   *satisfied* rather than excepted — for those occurrences. The state did
+//!   not *move*, though: it forked. A `{% block %}` inside a **host** tag's body
+//!   is still compiled by Django's `do_block` and still accumulates in
+//!   Django's `parser.__loaded_blocks`, two counters that cannot see each other.
+//!   That is A5's recorded divergence, reached exactly once in the pinned suite
 //!   (`test_blocktranslate.py::test_with_block`, where the host raises first).
 //!   What the fork costs is one parse-time message — the `'block' tag with name
 //!   '…' appears more than once` refusal can miss a duplicate split across the
 //!   two counters — and nothing about the rendered tree, which both parsers
-//!   build from materialised nodes. The rule's test is still the one to apply to
-//!   the next built-in; what changes is that satisfying it means *for the
-//!   occurrences Rust compiles*, and the host-compiled ones keep Django's
-//!   attribute. `do_block` also recurses through
-//!   `parser.parse(("endblock",))`, which is structural and was never the
-//!   obstacle.
-//! - `extends` reads `parser.origin.template_name` (`loader_tags.py:305`) and
+//!   build from materialised nodes. That is what "the rule's test is satisfied
+//!   *for the occurrences Rust compiles*" means, and it is the shape to look
+//!   for in the next built-in whose state is shared with the host. `do_block`
+//!   also recurses through `parser.parse(("endblock",))`, which is structural
+//!   and was never the obstacle.
+//!
+//!   `do_extends` reads `parser.origin.template_name` (`loader_tags.py:305`) and
 //!   inspects the just-parsed nodelist through `get_nodes_by_type`
-//!   (`loader_tags.py:308`) — a query over *materialised* nodes, which do not
-//!   exist at compile time.
+//!   (`loader_tags.py:308`) — a query over **materialised** nodes, which do not
+//!   exist at compile time, and that half was the real obstacle. M7 did not move
+//!   the machinery for it; it **weakened the query to one the descriptors can
+//!   answer**, which is a different kind of resolution and the reason this
+//!   bullet is not the `block` bullet: `NodeListDesc::get_nodes_by_type` walks
+//!   by class *name*, and the one shape it cannot see is a host node that *is*
+//!   an `ExtendsNode`. Measured zero in the pinned suite and recorded on the
+//!   method. The origin half was never a subtraction reason of its own: Rust
+//!   added `Parser::origin_template_name` in Task 2, and reading an attribute off
+//!   the parse is exactly the kind of thing the rule permits.
 //! - `include` reaches `parser.compile_filter` and the loader machinery.
 //!
 //! **`load` and `querystring` were the table's last two members under a
@@ -108,7 +120,7 @@
 //! under this rule, which acts at compile time, where both are the same case.
 //! What is recorded here is the measurement, not a verdict.
 //!
-//! The count is 23 = 27 built-ins minus those four, and the metric matters:
+//! The count is 24 = 27 built-ins minus those three, and the metric matters:
 //! `Engine().template_builtins[0].tags` is 24 (`defaulttags` alone), while the
 //! union across all three builtin libraries is 27 (`defaulttags` 24 +
 //! `loader_tags` 3). Both are right answers to different questions, and this
@@ -146,6 +158,7 @@ const REGISTRY: &[Entry] = &[
     ("csrf_token", tags::csrf_token::compile),
     ("cycle", tags::cycle::compile),
     ("debug", tags::debug::compile),
+    ("extends", tags::extends::compile),
     ("filter", tags::filter::compile),
     ("firstof", tags::firstof::compile),
     ("for", tags::for_tag::compile),
@@ -287,20 +300,20 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_has_the_twenty_three_names_rust_owns() {
-        // 27 built-in names minus `extends`, `include`, `load` and
-        // `querystring`. See the module doc for why those four are absent and
-        // for the counting trap.
-        assert_eq!(builtin_tag_names().len(), 23);
+    fn the_registry_has_the_twenty_four_names_rust_owns() {
+        // 27 built-in names minus `include`, `load` and `querystring`. See the
+        // module doc for why those three are absent and for the counting trap.
+        assert_eq!(builtin_tag_names().len(), 24);
     }
 
     #[test]
-    fn the_four_python_owned_builtins_are_not_rust_compile_functions() {
-        // Two for M7 (§6's remaining loader tags) and two M6 removed: `load` is
+    fn the_three_python_owned_builtins_are_not_rust_compile_functions() {
+        // One for M7 (§6's remaining loader tag) and two M6 removed: `load` is
         // host state, `querystring` is a `simple_tag`. The reasons are separate
-        // and the module doc carries all of them. `block` left this list in M7,
-        // which is why the name counts down rather than the list growing.
-        for absent in ["extends", "include", "load", "querystring"] {
+        // and the module doc carries all of them. `block` and `extends` left
+        // this list in M7, which is why the name counts down rather than the
+        // list growing.
+        for absent in ["include", "load", "querystring"] {
             assert!(
                 builtin_tag(absent).is_none(),
                 "{absent} must not be a Rust compile function (§6: Python-owned)",
@@ -380,11 +393,11 @@ mod tests {
         // every table entry is either here or in `stubs`, and the two halves
         // move in opposite directions. The nine are M2's, the eleven after them
         // landed across M5's tasks, and M6 removed two names from the table
-        // rather than implementing them — so this list is 20 and `stubs` is 2,
-        // summing to the registry's 22. **M7's `block` is the first name to move
-        // between the halves rather than in or out of the table**: it was never
-        // a stub, and it arrives from the `absent` list, so this is 21, `stubs`
-        // is still 2, and the sum is 23.
+        // rather than implementing them — so this list was 20 and `stubs` is 2,
+        // summing to the registry's 22. **M7's `block` and `extends` are the
+        // first names to move between the halves rather than in or out of the
+        // table**: neither was ever a stub, and both arrive from the `absent`
+        // list, so this is 22, `stubs` is still 2, and the sum is 24.
         let mut expected: Vec<&str> = [
             "autoescape",
             "block",
@@ -392,6 +405,7 @@ mod tests {
             "csrf_token",
             "cycle",
             "debug",
+            "extends",
             "filter",
             "firstof",
             "for",

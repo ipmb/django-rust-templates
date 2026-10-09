@@ -983,7 +983,7 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   the `{% extends %}`-specific case moves to M7. The rule's *machinery* is
   already Rust's and already tested: `extend_nodelist`'s
   `must_be_first && contains_nontext` check (`parser/mod.rs:489`) is exercised
-  against a stand-in `must_be_first` node (`parser/tags/mod.rs:196`). M7
+  against a stand-in `must_be_first` node (`parser/tags/mod.rs:197`). M7
   supplies a tag, not a rule.
 
   **What M7 owes, stated exactly, because the loose version invites a reader at

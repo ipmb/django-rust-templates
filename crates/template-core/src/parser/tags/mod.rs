@@ -17,6 +17,7 @@ pub mod comment;
 pub mod csrf_token;
 pub mod cycle;
 pub mod debug;
+pub mod extends;
 pub mod filter;
 pub mod firstof;
 // `for` and `if` are Rust keywords, so the module name is `for_tag`/`if_tag`
@@ -229,6 +230,17 @@ pub(crate) mod support {
     use crate::parser::Parser;
     use crate::parser::TEXT_NODE;
     use crate::token::Token;
+
+    /// Parse `source` with no host, and return the whole top-level nodelist.
+    ///
+    /// [`compile`]'s companion, for the tests whose subject is the *list* rather
+    /// than the node: `NodeListDesc::get_nodes_by_type` walks one, and a helper
+    /// that unwrapped a single node could not express the multi-sibling case at
+    /// all.
+    pub(crate) fn nodelist(source: &str) -> NodeListDesc {
+        let mut parser = Parser::new(Lexer::new(source).tokenize(), &NoHost);
+        parser.parse(&[]).expect("expected a successful parse")
+    }
 
     /// Parse `source` with no host, and return its single top-level node.
     pub(crate) fn compile(source: &str) -> NodeDesc {

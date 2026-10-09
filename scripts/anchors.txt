@@ -15,8 +15,8 @@ crates/template-core/src/parser/mod.rs:395	crates/template-core/src/parser/mod.r
 parser/mod.rs:424-428	crates/template-core/src/parser/mod.rs	424	428	token.or_else	-
 crates/template-core/src/parser/mod.rs:483	crates/template-core/src/parser/mod.rs	483	-	pub fn extend_nodelist(	-
 parser/mod.rs:489	crates/template-core/src/parser/mod.rs	489	-	if node.must_be_first && nodelist.contains_nontext {	-
-tags/mod.rs:181	crates/template-core/src/parser/tags/mod.rs	181	-	Ok(NodeDesc::with_nodelist(	-
-parser/tags/mod.rs:196	crates/template-core/src/parser/tags/mod.rs	196	-	fn standin_first	-
+tags/mod.rs:182	crates/template-core/src/parser/tags/mod.rs	182	-	Ok(NodeDesc::with_nodelist(	-
+parser/tags/mod.rs:197	crates/template-core/src/parser/tags/mod.rs	197	-	fn standin_first	-
 url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
 with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
 filters.rs:69-71	crates/template-py/src/filters.rs	69	71	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
@@ -36,6 +36,7 @@ django/template/base.py:97-101	django/template/base.py	97	101	-	-
 base.py:109-110	django/template/base.py	109	110	def __str__(self):	return self.msg % self.params
 base.py:148	django/template/base.py	148	-	from .engine import Engine	-
 base.py:151-152	django/template/base.py	151	152	if origin is None:	origin = Origin(UNKNOWN_SOURCE)
+base.py:151-154	django/template/base.py	151	154	Origin(UNKNOWN_SOURCE)	-
 base.py:154	django/template/base.py	154	-	self.origin = origin	-
 base.py:198-200	django/template/base.py	198	200	parser.parse()	-
 django/template/base.py:390-403	django/template/base.py	390	403	-	-
@@ -58,6 +59,7 @@ base.py:585	django/template/base.py	585	-	-	-
 base.py:587-588	django/template/base.py	587	588	self.command_stack.pop()	-
 base.py:600-617	django/template/base.py	600	617	def extend_nodelist(self, nodelist, node, token):	-
 base.py:602-606	django/template/base.py	602	606	if node.must_be_first and nodelist.contains_nontext:	origin = "the template"
+base.py:602-612	django/template/base.py	602	612	-	-
 base.py:611	django/template/base.py	611	-	-	-
 base.py:615	django/template/base.py	615	-	node.token = token	-
 base.py:616	django/template/base.py	616	-	node.origin = self.origin	-
@@ -145,13 +147,17 @@ base.py:1016-1020	django/template/base.py	1016	1020	-	-
 base.py:1023	django/template/base.py	1023	-	getattr(e, "silent_variable_failure", False)	-
 base.py:1023-1024	django/template/base.py	1023	1024	if getattr(e, "silent_variable_failure", False):	current = context.template.engine.string_if_invalid
 base.py:1024	django/template/base.py	1024	-	current = context.template.engine.string_if_invalid	-
+base.py:1035	django/template/base.py	1035	-	child_nodelists = ("nodelist",)	-
 base.py:1036	django/template/base.py	1036	-	-	-
 base.py:1044-1070	django/template/base.py	1044	1070	def render_annotated(self, context):	-
 base.py:1054	django/template/base.py	1054	-	if context.template.engine.debug:	-
 base.py:1058-1062	django/template/base.py	1058	1062	if (	e.template_debug = (
 base.py:1060-1063	django/template/base.py	1060	1063	and context.render_context.template.origin == e._culprit_node.origin	context.render_context.template.get_exception_info(
 base.py:1060	django/template/base.py	1060	-	context.render_context.template.origin == e._culprit_node.origin	-
+base.py:1070-1082	django/template/base.py	1070	1082	nodes.extend(nodelist.get_nodes_by_type(nodetype))	-
+base.py:1079-1080	django/template/base.py	1079	1080	getattr(self, attr, None)	-
 base.py:1091	django/template/base.py	1091	-	SafeString("".join(	-
+base.py:1093-1098	django/template/base.py	1093	1098	"Return a list of all nodes of the given type"	-
 base.py:1113	django/template/base.py	1113	-	def render_annotated	-
 base.py:1113-1120	django/template/base.py	1113	1120	return self.s	-
 base.py:1139	django/template/base.py	1139	-	-	-
@@ -334,6 +340,7 @@ defaulttags.py:262	django/template/defaulttags.py	262	-	-	-
 defaulttags.py:262-265	django/template/defaulttags.py	262	265	def __init__(self, nodelist_true, nodelist_false, *varlist):	self._varlist = varlist
 defaulttags.py:265	django/template/defaulttags.py	265	-	self._varlist = varlist	-
 defaulttags.py:308-309	django/template/defaulttags.py	308	309	def __init__(self, conditions_nodelists):	self.conditions_nodelists = conditions_nodelists
+defaulttags.py:314-320	django/template/defaulttags.py	314	320	__iter__	-
 defaulttags.py:323	django/template/defaulttags.py	323	-	-	-
 defaulttags.py:323-333	django/template/defaulttags.py	323	333	for condition, nodelist in self.conditions_nodelists:	return nodelist.render(context)
 defaulttags.py:326	django/template/defaulttags.py	326	-	condition.eval(context)	-
@@ -455,6 +462,9 @@ library.py:421	django/template/library.py	421	-	-	-
 library.py:454	django/template/library.py	454	-	parser.compile_filter	-
 loader_tags.py:63	django/template/loader_tags.py	63	-	block = type(self)(block.name, block.nodelist)	-
 loader_tags.py:87	django/template/loader_tags.py	87	-	-	-
+loader_tags.py:94	django/template/loader_tags.py	94	-	self.blocks = {n.name: n	-
+loader_tags.py:118	django/template/loader_tags.py	118	-	parent = self.parent_name.resolve(context)	-
+loader_tags.py:121	django/template/loader_tags.py	121	-	self.parent_name.var	-
 loader_tags.py:215	django/template/loader_tags.py	215	-	def do_block(parser, token):	-
 loader_tags.py:219-220	django/template/loader_tags.py	219	220	# token.split_contents() isn't useful here because this tag doesn't accept	# variable as arguments.
 loader_tags.py:221-241	django/template/loader_tags.py	221	241	bits = token.contents.split()	parser.invalid_block_tag(endblock, "endblock", acceptable_endblocks)
@@ -467,9 +477,13 @@ loader_tags.py:239	django/template/loader_tags.py	239	-	acceptable_endblocks = (
 loader_tags.py:239-241	django/template/loader_tags.py	239	241	if endblock.contents not in acceptable_endblocks:	parser.invalid_block_tag(endblock, "endblock", acceptable_endblocks)
 loader_tags.py:246	django/template/loader_tags.py	246	-	-	def construct_relative_path(
 loader_tags.py:264-265	django/template/loader_tags.py	264	265	f"The relative path {relative_name} cannot be evaluated due to "	"an unknown template origin."
+loader_tags.py:275-284	django/template/loader_tags.py	275	284	points outside the file hierarchy that	-
 loader_tags.py:276-277	django/template/loader_tags.py	276	277	"The relative path '%s' points outside the file hierarchy that "	"template '%s' is in." % (relative_name, current_template_name)
 loader_tags.py:281-283	django/template/loader_tags.py	281	283	"The relative path '%s' was translated to template name '%s', the "	% (relative_name, current_template_name)
+loader_tags.py:292	django/template/loader_tags.py	292	-	def do_extends(parser, token):	-
+loader_tags.py:296-299	django/template/loader_tags.py	296	299	may be used in two ways	-
 loader_tags.py:305	django/template/loader_tags.py	305	-	bits[1] = construct_relative_path(parser.origin.template_name, bits[1])	-
+loader_tags.py:307	django/template/loader_tags.py	307	-	nodelist = parser.parse()	-
 loader_tags.py:308	django/template/loader_tags.py	308	-	if nodelist.get_nodes_by_type(ExtendsNode):	-
 loader_tags.py:347	django/template/loader_tags.py	347	-	-	-
 loader_tags.py:356	django/template/loader_tags.py	356	-	"Unknown argument for %r tag: %r." % (bits[0], option)	-

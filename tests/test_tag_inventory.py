@@ -233,7 +233,7 @@ class TagInventoryTests(unittest.TestCase):
 
 
 class RustRegistryTests(unittest.TestCase):
-    """The Rust registry is Django's built-ins minus the four Python owns as tags.
+    """The Rust registry is Django's built-ins minus the three Python owns as tags.
 
     M2 could assert the complement from Rust alone (`the_registry_holds_exactly_the_nine_m2_tags`
     listed the 18 names that must *not* be registered), because a missing entry
@@ -250,22 +250,28 @@ class RustRegistryTests(unittest.TestCase):
     `querystring`'s is *machinery* (`simple_tag`'s generated compile function
     calls `parse_bits` driven by the callable's signature — `library.py:454`).
 
-    **M7 moves it back to four, and the direction is the point.** `block` was
-    Python-owned for the same *state* reason as `load` — `do_block` writes
-    `parser.__loaded_blocks` — and M7 put that state on Rust's `Parser`, so the
-    name became Rust's. `extends` and `include` remain, on §6's list and for
-    `extends`'s `origin`/`get_nodes_by_type` and `include`'s loader machinery.
+    **M7 moves it back to three, and the direction is the point — twice over.**
+    `block` was Python-owned for the same *state* reason as `load` — `do_block`
+    writes `parser.__loaded_blocks` — and M7 put that state on Rust's `Parser`,
+    so the name became Rust's. `extends` was Python-owned for *machinery*'s
+    reason — `do_extends` reads `parser.origin.template_name` and queries the
+    just-parsed nodelist through `get_nodes_by_type` — and M7 did not move that
+    machinery: it replaced the query with one descriptors can answer
+    (`NodeListDesc::get_nodes_by_type`, by class name) and gave the origin a
+    Rust field. The two departures are the two versions of the same move, and
+    `registry.rs` carries them as one paragraph for that reason. `include`
+    remains, on §6's list and for its loader machinery.
     """
 
-    # The four Django registers that Rust does not own the compile function for.
-    PYTHON_OWNED = {"extends", "include", "load", "querystring"}
+    # The three Django registers that Rust does not own the compile function for.
+    PYTHON_OWNED = {"include", "load", "querystring"}
 
-    def test_the_rust_registry_is_djangos_builtins_minus_the_python_owned_four(self):
+    def test_the_rust_registry_is_djangos_builtins_minus_the_python_owned_three(self):
         from django_rust_templates import _native
 
         names = _native.builtin_tag_names()
         self.assertEqual(sorted(names), sorted(REGISTERED - self.PYTHON_OWNED))
-        self.assertEqual(len(names), 23)
+        self.assertEqual(len(names), 24)
 
     def test_the_python_owned_tags_are_absent_on_purpose(self):
         from django_rust_templates import _native

@@ -486,4 +486,74 @@ ERRORS = [
         "{% block a %}x",
         "Unclosed tag on line 1: 'block'. Looking for one of: endblock.",
     ),
+    # --- M7: `{% extends %}` -------------------------------------------------
+    # Three producers, and the one that is a *rule* rather than a check in the
+    # tag is the third: `extend_nodelist` refuses a `must_be_first` node once
+    # the nodelist holds anything that is not a `TextNode` (`base.py:602-606`),
+    # and `ExtendsNode.must_be_first = True` (`loader_tags.py:87`) makes
+    # `{% extends %}` the only built-in that sets it. Its message is the
+    # *token's contents* and the origin, which is why the `origin` parameter
+    # exists on the two harness helpers at all.
+    #
+    # `{% extends %}` and `{% extends "a" "b" %}` are the same arm: `bits` is
+    # `["extends"]` and `["extends", '"a"', '"b"']`, neither of length two.
+    ("{% extends %}", "'extends' takes one argument"),
+    ('{% extends "a" "b" %}', "'extends' takes one argument"),
+    # The duplicate, and it is a scan of the nodelist `do_extends` just parsed
+    # rather than of the siblings — the **token is the first `{% extends %}`**,
+    # because that is the frame the check runs in. Measured on the pin.
+    (
+        '{% extends "a" %}{% extends "b" %}',
+        "'extends' cannot appear more than once in the same template",
+    ),
+    # `must_be_first`, raising: a `{{ … }}` before it flips `contains_nontext`.
+    (
+        '{{ x }}{% extends "a" %}',
+        '{% extends "a" %} must be the first tag in the template.',
+    ),
+    # And its control, which does **not** raise: a `TextNode` is exactly what
+    # `contains_nontext` is defined against. This row is in the success corpus,
+    # and it is named here so the pair is findable from either side.
+    #
+    # The relative-path failure that needs no origin at all: `parse`'s default
+    # is the unknown one. The other two of the three need a template *name*, and
+    # they are `ORIGIN_ERRORS` below.
+    (
+        "{% extends './x.html' %}",
+        "The relative path './x.html' cannot be evaluated due to an "
+        "unknown template origin.",
+    ),
+]
+
+# Rows whose message can be produced only by an origin that **names a
+# template** — `construct_relative_path`'s second and third failures
+# (`loader_tags.py:275-284`). They are a separate list rather than two more
+# entries above, because they need a third field and mixing arities in one list
+# buys nothing: every consumer here unpacks two. Each is
+# `(source, origin_template_name, expected)`, and
+# `test_the_origin_carrying_rows_match_django` grades them the same way the
+# main corpus is graded — message *and* token, both sides driven by
+# `origin_name`.
+#
+# `{% extends "./x.html" %}` cannot reach either on its own: `./x.html` resolves
+# to `x.html`, which is inside the hierarchy and is not the origin's own name.
+# The first row escapes the directory, the second lands on the origin itself —
+# and that one is the row that separates `current_template_name` from the
+# resolved new name, because the two agree for every slash-free origin. Measured
+# on the pin: with origin `/index.html`, `./index.html` reports
+# `template name '/index.html'` (the origin, as given) while the resolved name
+# is `index.html`.
+ORIGIN_ERRORS = [
+    (
+        "{% extends '../../x.html' %}",
+        "index.html",
+        "The relative path ''../../x.html'' points outside the file hierarchy "
+        "that template 'index.html' is in.",
+    ),
+    (
+        "{% extends './index.html' %}",
+        "/index.html",
+        "The relative path ''./index.html'' was translated to template name "
+        "'/index.html', the same template in which the tag appears.",
+    ),
 ]
