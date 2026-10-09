@@ -306,20 +306,32 @@ since the first file finished:
 | `3f5a7fa` | `crates/template-core/src/parser/tags/regroup.rs` | `base.py:75`, `defaulttags.py:1352-1419` | 2 read; **1 wrong** (`1352-1419` ends two blank lines past `regroup`, whose last statement is 1417) — fixed in `061990a`. `base.py:75` is `VARIABLE_ATTRIBUTE_SEPARATOR = "."`, right |
 | `436747d` + `9eb488d` | `crates/template-core/src/parser/tags/url.rs` | *none entered* | **0 rows read, 0 wrong** — the first batch that stranded nothing at all, and the mechanism is worth keeping. `url.rs`'s five rows were all **quoted** by the naming pass, and a quoted row is never in the stranded bucket; the one unquoted row it had (`defaulttags.py:1514-1586`) was pruned by the correction commit (it is now `1514-1584`) before it could enter. So this batch neither confirms nor refutes the "clean batch" prediction — it never reached the list |
 | `93bc8ba` | `crates/template-core/src/filters/urlizetrunc.rs` | *none entered* | **0 rows read, 0 wrong** — the second batch to strand nothing, and the same mechanism: the module's three anchors were `defaultfilters.py:386`, `:389-400` and `:399`, all already **quoted** by `urlize.rs`, `host.rs` and `filter_cases.py`, and the one row it added (`defaultfilters.py:398`) is cited by the pass that added it. Two batches in a row now strand nothing, and neither is evidence for the "clean batch" prediction — both are evidence that a file whose rows are *all* quoted cannot feed the list, which is the list's own limit, not the file's quality |
+| `b8f72be` + `b5d05f7` | `crates/template-core/src/parser/tags/ifchanged.rs` | `defaulttags.py:1023-1073` | **1 row read, 1 wrong** — and it is the first entry the list has caught since the ten blank-ended rows, so it is worth its own note (below). Corrected to `1023-1062` in `b5d05f7`, which requotes the row, so it did not stay on the list |
 
-Twenty-seven rows have passed through; eleven were wrong or cited for the wrong
-line. (An eighth batch, `urlizetrunc.rs`, stranded none, as did the seventh,
-`url.rs` — see the table.) Seven were wrong in a *span's* end (`base.py:959-1029` ends on a blank
+Twenty-eight rows have passed through; twelve were wrong or cited for the wrong
+line. (Two batches, `url.rs` and `urlizetrunc.rs`, stranded none — see the
+table.) Eight were wrong in a *span's* end (`base.py:959-1029` ends on a blank
 line, `:963-995` runs past the arms it claims, `:999-1029` misses two of its
 three branches, `html.py:412-415` is a neighbouring `@cached_property`,
 `base.py:771-774` / `base.py:804-810` each end one statement past the construct
-they enumerate, and `defaulttags.py:1352-1419` ends two blank lines past its
-function) and four were wrong in the line itself (`html.py:246` is blank,
-`base.py:999` is not the guard it is cited as, `base.py:972` is right for one of
-its two sites and wrong for the other, and `base.py:697-701` is a regex rather
-than the `compile_filter` its sentence is about). All eleven came from a file
-whose citations had never been read in context, and the span ones are invisible
-to a check that only asks whether some line inside the span exists.
+they enumerate, `defaulttags.py:1352-1419` ends two blank lines past its
+function, and `defaulttags.py:1023-1073` ends eleven lines past its function,
+inside the next one) and four were wrong in the line itself (`html.py:246` is
+blank, `base.py:999` is not the guard it is cited as, `base.py:972` is right for
+one of its two sites and wrong for the other, and `base.py:697-701` is a regex
+rather than the `compile_filter` its sentence is about). All twelve came from a
+file whose citations had never been read in context, and the span ones are
+invisible to a check that only asks whether some line inside the span exists.
+
+`defaulttags.py:1023-1073` is the twelfth and it is the interesting one, because
+it is the first defect the stranded list has caught since the ten blank-ended
+rows — the other eleven came from a naming pass or from the blank-end sweep.
+Its end line, `"\n".join(sorted(parser.libraries)),` at 1073, is *real code*, so
+the blank-end detector could not fire on it; the overrun is invisible until you
+look at what 1073 belongs to, which is `find_library`'s `raise`, eleven lines
+past `ifchanged`'s `return`. That is the list's whole value stated as one case:
+the detectors that read *within* a span cannot see a span that is simply too
+long, and only the file finishing makes it worth reading.
 
 The order of the sweep decides when each row becomes visible: a row cited only
 from files swept last surfaces last. So the list still has to be read once, at
