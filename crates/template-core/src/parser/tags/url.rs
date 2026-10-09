@@ -1,4 +1,4 @@
-//! `{% url %}` — `defaulttags.url` (`defaulttags.py:1514-1586`).
+//! `{% url %}` — `defaulttags.url` (`defaulttags.py:1514-1584`).
 //!
 //! # Compile calls no reversal
 //!
@@ -12,11 +12,12 @@
 //! # Each bit is classified by `kwarg_re.match`, and `as` is read from the end
 //!
 //! `bits = bits[2:]`, then a trailing `as` (`len(bits) >= 2 and bits[-2] == "as"`,
-//! `:1568-1571`) is stripped, then every surviving bit goes through
+//! `defaulttags.py:1570-1572`) is stripped, then every surviving bit goes through
 //! [`match_kwarg`]. A participating name group makes it a kwarg
 //! (`kwargs[name] = compile_filter(value)`), its absence makes it positional
-//! (`args.append(compile_filter(value))`) — the `if name:` on `:1581` is the
-//! group's presence, since `\w+` can never capture an empty string.
+//! (`args.append(compile_filter(value))`) — the `if name:` on
+//! `defaulttags.py:1579` is the group's presence, since `\w+` can never capture an
+//! empty string.
 //!
 //! Note `as` is stripped **before** classification, so `{% url 'v' as u %}` has
 //! an empty `args` and no `as` in it, while `{% url 'v' a as u %}` has `a` as
@@ -36,8 +37,8 @@
 //! # The descriptor is positional, and `asvar` is always present
 //!
 //! `URLNode(view_name, args, kwargs, asvar)` (`defaulttags.py:479-483`) — all four
-//! are plain attributes, and `:1585` passes `asvar` on both paths, so it is
-//! emitted as `AttrValue::None` when there is no `as`.
+//! are plain attributes, and `defaulttags.py:1584` passes `asvar` on both paths,
+//! so it is emitted as `AttrValue::None` when there is no `as`.
 
 use crate::parser::desc::{AttrValue, NodeDesc};
 use crate::parser::error::Error;
