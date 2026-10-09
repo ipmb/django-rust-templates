@@ -419,7 +419,7 @@ def template_for(nodelist, engine=None, parser=None):
     `parser_for` already needed: `Engine.__init__` reads settings, and any caller
     of either function must have configured them. It is a parameter rather than a
     fresh `Engine()` here because the render path *reads* it — `string_if_invalid`
-    on the five lines above and `debug` on the sixth — and a fresh one would
+    on the five reads above and `debug` on the sixth — and a fresh one would
     render a different answer than the engine the caller chose. Measured:
     `Engine(string_if_invalid="<<invalid>>")` renders `{{ nope }}` as
     `'&lt;&lt;invalid&gt;&gt;'` through Django and rendered `''` through a shell
