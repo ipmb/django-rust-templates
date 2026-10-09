@@ -198,14 +198,22 @@ class RenderValueInContextTests(unittest.TestCase):
     def test_the_modules_that_copied_it_hold_ours(self):
         """The out-of-module call sites, which are copies taken at *import* time.
 
-        Two of the modules that call the function are not ours: defaulttags, at
-        `django/template/defaulttags.py:37`, and the i18n library, at
-        `django/templatetags/i18n.py:5`. Both reach it through a from-import at
-        module scope, so each holds whatever the module attribute was when it was
-        imported — and nothing this project does to django.template.base
-        afterwards can change it. That is the difference from our own file's
+        Two of the modules that call the function reach it through a from-import
+        at module scope — defaulttags, at `django/template/defaulttags.py:37`,
+        and the i18n library, at `django/templatetags/i18n.py:5` — so each holds
+        whatever the module attribute was when it was imported, and nothing this
+        project does to django.template.base afterwards can change it. That is
+        the difference from our own file's
         call, at `python/django_rust_templates/_impl/base.py:1161`, which reads
         the module global at call time and therefore always follows.
+
+        **One of the two is now ours and the hazard is unchanged, which is the
+        point of keeping it in the row.** `defaulttags` is Django's file; `i18n`
+        became ours in M12 Task 6, so the *copy it takes* is taken by our
+        transcription — but it is still a copy, and it is still frozen at the
+        moment the module executes. If that moment is before `install()`, our
+        transcribed i18n binds Django's function while every other module binds
+        ours. Interposing a module does not make its captures late-binding.
 
         **Measured, in both import orders.** With ``install()`` first — the order
         ``scripts/check.sh`` establishes for every unit-test process, via the

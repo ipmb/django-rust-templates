@@ -26,6 +26,7 @@ pub mod firstof;
 // module name differ from the file name.
 #[path = "for.rs"]
 pub mod for_tag;
+pub mod i18n;
 #[path = "if.rs"]
 pub mod if_tag;
 pub mod ifchanged;
@@ -159,8 +160,35 @@ pub(crate) fn py_repr_str(s: &str) -> String {
 }
 
 /// Python's `repr()` of a list of strings, as `"%s" % [str, ...]` renders it.
+///
+/// ASCII-only, like [`py_repr_str`], and for the same reason: its input is a
+/// constant (`{% templatetag %}`'s argument list) rather than user text.
 fn py_list_repr(items: &[&str]) -> String {
     let rendered: Vec<String> = items.iter().map(|item| py_repr_str(item)).collect();
+    format!("[{}]", rendered.join(", "))
+}
+
+/// Python's `repr()` of a list of **arbitrary** strings, as `"%r" % [str, …]`
+/// renders it.
+///
+/// The user-text counterpart of [`py_list_repr`]: each element goes through
+/// [`Parser::py_repr`] — the host's real `repr` — because the elements are
+/// template text, and `py_repr_str`'s ASCII-only assertion is exactly what
+/// refuses that. It lives here rather than beside one caller because two tags
+/// need it: `{% get_current_timezone %}` in `tz.rs` (`tz.py:197-199`) and the
+/// five `as variable`/`for … as` messages in `i18n.rs` (`i18n.py:237,260,287,330,353`).
+/// Generic over the element type so a `Vec<String>` from `split_contents` and a
+/// `Vec<&str>` from `pyunicode::split` both go through it without a conversion.
+///
+/// [`Parser::py_repr`]: crate::parser::Parser::py_repr
+pub(crate) fn python_list_repr<T: AsRef<str>>(
+    parser: &crate::parser::Parser<'_>,
+    items: &[T],
+) -> String {
+    let rendered: Vec<String> = items
+        .iter()
+        .map(|item| parser.py_repr(item.as_ref()))
+        .collect();
     format!("[{}]", rendered.join(", "))
 }
 

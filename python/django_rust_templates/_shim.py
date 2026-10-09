@@ -144,13 +144,17 @@ SHADOWING = {
     "loaders/filesystem.py": "transcribed",
     "loaders/locmem.py": "transcribed",
     "smartif.py": "transcribed",
-    # M12's three, and the first keys under the second namespace — the
-    # `templatetags/` directory `NAMESPACE_ROOTS` serves. All transcribed: the
-    # three modules are the pin plus a marker, because the seven tags Rust
-    # compiles out of them never reach these bodies. `tz` joined in Task 4; its
-    # three *filters* (`localtime`, `timezone`, `utc`) are Task 7's Rust bodies
-    # and are transcribed-verbatim for now, which the file's marker and
-    # `check_transcriptions.py`'s declared region record rather than hide.
+    # M12's five, and the only keys under the second namespace — the
+    # `templatetags/` directory `NAMESPACE_ROOTS` serves. All transcribed: each
+    # module is the pin plus a marker, because the tag bodies Rust compiles out
+    # of them never reach Python once the names are Rust's. One library joined
+    # per task — `cache` and `static` first, `tz` in Task 4, `l10n` in Task 5,
+    # and `i18n` in Task 6, which is the last of the five and the one that takes
+    # the second meter scope to zero. Their *filters* (`localtime`, `timezone`,
+    # `utc` in tz; `localize`, `unlocalize` in l10n; the four language filters
+    # in i18n) are Task 7's Rust bodies and are transcribed-verbatim for now,
+    # which each file's marker and `check_transcriptions.py`'s declared region
+    # record rather than hide.
     #
     # **No `templatetags/__init__.py` row, and that is measured rather than an
     # omission.** The plan called for one. `_is_foreign_package` declines
@@ -163,6 +167,7 @@ SHADOWING = {
     # interposed. Upstream's `__init__.py` is 0 bytes, so there is no behaviour
     # in it to transcribe and nothing is lost by leaving the package Django's.
     "templatetags/cache.py": "transcribed",
+    "templatetags/i18n.py": "transcribed",
     "templatetags/l10n.py": "transcribed",
     "templatetags/static.py": "transcribed",
     "templatetags/tz.py": "transcribed",

@@ -1020,6 +1020,12 @@ BASENAMES = {
     # other four are reachable from no template tag at all.
     "cache.py": "django/templatetags/cache.py",
     "static.py": "django/templatetags/static.py",
+    # M12 Task 6a's, and the same shape as the two above: `i18n.py` matches
+    # three files under `.django/` (`views/i18n.py`, `conf/urls/i18n.py`), and
+    # ours is the templatetags one — the module the ten tag names are registered
+    # on. `tz.py` and `l10n.py`, Task 4's and Task 5's, needed no row because
+    # each is the only file with that basename under the checkout.
+    "i18n.py": "django/templatetags/i18n.py",
 }
 
 MANIFEST = load_manifest()

@@ -313,7 +313,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
 
         The cache-drop below is not incidental. The row writes a module and
         expects the finder to see it, but ``install()`` returns early when the
-        shim is already installed (``_shim.py:551``), and a session-start install
+        shim is already installed (``_shim.py:556``), and a session-start install
         (which ``check.sh`` now does, so every test module binds the same
         classes) means the shim *is* already installed by the time this row
         runs. A ``django.template.backends`` cached earlier in the session then
@@ -585,17 +585,20 @@ class NamespaceTests(unittest.TestCase):
         ``the second count is 2``, and that is wrong for the same off-by-one
         reason:** it is written as if the count arrives at 2 here, but Task 4
         already measured 2 and left ``i18n`` alone, so one more file moves
-        2 → 1. ``i18n`` is the last of the five and Task 6 takes it to 0.
+        2 → 1.
+
+        It is **0** in M12 Task 6a, which interposes ``i18n`` — the fifth and
+        last library, one module, so the delta is one again and the set below is
+        empty. This is the commit the milestone's second scope was for: it
+        started at Django's five libraries and now names none of them, and
+        ``unshimmed(scope="django.templatetags")`` returning ``[]`` is the
+        measurement that says so. Task 6b ports ``blocktranslate``'s *bodies*
+        and moves this count not at all.
         """
         _shim.install()
         self.assertEqual(_shim.unshimmed(), _shim.unshimmed(scope="django.template"))
         self.assertEqual(len(_shim.unshimmed()), 11)
-        self.assertEqual(
-            sorted(_shim.unshimmed(scope="django.templatetags")),
-            [
-                "django.templatetags.i18n",
-            ],
-        )
+        self.assertEqual(_shim.unshimmed(scope="django.templatetags"), [])
 
     def test_a_namespaces_files_are_not_everything_under_its_root(self):
         """The label against the measurement, staged on a real tree.

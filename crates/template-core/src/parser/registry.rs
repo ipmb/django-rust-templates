@@ -235,13 +235,27 @@ pub fn builtin_tag(command: &str) -> Option<CompileFn> {
 /// [`Host::library_tag_loaded`]: crate::parser::host::Host::library_tag_loaded
 const LIBRARY_REGISTRY: &[Entry] = &[
     ("cache", tags::cache::compile),
+    (
+        "get_available_languages",
+        tags::i18n::get_available_languages,
+    ),
+    ("get_current_language", tags::i18n::get_current_language),
+    (
+        "get_current_language_bidi",
+        tags::i18n::get_current_language_bidi,
+    ),
     ("get_current_timezone", tags::tz::get_current_timezone),
+    ("get_language_info", tags::i18n::get_language_info),
+    ("get_language_info_list", tags::i18n::get_language_info_list),
     ("get_media_prefix", tags::static_tag::compile),
     ("get_static_prefix", tags::static_tag::compile),
+    ("language", tags::i18n::language),
     ("localize", tags::l10n::localize),
     ("localtime", tags::tz::localtime),
     ("static", tags::static_tag::compile),
     ("timezone", tags::tz::timezone),
+    ("trans", tags::i18n::translate),
+    ("translate", tags::i18n::translate),
 ];
 
 /// The compile function Rust has for the **library** tag `command`, if it has
@@ -260,17 +274,24 @@ pub fn library_tag(command: &str) -> Option<CompileFn> {
 /// `ShellHost.has_tag` for a library tag the way it answers for a built-in one —
 /// see `python/django_rust_templates/host.py`'s `_rust_owned`. The shell cannot
 /// derive it: the natural-looking source, `django_own_tags()`, holds **all 18**
-/// library tags, and claiming all 18 would send `trans`, `blocktranslate` and
-/// the rest to `invalid_block_tag` instead of to the host that compiles them
+/// library tags, and claiming all 18 would send `blocktrans`, `blocktranslate`
+/// and the rest to `invalid_block_tag` instead of to the host that compiles them
 /// (the defect
 /// M12's `245 failures of the 1547` measurement is about). So the list of
 /// library tags Rust actually compiles has to come from Rust.
+///
+/// **Sixteen of the 18 as of M12 Task 6a**, the last name-adding task: `i18n`'s
+/// eight joined the eight `cache`/`static`/`tz`/`l10n` already had, and the two
+/// left — `blocktranslate` and `blocktrans` — are Task 6b's Rust bodies. So this
+/// table and `django_own_tags()` now differ by exactly those two.
 ///
 /// Three of the entries share [`tags::static_tag::compile`], which is
 /// Django's own shape rather than a shortcut here — `do_static`,
 /// `get_static_prefix` and `get_media_prefix` are one class-method call with
 /// different arguments (`static.py:74`, `static.py:92`, `static.py:171`), and that function
-/// recovers the command from the token.
+/// recovers the command from the token. [`tags::i18n::translate`] is shared the
+/// same way: `translate` and `trans` are one body registered twice
+/// (`i18n.py:358-359`).
 pub fn library_tag_names() -> Vec<&'static str> {
     LIBRARY_REGISTRY.iter().map(|(name, _)| *name).collect()
 }
@@ -568,7 +589,7 @@ mod tests {
     }
 
     #[test]
-    fn the_library_registry_holds_the_eight_names_m12_has_landed_so_far() {
+    fn the_library_registry_holds_the_sixteen_names_m12_has_landed_so_far() {
         // The literal, because the *set* is a claim about Django's libraries and
         // not a consequence of anything in this file. `tests/test_tag_inventory.py`
         // cross-checks `REGISTRY` against Django's built-in registry; the library
@@ -578,20 +599,30 @@ mod tests {
         //
         // Four at Task 3 (`cache`, `static`, and the two `static.py` prefix
         // readers), three more at Task 4 (`tz`'s three tags), one more at Task 5
-        // (`l10n`'s single tag, `localize`). Task 7 adds the nine *filters* of the
-        // five libraries and moves none of these names: filters are not tags and
-        // never enter this table.
+        // (`l10n`'s single tag, `localize`), and eight at Task 6a (`i18n`'s eight
+        // non-translating tags). Task 6b adds the last two (`blocktranslate`,
+        // `blocktrans`) and takes this to 18, the whole of `django_own_tags()`.
+        // Task 7 adds the nine *filters* of the five libraries and moves none
+        // of these names: filters are not tags and never enter this table.
         assert_eq!(
             library_tag_names(),
             [
                 "cache",
+                "get_available_languages",
+                "get_current_language",
+                "get_current_language_bidi",
                 "get_current_timezone",
+                "get_language_info",
+                "get_language_info_list",
                 "get_media_prefix",
                 "get_static_prefix",
+                "language",
                 "localize",
                 "localtime",
                 "static",
                 "timezone",
+                "trans",
+                "translate",
             ],
         );
     }

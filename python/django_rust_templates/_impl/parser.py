@@ -55,6 +55,15 @@ from django.template.defaulttags import (
 )
 from django.template.loader_tags import BlockNode, ExtendsNode, IncludeNode
 from django.templatetags.cache import CacheNode
+from django.templatetags.i18n import (
+    GetAvailableLanguagesNode,
+    GetCurrentLanguageBidiNode,
+    GetCurrentLanguageNode,
+    GetLanguageInfoListNode,
+    GetLanguageInfoNode,
+    LanguageNode,
+    TranslateNode,
+)
 from django.templatetags.l10n import LocalizeNode
 from django.templatetags.static import PrefixNode, StaticNode
 from django.templatetags.tz import (
@@ -145,15 +154,38 @@ NODE_CLASSES = {
     "FilterNode": FilterNode,
     "FirstOfNode": FirstOfNode,
     "ForNode": ForNode,
-    # M12 Task 4's three, `django.templatetags.tz`'s. Ordinary keyword
-    # constructors like the trio above — `LocalTimeNode.__init__(self, nodelist,
-    # use_tz)` (`tz.py:95`), `TimezoneNode.__init__(self, nodelist, tz)`
-    # (`tz.py:112`) and `GetCurrentTimezoneNode.__init__(self, variable)`
-    # (`tz.py:127`) — so the bare class is the factory.
+    # M12 Task 6a's seven, `django.templatetags.i18n`'s. Ordinary keyword
+    # constructors like every entry here but `IfChangedNode` —
+    # `GetAvailableLanguagesNode.__init__(self, variable)` (`i18n.py:14`),
+    # `GetLanguageInfoNode.__init__(self, lang_code, variable)` (`i18n.py:25`),
+    # `GetLanguageInfoListNode.__init__(self, languages, variable)`
+    # (`i18n.py:36`), `GetCurrentLanguageNode.__init__(self, variable)`
+    # (`i18n.py:55`), `GetCurrentLanguageBidiNode.__init__(self, variable)`
+    # (`i18n.py:64`), `TranslateNode.__init__(self, filter_expression, noop,
+    # asvar=None, message_context=None)` (`i18n.py:75`) and
+    # `LanguageNode.__init__(self, nodelist, language)` (`i18n.py:208`) — so the
+    # bare class is the factory. **`BlockTranslateNode` is deliberately absent:
+    # it is M12 Task 6b's**, and its refusal row in `test_materialise.py` stays
+    # green until then. `TranslateNode.__init__` rewrites a literal operand in
+    # place (`i18n.py:80-82`), which is this class's job and not Rust's — the
+    # materialiser runs the real constructor, so the rewrite happens exactly
+    # once, here.
+    "GetAvailableLanguagesNode": GetAvailableLanguagesNode,
+    "GetCurrentLanguageBidiNode": GetCurrentLanguageBidiNode,
+    "GetCurrentLanguageNode": GetCurrentLanguageNode,
+    # M12 Task 4's third, `django.templatetags.tz`'s. Ordinary keyword
+    # constructors — `LocalTimeNode.__init__(self, nodelist, use_tz)`
+    # (`tz.py:95`), `TimezoneNode.__init__(self, nodelist, tz)` (`tz.py:112`)
+    # and `GetCurrentTimezoneNode.__init__(self, variable)` (`tz.py:127`) — so
+    # the bare class is the factory. Its siblings `LocalTimeNode` and
+    # `TimezoneNode` are further down in their own sort positions.
     "GetCurrentTimezoneNode": GetCurrentTimezoneNode,
+    "GetLanguageInfoListNode": GetLanguageInfoListNode,
+    "GetLanguageInfoNode": GetLanguageInfoNode,
     "IfChangedNode": _ifchanged_factory,
     "IfNode": IfNode,
     "IncludeNode": IncludeNode,
+    "LanguageNode": LanguageNode,
     # M12 Task 5's, `django.templatetags.l10n`'s one node. An ordinary keyword
     # constructor — `LocalizeNode.__init__(self, nodelist, use_l10n)`
     # (`l10n.py:24`) — so the bare class is the factory, like every entry here
@@ -170,6 +202,7 @@ NODE_CLASSES = {
     "StaticNode": StaticNode,
     "TemplateTagNode": TemplateTagNode,
     "TimezoneNode": TimezoneNode,
+    "TranslateNode": TranslateNode,
     "URLNode": URLNode,
     "VerbatimNode": VerbatimNode,
     "VariableNode": VariableNode,

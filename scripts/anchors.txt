@@ -1,3 +1,4 @@
+_shim.py:556	python/django_rust_templates/_shim.py	556	-	-	-
 center.rs:86	crates/template-core/src/filters/center.rs	86	-	arg.unwrap_or(Value::None)	-
 center.rs:90	crates/template-core/src/filters/center.rs	90	-	text.starts_with('-')	-
 get_digit.rs:108	crates/template-core/src/filters/get_digit.rs	108	-	text.chars().rev().nth(index)	-
@@ -26,8 +27,8 @@ resolve.rs:28	crates/template-core/src/parser/resolve.rs	28	-	pub enum Step {	-
 parser/resolve.rs:156	crates/template-core/src/parser/resolve.rs	156	-	pub trait LookupTarget {	-
 resolve.rs:253	crates/template-core/src/parser/resolve.rs	253	-	pub enum LookupOutcome {	-
 extends.rs:71	crates/template-core/src/parser/tags/extends.rs	71	-	if !nodelist.get_nodes_by_type("ExtendsNode").is_empty() {	-
-tags/mod.rs:191	crates/template-core/src/parser/tags/mod.rs	191	-	Ok(NodeDesc::with_nodelist(	-
-parser/tags/mod.rs:206	crates/template-core/src/parser/tags/mod.rs	206	-	fn standin_first	-
+tags/mod.rs:216	crates/template-core/src/parser/tags/mod.rs	216	-	-	-
+parser/tags/mod.rs:231	crates/template-core/src/parser/tags/mod.rs	231	-	-	-
 url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
 with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
 filters.rs:69-71	crates/template-py/src/filters.rs	69	71	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
@@ -587,8 +588,38 @@ cache.py:93	django/templatetags/cache.py	93	-	-	-
 cache.py:96-98	django/templatetags/cache.py	96	98	-	-
 cache.py:97	django/templatetags/cache.py	97	-	-	-
 django/templatetags/i18n.py:5	django/templatetags/i18n.py	5	-	from django.template.base import TokenType, render_value_in_context	-
+i18n.py:14	django/templatetags/i18n.py	14	-	-	-
+i18n.py:25	django/templatetags/i18n.py	25	-	-	-
+i18n.py:36	django/templatetags/i18n.py	36	-	-	-
+i18n.py:55	django/templatetags/i18n.py	55	-	-	-
+i18n.py:64	django/templatetags/i18n.py	64	-	-	-
+i18n.py:73	django/templatetags/i18n.py	73	-	-	-
+i18n.py:75	django/templatetags/i18n.py	75	-	-	-
+i18n.py:80-82	django/templatetags/i18n.py	80	82	is_var = True	-
 django/templatetags/i18n.py:91	django/templatetags/i18n.py	91	-	-	-
+i18n.py:97-99	django/templatetags/i18n.py	97	99	-	-
 django/templatetags/i18n.py:185	django/templatetags/i18n.py	185	-	-	-
+i18n.py:208	django/templatetags/i18n.py	208	-	-	-
+i18n.py:213	django/templatetags/i18n.py	213	-	translation.override	-
+i18n.py:219-239	django/templatetags/i18n.py	219	239	do_get_available_languages	-
+i18n.py:232-234	django/templatetags/i18n.py	232	234	-	-
+i18n.py:243-262	django/templatetags/i18n.py	243	262	-	-
+i18n.py:266-289	django/templatetags/i18n.py	266	289	do_get_language_info_list	-
+i18n.py:314-332	django/templatetags/i18n.py	314	332	-	-
+i18n.py:336-355	django/templatetags/i18n.py	336	355	do_get_current_language_bidi	-
+i18n.py:358-359	django/templatetags/i18n.py	358	359	-	-
+i18n.py:360-453	django/templatetags/i18n.py	360	453	do_translate	-
+i18n.py:375-379	django/templatetags/i18n.py	375	379	-	-
+i18n.py:400-450	django/templatetags/i18n.py	400	450	takes at least one argument	-
+i18n.py:410	django/templatetags/i18n.py	410	-	{"as", "noop"}	-
+i18n.py:412-451	django/templatetags/i18n.py	412	451	while remaining:	-
+i18n.py:414-417	django/templatetags/i18n.py	414	417	The '%s' option was specified more than once.	-
+i18n.py:415-417	django/templatetags/i18n.py	415	417	-	-
+i18n.py:434-441	django/templatetags/i18n.py	434	441	-	-
+i18n.py:441	django/templatetags/i18n.py	441	-	-	-
+i18n.py:456-596	django/templatetags/i18n.py	456	596	do_block_translate	-
+i18n.py:600-616	django/templatetags/i18n.py	600	616	-	-
+i18n.py:613-614	django/templatetags/i18n.py	613	614	-	-
 l10n.py:24	django/templatetags/l10n.py	24	-	-	-
 l10n.py:31-36	django/templatetags/l10n.py	31	36	-	-
 l10n.py:40-60	django/templatetags/l10n.py	40	60	localize_tag	-
@@ -710,12 +741,11 @@ django/utils/timezone.py:146-161	django/utils/timezone.py	146	161	settings.USE_T
 timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)
 python/django_rust_templates/_impl/base.py:1161	python/django_rust_templates/_impl/base.py	1161	-	-	-
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
-_impl/parser.py:535	python/django_rust_templates/_impl/parser.py	535	-	func = parser.find_filter(name)	-
-_impl/parser.py:636	python/django_rust_templates/_impl/parser.py	636	-	func = resolve_ref(handle.index)	-
+_impl/parser.py:568	python/django_rust_templates/_impl/parser.py	568	-	-	-
+_impl/parser.py:669	python/django_rust_templates/_impl/parser.py	669	-	-	-
 _shim.py:75	python/django_rust_templates/_shim.py	75	-	TARGET = "django.template"	-
-_shim.py:551	python/django_rust_templates/_shim.py	551	-	if installed():	-
 python/django_rust_templates/host.py:422	python/django_rust_templates/host.py	422	-	-	-
-python/django_rust_templates/host.py:550	python/django_rust_templates/host.py	550	-	self.last_error = error	-
+python/django_rust_templates/host.py:555	python/django_rust_templates/host.py	555	-	-	-
 tests/parity_target.py:62	tests/parity_target.py	62	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
 tests/parity_target.py:170	tests/parity_target.py	170	-	So this is the replacement Python side	-
 filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-

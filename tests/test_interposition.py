@@ -1305,7 +1305,7 @@ class FilterRoutingTests(unittest.TestCase):
         """The premise, on its own, so a green counter cannot be the whole story.
 
         `Parser.find_filter(name)` is the handle the parse keeps
-        (`_impl/parser.py:535`) and the object the routing compares against, so
+        (`_impl/parser.py:568`) and the object the routing compares against, so
         this asserts the *identity* the routing will test — ours, from our file —
         rather than a name. Two claims, because interposing the file is not the
         same as the registry being the one the parser reads: `register` could be
@@ -2140,17 +2140,26 @@ class LibraryTagPredicateTests(unittest.TestCase):
     def test_the_clause_reads_a_library_tag_the_way_it_will_once_rust_owns_it(self):
         """The exact comparison `has_tag` makes, with the port staged.
 
-        `"trans"` is added to this host's `_rust_owned` and no further — a local
-        host, so nothing about the shipped routing changes and Task 2's
-        unchanged 18-`theirs` table stays the evidence that the widening alone
-        is behaviour-preserving.
+        `"blocktranslate"` is added to this host's `_rust_owned` and no further —
+        a local host, so nothing about the shipped routing changes and Task 2's
+        unchanged 18-`theirs` table stays the evidence that the widening alone is
+        behaviour-preserving.
 
-        Two answers, and each is a different input: Django's own `trans` bound by
-        `{% load i18n %}` is **Rust's** to compile (False), and a library that
-        rebinds `trans` is **the host's** (True). Without the staging both names
-        answer True by the early return, which is why this row stages at all —
-        an unstaged version asserts the early return twice and says nothing
-        about the clause.
+        **`blocktranslate` rather than `trans`, and this commit is why.** The row
+        staged `trans` while it was a *future* Rust name; M12 Task 6a registered
+        it, so the unstaged control below stopped answering True and the row
+        failed loudly — which is the expiry doing its job. `blocktranslate` is
+        the remaining unported name (Task 6b's) and the same shape of input: a
+        real library tag Rust does not own yet, so the staging still has two
+        answers to distinguish. Task 6b repoints it again, or the control fails
+        there for the same reason.
+
+        Two answers, and each is a different input: Django's own `blocktranslate`
+        bound by `{% load i18n %}` is **Rust's** to compile once staged (False),
+        and a library that rebinds `blocktranslate` is **the host's** (True).
+        Without the staging both names answer True by the early return, which is
+        why this row stages at all — an unstaged version asserts the early return
+        twice and says nothing about the clause.
         """
         import importlib
 
@@ -2160,30 +2169,30 @@ class LibraryTagPredicateTests(unittest.TestCase):
 
         class ShadowNode(Node):
             def render(self, context):
-                return "shadow(trans)"
+                return "shadow(blocktranslate)"
 
-        def compile_shadow_trans(parser, token):
+        def compile_shadow_blocktranslate(parser, token):
             return ShadowNode()
 
         shadow = Library()
-        shadow.tag("trans", compile_shadow_trans)
+        shadow.tag("blocktranslate", compile_shadow_blocktranslate)
 
         def routed(library):
             parser = parser_for("", Engine())
             parser.add_library(library)
             host = self.host_module.ShellHost(parser)
-            host._rust_owned = host._rust_owned | {"trans"}
-            return host.has_tag("trans")
+            host._rust_owned = host._rust_owned | {"blocktranslate"}
+            return host.has_tag("blocktranslate")
 
         i18n = importlib.import_module("django.templatetags.i18n")
         self.assertFalse(
             routed(i18n.register),
-            "`{% load i18n %}` binds Django's own `trans`, so Rust owns it — "
-            "this is False only because the predicate now carries that callable",
+            "`{% load i18n %}` binds Django's own `blocktranslate`, so Rust owns "
+            "it — this is False only because the predicate now carries that callable",
         )
         self.assertTrue(
             routed(shadow),
-            "a library rebinding `trans` must still run its own body",
+            "a library rebinding `blocktranslate` must still run its own body",
         )
 
         # And the same two names without the staging: both True, so the row
@@ -2191,7 +2200,7 @@ class LibraryTagPredicateTests(unittest.TestCase):
         def unstaged(library):
             parser = parser_for("", Engine())
             parser.add_library(library)
-            return self.host_module.ShellHost(parser).has_tag("trans")
+            return self.host_module.ShellHost(parser).has_tag("blocktranslate")
 
         self.assertTrue(
             unstaged(i18n.register) and unstaged(shadow),
@@ -2390,6 +2399,341 @@ class L10nInterpositionTests(unittest.TestCase):
                     inspect.getfile(func),
                     f"{name} resolves to {inspect.getfile(func)}, not our file",
                 )
+
+
+class I18nInterpositionTests(unittest.TestCase):
+    """M12 Task 6a: ``i18n`` is our module — eight tags, seven node classes.
+
+    ``django.templatetags.i18n`` is the fifth and last of the milestone's five
+    libraries, and the largest. Rust compiles **eight** of its ten tag names —
+    every one but ``blocktranslate``/``blocktrans``, which are Task 6b's — so
+    this commit is the one that takes the meter's second scope to zero and the
+    one that leaves ``BlockTranslateNode`` unregistered while the module is
+    already ours.
+
+    **The five filters the same file registers — ``language_name``,
+    ``language_name_translated``, ``language_name_local``, ``language_bidi`` and
+    ``i18n.py:293,298,304,309`` — are Task 7's.** This task transcribes their
+    Python (the file is the unit of transcription) and writes no Rust filter
+    body, so a row demanding ``_native``'s filter registry carry these names
+    belongs to Task 7; their absence here is a division of labour, not an
+    omission.
+
+    **Two splittings, and which tag gets which** (the module doc in
+    ``crates/template-core/src/parser/tags/i18n.rs`` states it for the Rust
+    side): ``get_available_languages``, ``get_current_language`` and
+    ``get_current_language_bidi`` read ``token.contents.split()`` and store a
+    **bare string** as the ``as`` target; the other five use ``split_contents``
+    and compile their operand. A port that swapped them compiles and passes
+    nothing, which is why the resolution row below asserts the stored value's
+    type and not only the class.
+
+    The routing claim has an instrument —
+    ``.review/m12-measurements/m12_measure_tag_routing.py`` — whose verdict for
+    all ten i18n names flips ``theirs/theirs`` to ``ours/ours`` in this commit,
+    *measured to be a file-ownership verdict rather than a body count*: the
+    blind-spot probe (``.review/m12-measurements/m12_measure_instrument_blindspot.py``)
+    shows repointing ``__file__`` alone flips 10 of 10. The rows below are the
+    direct-entry version, so a green instrument is not the whole story.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _shim.install()
+
+    def _engine(self):
+        # A real `Engine` with the library spelled as a dotted path, because that
+        # is the route `{% load i18n %}` takes. A bare `Engine()` cannot see
+        # `django.templatetags.i18n` at all (measured — `'i18n' is not a
+        # registered tag library`), so a row against one would measure the probe.
+        return Engine(libraries={"i18n": "django.templatetags.i18n"})
+
+    def test_i18n_resolves_to_our_file(self):
+        import importlib
+
+        module = importlib.import_module("django.templatetags.i18n")
+        self.assertIn("_impl", module.__file__, module.__file__)
+
+    def test_each_i18n_tag_compiles_to_our_node_class(self):
+        """The routing claim, end to end, for the eight names and seven classes.
+
+        ``translate`` and ``trans`` are one body under two registry entries, so
+        both are asserted against the same class — the shape `static`'s three
+        tag names have. The node class is compared *by identity* to the one our
+        transcribed module defines, which is the object `get_nodes_by_type` and
+        every downstream ``isinstance`` sees.
+        """
+        import importlib
+        import inspect
+
+        i18n = importlib.import_module("django.templatetags.i18n")
+        engine = self._engine()
+
+        for source, class_name in [
+            (
+                "{% load i18n %}{% get_available_languages as langs %}",
+                "GetAvailableLanguagesNode",
+            ),
+            (
+                "{% load i18n %}{% get_language_info for code as li %}",
+                "GetLanguageInfoNode",
+            ),
+            (
+                "{% load i18n %}{% get_language_info_list for langs as ls %}",
+                "GetLanguageInfoListNode",
+            ),
+            (
+                "{% load i18n %}{% get_current_language as cur %}",
+                "GetCurrentLanguageNode",
+            ),
+            (
+                "{% load i18n %}{% get_current_language_bidi as bidi %}",
+                "GetCurrentLanguageBidiNode",
+            ),
+            ('{% load i18n %}{% translate "x" %}', "TranslateNode"),
+            ('{% load i18n %}{% trans "x" %}', "TranslateNode"),
+            (
+                '{% load i18n %}{% language "de" %}x{% endlanguage %}',
+                "LanguageNode",
+            ),
+        ]:
+            with self.subTest(source=source):
+                template = engine.from_string(source)
+                # `{% load %}` is itself a node in the nodelist — Django's
+                # `do_load` returns one (`defaulttags.py:1131`) — so it is
+                # skipped alongside the text node.
+                nodes = [
+                    node
+                    for node in template.nodelist
+                    if type(node).__name__ not in ("TextNode", "LoadNode")
+                ]
+                self.assertEqual([type(node).__name__ for node in nodes], [class_name])
+                self.assertIs(type(nodes[0]), getattr(i18n, class_name))
+                self.assertIn("_impl", inspect.getfile(type(nodes[0])))
+
+    def test_translate_as_var_stores_and_returns_nothing(self):
+        """The ``as var`` branch: store into the context and emit nothing.
+
+        `TranslateNode.render` returns ``""`` on this branch (`i18n.py:97-99`),
+        so the ``[`` before ``{{ greeting }}`` is the tag emitting nothing and the
+        ``[`` in the output is the text node — a port that returned the value
+        *and* stored it would render ``[JaJa]``.
+
+        German rather than a fake catalog: Django's own catalogue translates
+        ``Yes`` to ``Ja`` (measured on the pinned tree with
+        ``translation.override("de")``), which makes the branch observable
+        without any test-local catalogue. That is what shows the value came
+        *through the translation*, not that the node echoed its operand.
+        """
+        from django.utils import translation
+
+        template = self._engine().from_string(
+            '{% load i18n %}{% translate "Yes" as greeting %}[{{ greeting }}]'
+        )
+        with translation.override("de"):
+            self.assertEqual(template.render(Context({})), "[Ja]")
+
+    def test_translate_noop_marks_but_does_not_translate(self):
+        """The ``noop`` branch: mark for extraction, return the string unchanged.
+
+        Under the same German catalogue ``{% translate "Yes" %}`` renders ``Ja``;
+        with ``noop`` it renders ``Yes``. That is the whole point of the option
+        (`i18n.py:375-379`) and it is the pair the milestone's gate weighs, so it
+        is asserted as a pair — the ``Ja`` half is the control that shows the
+        catalogue is live, without which ``Yes`` would be indistinguishable from
+        a broken engine.
+        """
+        from django.utils import translation
+
+        engine = self._engine()
+        translated = engine.from_string('{% load i18n %}{% translate "Yes" %}')
+        marked = engine.from_string('{% load i18n %}{% translate "Yes" noop %}')
+        with translation.override("de"):
+            self.assertEqual(translated.render(Context({})), "Ja")
+            self.assertEqual(marked.render(Context({})), "Yes")
+
+    def test_the_six_refusals_name_the_spelling_that_was_used(self):
+        """Every message names ``bits[0]``, so ``trans`` and ``translate`` differ.
+
+        Six distinct messages (`i18n.py:400-450`), each written out in full —
+        the assertion on the *text* is what makes the row able to tell the two
+        spellings apart, since a row that used the wrong spelling still compiles
+        and raises. ``{% trans %}`` is exercised against the same two messages a
+        second time so the substitution is measured rather than assumed.
+        """
+        from django.template import TemplateSyntaxError
+
+        engine = self._engine()
+        for source, expected in [
+            (
+                "{% load i18n %}{% translate %}",
+                "'translate' takes at least one argument",
+            ),
+            (
+                "{% load i18n %}{% trans %}",
+                "'trans' takes at least one argument",
+            ),
+            (
+                '{% load i18n %}{% translate "x" noop noop %}',
+                "The 'noop' option was specified more than once.",
+            ),
+            (
+                '{% load i18n %}{% translate "x" context %}',
+                "No argument provided to the 'translate' tag for the context option.",
+            ),
+            (
+                '{% load i18n %}{% translate "x" context as %}',
+                "Invalid argument 'as' provided to the 'translate' tag for the context option",
+            ),
+            (
+                '{% load i18n %}{% translate "x" as %}',
+                "No argument provided to the 'translate' tag for the as option.",
+            ),
+            (
+                '{% load i18n %}{% translate "x" bogus %}',
+                "Unknown argument for 'translate' tag: 'bogus'. The only options "
+                "available are 'noop', 'context \"xxx\", and 'as VAR'.",
+            ),
+            (
+                '{% load i18n %}{% trans "x" bogus %}',
+                "Unknown argument for 'trans' tag: 'bogus'. The only options "
+                "available are 'noop', 'context \"xxx\", and 'as VAR'.",
+            ),
+        ]:
+            with self.subTest(source=source):
+                with self.assertRaises(TemplateSyntaxError) as caught:
+                    engine.from_string(source)
+                self.assertEqual(str(caught.exception), expected)
+
+    def test_language_takes_one_argument_and_reads_a_body(self):
+        """`{% language %}`'s single-argument refusal and its body parse.
+
+        The refusal is its own message, and the accepted form reads a body — so
+        the row asserts the node and its nodelist, not only the error.
+        """
+        from django.template import TemplateSyntaxError
+
+        engine = self._engine()
+        template = engine.from_string(
+            '{% load i18n %}{% language "de" %}x{% endlanguage %}'
+        )
+        node = next(
+            n for n in template.nodelist if type(n).__name__ == "LanguageNode"
+        )
+        self.assertEqual(len(node.nodelist), 1, "the body is one text node")
+
+        for source in [
+            "{% load i18n %}{% language %}x{% endlanguage %}",
+            "{% load i18n %}{% language a b %}x{% endlanguage %}",
+        ]:
+            with self.subTest(source=source):
+                with self.assertRaises(TemplateSyntaxError) as caught:
+                    engine.from_string(source)
+                self.assertEqual(
+                    str(caught.exception), "'language' takes one argument (language)"
+                )
+
+    def test_the_duplicate_check_runs_before_dispatch(self):
+        """`option in seen` is checked first (`i18n.py:414-417`), before dispatch.
+
+        So a repeated option is refused even when its first use was valid. **The
+        message names the option and not the tag** (`"The '%s' option was
+        specified more than once." % option`, `i18n.py:415-417`), which is the
+        observable that tells this branch from every other one in the scan — all
+        five of which interpolate `bits[0]`. A port that dispatched first would
+        silently ignore the second occurrence.
+        """
+        from django.template import TemplateSyntaxError
+
+        engine = self._engine()
+        for source, option in [
+            ('{% load i18n %}{% translate "x" noop noop %}', "noop"),
+            ('{% load i18n %}{% translate "x" context "a" context "b" %}', "context"),
+            ('{% load i18n %}{% translate "x" as a as b %}', "as"),
+        ]:
+            with self.subTest(source=source):
+                with self.assertRaises(TemplateSyntaxError) as caught:
+                    engine.from_string(source)
+                self.assertEqual(
+                    str(caught.exception),
+                    f"The '{option}' option was specified more than once.",
+                )
+
+    def test_a_context_value_may_not_be_as_or_noop(self):
+        """The `invalid_context` set is `{"as", "noop"}` (`i18n.py:410,428-432`)."""
+        from django.template import TemplateSyntaxError
+
+        engine = self._engine()
+        for value in ("as", "noop"):
+            source = f'{{% load i18n %}}{{% translate "x" context {value} %}}'
+            with self.subTest(value=value):
+                with self.assertRaises(TemplateSyntaxError) as caught:
+                    engine.from_string(source)
+                self.assertEqual(
+                    str(caught.exception),
+                    f"Invalid argument '{value}' provided to the 'translate' tag "
+                    "for the context option",
+                )
+
+    def test_the_as_name_is_not_validated(self):
+        """`asvar = value` with no check at all (`i18n.py:441`).
+
+        A word that is not a legal variable name is still stored — unlike
+        `context`'s value, which has a rejection set. The contrast with the row
+        above is the claim.
+        """
+        engine = self._engine()
+        template = engine.from_string('{% load i18n %}{% translate "x" as not-a-var %}')
+        node = next(n for n in template.nodelist if type(n).__name__ == "TranslateNode")
+        self.assertEqual(node.asvar, "not-a-var")
+
+    def test_a_trailing_context_or_as_has_its_own_message(self):
+        """`remaining.pop(0)`'s `IndexError` is caught and given a dedicated text.
+
+        Not the unknown-argument branch (`i18n.py:421-427,435-440`) — the message
+        names the option that ran out of arguments.
+        """
+        from django.template import TemplateSyntaxError
+
+        engine = self._engine()
+        for source, expected in [
+            (
+                '{% load i18n %}{% translate "x" context %}',
+                "No argument provided to the 'translate' tag for the context option.",
+            ),
+            (
+                '{% load i18n %}{% translate "x" as %}',
+                "No argument provided to the 'translate' tag for the as option.",
+            ),
+        ]:
+            with self.subTest(source=source):
+                with self.assertRaises(TemplateSyntaxError) as caught:
+                    engine.from_string(source)
+                self.assertEqual(str(caught.exception), expected)
+
+    def test_language_validates_its_argument_before_parsing_the_body(self):
+        """The argument is compiled before `parser.parse` (`i18n.py:613-614`).
+
+        Observable in both directions: a bad argument reports the *argument*
+        error, and a valid argument with a missing terminator reports
+        `Unclosed tag` — which is the control that shows the row measures the
+        order and not a blanket refusal. `{% timezone %}` has the identical
+        shape and its row states the same thing.
+        """
+        from django.template import TemplateSyntaxError
+
+        engine = self._engine()
+        with self.assertRaises(TemplateSyntaxError) as caught:
+            engine.from_string("{% load i18n %}{% language %}x")
+        self.assertEqual(
+            str(caught.exception), "'language' takes one argument (language)"
+        )
+        with self.assertRaises(TemplateSyntaxError) as caught:
+            engine.from_string('{% load i18n %}{% language "de" %}x')
+        self.assertEqual(
+            str(caught.exception),
+            "Unclosed tag on line 1: 'language'. Looking for one of: endlanguage.",
+        )
 
 
 class DefaultTagsInterpositionTests(unittest.TestCase):

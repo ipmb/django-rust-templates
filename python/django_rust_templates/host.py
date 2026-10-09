@@ -398,16 +398,20 @@ class ShellHost:
         # host was the one place that read the keys as the registry.
         # M12 widens this with the `django.templatetags` names Rust has a real
         # body for — `cache`, `static` and the two prefix tags, plus `tz`'s three
-        # tag names as of Task 4 and `l10n`'s one (`localize`) as of Task 5.
+        # tag names as of Task 4, `l10n`'s one (`localize`) as of Task 5, and
+        # `i18n`'s eight as of Task 6a. That is sixteen of the eighteen.
         # **Those, not the 18 the five libraries
         # register**, and the difference is a
         # correctness boundary rather than bookkeeping: `library_tag_loaded`
         # below is `command in parser.tags`, which is true for *every* name a
         # loaded library contributes, and the Rust arm it feeds refuses a name
-        # `LIBRARY_REGISTRY` has no body for. Claiming `trans` here would route
-        # a loaded `{% trans %}` past `has_tag`'s "the registered callable is
+        # `LIBRARY_REGISTRY` has no body for. Claiming `blocktranslate` here
+        # would route a loaded `{% blocktranslate %}` past `has_tag`'s "the
+        # registered callable is
         # still Django's, so the host compiles it" clause and into Rust's
-        # `Invalid block tag` — a template Django renders, refused by us.
+        # `Invalid block tag` — a template Django renders, refused by us. The
+        # two names left unclaimed are exactly Task 6b's
+        # (`blocktranslate`/`blocktrans`).
         self._rust_owned = (
             set(_native.builtin_tag_names_including_stubs())
             - set(_native.builtin_tag_stub_names())
@@ -455,9 +459,10 @@ class ShellHost:
         `add_library` merges a loaded library's tags into it
         (`base.py:668-670`), so the name is present in exactly the second case.
         Answering from `_library_tag_tables()` instead would say `True` for all
-        18 library names, 10 of which are Python's as of M12 Task 5 (the
-        library table's 18 minus the eight Rust bodies `LIBRARY_REGISTRY` has) —
-        see `__init__` for why `_rust_owned` carries the eight that have Rust
+        18 library names, **2 of which are Python's as of M12 Task 6a** (the
+        library table's 18 minus the sixteen Rust bodies `LIBRARY_REGISTRY` has
+        — `blocktranslate` and `blocktrans`, which are Task 6b's) —
+        see `__init__` for why `_rust_owned` carries the sixteen that have Rust
         bodies and this method is the coarser question that only the Rust arm may
         narrow.
         """

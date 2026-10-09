@@ -187,7 +187,7 @@ def django_exception(error, host=None):
       ``class_name`` is read straight off that error — so a name in the wire
       error always came from a `call_tag` failure;
     * ``last_error`` is assigned in one place, `ShellHost.call_tag`
-      (`python/django_rust_templates/host.py:550`), on the way out — so it
+      (`python/django_rust_templates/host.py:555`), on the way out — so it
       always names a `call_tag` failure too;
     * a host error is **terminal**: the parse loop's arm is
       `Err(error) => Err(error)` (`parser/mod.rs:394-403`) and its caller is

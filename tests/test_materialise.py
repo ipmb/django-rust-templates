@@ -365,6 +365,46 @@ class MaterialiseTests(unittest.TestCase):
         self.assertIsNotNone(cls, "LocalizeNode is not in NODE_CLASSES")
         self.assertIn("_impl", inspect.getfile(cls))
 
+    def test_the_i18n_node_classes_are_registered_and_are_ours(self):
+        """M12 Task 6a: the seven classes ``i18n.rs`` emits are materialisable.
+
+        ``StaticEmitterRegistryTests`` below checks the *membership* generically,
+        by reading the class names out of the Rust source, so that row covers the
+        set. This is the direct-entry half: the seven names by hand, each
+        resolving to a class defined in our own module — a registry carrying
+        ``TranslateNode`` pointing at Django's class would satisfy membership and
+        fail here.
+
+        **``BlockTranslateNode`` is deliberately not in the list**, and that is
+        the split's shape rather than an omission: it is Task 6b's, so
+        ``test_the_refusal_is_live_for_block_translate_node_until_task_6`` above
+        still asserts it is *absent*. The two rows together are the whole
+        statement — seven present, one absent — which no single row can make.
+
+        The seven are not uniform in shape, and the registry is where a mismatch
+        would show: ``TranslateNode.__init__`` takes four arguments with the last
+        two defaulted (``i18n.py:75``), ``LanguageNode`` takes a *nodelist* plus a
+        compiled expression (``i18n.py:208``), and the five ``get_*`` nodes take a
+        bare-string target or a compiled operand. So a descriptor with a wrong
+        kwarg spelling fails to build here rather than building the wrong node.
+        """
+        import inspect
+
+        for name in (
+            "GetAvailableLanguagesNode",
+            "GetLanguageInfoNode",
+            "GetLanguageInfoListNode",
+            "GetCurrentLanguageNode",
+            "GetCurrentLanguageBidiNode",
+            "TranslateNode",
+            "LanguageNode",
+        ):
+            with self.subTest(name=name):
+                cls = materialiser.NODE_CLASSES.get(name)
+                self.assertIsNotNone(cls, f"{name} is not in NODE_CLASSES")
+                self.assertIn("_impl", inspect.getfile(cls))
+        self.assertNotIn("BlockTranslateNode", materialiser.NODE_CLASSES)
+
     def test_the_refusal_is_live_for_block_translate_node_until_task_6(self):
         """Review Focus 4, pinned while it is still observable.
 
@@ -373,10 +413,20 @@ class MaterialiseTests(unittest.TestCase):
         loudly instead of silently building a different node. ``BlockTranslateNode``
         is the name that makes the row worth writing and the reason it is
         temporary: ``django.templatetags.i18n`` defines it, the milestone
-        transcribes that module, and **Task 6 is the task that registers it** — so
+        transcribes that module, and **Task 6 registers it** — so
         at *this* commit the refusal must still fire for it, and Task 6 deletes
         this row in the commit that adds the entry. That commit is the only one
         where both halves can be checked against the tree.
+
+        **Task 6 split, and this row is why the split is visible.** The plan's
+        Task 6 was one commit; the dispatch split it into 6a (the eight
+        non-translating tags, this commit) and 6b (``blocktranslate``). So the
+        entry this row waits for arrives in **6b**, and 6a is the commit that
+        leaves the row green *while i18n is already our module* — the one state
+        where "the module is ours" and "the class is not registered" are both
+        true, and therefore the one commit where the two halves are separately
+        observable. The row's name says ``task_6`` and that still names the
+        right task; only the commit that deletes it moved.
         """
         self.assertNotIn("BlockTranslateNode", materialiser.NODE_CLASSES)
         with self.assertRaises(LookupError) as caught:
@@ -1105,7 +1155,7 @@ _CFG_TEST = "#[cfg(test)]"
 _TAG_MODULES = PROJECT_ROOT / "crates" / "template-core" / "src" / "parser" / "tags"
 
 # `NodeDesc::new("X")` / `NodeDesc::with_nodelist("X", ...)`. `\s*` spans the
-# newline in `tags/mod.rs:191`, where the class name starts on the following line.
+# newline in `tags/mod.rs:216`, where the class name starts on the following line.
 _CLASS = re.compile(r'NodeDesc::(?:new|with_nodelist)\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)"')
 _TEXT = re.compile(r"NodeDesc::text\s*\(")
 

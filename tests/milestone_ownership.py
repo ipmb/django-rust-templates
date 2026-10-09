@@ -65,12 +65,12 @@ OWNERS = {
     # §10.3's M12 row, which is the first row whose names are in the **second**
     # namespace rather than folded into the `django.template` universe: `i18n`,
     # `l10n`, `static`, `tz` and `cache` are `django/templatetags/*`, which M12
-    # Task 1 gave the meter as its second scope. The one below is here
-    # because the table partitions both populations; `cache`, `static`, `tz` and
-    # `l10n` moved to `INTERPOSED` in the commit that transcribed each, which is
-    # the move `test_no_name_is_both_owned_and_taken` exists to force. M12's row
-    # also retires nothing from the 11 the first scope is counted at.
-    "templatetags.i18n": "M12",
+    # Task 1 gave the meter as its second scope. **The row is now empty here, as
+    # M10's and M11's are above:** all five moved to `INTERPOSED` in the commit
+    # that transcribed each — `cache`/`static` first, then `tz`, then `l10n`, and
+    # `i18n` last in Task 6a, which is the move
+    # `test_no_name_is_both_owned_and_taken` exists to force. M12's row also
+    # retires nothing from the 11 the first scope is counted at.
     #
     # §10.3's M13 row — partials, `library`, `backends`, `response` — plus
     # `loader`, which the row does not name and which §2 had to decide: the
@@ -135,12 +135,14 @@ INTERPOSED = {
     "M11": ["loader_tags", "defaultfilters", "defaulttags"],
     # M12's five live in the *second* meter scope, `django.templatetags`, and
     # only the ones that are transcribed appear in `_shim.SHADOWING` — which is
-    # what this table is checked against. `i18n` joins as Task 6 ports it. The
-    # package itself (`templatetags`) is absent here and cannot be added: the
-    # shim's `_is_foreign_package` declines to serve `django.templatetags`, so no
-    # file of ours ever shadows it.
+    # what this table is checked against. `i18n` joined in Task 6a, the last of
+    # the five and the one that takes `unshimmed(scope="django.templatetags")` to
+    # zero. The package itself (`templatetags`) is absent here and cannot be
+    # added: the shim's `_is_foreign_package` declines to serve
+    # `django.templatetags`, so no file of ours ever shadows it.
     "M12": [
         "templatetags.cache",
+        "templatetags.i18n",
         "templatetags.l10n",
         "templatetags.static",
         "templatetags.tz",

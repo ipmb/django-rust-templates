@@ -96,6 +96,24 @@ MODULES = {
     # Python's too, and is our transcription's), so nothing in this file
     # delegates to Rust and the generator can write the whole of it.
     "templatetags/l10n.py": "django/templatetags/l10n.py",
+    # M12 Task 6's, the fifth and last of the five, and the largest (616 lines).
+    # Pin-plus-marker like the four above, and for their reason: Rust compiles
+    # **eight** of its ten registered tag names — every one but
+    # `blocktranslate`/`blocktrans`, which are Task 6b's — so those eight bodies
+    # are unreachable through the host once the names are Rust's, and the four
+    # filters (`language_name`, `language_name_translated`, `language_name_local`,
+    # `language_bidi`, `i18n.py:293,298,304,309`) are Task 7's Rust bodies. The
+    # `django.utils.translation` delegation every node's *render* makes
+    # (`i18n.py:19,31,44,59,68,169,177,213` and the filter bodies) stays Python's,
+    # because the render is Python's on every path (§6's framework-coupling test,
+    # the same sentence `l10n.py`'s and `tz.py`'s rows carry): Rust owns the
+    # *compile* functions, and nothing in this file delegates to Rust. So the
+    # generator writes the whole of it.
+    #
+    # This is the fifth of the five, so `unshimmed(scope="django.templatetags")`
+    # reaches zero with the same commit — the second scope of the milestone's
+    # meter, which started at Django's five libraries.
+    "templatetags/i18n.py": "django/templatetags/i18n.py",
     # M11's first, and the only one this table names yet. Unlike M10's loader
     # files it is a module the tag and filter corpus renders through, so a
     # verbatim transcription here moves the *registry's* owner and the node

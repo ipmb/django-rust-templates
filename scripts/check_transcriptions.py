@@ -417,6 +417,25 @@ COMPARED_PATH = {
     # `test_the_compared_path_is_the_measured_one` would fail in the commit that
     # added it.
     "templatetags/l10n.py": [],
+    # M12 Task 6a's, measured with the same instrument rather than copied:
+    # `m9_measure_parse_path.py templatetags/i18n.py` reports **0 of 31**
+    # functions over both corpora (hand-written 166: 0; generated 400: 0), and
+    # the 31 is `definitions()`' counting unit — **12 module-level defs** (the
+    # seven tag bodies behind the eight names — `trans` aliases `translate` —
+    # plus `do_block_translate` which is Task 6b's, plus the
+    # four filters `language_name`, `language_name_translated`,
+    # `language_name_local` and `language_bidi` at `i18n.py:293,298,304,309`)
+    # plus **19 methods** on the eight node classes (two each on the six flat
+    # nodes, three on `GetLanguageInfoListNode` — `get_language_info` is its
+    # extra — and four on `BlockTranslateNode`). The zero has `cache.py`'s,
+    # `tz.py`'s and `l10n.py`'s reason one library further on:
+    # `tests/parser_corpus.py`'s `{% load %}` rows reach the `template_tests.*`
+    # libraries and never `django.templatetags.i18n`, so every one of the 31 is
+    # defined and simply not entered. The re-measurement row keeps it honest — a
+    # corpus that grew a `{% load i18n %}` row would move this entry, and
+    # `test_the_compared_path_is_the_measured_one` would fail in the commit that
+    # added it.
+    "templatetags/i18n.py": [],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])
@@ -974,6 +993,42 @@ DECLARED = {
                 (1, 2),
                 None,
                 "# TRANSCRIBED: django/templatetags/l10n.py (Django 6.0.9)",
+            ),
+        ],
+    ),
+    # M12 Task 6a's, the fifth and last of the five and the same shape: the pin
+    # plus a two-line marker, `None` on the upstream side, nothing else. The
+    # module opens with imports (`i18n.py:1-8`), so the marker is a comment on
+    # line 1 and the region is `(1, 2)`.
+    #
+    # Verbatim is right for all eight tag bodies although Rust compiles their
+    # names: `has_tag` answers False for a Rust-owned name the template loaded,
+    # so `do_get_available_languages`, `do_get_language_info`,
+    # `do_get_language_info_list`, `do_get_current_language`,
+    # `do_get_current_language_bidi`, `do_translate` and `language` are bodies
+    # nothing calls — the same case `defaulttags.py`, `tz.py` and `l10n.py` are
+    # kept verbatim for. The two names Rust does **not** own yet
+    # (`blocktranslate`/`blocktrans`, which are Task 6b's) *are* reached through
+    # this file, and they are transcribed here for that reason rather than for
+    # the unreachability one — the file is the unit of transcription.
+    #
+    # **Every node's render stays Python's, and the marker's meaning is why that
+    # is a transcription rather than a delegation:** each `render` makes the
+    # `django.utils.translation` call (`i18n.py:19,31,44,59,68,169,177,213`),
+    # and Rust owns only the *compile* functions. The four filters
+    # (`language_name`, `language_name_translated`, `language_name_local`,
+    # `language_bidi`, `i18n.py:293,298,304,309`) are Task 7's Rust bodies and are
+    # transcribed-verbatim here for the reason `tz.py`'s and `l10n.py`'s are: a
+    # per-file table cannot express a half-transcribed module. So nothing in this
+    # file delegates to Rust and the generated marker says the upstream path and
+    # the pin and nothing more, as every marker in this table does.
+    "templatetags/i18n.py": (
+        "django/templatetags/i18n.py",
+        [
+            (
+                (1, 2),
+                None,
+                "# TRANSCRIBED: django/templatetags/i18n.py (Django 6.0.9)",
             ),
         ],
     ),

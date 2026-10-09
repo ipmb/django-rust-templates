@@ -52,7 +52,7 @@
 
 use crate::parser::desc::{AttrValue, NodeDesc};
 use crate::parser::error::Error;
-use crate::parser::tags::split_contents;
+use crate::parser::tags::{python_list_repr, split_contents};
 use crate::parser::Parser;
 use crate::pyunicode;
 use crate::token::Token;
@@ -135,17 +135,6 @@ pub fn get_current_timezone(parser: &mut Parser<'_>, token: &Token) -> Result<No
     }
     Ok(NodeDesc::new("GetCurrentTimezoneNode")
         .attr("variable", AttrValue::Str(args[2].to_string())))
-}
-
-/// Python's `repr()` of a list of arbitrary strings, as `"%r" % [str, …]` renders it.
-///
-/// Each element goes through [`Parser::py_repr`] — the host's Python `repr`,
-/// which is exact for the non-ASCII code points `py_repr_str` deliberately
-/// refuses. Mirrors `tags/mod.rs`'s `py_list_repr`, but takes the parser because
-/// the elements are user text rather than a constant.
-fn python_list_repr(parser: &Parser<'_>, items: &[&str]) -> String {
-    let rendered: Vec<String> = items.iter().map(|item| parser.py_repr(item)).collect();
-    format!("[{}]", rendered.join(", "))
 }
 
 #[cfg(test)]

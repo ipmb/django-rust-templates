@@ -155,7 +155,23 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # `git diff tests/` since `b83ec01` is `+4` rows in two files, no removals, so
 # 410 + 4 = 414 — measured by discovery before the pin moved, and the failure text
 # before the pin moved read `discovery found 414 tests, the pin says 410`.
-PINNED = 414
+#
+# 414 → 426 is M12 Task 6a, **twelve** rows in three files:
+# `test_interposition.py::I18nInterpositionTests` contributes **eleven** (the
+# module resolves to `_impl`; the eight names compile to our seven classes; the
+# `as var` and `noop` render branches; the six refusal messages; `{% language %}`'s
+# argument and body; and four rows for the argument scan's branches — the
+# duplicate check, the `context` value set, the unvalidated `as` name, and the
+# trailing-option message — plus the language argument-before-body order).
+# `test_materialise.py` contributes **one** (`test_the_i18n_node_classes_are_registered_and_are_ours`,
+# seven subtests over the seven names plus the `BlockTranslateNode` absence).
+# `test_base_parity.py` and `test_interposition.py::LibraryTagPredicateTests` move
+# no count: the first is a docstring fix, the second re-points its staged name
+# from `trans` to `blocktranslate` because `trans` became Rust's in this commit —
+# a modification, not an addition. `git diff tests/` since `b83ec01` is `+12` rows
+# in three files, no removals (measured by discovery, and the failure text before
+# the pin moved read `discovery found 426 tests, the pin says 414`).
+PINNED = 426
 
 
 def collected() -> unittest.TestSuite:
