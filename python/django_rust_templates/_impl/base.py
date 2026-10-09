@@ -184,23 +184,26 @@ class Template:
         annotated with contextual line information where it occurred in the
         template source.
         """
-        if self.engine.debug:
-            lexer = DebugLexer(self.source)
-        else:
-            lexer = Lexer(self.source)
-
-        tokens = lexer.tokenize()
-        parser = Parser(
-            tokens,
-            self.engine.template_libraries,
-            self.engine.template_builtins,
-            self.origin,
-        )
+        # Delegated to Rust (M9): `django_rust_templates.render` binds
+        # `template-core`'s lexer and parser to Django's node classes and
+        # returns a `Template` built by `__new__`, so this method is not
+        # re-entered. The docstring above is upstream's verbatim; the delegation
+        # is recorded here rather than in it so that the method's *contract*
+        # stays a transcription of upstream's.
+        #
+        # Everything after the parse is upstream's and stays, because it is this
+        # class's contract rather than the engine's: `extra_data`, and an
+        # `except` arm that both annotates a debug parse and prefixes a
+        # `TemplateSyntaxError` with the origin name when the template has one.
+        # That last clause never fires for `Engine.from_string` — its origin is
+        # `UNKNOWN_SOURCE` — so only a template loaded from a file reaches it,
+        # which is exactly how it would go missing unnoticed.
+        from django_rust_templates.render import parse_template
 
         try:
-            nodelist = parser.parse()
-            self.extra_data = parser.extra_data
-            return nodelist
+            parsed = parse_template(self.source, self.engine, self.origin)
+            self.extra_data = parsed.extra_data
+            return parsed.nodelist
         except Exception as e:
             if self.engine.debug:
                 e.template_debug = self.get_exception_info(e, e.token)

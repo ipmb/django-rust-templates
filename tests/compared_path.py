@@ -62,30 +62,64 @@ def definitions(module):
     return out
 
 
+def bindings(reference):
+    """Every ``(module, attribute)`` in ``sys.modules`` whose value *is* it.
+
+    Identity, not equality: ``counting`` closes over its original, and two
+    distinct wrappers are never ``==``, but the point is to find the exact
+    binding rather than a similar one. Only ``django.*`` modules are visited —
+    nothing else imports from ``django.template``, and rewriting a stranger's
+    namespace would be a side effect this instrument has no business having.
+    """
+    for other in list(sys.modules.values()):
+        if other is None or not getattr(other, "__name__", "").startswith("django."):
+            continue
+        for attr, value in list(vars(other).items()):
+            if value is reference:
+                yield other, attr
+
+
+def rebind(old, new):
+    """Point every binding of ``old`` at ``new``, per entry.
+
+    One setattr that raises must not abandon the rest: a half-restored module is
+    worse than a consistently wrapped one, because the symptom would be a later
+    row running against a wrapper nobody is counting.
+    """
+    for owner, attr in bindings(old):
+        try:
+            setattr(owner, attr, new)
+        except (AttributeError, TypeError):
+            continue
+
+
 @contextlib.contextmanager
 def instrumented(module):
     """Count calls to every function ``module`` defines, restoring on exit.
 
-    Yields the ``collections.Counter`` of qualified names. Restoration is a
-    ``setattr`` back to the original object rather than a re-import, so the
-    module object — and therefore every binding other modules already hold — is
-    the same one afterwards.
+    Yields the ``collections.Counter`` of qualified names.
 
-    **The sweep at the end is not decoration.** Wrapping the defining module
-    only counts calls that go through *that* module's namespace. A function the
-    module defines and another module imported by name — ``token_kwargs``, which
-    ``django.template.library`` and the tag compile functions reach with
-    ``from django.template.base import token_kwargs`` — is called through the
-    *consumer's* binding, and the wrapper never runs. Measured: ``token_kwargs``
-    showed up in the first run of the measurement script and vanished in the
-    second, and the only difference was that the first wrapped before the
-    parity module imported. The reach set must not depend on import order, so
-    every already-imported Django module's binding to a wrapped function is
-    rebound to the wrapper.
+    **Both sweeps are identity sweeps, and the restore sweep is a second
+    one.** Wrapping the defining module only counts calls that go through
+    *that* module's namespace. A function the module defines and another module
+    imported by name — ``token_kwargs``, which ``django.template.library``
+    reaches with ``from django.template.base import token_kwargs`` — is called
+    through the *consumer's* binding, and the wrapper never runs. Measured:
+    ``token_kwargs`` showed up in the first run of the measurement script and
+    vanished in the second, and the only difference was that the first wrapped
+    before the parity module imported. A reach set that depends on import order
+    is not a measurement.
+
+    The restore cannot use a list captured going in, for the same reason one
+    step later: a module imported *during* the window binds the wrapper, and a
+    captured list never visits it — so it would keep a live wrapper (and a live
+    counter) for the rest of the session, and the symptom would be a later row
+    silently running wrapped code. Restoring is therefore "find every binding
+    that *is* one of my wrappers and put the original back", which is complete
+    by construction because the wrappers are objects this function made.
     """
     counts = collections.Counter()
-    replaced = []
-    wrappers = {}
+    made = []  # (wrapper, original), in wrap order
 
     def wrap(owner, name, label):
         original = getattr(owner, name)
@@ -98,8 +132,8 @@ def instrumented(module):
         counting.__doc__ = original.__doc__
         counting.__wrapped__ = original
         setattr(owner, name, counting)
-        replaced.append((owner, name, original))
-        wrappers[id(original)] = counting
+        made.append((counting, original))
+        rebind(original, counting)  # consumers that imported the name
 
     for name, obj in list(vars(module).items()):
         if inspect.isfunction(obj) and obj.__module__ == module.__name__:
@@ -109,24 +143,14 @@ def instrumented(module):
                 if inspect.isfunction(value):
                     wrap(obj, attr, f"{name}.{attr}")
 
-    # Rebind every consumer's reference to a function we just wrapped.
-    rebound = []
-    for other in list(sys.modules.values()):
-        if other is None or not getattr(other, "__name__", "").startswith("django."):
-            continue
-        for attr, value in list(vars(other).items()):
-            wrapper = wrappers.get(id(value))
-            if wrapper is not None and value is not wrapper:
-                rebound.append((other, attr, value))
-                setattr(other, attr, wrapper)
-
     try:
         yield counts
     finally:
-        for other, attr, value in rebound:
-            setattr(other, attr, value)
-        for owner, name, original in replaced:
-            setattr(owner, name, original)
+        # The second identity sweep, over `sys.modules` as it is *now*. A module
+        # imported during the window holds the wrapper, and a list captured on
+        # the way in would never visit it.
+        for wrapper, original in made:
+            rebind(wrapper, original)
 
 
 def measure(module, sources, calls) -> dict:

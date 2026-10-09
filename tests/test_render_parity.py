@@ -5,11 +5,20 @@ first thing to read here rather than the last:
 
 * ``RenderParityTests`` renders each template twice — once through
   ``render_string`` (Rust parse, shell materialise, Django render) and once
-  through stock Django — and compares. A passing case is evidence that the Rust
+  through the Python side — and compares. A passing case is evidence that the Rust
   **parse** and the host callbacks are right. It is *not* evidence about Task 7's
   resolver, because the lookup in these templates still runs through Django's own
   ``Variable._resolve_lookup``: ``django.template.base`` is not interposed until
   M9, so the arm order Task 7 built is not on the render path at all.
+
+  **"The Python side" is `django_render` below, and M9 is why it is not
+  `engine.from_string`.** Until M9 that second render *was* stock Django; M9
+  interposes ``base``, so ``Engine.from_string`` builds *our* ``Template``, whose
+  ``compile_nodelist`` delegates to ``render.parse_template`` — the same function
+  ``render_string`` calls — and every row in this class would have compared Rust
+  against Rust. `django_render` builds its tree from Django's own ``Parser``
+  instead, which is the claim ``tests/parity_target.py`` states for the other
+  harnesses, and ``test_the_python_side_is_not_the_rust_parse`` pins it.
 * ``ResolverParityTests`` drives ``_native.resolve`` directly against
   ``Variable._resolve_lookup``. That is where the resolver is measured, on paths
   no M3 template can reach — a failing ``@property``, a ``BaseContext``
@@ -38,11 +47,11 @@ if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
 from django.template import Context, Engine  # noqa: E402
-from django.template.base import BaseContext, Variable  # noqa: E402
+from django.template.base import BaseContext, Parser, Variable  # noqa: E402
 from django.utils.version import PY314  # noqa: E402
 
-from django_rust_templates import _native  # noqa: E402
-from django_rust_templates.render import render_string  # noqa: E402
+from django_rust_templates import _native, render  # noqa: E402
+from django_rust_templates.render import materialiser, render_string  # noqa: E402
 
 
 class _RaisesAttributeError:
@@ -144,6 +153,41 @@ class _FalsyClassAttributeContext(BaseContext):
     zero = 0
 
 
+def django_render(source, context, engine):
+    """The Python side of the comparison: Django's parse, then Django's render.
+
+    **Not ``engine.from_string(source).render(...)``, which is Rust on both
+    sides since M9.** ``Engine.from_string`` builds a ``Template`` whose
+    ``compile_nodelist`` delegates to ``render.parse_template``, and that is the
+    *same* function ``render_string`` calls — so every row in
+    ``RenderParityTests`` compared Rust against Rust while its docstring claimed
+    the comparison was evidence about the Rust parse. Measured, not reasoned:
+    ``.review/m9-measurements/m9_measure_render_parity_oracle.py`` wraps
+    ``render.parse_template`` and finds both sides enter it exactly once.
+
+    What replaces it is the shape the other parity harnesses already use and the
+    claim ``tests/parity_target.py`` states for them: ``Parser`` is a
+    transcription of ``base.py`` whose declared regions do not cover
+    ``Parser.parse``, so the tree built here is Django's algorithm rather than
+    Rust's. ``template_for`` is the shell's ``__new__``-based ``Template``
+    constructor — the same one the Rust path uses — so the two sides of the
+    comparison differ in the parse and nowhere else.
+
+    ``origin`` is the shell's ``UNKNOWN_ORIGIN``, matching what ``render_string``
+    passes: ``Template.__init__``'s own default is ``Origin(UNKNOWN_SOURCE)``
+    (``base.py:151-152``), and the debug path compares the *template's* origin
+    against each node's, so leaving the template's ``None`` here would make the
+    two sides differ on an attribute no row in this class reads but which every
+    row would then be measuring differently.
+    """
+    parser = render.parser_for(source, engine)
+    nodelist = parser.parse()
+    template = materialiser().template_for(
+        nodelist, engine, parser, render.UNKNOWN_ORIGIN
+    )
+    return template.render(Context(context))
+
+
 class _ParityTest(unittest.TestCase):
     """Settings and an ``Engine``, once per class.
 
@@ -172,8 +216,49 @@ class _ParityTest(unittest.TestCase):
 class RenderParityTests(_ParityTest):
     def assert_renders_like_django(self, source, context):
         ours = render_string(source, context)
-        theirs = self.engine.from_string(source).render(Context(context))
+        theirs = django_render(source, context, self.engine)
         self.assertEqual(ours, theirs, f"template: {source!r}")
+
+    def test_the_python_side_is_not_the_rust_parse(self):
+        """[`django_render`]'s whole reason for existing, pinned by call count.
+
+        ``Engine.from_string`` reaches the Rust parse since M9 Task 2, so an
+        oracle written that way is Rust against Rust and a green row there is
+        evidence about nothing — the vacuous-gate failure this project has hit
+        twice, and the one ``tests/parity_target.py`` refuses for the parser
+        harness. The counts are the claim: ``render_string`` enters
+        ``_native.compile_template`` once, ``django_render`` zero times.
+
+        Measured before it was written, with the same wrapper:
+        ``.review/m9-measurements/m9_measure_render_parity_oracle.py``. Without
+        this row "someone simplifies ``django_render`` back to
+        ``engine.from_string``" is a change no test can see.
+        """
+        from tests.parity_target import assert_target_is_not_rust_owned
+
+        # The other half of the claim: the tree `django_render` builds comes
+        # from a transcription whose declared regions do not cover `parse`.
+        assert_target_is_not_rust_owned(self, Parser, "Parser")
+
+        calls = []
+        original = _native.compile_template
+
+        def counting(*args, **kwargs):
+            calls.append(args[0])
+            return original(*args, **kwargs)
+
+        _native.compile_template = counting
+        try:
+            render_string("{{ a }}", {"a": 1}, self.engine)
+            ours = len(calls)
+            calls.clear()
+            django_render("{{ a }}", {"a": 1}, self.engine)
+            theirs = len(calls)
+        finally:
+            _native.compile_template = original
+
+        self.assertEqual(ours, 1, "render_string must reach the Rust parse")
+        self.assertEqual(theirs, 0, "the Python side must not")
 
     def test_text_only(self):
         self.assert_renders_like_django("hello", {})
@@ -220,7 +305,7 @@ class RenderParityTests(_ParityTest):
         """
         engine = Engine(string_if_invalid="<<invalid>>")
         ours = render_string("{{ nope }}", {"name": "Ada"}, engine)
-        theirs = engine.from_string("{{ nope }}").render(Context({"name": "Ada"}))
+        theirs = django_render("{{ nope }}", {"name": "Ada"}, engine)
         self.assertEqual(ours, theirs)
 
     def test_string_if_invalid_has_two_consumers_and_they_differ(self):
@@ -269,7 +354,7 @@ class RenderParityTests(_ParityTest):
         }
         for source, literal in expected.items():
             ours = render_string(source, context, engine)
-            theirs = engine.from_string(source).render(Context(context))
+            theirs = django_render(source, context, engine)
             self.assertEqual(ours, theirs, f"template: {source!r}")
             # The literal as well as the comparison: comparing two runs that
             # changed together would keep passing, and these four strings are

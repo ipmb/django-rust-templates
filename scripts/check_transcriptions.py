@@ -83,35 +83,42 @@ MARKER_WINDOW = 4
 # A guard that checked only the named target's own lines would miss a region
 # declared in any of the other 27.
 COMPARED_PATH = {
+    # No function in the package `__init__` is reachable from a parity harness,
+    # so its entry is empty — and it is *present*, because the guard asserts the
+    # key set equals `DECLARED`'s rather than checking the modules it happens to
+    # list. An absent entry is invisible to a re-measurement that iterates the
+    # pin: interposing a module without measuring it would leave its declared
+    # regions unchecked with everything green.
+    "__init__.py": [],
     "base.py": [
         (116, 119, "Origin.__init__"),
-        (361, 383, "Token.__init__"),
-        (392, 405, "Token.split_contents"),
-        (409, 411, "Lexer.__init__"),
-        (420, 432, "Lexer.tokenize"),
-        (434, 466, "Lexer.create_token"),
-        (504, 526, "Parser.__init__"),
-        (531, 593, "Parser.parse"),
-        (595, 600, "Parser.skip_past"),
-        (602, 619, "Parser.extend_nodelist"),
-        (621, 632, "Parser.error"),
-        (634, 650, "Parser.invalid_block_tag"),
-        (661, 662, "Parser.next_token"),
-        (664, 665, "Parser.prepend_token"),
-        (667, 668, "Parser.delete_first_token"),
-        (670, 672, "Parser.add_library"),
-        (674, 678, "Parser.compile_filter"),
-        (680, 684, "Parser.find_filter"),
-        (741, 785, "FilterExpression.__init__"),
-        (873, 924, "Variable.__init__"),
-        (926, 942, "Variable.resolve"),
-        (1072, 1084, "Node.get_nodes_by_type"),
-        (1092, 1093, "NodeList.render"),
-        (1095, 1100, "NodeList.get_nodes_by_type"),
-        (1106, 1107, "TextNode.__init__"),
-        (1115, 1122, "TextNode.render_annotated"),
-        (1144, 1145, "VariableNode.__init__"),
-        (1165, 1209, "token_kwargs"),
+        (364, 386, "Token.__init__"),
+        (395, 408, "Token.split_contents"),
+        (412, 414, "Lexer.__init__"),
+        (423, 435, "Lexer.tokenize"),
+        (437, 469, "Lexer.create_token"),
+        (507, 529, "Parser.__init__"),
+        (534, 596, "Parser.parse"),
+        (598, 603, "Parser.skip_past"),
+        (605, 622, "Parser.extend_nodelist"),
+        (624, 635, "Parser.error"),
+        (637, 653, "Parser.invalid_block_tag"),
+        (664, 665, "Parser.next_token"),
+        (667, 668, "Parser.prepend_token"),
+        (670, 671, "Parser.delete_first_token"),
+        (673, 675, "Parser.add_library"),
+        (677, 681, "Parser.compile_filter"),
+        (683, 687, "Parser.find_filter"),
+        (744, 788, "FilterExpression.__init__"),
+        (876, 927, "Variable.__init__"),
+        (929, 945, "Variable.resolve"),
+        (1075, 1087, "Node.get_nodes_by_type"),
+        (1095, 1096, "NodeList.render"),
+        (1098, 1103, "NodeList.get_nodes_by_type"),
+        (1109, 1110, "TextNode.__init__"),
+        (1118, 1125, "TextNode.render_annotated"),
+        (1147, 1148, "VariableNode.__init__"),
+        (1168, 1212, "token_kwargs"),
     ],
 }
 
@@ -174,10 +181,36 @@ DECLARED = {
         [
             # The `# TRANSCRIBED:` marker and its blank separator, ours only —
             # a pure insertion, hence `None` on the upstream side, and no
-            # executable line, hence no snippet. Tasks 2 and 5 add the
-            # `compile_nodelist` and `_resolve_lookup` bodies here; at this
-            # commit the transcription delegates nothing and says so.
+            # executable line, hence no snippet.
             ((2, 3), None, None),
+            # M9's parse seam: `Template.compile_nodelist` delegates to Rust.
+            # Upstream's lexer construction and `Parser(...)` call are gone, and
+            # in their place is a comment block plus the import that reaches the
+            # shell. Two regions rather than one because `difflib` pairs our
+            # prose against upstream's parser construction and our three
+            # statements against upstream's three, and each pair is a separate
+            # opcode; the second region is the delegation proper.
+            #
+            # This is the one declared region that *is* the Rust-vs-Rust hazard
+            # the guard exists to refuse, and it is intended: M9's whole point is
+            # that the suite's parsing runs in Rust. It is safe for the parity
+            # rows only because they do not go through `compile_nodelist` —
+            # `tests/test_parser_parity.py:django_parse` builds a `Parser`
+            # directly — which is why `Template.compile_nodelist` is absent from
+            # `COMPARED_PATH` and why that absence is a measurement rather than
+            # an oversight.
+            (
+                (187, 201),
+                (185, 196),
+                "from django_rust_templates.render import parse_template",
+            ),
+            (
+                (204, 206),
+                (199, 201),
+                "parsed = parse_template(self.source, self.engine, self.origin)\n"
+                "self.extra_data = parsed.extra_data\n"
+                "return parsed.nodelist",
+            ),
         ],
     ),
 }
@@ -204,11 +237,22 @@ def pinned_version() -> str:
 def executable_lines(source: str) -> set:
     """1-based lines of ``source`` that hold an executable statement.
 
-    A bare string expression — the module docstring, or a stray string — is not
-    executable: it is a no-op in CPython and it is where a transcription's own
-    prose lives, so counting it would force a snippet on every rewritten
-    docstring. Everything else with a ``lineno`` counts, which includes the
-    ``import`` lines a stripped-comment edit leaves behind.
+    Two exclusions, each measured rather than guessed:
+
+    * a bare string expression — the module docstring, or a stray string — is
+      not executable: it is a no-op in CPython and it is where a transcription's
+      own prose lives, so counting it would force a snippet on every rewritten
+      docstring;
+    * a **compound** statement contributes only its header line, not its whole
+      span. ``ast.walk`` yields the ``FunctionDef``/``If``/``Try`` node with a
+      ``lineno`` and an ``end_lineno`` covering the body, and taking that span
+      marks every comment and every docstring *inside* the function as
+      executable — measured on this milestone's own `compile_nodelist`
+      declaration, where a 15-line region reported all 15 lines as executable
+      because one ``import`` at its end sits inside a `FunctionDef`. The rule
+      wants the lines that *do* something, and a compound statement's header is
+      the only line of it that does; its children are walked separately and
+      counted on their own.
     """
     out = set()
     for node in ast.walk(ast.parse(source)):
@@ -217,7 +261,10 @@ def executable_lines(source: str) -> set:
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
             if isinstance(node.value.value, str):
                 continue
-        out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+        if hasattr(node, "body"):
+            out.add(node.lineno)
+        else:
+            out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
     return out
 
 
@@ -247,6 +294,27 @@ def declared_regions(name: str) -> list:
     """The ``(ours, theirs)`` spans ``name`` declares, snippets dropped."""
     _upstream, regions = DECLARED[name]
     return [(ours, theirs) for ours, theirs, _snippet in regions]
+
+
+def module_of(name: str) -> str:
+    """The dotted import path of the interposed module for transcription ``name``.
+
+    Derived from the declared upstream path rather than written a second time,
+    so the two cannot disagree: ``django/template/base.py`` is
+    ``django.template.base`` and ``django/template/__init__.py`` is the package
+    ``django.template``, whose last segment the ``__init__`` does not name.
+
+    That this is the *interposed* module rather than the checkout's is the point
+    of the name — the shim loads our file under Django's name, so importing it
+    gets ours, and a measurement of "what the parity harness executes" has to be
+    a measurement of what the harness would actually run.
+    """
+    upstream = DECLARED[name][0]
+    if upstream.endswith("/__init__.py"):
+        upstream = upstream[: -len("/__init__.py")]
+    elif upstream.endswith(".py"):
+        upstream = upstream[: -len(".py")]
+    return upstream.replace("/", ".")
 
 
 def _within(span, first: int, last: int) -> bool:
@@ -316,6 +384,25 @@ def check() -> list:
     command ran it at some earlier time.
     """
     failures = []
+    # The pinned measured path must cover exactly the transcriptions that
+    # declare regions. Equality, not containment: a module missing from the pin
+    # has its declared regions checked by nothing, and a module in the pin that
+    # is no longer transcribed is a stale measurement — both are failures, and
+    # both are found in the commit that causes them rather than later.
+    missing = sorted(set(DECLARED) - set(COMPARED_PATH))
+    if missing:
+        failures.append(
+            f"COMPARED_PATH is missing an entry for {missing}, so nothing "
+            "checks whether a declared region sits on code a parity harness "
+            "executes — measure it and add the entry in the commit that "
+            "transcribes the module"
+        )
+    stale = sorted(set(COMPARED_PATH) - set(DECLARED))
+    if stale:
+        failures.append(
+            f"COMPARED_PATH has a stale entry for {stale}, which is no longer "
+            "a declared transcription"
+        )
     for name, (upstream, regions) in sorted(DECLARED.items()):
         ours_path = IMPL / name
         theirs_path = CHECKOUT / upstream
@@ -383,11 +470,11 @@ def check() -> list:
                     f"read: {[ours[n - 1] for n in inside]}"
                 )
                 continue
-            unnamed = [n for n in inside if ours[n - 1] not in snippet]
+            unnamed = [n for n in inside if ours[n - 1].strip() not in snippet]
             if unnamed:
                 failures.append(
                     f"{name}: region ours:{_fmt(ours_span)} snippet does not "
-                    f"name line(s) {unnamed}: {[ours[n - 1] for n in unnamed]}"
+                    f"name line(s) {unnamed}: {[ours[n - 1].strip() for n in unnamed]}"
                 )
     return failures
 

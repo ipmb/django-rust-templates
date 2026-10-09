@@ -2325,7 +2325,16 @@ fn compile_template(
         Some(origin) => origin.getattr("template_name")?.extract()?,
         None => None,
     };
-    let desc = parse_source(py, source, false, origin_name, &host)?;
+    // `self.engine.debug`, which upstream reads at the top of `compile_nodelist`
+    // to choose `DebugLexer` over `Lexer` (`base.py:183-186`). It has to be read
+    // here rather than defaulted, because the *positions* it turns on are what
+    // every downstream debug path needs and none of them can recover them:
+    // measured, with this hardcoded `false`, `Engine(debug=True).from_string(
+    // "{% badtag %}")` reaches `Template.get_exception_info`, which does
+    // `start, end = token.position`, and dies with
+    // `TypeError: cannot unpack non-iterable NoneType object`.
+    let debug: bool = engine.bind(py).getattr("debug")?.extract()?;
+    let desc = parse_source(py, source, debug, origin_name, &host)?;
     // The table is the render's own, and it is handed to `materialise` **with**
     // the descriptor rather than being left for the shell to find: this is the
     // hole §Review Focus 3 names. Before this, a `Ref` in the tree reached

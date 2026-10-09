@@ -45,15 +45,25 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from django.template.base import UNKNOWN_SOURCE, Lexer, Origin, Parser
+from django.template.base import (
+    UNKNOWN_SOURCE,
+    Lexer,
+    Origin,
+    Parser,
+    Token,
+    TokenType,
+)
 from django.template.context import Context
 from django.template.engine import Engine
+from django.template.exceptions import TemplateSyntaxError
 
 from django_rust_templates import _native
 from django_rust_templates.host import ShellHost
 
 __all__ = (
     "UNKNOWN_ORIGIN",
+    "django_exception",
+    "django_token",
     "materialiser",
     "parse_template",
     "parser_for",
@@ -119,6 +129,78 @@ def materialiser():
     return _CACHED
 
 
+def django_token(wire):
+    """Django's `Token` for `_native`'s four-field wire tuple, or `None`.
+
+    The same construction `ShellHost.call_tag` uses on the same tuple, and it
+    has to be the same: the wire order is `(type, contents, lineno, position)`
+    while `Token.__init__` takes `(token_type, contents, position, lineno)`, so
+    this is one of the two places the two orders meet.
+
+    `token_type` is reconstructed through the `TokenType` enum rather than left
+    as the wire's `int`, because `Token.__repr__` reads `self.token_type.name`
+    and Django's debug path prints it.
+    """
+    if wire is None:
+        return None
+    kind, contents, lineno, position = wire
+    return Token(TokenType(kind), contents, position, lineno)
+
+
+def django_exception(error, host=None):
+    """`_native`'s parse failure, as the exception Django would have raised.
+
+    Rust raises **one** class for everything a parse rejects. That is design
+    decision 2 — Rust owns the message, Python owns the exception *object*,
+    because `assertRaisesMessage`, `Template.get_exception_info` and Django's
+    own test runner all inspect the object rather than the message — and this is
+    the place the object is chosen.
+
+    **It is not optional at M9, and the plan omitted it.** Until M9 the suite's
+    parses went through Django's real `Parser`, which raises `TemplateSyntaxError`
+    itself, so nothing ever had to convert. M9's delegation makes
+    `Template.compile_nodelist` the suite's only parse path, and without this the
+    first run dies three ways at once, all measured: upstream's `except` arm
+    hands `e.token` to `get_exception_info`, which reads `token.position` off the
+    wire tuple and raises `AttributeError: 'tuple' object has no attribute
+    'position'`; `assertRaises(TemplateSyntaxError)` sees a class it does not
+    know; and Django's parallel runner cannot pickle the result —
+    `Can't pickle <class '_native.UnimplementedTag'>: No module named '_native'`.
+
+    **A host exception is restored by identity, not rebuilt.** When a tag's own
+    code raised, `error.class_name` names the class Python raised, and the
+    *object* is still on the host that ran it (``host.last_error``), so it is
+    re-raised as itself — the same instance, with its `__traceback__`. That is
+    what Django does: `Parser.parse` re-raises the object it caught
+    (`base.py:583-585`). Rebuilding from a name and a message would lose the
+    traceback, and matching on the name keeps this from handing back an object
+    from an *earlier* host call than the one that failed.
+
+    **Otherwise only the class is chosen.** `args` rides across untouched, so
+    the message stays Rust's, and `.token` is the same wire tuple turned into a
+    real `Token`, which is what makes `e.token` usable by `get_exception_info`
+    and by the `{% include %}` paths that read it. `UnimplementedTag` is a
+    `ParseError` subclass and is converted with the rest: outside this repository
+    the shell is a drop-in replacement, and a class Django has never heard of
+    escaping a parse is not one. Nothing is lost by that — the parity harnesses
+    that bucket on `UnimplementedTag` call `_native.parse` directly and never
+    come through here.
+
+    ``host`` is optional because the conversion is meaningful without one: a
+    caller that drove `_native.compile_template` directly has no `ShellHost` to
+    consult, and gets the class-only conversion.
+    """
+    class_name = getattr(error, "class_name", None)
+    if class_name is not None and host is not None:
+        raised = host.last_error
+        if raised is not None and type(raised).__name__ == class_name:
+            return raised
+
+    converted = TemplateSyntaxError(*error.args)
+    converted.token = django_token(getattr(error, "token", None))
+    return converted
+
+
 def parser_for(source, engine=None, origin=UNKNOWN_ORIGIN):
     """Django's own `Parser`, built the way Django builds one.
 
@@ -178,18 +260,32 @@ def parse_template(source, engine=None, origin=UNKNOWN_ORIGIN):
     `origin.template_name`) and the materialised tree (as every node's `origin`
     and the `Template`'s) — and `_native.compile_template`'s doc records why the
     node's and the template's have to be the same object.
+
+    **A parse failure leaves as `TemplateSyntaxError`, not as `_native.ParseError`.**
+    This is the shell's only source-to-`Template` path, so it is the one place
+    the conversion has to happen, and [`django_exception`] is it; putting it
+    inside `compile_nodelist` instead would have meant editing upstream's method
+    rather than transcribing it, which is the one thing M9 must not do.
     """
     if engine is None:
         engine = Engine()
     parser = parser_for(source, engine, origin)
-    return _native.compile_template(
-        source,
-        parser,
-        materialiser(),
-        engine,
-        ShellHost(parser),
-        origin,
-    )
+    host = ShellHost(parser)
+    try:
+        return _native.compile_template(
+            source,
+            parser,
+            materialiser(),
+            engine,
+            host,
+            origin,
+        )
+    except _native.ParseError as error:
+        # `from None`, because Django's own `Parser.parse` re-raises the *same*
+        # object and therefore has no chain at all: letting CPython add one here
+        # would print a `_native.ParseError` frame that stock Django's traceback
+        # does not have.
+        raise django_exception(error, host) from None
 
 
 def render_string(source, context, engine=None, origin=UNKNOWN_ORIGIN):

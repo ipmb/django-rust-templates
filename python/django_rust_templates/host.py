@@ -115,15 +115,39 @@ class ShellHost:
 
     def __init__(self, parser):
         self.parser = parser
-        self._rust_owned = set(_native.builtin_tag_names())
+        # `builtin_tag_names()` minus `builtin_tag_stubs()`: the names Rust has a
+        # real compile function for. `names()` alone is the registry's *keys*,
+        # and a stub is a key with a body that raises `Unimplemented`, so taking
+        # it whole claims `partial` and `partialdef` for Rust and the identity
+        # clause below then declines them on the host's behalf — measured, that
+        # is 245 failures in the 1547, every one of them
+        # `'partial' is a built-in tag this engine does not implement yet (M13)`
+        # where `template_tests.syntax_tests.test_partials` expected either a
+        # render or Django's own syntax error.
+        #
+        # The subtraction is not a new rule, it is the one the rest of the tree
+        # already uses: `tests/test_parser_parity.py` derives "implemented" as
+        # `set(builtin_tag_names()) - set(builtin_tag_stubs())`, and
+        # `tests/test_tag_inventory.py` pins the stub set to those two names. The
+        # host was the one place that read the keys as the registry.
+        self._rust_owned = set(_native.builtin_tag_names()) - set(
+            _native.builtin_tag_stubs()
+        )
         self._django_tags = django_own_tags()
+        # The exception object `call_tag` last let past, for the shell to
+        # re-raise by identity. `None` until one does. See `call_tag`.
+        self.last_error = None
 
     def has_tag(self, command):
         func = self.parser.tags.get(command)
         if func is None:
             return False
         if command not in self._rust_owned:
-            # `load`, `querystring`, and everything a `{% load %}` brought in.
+            # `load`, `querystring`, the two stub tags, and everything a
+            # `{% load %}` brought in. `load` and `querystring` are answered by
+            # the registry not containing them; `partial` and `partialdef` by
+            # their bodies being stubs — see `__init__` for why the registry's
+            # keys are not the same question as its implementations.
             return True
         # Rust's, unless something replaced `defaulttags`' callable for the
         # name — `add_library` is `self.tags.update(lib.tags)`
@@ -202,6 +226,21 @@ class ShellHost:
             # `crates/template-py/src/lib.rs`.
             error = parser.error(token, error)
             error.token_wire = _wire_token(error.token)
+            # Kept as the **object**, not as its class name, so the shell can
+            # re-raise this exact instance — which is what Django does:
+            # `Parser.parse` re-raises the object it caught
+            # (`base.py:583-585`), so a tag whose body raises `RuntimeError`
+            # leaves the parse as that `RuntimeError` with its `__traceback__`
+            # and its `_culprit_node` attached. Rust can only carry the class's
+            # *name* across the FFI (`ErrorKind::Host`), and rebuilding an
+            # exception from a name and a message would lose both. See
+            # `render.django_exception`, which reads this.
+            #
+            # The parse aborts on the first failure, so the last host call to
+            # raise is the one the parse died on. Overwritten rather than
+            # appended for that reason — a list would invite reading an earlier
+            # entry.
+            self.last_error = error
             raise
         parser.command_stack.pop()
         left = [_wire_token(tok) for tok in reversed(parser.tokens)]

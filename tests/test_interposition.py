@@ -53,18 +53,130 @@ class InterpositionTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn("_impl", inspect.getfile(getattr(base, name)))
 
+    def test_compile_nodelist_reaches_rust(self):
+        """The parse seam, pinned to a Rust call rather than to a result.
+
+        The counts are not evidence for this: a ``compile_nodelist`` that
+        quietly called Django's own ``Lexer`` and ``Parser`` keeps every count
+        green (``.review/m9-recon.md`` finding 1a — this is the failure the M9
+        transcription makes *possible*, since our ``Lexer`` and ``Parser`` are
+        themselves interposed and therefore look ours). So the row wraps the
+        binding and asserts it was entered, which fails the moment the
+        delegation is reverted, whatever the templates render.
+
+        ``Engine.from_string`` is the caller because it is the one the suite
+        uses 1170 times: ``Template.__init__`` ends in ``compile_nodelist``.
+        """
+        from django.template import Engine
+
+        from django_rust_templates import _native
+
+        calls = []
+        original = _native.compile_template
+
+        def counting(*args, **kwargs):
+            calls.append(args[0])
+            return original(*args, **kwargs)
+
+        _native.compile_template = counting
+        try:
+            Engine().from_string("{{ a }}{% if b %}x{% endif %}")
+        finally:
+            _native.compile_template = original
+
+        self.assertEqual(len(calls), 1, calls)
+
+    def test_compile_nodelist_preserves_extra_data(self):
+        """``extra_data`` is assigned between ``parse()`` and the ``return``.
+
+        Upstream sets it inside the ``try`` (``base.py:198-200``) and
+        ``{% partial %}`` reads it at M13, so a delegation that returned the
+        nodelist and nothing else would drop it. It is also the one attribute
+        the *shell* cannot set — ``render.parse_template`` returns a ``Template``
+        built by ``__new__``, and the docstring there says why setting
+        ``extra_data`` in two places is how the two would drift.
+        """
+        from django.template import Engine
+
+        template = Engine().from_string("{% csrf_token %}")
+        self.assertTrue(hasattr(template, "extra_data"))
+        self.assertIsInstance(template.extra_data, dict)
+
+    def test_compile_nodelist_attaches_debug_info_to_a_parse_error(self):
+        """The debug arm: a failed parse is annotated, not merely re-raised."""
+        from django.template import Engine
+        from django.template.exceptions import TemplateSyntaxError
+
+        engine = Engine(debug=True)
+        with self.assertRaises(TemplateSyntaxError) as caught:
+            engine.from_string("{% badtag %}")
+
+        self.assertTrue(hasattr(caught.exception, "template_debug"))
+        self.assertEqual(caught.exception.template_debug["during"], "{% badtag %}")
+
+    def test_compile_nodelist_keeps_upstreams_error_message_rewriting(self):
+        """The obligation this milestone's own plan omitted, so it gets a row.
+
+        Upstream's ``compile_nodelist`` has **four** obligations, not three: as
+        well as ``extra_data``, the debug annotation and the re-raise, it
+        prefixes a ``TemplateSyntaxError``'s message with the template's origin
+        name when the origin is named — ``base.py:204-212``:
+
+            e.raw_error_message = raw_message
+            e.args = (f"Template: {self.origin.name}, {raw_message}", ...)
+
+        The plan's Step 1 transcription of the method stopped at the debug arm,
+        and its Step 4 delegation put ``return parsed.nodelist`` *inside* the
+        ``try`` with an ``except`` arm marked ``# pragma: no cover`` — which
+        would have made this code unreachable and silently dropped the prefix
+        for every template loaded from a file, which is every template the
+        suite's loader and backend tests use. ``Engine.from_string`` cannot see
+        it, because its origin is ``UNKNOWN_SOURCE`` and the rewrite is
+        conditional on the name differing from that.
+        """
+        from django.template import Engine, Origin, Template
+        from django.template.exceptions import TemplateSyntaxError
+
+        origin = Origin(name="some/template.html", template_name="some/template.html")
+        with self.assertRaises(TemplateSyntaxError) as caught:
+            Template("{% badtag %}", engine=Engine(), origin=origin)
+
+        raw = caught.exception.raw_error_message
+        self.assertEqual(
+            caught.exception.args[0],
+            f"Template: some/template.html, {raw}",
+        )
+
     def test_the_transcription_is_the_pinned_source(self):
         """A second opinion on the file itself, independent of the guard.
 
         ``check_transcriptions.py`` says the differing regions are the declared
-        ones; that is a statement about a diff. This says the *bulk* of the file
-        is upstream's, by line count, which is the thing a reader wants to know
-        before believing the guard: the transcription is 1209 lines against
-        upstream's 1207, and the two extra are the marker and its blank
-        separator. A transcription that had drifted by a paragraph would move
-        both numbers together and this row would not notice — that is the
-        guard's job — but a transcription that had been *replaced* would.
+        ones; that is a statement about a diff's *edges*. This says the *bulk*
+        of the file is upstream's, by content rather than by region arithmetic,
+        which is the thing a reader wants before believing the guard.
+
+        The metric is the **number of lines in ``difflib``'s equal blocks** —
+        the lines that are upstream's verbatim and in place — and it is pinned.
+        The first version of this row pinned the line *count* instead ("ours is
+        upstream plus the marker and its blank"), which M9's own Task 2 broke,
+        because a delegation is a real edit and not a marker. The second version
+        — written and thrown away in the same sitting — counted lines that
+        ``in upstream``, which is a membership test against the whole 1207-line
+        file and therefore measures nothing: it returned 1192, the entire
+        untouched population, because every line of Django's ``base.py`` appears
+        *somewhere* in it. A replacement of the whole file would have scored the
+        same. Equal blocks are what discriminate, because an equal block is by
+        construction a maximal run of identical lines: edit one and the run
+        breaks.
+
+        The declared regions are deliberately *not* subtracted here. Subtracting
+        them would make this row agree with the guard by construction — the two
+        would be right and wrong together, which is not a second opinion. What
+        this row is for is a file that has been replaced or rewritten wholesale,
+        where the guard's regions are still individually valid and the file is
+        nonetheless no longer a transcription.
         """
+        import difflib
         import pathlib
 
         from django_rust_templates import _shim as shim
@@ -74,12 +186,27 @@ class InterpositionTests(unittest.TestCase):
         theirs = (project_root / ".django" / "django" / "template" / "base.py")
         theirs = theirs.read_text().splitlines()
 
-        # Ours is `\"\"\"`, the marker, a blank, then upstream from line 2 on.
-        self.assertEqual(len(ours), len(theirs) + 2)
-        self.assertEqual(ours[3:], theirs[1:])
+        matcher = difflib.SequenceMatcher(a=ours, b=theirs, autojunk=False)
+        opcodes = matcher.get_opcodes()
+        equal = sum(i2 - i1 for tag, i1, i2, _j1, _j2 in opcodes if tag == "equal")
+        differing = [op for op in opcodes if op[0] != "equal"]
+
+        # The structure, which is what the guard reads: three edits, two of them
+        # pairs and one a pure insertion of ours. Asserted here too because a
+        # re-alignment that merged two edits into one would move `equal` in a way
+        # this row could not explain on its own.
+        self.assertEqual([op[0] for op in differing], ["delete", "replace", "replace"])
+
+        self.assertEqual(
+            equal,
+            1192,
+            "the number of lines this transcription shares with upstream, in "
+            "place, has moved; if that was a delegation, re-pin it here and "
+            "declare the region in scripts/check_transcriptions.py",
+        )
 
     def test_the_compared_path_is_the_measured_one(self):
-        """Re-measure the guard's ``COMPARED_PATH`` table and compare.
+        """Re-measure the guard's ``COMPARED_PATH`` table and compare, per module.
 
         That table is what ``tests/parity_target.py`` uses to decide whether a
         declared transcription region sits on code the parity harness executes.
@@ -89,20 +216,19 @@ class InterpositionTests(unittest.TestCase):
         both sides then agree no matter what Rust does.
 
         So the measurement is run here, in the same process as the parity rows,
-        and the set of functions reached — with their spans — is asserted equal
-        to the pin. Both corpora, because they differ: the generator reaches
-        ``Parser.error`` and ``Parser.invalid_block_tag`` and the hand-written
-        corpus does not.
+        for **every** module in the pin — not for the one this milestone happens
+        to be working on. Iterating the pin is what gives the guard its teeth
+        without a second place to remember: ``check_transcriptions.py`` asserts
+        the pin's key set equals the declared set, so interposing a module
+        without measuring it fails in the commit that interposes it, and this
+        row then fails if the spans it was given are wrong.
 
-        ``tests/compared_path.py`` holds the instrument; the measurement script
-        ``.review/m9-measurements/m9_measure_parse_path.py`` prints a wider
-        report from the same code. Measured at 28 functions spanning lines
-        116-1209, which is nearly the whole module — that is why the guard has
-        teeth at all, and why "the target's own lines" was a proxy.
+        Both corpora, because they differ: the generator reaches ``Parser.error``
+        and ``Parser.invalid_block_tag`` and the hand-written corpus does not.
         """
+        import importlib
         import random
 
-        import django.template.base as base
         import scripts.check_transcriptions as guard
         from tests.compared_path import measure
         from tests.parser_corpus import (
@@ -117,23 +243,22 @@ class InterpositionTests(unittest.TestCase):
         sources = list(TEMPLATES)
         sources += [random_template(rng) for _ in range(RANDOM_CASES)]
 
-        measured = measure(base, sources, django_parse)
-        pinned = {
-            label: (first, last)
-            for first, last, label in guard.COMPARED_PATH["base.py"]
-        }
+        for name, pinned_entries in sorted(guard.COMPARED_PATH.items()):
+            module = importlib.import_module(guard.module_of(name))
+            measured = measure(module, sources, django_parse)
+            pinned = {label: (first, last) for first, last, label in pinned_entries}
 
-        self.assertEqual(
-            sorted(measured),
-            sorted(pinned),
-            "the functions the parity harness executes have changed, so "
-            "scripts/check_transcriptions.py's COMPARED_PATH['base.py'] is "
-            "stale — regenerate it with "
-            ".review/m9-measurements/m9_measure_parse_path.py",
-        )
-        for label in sorted(pinned):
-            with self.subTest(function=label):
-                self.assertEqual(measured[label], pinned[label])
+            with self.subTest(module=name):
+                self.assertEqual(
+                    sorted(measured),
+                    sorted(pinned),
+                    f"the functions the parity harness executes in {name} have "
+                    f"changed, so COMPARED_PATH['{name}'] is stale — regenerate "
+                    "it with .review/m9-measurements/m9_measure_parse_path.py",
+                )
+            for label in sorted(pinned):
+                with self.subTest(module=name, function=label):
+                    self.assertEqual(measured[label], pinned[label])
 
 
 if __name__ == "__main__":

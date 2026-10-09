@@ -49,7 +49,9 @@ base.py:148	django/template/base.py	148	-	from .engine import Engine	-
 base.py:151-152	django/template/base.py	151	152	if origin is None:	origin = Origin(UNKNOWN_SOURCE)
 base.py:151-154	django/template/base.py	151	154	Origin(UNKNOWN_SOURCE)	-
 base.py:154	django/template/base.py	154	-	self.origin = origin	-
+base.py:183-186	django/template/base.py	183	186	lexer = DebugLexer(self.source)	-
 base.py:198-200	django/template/base.py	198	200	parser.parse()	-
+base.py:204-212	django/template/base.py	204	212	e.raw_error_message = raw_message	-
 django/template/base.py:390-403	django/template/base.py	390	403	-	-
 base.py:472	django/template/base.py	472	-	-	-
 base.py:504-505	django/template/base.py	504	505	-	-

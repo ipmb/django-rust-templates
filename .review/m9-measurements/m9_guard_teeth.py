@@ -10,7 +10,9 @@ working tree is never mutated:
 2. the marker names the wrong upstream path;
 3. a region covers code the parity harness executes (`COMPARED_PATH`);
 4. a region with executable lines declares no snippet;
-5. a region's snippet does not account for every executable line in it.
+5. a region's snippet does not account for every executable line in it;
+6. a transcribed module has no `COMPARED_PATH` entry, so nothing checks whether
+   its declared regions sit on code a parity harness executes.
 
 Run it:
 
@@ -32,24 +34,58 @@ REAL_BASE = guard.IMPL / BASE
 UPSTREAM = guard.DECLARED[BASE][0]
 REAL_REGIONS = guard.DECLARED[BASE][1]
 
+# `Parser.parse`'s span, taken from the pin rather than written down. The first
+# version of this script hardcoded 531-593, and the very next edit to
+# `base.py` — Task 2's delegation, which added five lines above it — moved the
+# method and three scenarios silently stopped testing anything. A measurement
+# script that has to be updated when the thing it measures moves is a script
+# that gets updated without being read.
+PARSE_FIRST, PARSE_LAST, _ = next(
+    entry for entry in guard.COMPARED_PATH[BASE] if entry[2] == "Parser.parse"
+)
+# The first three *executable* lines inside it, which is what the snippet
+# scenarios need: `Parser.parse` opens with a `def` line followed by a docstring,
+# so a fixed offset from `PARSE_FIRST` would land on prose and the scenarios
+# would test the docstring exclusion instead of the snippet rule.
+_parse_executable = sorted(
+    n
+    for n in guard.executable_lines(REAL_BASE.read_text())
+    if PARSE_FIRST <= n <= PARSE_LAST
+)
+PARSE_HEAD = (_parse_executable[0], _parse_executable[2])
+
 results = []
 
 
-def scenario(label, *, source=None, regions=None, declared=None, expected):
+def scenario(label, *, source=None, regions=None, declared=None, compared=None,
+             expected):
     """Run ``check()`` against a copy of ``base.py`` and record what it said."""
     with tempfile.TemporaryDirectory() as tmp:
         impl = pathlib.Path(tmp)
         (impl / BASE).write_text(source if source is not None else REAL_BASE.read_text())
 
-        saved_impl, saved_declared = guard.IMPL, guard.DECLARED
+        saved_impl, saved_declared, saved_compared = (
+            guard.IMPL,
+            guard.DECLARED,
+            guard.COMPARED_PATH,
+        )
         guard.IMPL = impl
         guard.DECLARED = declared if declared is not None else {
             BASE: (UPSTREAM, regions if regions is not None else REAL_REGIONS)
         }
+        # Narrowed with `DECLARED`, or the key-set equality check reports every
+        # real entry as stale and drowns the scenario's own output.
+        guard.COMPARED_PATH = (
+            saved_compared if compared is None else compared
+        )
         try:
             failures = guard.check()
         finally:
-            guard.IMPL, guard.DECLARED = saved_impl, saved_declared
+            guard.IMPL, guard.DECLARED, guard.COMPARED_PATH = (
+                saved_impl,
+                saved_declared,
+                saved_compared,
+            )
 
     hit = [f for f in failures if expected in f]
     results.append((label, bool(hit), failures))
@@ -91,11 +127,11 @@ scenario(
 
 print()
 print("=== 3. a region may not cover code the parity harness executes ===")
-# `Parser.parse` is lines 531-593 in our transcription and is in COMPARED_PATH;
-# lines 540-542 are its first three statements.
+# `Parser.parse` is in COMPARED_PATH; its first three statements are executable
+# and the region covers them.
 scenario(
     "a region inside Parser.parse",
-    regions=[((2, 3), None, None), ((540, 542), (546, 548), None)],
+    regions=[((2, 3), None, None), (PARSE_HEAD, None, None)],
     expected="which the parity harness executes",
 )
 
@@ -103,20 +139,25 @@ print()
 print("=== 4/5. snippets on regions with executable lines ===")
 scenario(
     "executable region with no snippet",
-    regions=[((2, 3), None, None), ((540, 542), (546, 548), None)],
+    regions=[((2, 3), None, None), (PARSE_HEAD, None, None)],
     expected="declares no snippet",
 )
+_first_statement = REAL_BASE.read_text().splitlines()[_parse_executable[0] - 1].strip()
 scenario(
     "snippet naming only part of the region",
     regions=[
         ((2, 3), None, None),
-        (
-            (540, 542),
-            (546, 548),
-            "if parse_until is None:",  # lines 541 and 542 are unnamed
-        ),
+        (PARSE_HEAD, None, _first_statement),  # the rest left unnamed
     ],
     expected="snippet does not name line(s)",
+)
+
+print()
+print("=== 6. the pin must cover exactly the declared transcriptions ===")
+scenario(
+    "a transcribed module with no COMPARED_PATH entry",
+    compared={},
+    expected="COMPARED_PATH is missing an entry",
 )
 
 print()

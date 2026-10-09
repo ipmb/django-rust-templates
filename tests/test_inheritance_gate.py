@@ -205,7 +205,6 @@ class MustBeFirstGateTests(unittest.TestCase):
     def test_a_host_node_that_must_be_first_is_refused_after_text(self):
         from django.template import Context, TemplateSyntaxError
 
-        from django_rust_templates import _native
         from django_rust_templates.render import render_string
 
         engine = self._engine()
@@ -214,13 +213,15 @@ class MustBeFirstGateTests(unittest.TestCase):
         # `"{% load mylib %}{% first_tag %}"` refuses identically.
         source = "text{% load mylib %}{% first_tag %}"
 
-        # The two *types* differ on purpose (design decision 2, and
-        # `test_parser_errors.py`'s note that the shell converts
-        # `_native.ParseError` to `TemplateSyntaxError` at M9): Rust owns the
-        # message, Python owns the exception object. So the class assertion here
-        # is on our own class, and the *message* is what is compared across the
-        # seam — which is the whole of what this row is about.
-        with self.assertRaises(_native.ParseError) as ours:
+        # Both sides now raise **the same class**, and that is M9's doing rather
+        # than a coincidence: `render.parse_template` converts Rust's
+        # `_native.ParseError` into `TemplateSyntaxError` in the commit that
+        # makes `compile_nodelist` the suite's parse path. Before M9 this row
+        # asserted `_native.ParseError` on our side and compared only the text,
+        # because design decision 2 gave the message to Rust and the object to
+        # Python; the object is Python's now, so the class is asserted too and
+        # the text comparison stays as the thing that pins the *message*.
+        with self.assertRaises(TemplateSyntaxError) as ours:
             render_string(source, {}, engine)
         with self.assertRaises(TemplateSyntaxError) as stock:
             engine.from_string(source).render(Context({}))
@@ -242,7 +243,6 @@ class MustBeFirstGateTests(unittest.TestCase):
         """
         from django.template import Context, TemplateSyntaxError
 
-        from django_rust_templates import _native
         from django_rust_templates.render import render_string
 
         engine = self._engine(builtin=True)
@@ -251,7 +251,7 @@ class MustBeFirstGateTests(unittest.TestCase):
         self.assertEqual(engine.from_string("{% first_tag %}").render(Context({})), "F")
 
         second = "{% first_tag %}{% first_tag %}"
-        with self.assertRaises(_native.ParseError) as ours:
+        with self.assertRaises(TemplateSyntaxError) as ours:
             render_string(second, {}, engine)
         with self.assertRaises(TemplateSyntaxError) as stock:
             engine.from_string(second).render(Context({}))
@@ -276,18 +276,19 @@ class MustBeFirstGateTests(unittest.TestCase):
         observation looked plausible; only one names the contract.
 
         The stock engine refuses too, by accident: it reads `node.must_be_first`
-        itself (`base.py:602`). The types and texts differ on purpose — design
-        decision 2 gives the exception object to Python and the *message* to
-        Rust — so the cross-engine assertion here is that both refuse, not that
-        they agree.
+        itself (`base.py:602`). Since M9 both sides raise the *same* class, so
+        the cross-engine assertion is `assertRaises` on both plus agreement in
+        text — design decision 2 still gives the message to Rust, and
+        `render.parse_template` is what turns the object into Django's.
         """
-        from django_rust_templates import _native
+        from django.template import TemplateSyntaxError
+
         from django_rust_templates.render import render_string
 
         engine = self._engine()
         source = "{% load mylib %}{% bad_tag %}"
 
-        with self.assertRaises(_native.ParseError) as ours:
+        with self.assertRaises(TemplateSyntaxError) as ours:
             render_string(source, {}, engine)
         message = str(ours.exception)
         self.assertTrue(
@@ -299,10 +300,26 @@ class MustBeFirstGateTests(unittest.TestCase):
         )
         self.assertIn("must_be_first", message)
 
-        # Stock refuses as well, so this is a divergence in *text*, not in
-        # outcome — the same shape as the two rows above.
+        # Stock Django refuses too, by accident: `extend_nodelist` reads
+        # `node.must_be_first` unguarded (`base.py:602`) and raises
+        # `AttributeError`. **That oracle can no longer be reached through
+        # `Engine.from_string`** — since Task 2 that route is Rust's, and Rust
+        # refuses explicitly before Django's line is ever reached — so the row
+        # drives the transcription's own `Parser` instead, which is the object
+        # `django.template.base.Parser` resolves to and the same one the parity
+        # harness drives. Keeping it here is what makes the divergence above a
+        # *choice* that is visible, rather than an error path that quietly
+        # stopped having a second side.
+        from django.template.base import UNKNOWN_SOURCE, Lexer, Origin, Parser
+
+        parser = Parser(
+            Lexer(source).tokenize(),
+            engine.template_libraries,
+            engine.template_builtins,
+            Origin(UNKNOWN_SOURCE),
+        )
         with self.assertRaises(AttributeError):
-            engine.from_string(source)
+            parser.parse()
 
 
 class IncludeCacheGateTests(unittest.TestCase):

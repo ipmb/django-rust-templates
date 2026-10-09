@@ -190,6 +190,12 @@ class HostParserStateTests(unittest.TestCase):
         value is the ordering and not an inert fixture. Seen to fail by
         pre-seeding `template_for` with `extra_data = {}`: the row below then
         could not distinguish a successful parse from a failed one.
+
+        `_native.ParseError` is correct **here and only here**, because this row
+        calls `_native.compile_template` directly and never passes through
+        `render.parse_template`, which is where M9's conversion to
+        `TemplateSyntaxError` lives. The rows that go through `render_string`
+        are the ones that see the converted class.
         """
         engine = Engine(libraries=CUSTOM_LIBRARIES)
         source = "{% load custom %}{% extra_data %}{% endfor %}"
@@ -237,10 +243,12 @@ class HostParserStateTests(unittest.TestCase):
         self.assertIsInstance(django.exception, TemplateSyntaxError)
         self.assertEqual(str(ours.exception), str(django.exception))
         # `BadNode.render` raises `TemplateSyntaxError("error")`, which is
-        # Django's own class on both sides — the shell has not interposed
-        # `base` yet, and this is a *render* exception rather than the parse's
-        # `_native.ParseError`. Pinned so that the equality above cannot be
-        # satisfied by two empty messages.
+        # Django's own class on both sides — and since M9 it is *also* the class
+        # the parse would produce, because `render.parse_template` converts
+        # `_native.ParseError` into it. This is a *render* exception rather than
+        # the parse's, so the two routes are indistinguishable here; the point of
+        # pinning it is that the equality above cannot be satisfied by two empty
+        # messages.
         self.assertEqual(str(ours.exception), "error")
 
     def test_a_simple_block_tag_delimits_its_body_with_djangos_own_parse(self):
@@ -281,9 +289,10 @@ class HostParserStateTests(unittest.TestCase):
         # Pinned, so the equality cannot be satisfied by two empty messages —
         # and so that the *type* mistake is visible if it comes back: the
         # message is Django's, assembled by Django's own `unclosed_block_tag`
-        # inside the host, wrapped by Rust's `ParseError` at the FFI. See the
-        # docstring of `test_a_failed_parse_produces_no_template_...` for why
-        # `ParseError` rather than `TemplateSyntaxError` is correct at M6.
+        # inside the host, wrapped by Rust's `ParseError` at the FFI and turned
+        # back into a `TemplateSyntaxError` by `render.parse_template` at M9 —
+        # which is the row [`test_an_unclosed_rust_owned_block_tag_is_unaffected`]
+        # says is reachable only through the shell.
         self.assertEqual(
             str(ours.exception),
             "Unclosed tag on line 1: 'wrap'. Looking for one of: endwrap.",
@@ -296,8 +305,15 @@ class HostParserStateTests(unittest.TestCase):
         `command_stack` is never read. Keeping this green while the row above
         goes red is what says the defect is in `call_tag` rather than in the
         shared error path.
+
+        `TemplateSyntaxError` rather than `_native.ParseError` since M9: both
+        rows reach the class through `render_string`, and M9 put the shell's
+        conversion in `render.parse_template`. This file still pins
+        `_native.ParseError` in the rows that call `_native.compile_template`
+        directly — that path has no shell on it and is where the raw class is
+        the correct thing to assert.
         """
-        with self.assertRaises(_native.ParseError) as caught:
+        with self.assertRaises(TemplateSyntaxError) as caught:
             _render(UNCLOSED_RUST_SOURCE, Engine())
         self.assertIn("Unclosed tag", str(caught.exception))
 
