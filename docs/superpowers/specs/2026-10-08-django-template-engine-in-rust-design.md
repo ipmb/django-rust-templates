@@ -762,6 +762,62 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   And assert the closed obligation instead — every `class_name` the Rust emitter
   can produce resolves. That is what `tests/test_materialise.py` pins.
 
+- **`py_repr_str` is exact for ASCII only — enforced, and owed a fix at M5 and
+  M7.** Python's `repr` escapes a character when `Py_UNICODE_ISPRINTABLE` is
+  false, which covers every non-ASCII category-C code point plus `Zl`, `Zp` and
+  `Zs`; `char::is_control()` is **Cc only**. Sweeping every BMP code point for
+  "Python escapes it and a `Cc` test does not" gives **7,893** of them — 43
+  `Cf`, 1,432 `Cn`, 6,400 `Co`, 1 `Zl`, 1 `Zp` and 16 `Zs` — with the 2,048
+  surrogates excluded because a Rust `char` cannot hold one. (A cruder sweep
+  reads 7,895; the two extras are `U+0022` and `U+0027`, category `Po`, which
+  diverge over *quoting* rather than printability and which this function
+  handles correctly. Name the predicate or the number is not falsifiable.)
+  Both M2 call sites are ASCII *by construction*, which is why M2 is correct
+  rather than lucky: `{% resetcycle %}`'s `args[0]` is the tag name dispatch
+  matched against the registry, and `{% templatetag %}`'s list is a constant.
+  The day either sees user text the function is wrong, and that day is dated:
+  **M5** (`defaulttags.py:1683`, `{% with %}`'s `remaining_bits[0]`) and **M7**
+  (`loader_tags.py:356`, `{% include %}`'s `option`). Measured on the pinned
+  tree, a template whose `{% include %}` option is `U+00AD` followed by
+  `option` raises `Unknown argument for 'include' tag: '\xadoption'.`, and
+  `{% with a=1 foo<U+00AD>bar %}` raises `'with' received an invalid token:
+  'foo\xadbar'` — Django escapes the `Cf`, a `Cc`-only escape emits it raw.
+  **M5 and M7 route both messages through the host's `repr`** rather than
+  widening this function. A `debug_assert!` in it now fails the test suite the
+  moment either is wired up, so that is a choice someone makes rather than a
+  default nobody noticed.
+
+- **Whether the descriptor wire form needs container values is an M3 decision,
+  taken before fan-out, not now.** `AttrValue` carries `Str`/`SafeStr`/`Bool`/
+  `Int`/`None`/`Ref`, and the milestone claim that the format is general enough
+  for the tags that arrive later has no evidence behind it for lists or dicts.
+  Later milestones do need them — measured against the pinned tree,
+  `ForNode.loopvars` is a list of strings, `CycleNode.cyclevars` a list,
+  `WithNode.extra_context` a dict — but a plain `AttrValue::List` would **not**
+  be enough, which is the reason to defer rather than to guess:
+  `IfNode.conditions_nodelists` is a list of `(condition, nodelist)` tuples
+  (`defaulttags.py:995-1020`), so one element of the list is a *nodelist*, and
+  nodelists live in `NodeDesc.nodelists` rather than in an attribute value.
+  Guessing a shape now buys either dead decode arms — the anti-pattern this
+  document has flagged twice — or a format reopened at M6 regardless. M3
+  decides it with `FilterExpression` (the `Ref` producer) and the M5/M6 node
+  shapes both in hand, and adds the variant, its `attr_value_to_py` arm and its
+  `_decode_value` arm in one commit.
+
+- **M3 gate: a variable ahead of `{% extends %}`.** Every source in the M2
+  corpus and all 400 randomised templates are variable-free outside
+  `{% verbatim %}` and `{% comment %}`, because `{{ … }}` needs M3's
+  `FilterExpression`. So `contains_nontext` and `must_be_first` — the ordering
+  rule the whole `extend_nodelist` contract exists for (§6) — are exercised
+  only on text-versus-tag, never on variable-versus-`{% extends %}`. M3 adds
+  that case to the corpus explicitly.
+
+- **M6 gate: a library that redefines a built-in tag name.** Host-first
+  dispatch order is argued from `Library.add_tag`/`add_library`
+  last-registration-wins semantics rather than measured. M6 pins it with a
+  template that loads a library registering a name already in Django's
+  builtins, and asserts the user's definition is the one that runs.
+
 - **§5.5's render path** — `NodeList.render`/`Node.render_annotated` kept
   verbatim, shadow nodes renderable; M9 gate.
 - **§5.2's `annotate_exception`** — needed for Rust-owned culprits; verified by

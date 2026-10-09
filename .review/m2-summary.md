@@ -47,9 +47,9 @@ Plan corrections, all of the same shape and all worth reviewing as a set:
 
 | Check | Result |
 |---|---|
-| `cargo test -p template-core` | 112 passed, 0 failed |
+| `cargo test -p template-core` | 113 passed, 0 failed |
 | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
-| `tests.test_parser_parity` | 11 tests, 59 sources × 2 modes + 400 random × 2 modes, 0 mismatches |
+| `tests.test_parser_parity` | 12 tests, 59 sources × 2 modes + 400 random × 2 modes, 0 mismatches |
 | `tests.test_parser_errors` | 9 tests, 32-case corpus |
 | `tests.test_materialise` | 20 tests |
 | `tests.test_tag_inventory` | 7 tests |
@@ -63,6 +63,55 @@ unchanged: M2 adds `_native.parse` and a shell module nothing imports yet, so th
 engine is not in the suite's path (§10.1 — engine progress and integration
 progress move independently). The suite's job at M2 is to prove M2 broke
 nothing.
+
+## Round-3 verdict and dispositions
+
+The milestone round returned **APPROVE WITH CHANGES** — 0 blockers, 1 major, 3
+minors. Each was verified against the pinned tree before it was accepted, and one
+was declined.
+
+**MAJOR — `py_repr_str` is wrong for a reachable input class. Accepted, verified,
+fixed.** The finding was that the reachable-input argument is airtight today and
+false at M5 and M7. Both halves hold. Airtight today: `{% resetcycle %}`'s
+`args[0]` is the tag name dispatch matched against the registry, and
+`{% templatetag %}`'s list is a constant, so neither can carry a non-ASCII code
+point. False later: a template whose `{% include %}` option is `U+00AD` followed
+by `option` raises `Unknown argument for 'include' tag: '\xadoption'.` on the
+pinned tree, and `{% with a=1 foo<U+00AD>bar %}` raises `'with' received an
+invalid token: 'foo\xadbar'` — Django escapes the `Cf`, and `char::is_control()`
+is `Cc` only. Swept every BMP code point: **7,893** diverge — 43 `Cf`, 1,432
+`Cn`, 6,400 `Co`, 1 `Zl`, 1 `Zp`, 16 `Zs`, with the 2,048 surrogates excluded
+because a Rust `char` cannot hold one. A cruder predicate reads 7,895; the two
+extras are `U+0022` and `U+0027`, which diverge over *quoting* and are handled
+correctly. So the reviewer's figure and mine differed by two before they differed
+by 2,048, and both times the metric was the question — which is the fifth
+instance of this project's count trap and the first where a disagreement was
+resolved by decomposing the number rather than re-running the sweep.
+Disposition: a `debug_assert!` narrows the function to the set it is exact on;
+its old `héllo` test — which pinned behaviour nothing can reach and read as "this
+is a general repr" to the next caller — is replaced by one that **requires** the
+assertion to fire; and §10.4 records that M5 and M7 route those two messages
+through the host's `repr` rather than widening the function.
+
+**Minor — add `AttrValue::List`/`Map` now so M5 cannot reopen the format.
+Declined as stated; deferred to M3 with the counterexample.** The need is real
+and measured — `ForNode.loopvars` is a list of strings, `CycleNode.cyclevars` a
+list, `WithNode.extra_context` a dict — but the proposed shape does not cover it.
+`IfNode.conditions_nodelists` is a list of `(condition, nodelist)` tuples
+(`defaulttags.py:995-1020`), so one element is a *nodelist*, and nodelists live in
+`NodeDesc.nodelists`, not in an attribute value. `List`/`Map` therefore would not
+prevent M6 reopening the format anyway, while adding two decode arms the emitter
+cannot produce — the anti-pattern this project has flagged twice. M3 decides it
+with `FilterExpression` and the M5/M6 shapes in hand, in one commit.
+
+**Minor — widen the random alphabet. Accepted, and widened further than asked.**
+The four separators do nothing on their own, because `random_text` only ever
+produces text nodes and the table is read in `smart_split`. So the generator now
+also emits `{% autoescape <random text> %}…{% endautoescape %}` and the
+separators land in a tag argument, with a test pinning that reach.
+
+**Minor — the vacuity bound on variables. Accepted**, recorded here and as an M3
+gate in §10.4.
 
 ## Guards made to fail, not just read
 
@@ -88,6 +137,15 @@ Every test below was observed failing for its intended reason before being kept.
 - **`SpacelessNode` removed from `NODE_CLASSES`**: the registry test reports
   `'{% spaceless %}x{% endspaceless %}' emits ['SpacelessNode'], which the
   materialiser cannot build`.
+- **The `debug_assert!` in `py_repr_str` removed**: its companion test reports
+  `python_repr_refuses_the_inputs_it_is_not_exact_for - should panic ... FAILED`
+  — a `DID NOT PANIC`, which is the guard proving it is the assertion and not a
+  comment doing the work.
+- **`random_tag_with_argument` dropped from the generator**: the reach test
+  reports `0 not greater than 10 : no argument carried a Python-only separator`.
+  Worth noting *which* assertion caught it — `len(arguments) > 100` still passed,
+  because the fixed `{% autoescape on %}` block tags match the same pattern, so
+  the count is the weak assertion and the separator one is the guard.
 
 ## The plan-vs-tree defect rate — a process finding, not eight slips
 
@@ -151,9 +209,21 @@ is that it is the *sole* remedy for one class and overkill for the other.
   instead.
 - No timing. The parser is recursive and unbounded in nesting depth for a hostile
   template, exactly as Django's is; that is a deliberate match, not a measurement.
-- The randomised alphabet is `"abc \n\t'\"é🎉"` plus a tag vocabulary, so it
-  reaches shape and nesting but not exotic text. Whether it is wide enough is
-  attack item 5.
+- **Every corpus source and all 400 randomised templates are variable-free**
+  outside `{% verbatim %}` and `{% comment %}`, because `{{ … }}` needs M3's
+  `FilterExpression`. So `contains_nontext`/`must_be_first` — the ordering rule
+  `extend_nodelist` exists for — is exercised on text-versus-tag only, never
+  variable-versus-`{% extends %}`. That is half the domain, and M3 makes it an
+  explicit corpus case (spec §10.4).
+- **The randomised alphabet reaches shape, separators and quoting, not exotic
+  text.** It is now `abc`, space, `\n`, `\t`, both quotes, `U+001C`–`U+001F`,
+  `é` and 🎉 — and the generator now emits a tag whose *argument* is random text,
+  because separators inside a text node never reach `smart_split`, which is the
+  only place the table is read. Measured with the current seed: 196 of 400
+  templates contain such a tag, 307 arguments, 105 carrying a Python-only
+  separator, 71 a quote. The remaining gap is that "non-ASCII" means one Latin-1
+  letter and one astral emoji, so category-C code points — the ones that matter
+  to `py_repr_str` — are not sampled at all.
 
 ## Carried findings
 
@@ -189,9 +259,11 @@ obligation, and the pin-bump checklist item is the drift guard (§10.4).
 1. **The wire form**: nested tuples with native values and no discriminant.
    `bool`-before-`int` decoding is the hazard; is there a third case that needs
    its own wire class?
-2. **`py_repr_str`** — a hand-rolled Python `repr` for two messages. Is the
-   reachable-input argument airtight, and should the `{% resetcycle %}` message
-   route through the host's `repr` instead?
+2. **`py_repr_str`** — answered in round 3: reachable today, wrong at M5/M7,
+   now `debug_assert!`-bounded, with the host-`repr` obligation recorded in
+   §10.4. The open residue is whether the assertion should be on the *argument*
+   or on the *message template*, which is M5's to settle when the message is
+   actually built.
 3. **Host-first dispatch order.** It is argued from `add_library`'s
    last-registration-wins semantics; is that the right reading of Django's
    registry at M6?
@@ -199,6 +271,10 @@ obligation, and the pin-bump checklist item is the drift guard (§10.4).
    than wrong; does it make any M2 test vacuous?
 5. **Task 7's randomised pass compares outcomes**, so illegal templates compare as
    failures. Is the alphabet too narrow to reach a real class of divergence?
+   Round 3 asked this and the answer was that it was narrower than it looked:
+   the separators never reached `smart_split` at all. Widened and pinned; the
+   residue is that category-C code points are still unsampled, which is why
+   `py_repr_str`'s divergence had to be found by sweep rather than by the corpus.
 
 Ask for executable findings where you can — a command and its expected output
 rather than prose. Where a finding is about a number, please name the metric; four

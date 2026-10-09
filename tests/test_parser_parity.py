@@ -28,6 +28,7 @@ pinned tree rather than assumed:
 import importlib.util
 import inspect
 import random
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -219,6 +220,39 @@ class RandomisedParityTests(unittest.TestCase):
             outcomes["ok"],
             RANDOM_CASES,
             f"the generator barely produced successful parses: {outcomes}",
+        )
+
+    def test_the_generator_reaches_the_splitting_path(self):
+        """The randomised pass must exercise `smart_split`, not only text nodes.
+
+        `RANDOM_ALPHABET` carries U+001C..U+001F because Python's `str.isspace()`
+        accepts them and Rust's `char::is_whitespace()` does not — the M1
+        divergence. That table is read in `smart_split`, so separators inside a
+        *text node* prove nothing; they have to land in a tag argument. Measured
+        with the current seed: 400 templates, 196 containing an
+        `{% autoescape %}` tag, 307 arguments, 105 of them carrying a
+        Python-only separator, 71 a quote. The bounds below are floors, not the
+        measurements, so widening the alphabet or the tag set does not have to
+        update them — but dropping the argument path silently does.
+        """
+        rng = random.Random(RANDOM_SEED)
+        arguments = []
+        for _ in range(RANDOM_CASES):
+            source = random_template(rng)
+            for match in re.finditer(r"\{% autoescape (.*?) %\}", source, re.S):
+                arguments.append(match.group(1))
+
+        self.assertGreater(len(arguments), 100, "no tag arguments were generated")
+        self.assertGreater(
+            sum(1 for a in arguments if any(c in a for c in "\u001c\u001d\u001e\u001f")),
+            10,
+            "no argument carried a Python-only separator, so the M1 divergence "
+            "is not being exercised where it is read",
+        )
+        self.assertGreater(
+            sum(1 for a in arguments if "'" in a or '"' in a),
+            5,
+            "no argument carried a quote, so `smart_split`'s quoting arm is idle",
         )
 
 

@@ -98,7 +98,13 @@ RANDOM_CASES = 400
 # No `{`, `}`, `%` or `#`, so no random text accidentally forms a tag. What the
 # generator is for is *shape*: nesting depth, sibling order, and which nodelists
 # end up holding non-text nodes.
-RANDOM_ALPHABET = "abc \n\t'\"é🎉"
+#
+# U+001C..U+001F are here because Python's `str.isspace()` accepts them and
+# Rust's `char::is_whitespace()` does not, which is the M1 divergence the parity
+# suite exists to catch; `é` and 🎉 keep non-ASCII in the text, and the quote
+# characters keep quoting in play. All four separators, not one, because a
+# boundary fixed for U+001C could still be wrong for U+001D..U+001F.
+RANDOM_ALPHABET = "abc \n\t'\"\u001c\u001d\u001e\u001fé🎉"
 
 INLINE_TAGS = [
     "{% csrf_token %}",
@@ -122,15 +128,38 @@ def random_text(rng):
     return "".join(rng.choice(RANDOM_ALPHABET) for _ in range(rng.randint(0, 8)))
 
 
+def random_tag_with_argument(rng):
+    """A tag whose *argument* is random text.
+
+    Without this, `RANDOM_ALPHABET` only ever reaches text nodes, and the
+    separator table that M1 got wrong is exercised on the one path where it does
+    not matter. The table bites in `smart_split`, so the argument has to be a tag
+    argument for the alphabet to be worth widening.
+
+    `{% autoescape %}` is the M2 tag with exactly one argument, so a
+    disagreement here is a parser bug rather than a milestone boundary. Measured
+    on the pinned tree: Python's `re` `\\s` and `str.isspace()` are the same 29
+    code points, so `x<U+001C>on` splits into two arguments for Django and must
+    for us; `%`, `{`, `}` and `#` are absent from the alphabet, so the random
+    text cannot terminate the tag early, while `'` and `"` stay in play and make
+    quoting — including unbalanced quoting, which `smart_split` handles by
+    failing to match the quoted alternative rather than raising — part of the
+    input space.
+    """
+    return "{% autoescape " + random_text(rng) + " %}x{% endautoescape %}"
+
+
 def random_piece(rng, depth):
     if depth >= 3:
         return random_text(rng)
 
     roll = rng.random()
-    if roll < 0.45:
+    if roll < 0.4:
         return random_text(rng)
-    if roll < 0.7:
+    if roll < 0.62:
         return rng.choice(INLINE_TAGS)
+    if roll < 0.78:
+        return random_tag_with_argument(rng)
 
     opening, closing = rng.choice(BLOCK_TAGS)
     return opening + random_piece(rng, depth + 1) + closing

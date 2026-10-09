@@ -127,18 +127,43 @@ fn strip_first_and_last(s: &str) -> String {
 
 /// Python's `repr()` for a `str`, as a `"%r"` interpolation applies it.
 ///
-/// Two Django messages interpolate with `%r`: `{% resetcycle %}`'s command name
-/// and `{% templatetag %}`'s list of arguments. Both are ASCII identifiers, and
-/// for those this is exact — Python chooses `'` unless the string contains `'`
-/// and no `"`, then escapes backslashes, the chosen quote, and the standard
-/// control escapes as `\xNN` / `\uNNNN` / `\UNNNNNNNN`. Printable non-ASCII is
-/// passed through, which is also what Python 3 does.
+/// Python's `repr()` of a string, for the two Django messages that interpolate
+/// with `%r`: `{% resetcycle %}`'s tag name and `{% templatetag %}`'s argument
+/// list. Python chooses `'` unless the string contains `'` and no `"`, then
+/// escapes backslashes, the chosen quote, and the standard control escapes as
+/// `\xNN` / `\uNNNN` / `\UNNNNNNNN`.
 ///
-/// Where it is *not* exact is any character Python classifies as non-printable
-/// by Unicode category, or a surrogate; nothing on this path can produce one,
-/// and the alternative — a Python `repr` — would mean a call back into the host
-/// from inside a compile function.
+/// **Exact on ASCII, and enforced as such.** The boundary is *not* "printable
+/// non-ASCII passes through": Python escapes a character when
+/// `Py_UNICODE_ISPRINTABLE` is false, which covers every non-ASCII category-C
+/// code point (Cf, Cs, Co, Cn) plus Zl, Zp and Zs. `char::is_control()` is Cc
+/// only, so this function emits those raw where Django escapes them. Measured
+/// on the pinned tree — `U+00AD` is Cf, and `option` is a live argument slot:
+///
+/// ```text
+/// >>> Template('{% include "x" ­option %}')
+/// TemplateSyntaxError: Unknown argument for 'include' tag: '\xadoption'.
+/// ```
+///
+/// The same slot exists at M5 in `{% with %}`'s `remaining_bits[0]`
+/// (`defaulttags.py:1683`): `{% with a=1 foo­bar %}` reports
+/// `'with' received an invalid token: 'foo\xadbar'`.
+///
+/// Both M2 call sites are ASCII *by construction*, which is why the assertion
+/// below holds and not by accident: `args[0]` is the tag name dispatch matched
+/// against the registry, and `TEMPLATETAG_ARGUMENTS` is a constant. When M5 and
+/// M7 wire user text into these messages they must route them through the
+/// host's `repr` rather than widen this function (design spec §10.4) — and this
+/// assertion is what makes that a decision someone has to make rather than a
+/// silently wrong message.
 fn py_repr_str(s: &str) -> String {
+    debug_assert!(
+        s.is_ascii(),
+        "py_repr_str is exact for ASCII only: Python's repr also escapes \
+         non-printable non-ASCII (Cf/Cs/Co/Cn/Zl/Zp/Zs), which `is_control` \
+         does not cover. Route {s:?} through the host's repr; do not widen here.",
+    );
+
     let quote = if s.contains('\'') && !s.contains('"') {
         '"'
     } else {
@@ -1022,11 +1047,27 @@ mod tests {
         assert_eq!(py_repr_str("a\\b"), "'a\\\\b'");
         assert_eq!(py_repr_str("a\nb\tc\rd"), "'a\\nb\\tc\\rd'");
         assert_eq!(py_repr_str("\u{0}"), "'\\x00'");
-        assert_eq!(py_repr_str("héllo"), "'héllo'");
+        assert_eq!(py_repr_str("\u{7f}"), "'\\x7f'");
         assert_eq!(
             py_list_repr(&["openblock", "closeblock"]),
             "['openblock', 'closeblock']",
         );
+    }
+
+    #[test]
+    #[cfg_attr(not(debug_assertions), ignore = "the guard is a debug_assert")]
+    #[should_panic(expected = "py_repr_str is exact for ASCII only")]
+    fn python_repr_refuses_the_inputs_it_is_not_exact_for() {
+        // This replaced an `assert_eq!(py_repr_str("héllo"), "'héllo'")` test,
+        // which pinned behaviour nothing can reach and read as "this function is
+        // a general repr" to the next caller. `héllo` is *not* the divergence —
+        // printable non-ASCII passes through correctly in Python 3 too — so the
+        // old test would have passed while the function stayed wrong for every
+        // non-printable non-ASCII code point. The constraint now fails loudly
+        // instead: M5's `{% with a=1 foo\u{ad}bar %}` and M7's
+        // `{% include "x" \u{ad}option %}` trip this the moment they are wired
+        // in, rather than emitting a message Django does not emit.
+        py_repr_str("héllo");
     }
 
     #[test]
