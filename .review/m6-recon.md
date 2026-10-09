@@ -304,9 +304,10 @@ since the first file finished:
 | `363140f` | `python/django_rust_templates/_impl/parser.py` | `base.py:514`, `base.py:697-701`, `base.py:771-774`, `base.py:804-810`, `defaulttags.py:323`, `defaulttags.py:909-911`, `engine.py:194`, `smartif.py:115-116` | 8 read; **3 wrong** (`697-701` is inside `filter_raw_string`, a regex — `compile_filter`'s quoted `return` is 676; `771-774` and `804-810` each end one line past the construct they name) — fixed in `1546c36`. The other five are right, and `697-701` was cited from **two** files |
 | `02348ff` | `crates/template-core/src/filters/urlize.rs` | `defaultfilters.py:493`, `html.py:492` | 2 read; **0 wrong** — both had just been read in context by the naming pass that rewrote the sentences citing them |
 | `3f5a7fa` | `crates/template-core/src/parser/tags/regroup.rs` | `base.py:75`, `defaulttags.py:1352-1419` | 2 read; **1 wrong** (`1352-1419` ends two blank lines past `regroup`, whose last statement is 1417) — fixed in `061990a`. `base.py:75` is `VARIABLE_ATTRIBUTE_SEPARATOR = "."`, right |
+| `436747d` + `9eb488d` | `crates/template-core/src/parser/tags/url.rs` | *none entered* | **0 rows read, 0 wrong** — the first batch that stranded nothing at all, and the mechanism is worth keeping. `url.rs`'s five rows were all **quoted** by the naming pass, and a quoted row is never in the stranded bucket; the one unquoted row it had (`defaulttags.py:1514-1586`) was pruned by the correction commit (it is now `1514-1584`) before it could enter. So this batch neither confirms nor refutes the "clean batch" prediction — it never reached the list |
 
 Twenty-seven rows have passed through; eleven were wrong or cited for the wrong
-line. Seven were wrong in a *span's* end (`base.py:959-1029` ends on a blank
+line. (A seventh batch, `url.rs`, stranded none — see the table.) Seven were wrong in a *span's* end (`base.py:959-1029` ends on a blank
 line, `:963-995` runs past the arms it claims, `:999-1029` misses two of its
 three branches, `html.py:412-415` is a neighbouring `@cached_property`,
 `base.py:771-774` / `base.py:804-810` each end one statement past the construct
@@ -325,13 +326,49 @@ cleanup is done.
 
 **The list is not the only instrument, and the naming pass has one of its own.**
 Naming a file forces each sentence citing it to be read in context, which
-surfaces wrong *counts* — not anchors, so no bucket holds them and no check
-sees them. Two so far: `parser.py:385` said the render path reads
-`context.template.engine` "in five places" and then enumerated six (fixed in
-`1546c36`), and `urlize.rs:54-56` said `handle_word` uses `safe_input` "in
-exactly four places: the two `if autoescape and not safe_input:` guards … and
-the two … branches" when the tree has one guard and two branches (fixed in
-`cfa14e1`). Both were held back from their naming commits, because a naming
-commit never moves a number. Neither is reachable from the stranded list: the
-lines were cited with a file name already, so the pass that caught them is the
-one that rewrote the line beside them, not the one that requotes a row.
+surfaces claims no bucket holds and no check sees. Three so far, all counts:
+
+- `parser.py:385` said the render path reads `context.template.engine` "in five
+  places" and then enumerated six (fixed in `1546c36`).
+- `urlize.rs:54-56` said `handle_word` uses `safe_input` "in exactly four
+  places: the two `if autoescape and not safe_input:` guards … and the two …
+  branches" when the tree has one guard and two branches (fixed in `cfa14e1`).
+- `defaultfilters.py:417-430`, "the **three** padding filters" — the span held
+  two, because it stopped before `center`'s decorator at 431 (`ljust` is
+  417-421, `rjust` 424-428, `center` 431-438; the corrected row ends at 438).
+  This one is the useful case, because the *count* was the half that needed no
+  line measured: a sentence that says three and a span that holds two disagree
+  on their face. It is checked in as `6d124dc`, and until now it was recorded
+  only in that commit message, under no heading that would lead anyone back to
+  it.
+
+All three were held back from their naming commits, because a naming commit
+never moves a number. None is reachable from the stranded list: the lines
+already named a file, so the pass that caught them is the one that rewrote the
+line beside them, not the one that requotes a row.
+
+The class has a searchable signature — a number word next to an enumeration of
+Django lines — so it is rule-findable, like the relative-line grep, and it has
+already produced three without being run as a sweep.
+
+**Naming a file also reads its *numbers*, and that found four more.** `url.rs`'s
+nine shorthands were all into `defaulttags.py`, and reading each claim against
+the tree turned up four wrong ones on lines the naming pass was rewriting
+(corrected in `9eb488d`):
+
+- `defaulttags.py:1514-1586` -> `1514-1584` — two blank lines past the function;
+- `:1568-1571` -> `1570-1572` — the quoted `if` is 1570 and the strip it claims
+  is `bits = bits[:-2]` at 1572, outside a span that opened on `asvar = None`;
+- `:1581` -> `1579` — `if name:` is 1579, and 1581 is `else:`;
+- `:1585` -> `1584` — 1585 is a blank line and the passing is the return at 1584.
+
+Two of those four are the same shape twice over, and they are the shape this
+recon keeps meeting: **a span that ends on a line which does not carry its
+claim.** But this batch produced a mechanical signal the earlier ones did not:
+the manifest had *already recorded the symptom*. `defaulttags.py:1514-1586` was
+an **unquoted** row — no snippet — and it had to be, because a blank end line
+carries no text a row can assert. So an unquoted row is worth reading as a
+signal in its own right: it may mean nobody quoted it, or it may mean the span
+ends where nothing can be quoted. The second reading is a defect. (`--check`
+still passes on such a row, because it only asks whether *some* line inside the
+span exists.)
