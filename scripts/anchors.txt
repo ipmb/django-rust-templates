@@ -402,13 +402,12 @@ html.py:210-229	django/utils/html.py	210	229	-	-
 html.py:210-232	django/utils/html.py	210	232	-	-
 html.py:211-229	django/utils/html.py	211	229	-	-
 html.py:214	django/utils/html.py	214	-	for long_open_tag in long_open_tag_without_closing_re.finditer(value):	-
+html.py:221-222	django/utils/html.py	221	222	if strip_tags_depth >= MAX_STRIP_TAGS_DEPTH:	raise SuspiciousOperation
 html.py:222	django/utils/html.py	222	-	raise SuspiciousOperation	-
-html.py:246	django/utils/html.py	246	-	-	-
 html.py:319	django/utils/html.py	319	-	safe_input = isinstance(text, SafeData)	-
 html.py:363-366	django/utils/html.py	363	366	settings.URLIZE_ASSUME_HTTPS	-
 html.py:383	django/utils/html.py	383	-	nofollow_attr = ""	-
-html.py:407-410	django/utils/html.py	407	410	"%s…" % x[: max(0, limit - 1)]	-
-html.py:412-415	django/utils/html.py	412	415	-	-
+html.py:407-410	django/utils/html.py	407	410	def trim_url(self, x, *, limit):	return "%s…" % x[: max(0, limit - 1)]
 html.py:492	django/utils/html.py	492	-	-	-
 html.py:496-499	django/utils/html.py	496	499	def urlize(text, trim_url_limit=None, nofollow=False, autoescape=False):	-
 django/utils/html.py:502-507	django/utils/html.py	502	507	avoid_wrapping	-

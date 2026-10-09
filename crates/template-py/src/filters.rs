@@ -229,7 +229,7 @@ impl<'py> PyFilterHost<'py> {
     /// existed:
     ///
     /// * **`SuspiciousOperation`**, raised by `strip_tags`'s depth limit
-    ///   (`html.py:246`) and by nothing in `builtins` — the corpus row wave B
+    ///   (`html.py:221-222`) and by nothing in `builtins` — the corpus row wave B
     ///   lands for `striptags` compares the class, so name-only reconstruction
     ///   fails it;
     /// * **a class of the caller's own**, which is the wider half: `str(v)` is
@@ -899,7 +899,7 @@ impl FilterHost for PyFilterHost<'_> {
             let kwargs = PyDict::new(py);
             // `trim_url_limit` rebuilt as a Python int rather than narrowed on
             // this side: `trim_url` compares it against a length **and slices
-            // with it** (`html.py:412-415`), so a negative sentinel and a literal
+            // with it** (`html.py:407-410`), so a negative sentinel and a literal
             // too large for any length are both answers Django gives — measured
             // through `{{ x|urlizetrunc:… }}`, `-1` is `'…'` and a 30-digit
             // literal truncates nothing. `Big` holds canonical decimal text by

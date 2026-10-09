@@ -3914,7 +3914,7 @@ CASES: list[dict] = [
     },
     # `urlizetrunc`, on a URL long enough to truncate at every limit below. The
     # link is always `<a href="https://example.com/very/long/path"
-    # rel="nofollow">…</a>`; `trim_url` (`html.py:412-415`) is what decides the
+    # rel="nofollow">…</a>`; `trim_url` (`html.py:407-410`) is what decides the
     # text between the tags.
     {
         "name": "urlizetrunc/truncates-at-five",
