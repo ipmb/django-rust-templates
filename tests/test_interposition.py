@@ -639,6 +639,48 @@ class ModuleInterpositionTests(unittest.TestCase):
         ):
             Engine(app_dirs=True, loaders=["django.template.loaders.filesystem.Loader"])
 
+    def test_the_utils_zero_is_a_measurement_and_not_a_silence(self):
+        """A zero is evidence only if the same instrument reports non-zero nearby.
+
+        ``COMPARED_PATH['utils.py']`` is ``[]``, and an empty pin is the one kind
+        of pin a *broken instrument* also produces: if the wrapper never fired,
+        every measured set would be empty and the empty ones would agree with it.
+        The failure to fear for a claim of the form "this count is zero" is
+        therefore the instrument reporting zero for **everything**.
+
+        The guard already covers that globally —
+        ``test_the_compared_path_is_the_measured_one`` re-measures ``base.py``'s
+        twenty-eight functions in the same pass, so a globally dead instrument
+        fails there. This row adds the same guarantee *locally*, beside the claim
+        it underwrites, because "the instrument fires, and it did not fire here"
+        is one statement and the two halves should not be able to drift apart.
+
+        The control this **replaces** was instrumenting the *pinned* copy of a
+        module and asserting zero. That refutes a different risk — an instrument
+        that counts by name rather than by identity — and it is a fine locality
+        check, but it cannot refute a silent instrument, because a module the
+        harness never imports is silent either way.
+
+        ``engine`` is the positive half rather than ``base`` or ``defaulttags``
+        because it is entered on every source through the same ``django_parse``,
+        so the two halves are one call apart rather than one corpus apart.
+        """
+        import django.template.engine as engine
+        import django.template.utils as utils
+
+        from tests.compared_path import instrumented
+        from tests.test_parser_parity import django_parse
+
+        with instrumented(engine) as positive:
+            django_parse("{{ x }}")
+        self.assertGreater(
+            sum(positive.values()), 0, "the instrument reports nothing at all"
+        )
+
+        with instrumented(utils) as counts:
+            django_parse("{{ x }}")
+        self.assertEqual(sum(counts.values()), 0)
+
 
 class ShadowingTests(unittest.TestCase):
     """Which ``_impl`` files wear a real module's name, and that each was meant.

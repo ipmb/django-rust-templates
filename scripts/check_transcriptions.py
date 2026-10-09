@@ -176,6 +176,17 @@ COMPARED_PATH = {
     # which interposes all nine M10 files verbatim in a scratch universe and
     # runs both corpora through `django_parse`; re-measured live on every unit
     # run by `test_the_compared_path_is_the_measured_one`.
+    #
+    # **Which harness, because the tree has two and they differ in exactly the
+    # dimension a timing premise is about.** This is measured through
+    # `django_parse`, the *parity* harness (`test_parser_parity.py:108`), which
+    # builds a fresh `Engine` per call. The *error* harness
+    # (`test_parser_errors.py:63`) holds `_ENGINE = Engine(libraries=LIBRARIES)`
+    # at module level, built at import — so a premise about when the Engine is
+    # constructed is true there and false here. The route argument above does
+    # not transfer either: a module reached only on an error path would need its
+    # own measurement. Naming the harness is the difference between a premise
+    # that can be checked and one that merely sounds right.
     "utils.py": [],
     # 3 functions, spans 31-155 of 309. The parity harness is a *parsing*
     # harness, and `Context` is a rendering object — so the reach here is not
