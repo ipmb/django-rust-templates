@@ -284,6 +284,7 @@ defaultfilters.py:990-996	django/template/defaultfilters.py	990	996	def pprint(v
 defaultfilters.py:996	django/template/defaultfilters.py	996	-	"Error in formatting: %s: %s" % (e.__class__.__name__, e)	-
 defaulttags.py:97	django/template/defaulttags.py	97	-	-	-
 defaulttags.py:106-112	django/template/defaulttags.py	106	112	# First time the node is rendered in template	if self.silent:
+defaulttags.py:176-179	django/template/defaulttags.py	176	179	if nodelist_empty is None:	self.nodelist_empty = nodelist_empty
 defaulttags.py:262	django/template/defaulttags.py	262	-	-	-
 defaulttags.py:265	django/template/defaulttags.py	265	-	self._varlist = varlist	-
 defaulttags.py:308-309	django/template/defaulttags.py	308	309	def __init__(self, conditions_nodelists):	self.conditions_nodelists = conditions_nodelists
@@ -314,8 +315,13 @@ defaulttags.py:724-757	django/template/defaulttags.py	724	757	-	-
 defaulttags.py:744	django/template/defaulttags.py	744	-	_, rest = token.contents.split(None, 1)	-
 defaulttags.py:745	django/template/defaulttags.py	745	-	filter_expr = parser.compile_filter("var|%s" % (rest))	-
 defaulttags.py:759-805	django/template/defaulttags.py	759	805	-	-
-defaulttags.py:807-931	django/template/defaulttags.py	807	931	do_for	-
+defaulttags.py:807-906	django/template/defaulttags.py	807	906	def do_for(parser, token):	return ForNode(loopvars, sequence, is_reversed, nodelist_loop, nodelist_empty)
+defaulttags.py:877	django/template/defaulttags.py	877	-	is_reversed = bits[-1] == "reversed"	-
+defaulttags.py:878	django/template/defaulttags.py	878	-	in_index = -3 if is_reversed else -2	-
+defaulttags.py:885	django/template/defaulttags.py	885	-	invalid_chars = frozenset((" ", '"', "'", FILTER_SEPARATOR))	-
 defaulttags.py:886	django/template/defaulttags.py	886	-	loopvars = re.split(r" *, *", " ".join(bits[1:in_index]))	-
+defaulttags.py:888	django/template/defaulttags.py	888	-	if not var or not invalid_chars.isdisjoint(var):	-
+defaulttags.py:906	django/template/defaulttags.py	906	-	return ForNode(loopvars, sequence, is_reversed, nodelist_loop, nodelist_empty)	-
 defaulttags.py:909-918	django/template/defaulttags.py	909	918	class TemplateLiteral(Literal):	return self.value.resolve(context, ignore_failures=True)
 defaulttags.py:909-911	django/template/defaulttags.py	909	911	-	-
 defaulttags.py:914-915	django/template/defaulttags.py	914	915	-	-

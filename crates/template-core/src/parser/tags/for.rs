@@ -1,4 +1,4 @@
-//! `{% for %}` — `defaulttags.do_for` (`defaulttags.py:807-931`).
+//! `{% for %}` — `defaulttags.do_for` (`defaulttags.py:807-906`).
 //!
 //! # Three checks, in Django's order, each on the raw `token.contents`
 //!
@@ -22,36 +22,37 @@
 //!
 //! # `in_index` is counted from the end, and `reversed` is a single bit
 //!
-//! `is_reversed = bits[-1] == "reversed"` (`:869`) and `in_index = -3 if
-//! is_reversed else -2` (`:870`). Reading from the *end* is what lets the
-//! sequence be a lone bit and the loop variables be everything between `for` and
-//! `in`; there is no scan for the first `in`. `{% for x in y %}` and
-//! `{% for x y in z %}` differ only in the loop-variable slice, and the second
-//! is rejected by check 3, not by check 2.
+//! `is_reversed = bits[-1] == "reversed"` (`defaulttags.py:877`) and
+//! `in_index = -3 if is_reversed else -2` (`defaulttags.py:878`). Reading from
+//! the *end* is what lets the sequence be a lone bit and the loop variables be
+//! everything between `for` and `in`; there is no scan for the first `in`.
+//! `{% for x in y %}` and `{% for x y in z %}` differ only in the loop-variable
+//! slice, and the second is rejected by check 3, not by check 2.
 //!
 //! # The loop variables come from `re.split`, through a join
 //!
-//! `re.split(r" *, *", " ".join(bits[1:in_index]))` (`:877`) — the bits are
-//! rejoined with **single** spaces and then split on a comma with any number of
-//! spaces around it. That is why `{% for a , b in y %}`, `{% for a, b in y %}`
-//! and `{% for a,b in y %}` all yield `["a", "b"]` (measured), and why
-//! `{% for a b in y %}` (no comma at all) yields the *single* loop variable
-//! `"a b"`, which check 3 then rejects for its space.
+//! `re.split(r" *, *", " ".join(bits[1:in_index]))` (`defaulttags.py:886`) — the
+//! bits are rejoined with **single** spaces and then split on a comma with any
+//! number of spaces around it. That is why `{% for a , b in y %}`,
+//! `{% for a, b in y %}` and `{% for a,b in y %}` all yield `["a", "b"]`
+//! (measured), and why `{% for a b in y %}` (no comma at all) yields the
+//! *single* loop variable `"a b"`, which check 3 then rejects for its space.
 //!
 //! # The invalid characters are `space`, both quotes, and `|`
 //!
-//! `frozenset((" ", '"', "'", FILTER_SEPARATOR))` (`:875`), tested with
-//! `not invalid_chars.isdisjoint(var)` — so it fires on any *single* character,
-//! and on an empty variable. `FILTER_SEPARATOR` is `"|"` (`base.py`), so
-//! `{% for a|b in y %}` is invalid rather than a filter to compile.
+//! `frozenset((" ", '"', "'", FILTER_SEPARATOR))` (`defaulttags.py:885`), tested
+//! with `not invalid_chars.isdisjoint(var)` — so it fires on any *single*
+//! character, and on an empty variable. `FILTER_SEPARATOR` is `"|"` (`base.py`),
+//! so `{% for a|b in y %}` is invalid rather than a filter to compile.
 //!
 //! # `nodelist_empty` is absent as `None`, and observable as an empty `NodeList`
 //!
-//! `ForNode(..., nodelist_empty=None)` (`:930`) and `ForNode.__init__` replaces
-//! `None` with a fresh `NodeList()` (`:177-180`), so the attribute is an empty
-//! nodelist either way. Emitting the empty nodelist keeps the descriptor's shape
-//! fixed across the two paths and produces the same object; the parity harness
-//! compares `vars(node)` and cannot tell them apart.
+//! `ForNode(..., nodelist_empty=None)` (`defaulttags.py:906`) and
+//! `ForNode.__init__` replaces `None` with a fresh `NodeList()`
+//! (`defaulttags.py:176-179`), so the attribute is an empty nodelist either way.
+//! Emitting the empty nodelist keeps the descriptor's shape fixed across the two
+//! paths and produces the same object; the parity harness compares `vars(node)`
+//! and cannot tell them apart.
 
 use std::sync::OnceLock;
 
@@ -93,7 +94,7 @@ fn split_loopvars(bits: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// `not var or not invalid_chars.isdisjoint(var)` (`:878-879`).
+/// `not var or not invalid_chars.isdisjoint(var)` (`defaulttags.py:888`).
 ///
 /// `isdisjoint` is *false* when the two share any character, so the condition is
 /// "empty, **or** holds at least one of the four forbidden characters".
@@ -218,8 +219,8 @@ mod tests {
 
     #[test]
     fn every_comma_spelling_produces_the_same_loop_variables() {
-        // The join-then-split (`:877`): measured on the pinned tree, all three
-        // spellings give `["a", "b"]`.
+        // The join-then-split (`defaulttags.py:886`): measured on the pinned
+        // tree, all three spellings give `["a", "b"]`.
         for source in [
             "{% for a, b in y %}{% endfor %}",
             "{% for a,b in y %}{% endfor %}",
