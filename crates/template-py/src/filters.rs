@@ -1051,11 +1051,11 @@ impl FilterHost for PyFilterHost<'_> {
         outcome.map_err(|e| self.host_error("localtime", e))
     }
 
-    fn date_format(&self, value: &Value, format: &str) -> Result<String, Error> {
+    fn date_format(&self, value: &Value, format: Option<&str>) -> Result<String, Error> {
         self.formats_text("date_format", value, format)
     }
 
-    fn time_format(&self, value: &Value, format: &str) -> Result<String, Error> {
+    fn time_format(&self, value: &Value, format: Option<&str>) -> Result<String, Error> {
         self.formats_text("time_format", value, format)
     }
 
@@ -1414,10 +1414,15 @@ impl PyFilterHost<'_> {
         &self,
         operation: &'static str,
         value: &Value,
-        format: &str,
+        format: Option<&str>,
     ) -> Result<String, Error> {
         let py = self.py;
         let outcome = (|| {
+            // `None` crosses as Python's own `None`, which is the point: the
+            // default is `get_format(format or "DATE_FORMAT")` *inside* the
+            // callee, and `settings.DATE_FORMAT` is a different string from
+            // `get_format("DATE_FORMAT")` in any language with a format module.
+            // Resolving it here would be the seam computing what Django computes.
             let formatted = py
                 .import("django.utils.formats")?
                 .getattr(operation)?

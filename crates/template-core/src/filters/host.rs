@@ -545,13 +545,47 @@ pub trait FilterHost {
 
     // --- locale, language and the clock -------------------------------------
     /// `django.utils.timezone.template_localtime(value, use_tz=…)` — `date` and
-    /// `time` (`expects_localtime`), so this is `settings.USE_TZ` and the active
-    /// timezone.
+    /// `time` (`expects_localtime`).
+    ///
+    /// **`use_tz` is `Context.use_tz`, not `settings.USE_TZ`**, which is what the
+    /// engine passes (`base.py:811`). The two differ on purpose: `{% localtime
+    /// off %}` flips `context.use_tz`, and that tag is the field's whole reason
+    /// for existing. A host reading `settings.USE_TZ` itself would ignore the tag.
+    ///
+    /// `Context.use_tz` **defaults to `None`**, which `template_localtime` reads
+    /// as "consult the setting" (`timezone.py:155-158`: `settings.USE_TZ if
+    /// use_tz is None else use_tz`). A `bool` cannot spell that, so the caller
+    /// resolves it — safe here **only because the substitution is exactly the
+    /// callee's own expression**, which puts this in the class with
+    /// [`FilterHost::comma_bits`] rather than the `date_format` one below:
+    /// performing the same decision the callee would have performed is not
+    /// reproducing it. It would stop being safe if `None` ever meant anything
+    /// else here.
     fn localtime(&self, value: Value, use_tz: bool) -> Result<Value, Error>;
     /// `django.utils.formats.date_format` — the active language's formats.
-    fn date_format(&self, value: &Value, format: &str) -> Result<String, Error>;
-    /// `django.utils.formats.time_format`, for the same reason.
-    fn time_format(&self, value: &Value, format: &str) -> Result<String, Error>;
+    ///
+    /// **`format` is an `Option` because Django's default is spelled `None`, and
+    /// `None` and the literal `"DATE_FORMAT"` are the *same call*.** The body is
+    /// `dateformat.format(value, get_format(format or "DATE_FORMAT", use_l10n))`
+    /// (`formats.py:155-158`). Measured on `date(2026, 10, 8)` under
+    /// `LANGUAGE_CODE="de"`:
+    ///
+    /// ```text
+    /// settings.DATE_FORMAT                 = 'N j, Y'
+    /// get_format("DATE_FORMAT")            = 'j. F Y'
+    /// date_format(d, None)                 = '8. Oktober 2026'
+    /// date_format(d, "DATE_FORMAT")        = '8. Oktober 2026'
+    /// date_format(d, settings.DATE_FORMAT) = 'Okt. 8, 2026'   <- diverges
+    /// ```
+    ///
+    /// So **`settings.DATE_FORMAT` is not the default**: it is `en-us`'s, and a
+    /// caller that resolved the default itself would be right in `en-us` and
+    /// wrong in every language that has a format module. The sentinel crosses the
+    /// seam unread, which is why this is an `Option` and not a `&str`.
+    fn date_format(&self, value: &Value, format: Option<&str>) -> Result<String, Error>;
+    /// `django.utils.formats.time_format`, the same shape and the same reason:
+    /// its body is `get_format(format or "TIME_FORMAT", use_l10n)`.
+    fn time_format(&self, value: &Value, format: Option<&str>) -> Result<String, Error>;
     /// `django.utils.timesince.timesince`, **with Django's own signature**.
     ///
     /// `timeuntil` is not `timesince` with the arguments swapped: Django's
@@ -576,6 +610,13 @@ pub trait FilterHost {
     /// `gettext` — the active language, and `settings.USE_I18N`.
     fn gettext(&self, text: &str) -> String;
     /// `ngettext` — the same, with the plural form.
+    ///
+    /// `n` is a `u64` where Python's is an arbitrary-precision int. Both call
+    /// sites are `filesizeformat`'s (`:908`, `:925`) and the only non-literal one
+    /// is the `bytes_ < KB` arm, so **`n < 1024`** holds; the other is a literal
+    /// `0`. So the narrowness is bounded by the *call site* rather than by the
+    /// signature, and the bound is written here rather than left to be
+    /// re-derived — a wider caller would have to widen this first.
     fn ngettext(&self, singular: &str, plural: &str, n: u64) -> String;
     /// `Decimal(str(value))`, then Django's `Decimal(str(float(value)))` retry
     /// (`defaultfilters.py:152-159`) — `floatformat`.
@@ -673,7 +714,33 @@ pub trait FilterHost {
     /// Rust compares the answer to zero, which is a `Small(0)` test: an
     /// `IntValue::Big` is canonical decimal text and never zero.
     fn int_modulo(&self, a: &Value, b: &Value) -> Result<IntValue, Error>;
-    /// `django.utils.timezone.now`, for `timeuntil`'s default argument.
+    /// `django.utils.timezone.now`, and **no filter or tag in this engine may
+    /// call it**.
+    ///
+    /// `timeuntil` is the caller the previous doc named, and following it is
+    /// wrong: `timeuntil_filter` is `timesince(d, now, reversed=True)` with `now`
+    /// filled **inside** `timesince` (`timesince.py:66`) from `d.tzinfo`. A
+    /// caller supplying this value instead takes the `elif is_aware(now) and
+    /// is_aware(d)` branch and raises, and the filter catches `(ValueError,
+    /// TypeError)` and answers `""` — so the documented caller turns a real
+    /// answer into an empty string. Measured under `USE_TZ=True` with a naive `d`:
+    ///
+    /// ```text
+    /// timesince(naive, None,           reversed=True) = '2 hours, 59 minutes'
+    /// timesince(naive, timezone.now(), reversed=True) = TypeError: can't subtract
+    ///                                                   offset-naive and offset-aware datetimes
+    /// {{ naive_dt|timeuntil }}                        = '2 hours, 59 minutes'
+    /// ```
+    ///
+    /// **`{% now %}` must not call it either**, which is the half that is easy to
+    /// miss: `NowNode.render` (`defaulttags.py:402-404`) is
+    /// `datetime.now(tz=get_current_timezone() if settings.USE_TZ else None)`, and
+    /// `timezone.now()` is UTC-based. Measured with `TIME_ZONE="Europe/Paris"`,
+    /// `USE_TZ=True`: `{% now "H:i:s" %}` answers `07:28:58` where
+    /// `time_format(timezone.now(), "H:i:s")` answers `05:28:58`. So the tag's
+    /// task needs a *different* method — the engine's current time in the current
+    /// timezone — and this one stays the faithful wrapper of `timezone.now()` it
+    /// is, with no caller in the filter layer and none owed to it.
     fn now(&self) -> Result<Value, Error>;
 }
 
@@ -853,11 +920,11 @@ impl FilterHost for NoFilterHost {
         Err(refused("localtime"))
     }
 
-    fn date_format(&self, _value: &Value, _format: &str) -> Result<String, Error> {
+    fn date_format(&self, _value: &Value, _format: Option<&str>) -> Result<String, Error> {
         Err(refused("date_format"))
     }
 
-    fn time_format(&self, _value: &Value, _format: &str) -> Result<String, Error> {
+    fn time_format(&self, _value: &Value, _format: Option<&str>) -> Result<String, Error> {
         Err(refused("time_format"))
     }
 
@@ -1281,14 +1348,14 @@ impl FilterHost for TestFilterHost {
         self.localtime.clone().ok_or_else(|| refused("localtime"))
     }
 
-    fn date_format(&self, _value: &Value, _format: &str) -> Result<String, Error> {
+    fn date_format(&self, _value: &Value, _format: Option<&str>) -> Result<String, Error> {
         self.record("date_format")?;
         self.date_format
             .clone()
             .ok_or_else(|| refused("date_format"))
     }
 
-    fn time_format(&self, _value: &Value, _format: &str) -> Result<String, Error> {
+    fn time_format(&self, _value: &Value, _format: Option<&str>) -> Result<String, Error> {
         self.record("time_format")?;
         self.time_format
             .clone()
@@ -1481,10 +1548,10 @@ mod tests {
             host.localtime(v.clone(), false)
                 .map(|_| "localtime")
                 .unwrap_err(),
-            host.date_format(&v, "Y")
+            host.date_format(&v, Some("Y"))
                 .map(|_| "date_format")
                 .unwrap_err(),
-            host.time_format(&v, "H")
+            host.time_format(&v, Some("H"))
                 .map(|_| "time_format")
                 .unwrap_err(),
             host.now().map(|_| "now").unwrap_err(),
