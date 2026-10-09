@@ -123,7 +123,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # table, and the staged reading of `has_tag`'s clause for a library tag. Five of
 # the six redden when `django_own_tags()` is reverted to the two-module merge —
 # the second does not, because it measures the registries rather than the table.
-PINNED = 403
+#
+# 403 → 404 is the M12 review's `_our_modules_in` finding, **one** row in
+# `test_shim.py::NamespaceTests`: a namespace that maps to `_impl` itself walks
+# the other namespace's files too. The row stages the tree, so it fails on the
+# unfixed function today rather than only after Task 5 creates
+# `_impl/templatetags/`. `git diff tests/` is `+1` row, one file, no removals.
+PINNED = 404
 
 
 def collected() -> unittest.TestSuite:

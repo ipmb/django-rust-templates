@@ -44,9 +44,12 @@ OWNERS = {
     # the last of its three and moved to `INTERPOSED` in the commit that
     # interposed it. `loader_tags` and `defaultfilters` went the same way, each
     # in its own task's commit.
-    # §10.3's M12 row owns no meter entry: `i18n`, `l10n`, `static`, `tz` and
-    # `cache` are `django/templatetags/*`, outside the namespace the meter
-    # covers. M12 moves tag bodies and retires nothing here.
+    # §10.3's M12 row owns no entry in *this* table: `i18n`, `l10n`, `static`,
+    # `tz` and `cache` are `django/templatetags/*`, which M12 Task 1 gave the
+    # meter as its **second scope** rather than folding into the
+    # `django.template` universe this table partitions. So M12 moves five names
+    # in `unshimmed(scope="django.templatetags")` — 5 to 0 by Tasks 3-6 — and
+    # retires nothing from the 11 this table is counted against.
     #
     # §10.3's M13 row — partials, `library`, `backends`, `response` — plus
     # `loader`, which the row does not name and which §2 had to decide: the

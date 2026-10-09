@@ -10,6 +10,7 @@ Django's fallback.
 import importlib
 import shutil
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -576,6 +577,42 @@ class NamespaceTests(unittest.TestCase):
                 "django.templatetags.static",
                 "django.templatetags.tz",
             ],
+        )
+
+    def test_a_namespaces_files_are_not_everything_under_its_root(self):
+        """The label against the measurement, staged on a real tree.
+
+        `django.template` maps to `_impl` itself, so the bare walk of that root
+        also answers for `django.templatetags` — from the commit that creates
+        `_impl/templatetags/`, `templatetags.i18n` would be reported as ours for
+        `django.template`. Harmless in `unshimmed`, which subtracts, and that is
+        why it needs a row rather than a note: a coverage or ownership check is
+        the obvious next caller, and the docstring said "our files for one
+        namespace" with nothing checking it.
+
+        The tree is staged in a temporary directory rather than waited for,
+        because `_impl/templatetags/` does not exist yet — a row that cannot fail
+        until Task 5 is a row nobody has read. `_IMPL_DIR` is restored in the
+        `finally`, so the shim is untouched outside the block.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "base.py").write_text("")
+            (root / "templatetags").mkdir()
+            (root / "templatetags" / "i18n.py").write_text("")
+            original = _shim._IMPL_DIR
+            _shim._IMPL_DIR = root
+            try:
+                outer = _shim._our_modules_in("django.template")
+                inner = _shim._our_modules_in("django.templatetags")
+            finally:
+                _shim._IMPL_DIR = original
+        self.assertEqual(inner, {"i18n"})
+        self.assertEqual(
+            outer,
+            {"base"},
+            "`django.template`'s files are not everything under `_impl`: a "
+            "nested namespace answers for its own names, from its own root",
         )
 
     def test_serving_a_namespace_does_not_claim_the_whole_of_it(self):

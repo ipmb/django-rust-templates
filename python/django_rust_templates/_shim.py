@@ -650,8 +650,32 @@ def _our_modules_in(scope: str) -> set[str]:
     ``django.templatetags`` files live under ``_impl/templatetags/`` while our
     ``django.template`` files are flat in ``_impl/``, and the two are compared
     against Django's directories for the *same* namespace.
+
+    **A namespace's files are not everything under its root.** ``django.template``
+    maps to ``_impl`` itself, so the bare walk also answers for
+    ``django.templatetags`` — from the commit that creates ``_impl/templatetags/``,
+    ``templatetags.i18n`` would be reported as ours for ``django.template``.
+    Harmless where this is used today, because ``unshimmed`` subtracts and extra
+    names on the right of a subtraction change nothing — which is exactly why it
+    needs saying: the docstring's claim would be wider than the measurement, and
+    a coverage or ownership check is the obvious future caller. Each nested
+    namespace's names are therefore dropped, keyed on the same table the roots
+    come from rather than special-cased on ``"templatetags"``.
     """
-    return _dotted_module_names(_impl_root(scope))
+    root = _impl_root(scope)
+    ours = _dotted_module_names(root)
+    for other in NAMESPACES:
+        if other == scope:
+            continue
+        nested = NAMESPACE_ROOTS[other]
+        other_root = _impl_root(other)
+        if nested and other_root != root and root in other_root.parents:
+            ours = {
+                name
+                for name in ours
+                if name != nested and not name.startswith(nested + ".")
+            }
+    return ours
 
 
 def _impl_root(scope: str) -> Path:
