@@ -16,8 +16,17 @@ use regex::Regex;
 pub fn smart_split(text: &str) -> Vec<&str> {
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
-        Regex::new(r#"((?:[^\s'"]*(?:(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')[^\s'"]*)+)|\S+)"#)
-            .expect("smart_split_re is a valid pattern")
+        // Django writes this pattern with `\s` and `\S`. Python's `\s` is built
+        // on `str.isspace()`, which also matches U+001C-U+001F; the `regex`
+        // crate's is Unicode `White_Space`, which does not. Both are therefore
+        // spelled out as `crate::pyunicode::WS_CLASS` here. Substituting the
+        // class for `\s` and its negation for `\S` is the whole change — the
+        // rest of the pattern is Django's verbatim.
+        let pattern = format!(
+            r#"((?:[^{ws}'"]*(?:(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')[^{ws}'"]*)+)|[^{ws}]+)"#,
+            ws = crate::pyunicode::WS_CLASS,
+        );
+        Regex::new(&pattern).expect("smart_split_re is a valid pattern")
     });
     re.find_iter(text).map(|m| m.as_str()).collect()
 }

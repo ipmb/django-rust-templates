@@ -23,6 +23,21 @@ CORPUS = [
     "{%   if x   %}",
     "{#   note   #}",
     "{{\tx\t}}",
+    # --- the four separators Python counts as whitespace and Rust does not ---
+    # Python's `str.strip()`/`str.split()` follow `str.isspace()`, which is true
+    # for U+001C-U+001F as well as Unicode White_Space. Rust's `str::trim` and
+    # the `regex` crate's `\s` follow White_Space only. Django accepts these;
+    # an implementation using the Rust tables silently trims less and splits
+    # differently, which changes a tag's contents and so its dispatch.
+    "{{ \x1c }}",
+    "{{ \x1f }}",
+    "{% \x1c if x %}",
+    "{% if\x1c x %}",
+    "{% autoescape\x1con %}",
+    "{# \x1d #}",
+    "\x1c{{ x }}",
+    "{{ a\x1c b }}",
+    "\x1c\x1d\x1e\x1f",
     # --- line numbers ---
     "\n\n{{ x }}",
     "a\nb\nc",

@@ -12,6 +12,7 @@ pub mod segments;
 // Also a `use`, so `segments` and `Segment` are in scope below.
 pub use segments::{segments, Segment};
 
+use crate::pyunicode;
 use crate::token::{Token, TokenType};
 
 // Template syntax constants, from django/template/base.py.
@@ -78,7 +79,10 @@ impl<'a> Lexer<'a> {
                 // `[2..len - 2]` strips `{%` and `%}`. Safe on byte indices
                 // because both delimiters are ASCII, so both edges are
                 // character boundaries.
-                let content = text[2..text.len() - 2].trim();
+                // `pyunicode::strip`, not `str::trim`: Django writes
+                // `.strip()`, whose table is Python's `str.isspace()` and so
+                // includes U+001C-U+001F. See the `pyunicode` module.
+                let content = pyunicode::strip(&text[2..text.len() - 2]);
 
                 if let Some(expected) = self.verbatim.clone() {
                     if content != expected {
@@ -103,7 +107,7 @@ impl<'a> Lexer<'a> {
             }
 
             if self.verbatim.is_none() {
-                let content = text[2..text.len() - 2].trim().to_string();
+                let content = pyunicode::strip(&text[2..text.len() - 2]).to_string();
                 let token_type = if token_start == VARIABLE_TAG_START {
                     TokenType::Var
                 } else {

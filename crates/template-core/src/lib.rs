@@ -7,6 +7,7 @@
 
 pub mod lexer;
 pub mod parser;
+pub mod pyunicode;
 pub mod text;
 pub mod token;
 

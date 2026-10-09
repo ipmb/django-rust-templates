@@ -40,13 +40,25 @@ SPLIT_CORPUS = [
     'value|default:"a b"',
     "_(\"outer _('inner') outer\")",
     'x _("a") _("b") y',
+    # `smart_split` is `re.finditer` over a pattern written with `\s`/`\S`.
+    # Python's `\s` is `isspace()`-based and so matches U+001C-U+001F; the
+    # `regex` crate's is White_Space and does not. These pin the difference.
+    "if\x1c x",
+    "a\x1cb",
+    "a \x1f b",
+    "\x1c",
+    " \x1c ",
+    'a "b\x1cc" d',
     "{% if x %}",
 ]
 
 # Pinned so a randomised failure reproduces exactly.
 RANDOM_SEED = 20261008
 RANDOM_CASES = 3000
-RANDOM_ALPHABET = "{}%# \naé🎉"
+# Includes U+001C-U+001F: Python calls those whitespace and Rust does not, so
+# any trimming or splitting that uses the Rust tables diverges only ever on
+# inputs containing one. They belong in the alphabet for that to be reachable.
+RANDOM_ALPHABET = "{}%# \naé🎉\x1c\x1d\x1f"
 RANDOM_MAX_LEN = 40
 
 
