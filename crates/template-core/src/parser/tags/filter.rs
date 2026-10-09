@@ -7,7 +7,7 @@
 //! descriptor's `FilterExpr` is built from `"var|lower"` for
 //! `{% filter lower %}`, and `var` is a name that appears nowhere in the
 //! template. The variable part is what `FilterNode.render` pushes onto the
-//! context as `var` before resolving (`:143`), so the prefix is not cosmetic:
+//! context as `var` before resolving (`:144`), so the prefix is not cosmetic:
 //! change it and the node resolves something else.
 //!
 //! # The refusal, and why it is checked by name
@@ -15,7 +15,7 @@
 //! `escape` and `safe` are refused because a `{% filter %}` block would apply
 //! them to *already-rendered* output, which is what `{% autoescape %}` is for.
 //! Django reads the name off the **compiled function** —
-//! `getattr(func, "_filter_name", None)` (`:746`) — not off the source text, and
+//! `getattr(func, "_filter_name", None)` (`:747`) — not off the source text, and
 //! the distinction is real: a custom library may register the `escape` function
 //! under another name, and Django would still refuse it.
 //!
@@ -68,7 +68,7 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
 
     // Every filter in the chain is checked, and the FIRST offender raises —
     // `{% filter upper|safe %}` reports `safe`, not nothing. The order is
-    // Django's `for func, unused in filter_expr.filters` (`:746-750`), which
+    // Django's `for func, unused in filter_expr.filters` (`:746-752`), which
     // walks the chain as written.
     for call in &filter_expr.filters {
         if call.name == "escape" || call.name == "safe" {
