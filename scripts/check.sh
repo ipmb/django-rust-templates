@@ -94,10 +94,18 @@ if [ "$FAST" -eq 0 ]; then
   "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_python_word_ranges.py" --check
   "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_python_case_fixups.py" --check
 
-  # Not "(rust engine)" until M9 interposes `base` — measured 2026-10-09, this
-  # suite calls `_native` zero times, so the label would assert what the run
-  # does not do. Same correction, and same reason, as `differential.py`'s
-  # output string; the two were the only labels in the repo making the claim.
+  # Not "(rust engine)" — but the reason has changed, and it is now measured
+  # rather than assumed. On 2026-10-09 this suite called `_native` zero times,
+  # which made the label assert what the run did not do. Re-measured on
+  # 2026-10-09 after M9 interposed `base` (instrument:
+  # `.review/m9-measurements/m9_measure_native_calls.py`): 23,263 calls from
+  # 1,176 of the 1,547 tests — `resolve` 10,180; `compile_template`,
+  # `builtin_tag_names` and `builtin_tag_stubs` 4,361 each. So Rust *is* on the
+  # suite's path now, and the reason the label stays is narrower: `lex` is still
+  # reached zero times (`base.Lexer` is Python at M9) and `engine.py` is still
+  # Django's, so "rust engine" would assert more than the run does. The
+  # equivalent claim in `differential.py` no longer has to be taken on trust —
+  # that harness now counts the calls and fails if the shim run reaches none.
   step "django template_tests (shim installed)"
   "$HERE/run_django_suite.sh" template_tests
 fi
