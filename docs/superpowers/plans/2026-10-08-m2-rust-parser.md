@@ -2059,7 +2059,10 @@ fn attr_value_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
     Ok(match value {
         AttrValue::Str(s) => s.as_str().into_pyobject(py)?.into_any().unbind(),
         AttrValue::SafeStr(s) => Py::new(py, SafeStr::new(s.clone()))?.into_any(),
-        AttrValue::Bool(b) => (*b).into_pyobject(py)?.into_any().unbind(),
+        // `bool`'s `IntoPyObject` yields a `Borrowed` (Python's `True`/`False`
+        // are singletons), so it must be owned before `into_any` can consume it:
+        // `(*b).into_pyobject(py)?.into_any()` is a borrowck error (E0507).
+        AttrValue::Bool(b) => (*b).into_pyobject(py)?.to_owned().into_any().unbind(),
         AttrValue::Int(i) => (*i).into_pyobject(py)?.into_any().unbind(),
         AttrValue::None => py.None(),
         AttrValue::Ref(r) => Py::new(py, NodeRef::new(r.0))?.into_any(),
@@ -2117,7 +2120,13 @@ fn nodelist_desc_to_py(py: Python<'_>, nodelist: &NodeListDesc) -> PyResult<Py<P
         py,
         [
             PyTuple::new(py, nodes)?.into_any().unbind(),
-            nodelist.contains_nontext.into_pyobject(py)?.into_any().unbind(),
+            // Same `Borrowed`-needs-owning fix as `attr_value_to_py`'s bool arm.
+            nodelist
+                .contains_nontext
+                .into_pyobject(py)?
+                .to_owned()
+                .into_any()
+                .unbind(),
         ],
     )?
     .into_any()
@@ -2216,13 +2225,24 @@ maturin develop 2>&1 | tail -5
 echo "maturin exit=${PIPESTATUS[0]}"
 .venv/bin/python -c "
 from django_rust_templates import _native
-print(_native.parse('a{% csrf_token %}b'))
+print(_native.parse('a\nb'))
 print(_native.NodeRef(3), _native.SafeStr('x'), _native.ParseError)
 "
 ```
 
-Expected: a nested 2-tuple whose `nodes` element holds a `('TextNode', (('s','a'),),
-(), (...))` entry, then `<NodeRef 3> <SafeStr "x"> <class 'django_rust_templates._native.ParseError'>`.
+Expected: a nested 2-tuple whose `nodes` element holds a `('TextNode', (('s','a\nb'),),
+(), (...))` entry, then `<NodeRef 3> <SafeStr "x"> <class '_native.ParseError'>`.
+
+A tag-based smoke test (`{% csrf_token %}`, `{% spaceless %}` …) does **not**
+work here: `builtin_tag` returns `None` for every name until Task 5 registers the
+nine M2 built-ins (`crates/template-core/src/parser/tags.rs`), so any of them
+fails with "Invalid block tag" at Step 4. Plain text is the only source that
+parses at this point.
+
+`create_exception!(_native, …)` names the module `_native`, not the fully
+qualified `django_rust_templates._native`, so `repr(ParseError)` is
+`<class '_native.ParseError'>`. The class object is still the same one
+`django_rust_templates._native.ParseError` resolves to.
 
 - [ ] **Step 5: Write `python/django_rust_templates/_impl/parser.py`**
 
@@ -2374,6 +2394,7 @@ because the whole point is that the objects produced are Django's — the same
 classes ``isinstance``, ``get_nodes_by_type`` and ``ExtendsNode.render`` test for.
 """
 
+import importlib.util
 import sys
 import unittest
 from pathlib import Path
@@ -2399,9 +2420,23 @@ from django.template.defaulttags import (  # noqa: E402
 from django.utils.safestring import SafeString  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
-from django_rust_templates._impl import parser as materialiser  # noqa: E402
 
-TEXT = ("TextNode", (("s", "hi"),), (), (2, "hi", 1, (0, 2)))
+# Loaded from its file, not as `django_rust_templates._impl.parser`:
+# `_impl/__init__.py` is the shim's `django.template` and imports its own
+# siblings (`from .engine import Engine` …), so importing the `_impl` *package*
+# by its ordinary name executes that file and fails for want of `engine`. This
+# is how the materialiser is reached without installing the shim.
+_MATERIALISER_SPEC = importlib.util.spec_from_file_location(
+    "django_rust_templates._impl.parser",
+    PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "parser.py",
+)
+materialiser = importlib.util.module_from_spec(_MATERIALISER_SPEC)
+sys.modules[_MATERIALISER_SPEC.name] = materialiser
+_MATERIALISER_SPEC.loader.exec_module(materialiser)
+
+# token_type 0 is `TokenType.TEXT`: a TextNode's token is a TEXT token, and
+# `test_the_token_is_a_real_token` asserts exactly that.
+TEXT = ("TextNode", (("s", "hi"),), (), (0, "hi", 1, (0, 2)))
 
 
 def text_desc(contents, token=None):
@@ -2444,8 +2479,14 @@ class MaterialiseTests(unittest.TestCase):
     def test_children_are_built_before_the_parent_and_token_comes_after(self):
         class SpyNode(Node):
             def __init__(self, nodelist):
+                self.received = nodelist
                 self.seen = [type(child).__name__ for child in nodelist]
-                self.token_at_construction = getattr(self, "token", "absent")
+                # `Node.token` is a *class* attribute defaulting to None
+                # (`base.py:1036`), so "not attached yet" reads as None, not as
+                # a missing attribute — `getattr(self, "token", "absent")` would
+                # return None and compare unequal to "absent" on every run,
+                # passing or failing for the wrong reason.
+                self.token_at_construction = getattr(self, "token", None)
 
         materialiser.NODE_CLASSES["SpyNode"] = SpyNode
         self.addCleanup(materialiser.NODE_CLASSES.pop, "SpyNode")
@@ -2453,12 +2494,20 @@ class MaterialiseTests(unittest.TestCase):
         desc = ("SpyNode", (), (("nodelist", ([text_desc("in")], False)),), (2, "spy", 1, None))
         node = materialiser.materialise_node(desc)
 
+        # A real `NodeList`, not a generator or a plain list, and populated
+        # before construction: a lazily-materialised child list fails one of
+        # these, exactly as `ExtendsNode.__init__`'s
+        # `nodelist.get_nodes_by_type(BlockNode)` would at M7.
+        self.assertIsInstance(
+            node.received,
+            NodeList,
+            "the constructor must receive a real NodeList, not a lazy list",
+        )
         self.assertEqual(
             node.seen, ["TextNode"], "the constructor must receive a complete child list"
         )
-        self.assertEqual(
+        self.assertIsNone(
             node.token_at_construction,
-            "absent",
             "token must be attached after construction, not before",
         )
         self.assertEqual(node.token.contents, "spy")
@@ -2487,7 +2536,15 @@ class MaterialiseTests(unittest.TestCase):
 
         desc = ("RefNode", (("thing", _native.NodeRef(7)),), (), None)
         seen = []
-        node = materialiser.materialise_node(desc, resolve_ref=seen.append)
+
+        def resolve(index):
+            seen.append(index)
+            return index
+
+        # Not `resolve_ref=seen.append`: that returns None, so `node.thing`
+        # would be None and the `assertEqual(node.thing, 7)` below could never
+        # pass — the test would fail on a correct implementation.
+        node = materialiser.materialise_node(desc, resolve_ref=resolve)
         self.assertEqual(seen, [7], "the index must reach the resolver unchanged")
         self.assertEqual(node.thing, 7)
 
@@ -2577,8 +2634,10 @@ class ParseToMaterialiseTests(unittest.TestCase):
     def test_debug_positions_cross_the_wire(self):
         # `Lexer` gives no positions, `DebugLexer` does; the shell must be able
         # to reconstruct both, because M9 exposes the two as distinct classes.
+        # `{% debug %}`'s tag token spans characters 0..11 — `DebugLexer` and the
+        # Rust lexer both report `(0, 11)` for it (verified against `.django`).
         debug_node = materialiser.materialise(_native.parse("{% debug %}", debug=True))[0]
-        self.assertEqual(debug_node.token.position, (0, 12))
+        self.assertEqual(debug_node.token.position, (0, 11))
         plain_node = materialiser.materialise(_native.parse("{% debug %}"))[0]
         self.assertIsNone(plain_node.token.position)
 
@@ -2603,7 +2662,23 @@ echo "clippy exit=$?"
 cat /tmp/clippy-m2t4.txt
 ```
 
-Expected: all tests pass, `clippy exit=0`.
+Expected: `clippy exit=0`, and **14 of the 19 tests pass**. The other five
+error with "Invalid block tag … Did you forget to register or load this tag?",
+and that is correct at Task 4 — Task 5 is where the nine M2 built-in tags get
+registered in Rust. Those five, all of which parse a tag through `_native.parse`
+directly, are:
+
+- `test_a_real_tag_produces_its_real_class` (`{% spaceless %}`)
+- `test_verbatim_content_is_safe` (`{% verbatim %}`)
+- `test_an_unterminated_marker_is_a_stop_iteration` (`{% now … %}`)
+- `test_the_wire_form_is_plain_data` (`{% templatetag openblock %}`)
+- `test_debug_positions_cross_the_wire` (`{% debug %}`)
+
+They are written here in full because they belong to this task's materialiser;
+they go green when Task 5 lands the tags, and Step 7's gate is "no *unexpected*
+failure" — the twelve `MaterialiseTests` and the two parse-independent
+`ParseToMaterialiseTests` (`test_text_round_trips`, `test_a_parse_error_carries_a_token`)
+must pass.
 
 Two of these tests are self-checks worth keeping: `test_the_wire_form_is_plain_data`
 walks the whole descriptor and fails on any type outside the documented set, and
