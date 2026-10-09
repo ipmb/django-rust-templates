@@ -587,7 +587,16 @@
       <em>by identity</em> — so a swap that keeps the total at six, a skip that appears, or a
       skip that stops appearing all stop the gate. The line is compared rather than dissected
       because a run may be green and still not this one: an <code>expectedFailure</code> that
-      fails prints <code>OK (expected failures=1)</code> and exits 0.
+      fails prints <code>OK (expected failures=1)</code> and exits 0, and no guard reading an
+      exit status could catch it.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      And it pins the checkout it runs against, before the suite rather than after it. The
+      clone's head is read against the sha <code>django.lock</code> records, and any
+      <code>git status</code> entry — including an untracked file planted in the tree —
+      refuses the run. A transcript cannot tell you the Django it came from was stock, and a
+      deliberately edited test is the one failure that every other check here would report as
+      green.
     </p>
   </section>
 

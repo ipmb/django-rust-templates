@@ -46,10 +46,10 @@ class HealthyRunTests(unittest.TestCase):
 
     def test_a_refusal_names_the_skip_that_is_not_declared(self):
         report = outcome(
-            transcript(skips=HEALTHY + ("template_tests.test_foo.NewTests.test_x",))
+            transcript(skips=HEALTHY + ("template_tests.unregistered_m15.FabricatedTests.test_x",))
         )
         self.assertTrue(
-            any("test_foo.NewTests.test_x" in r for r in report.refusals()),
+            any("unregistered_m15" in r for r in report.refusals()),
             report.refusals(),
         )
 
@@ -68,7 +68,7 @@ class RefusalTests(unittest.TestCase):
 
     def test_a_swapped_skip_that_keeps_the_count_at_six_is_refused(self):
         """§2:31 — a count of 6 is satisfied by a different 6."""
-        swapped = HEALTHY[:-1] + ("template_tests.test_impostor.ImpostorTests.test_x",)
+        swapped = HEALTHY[:-1] + ("template_tests.unregistered_m15.FabricatedTests.test_y",)
         report = outcome(transcript(skips=swapped))
         self.assertTrue(report.refusals())
 
