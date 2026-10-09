@@ -116,13 +116,32 @@ defaultfilters.py:78-83	django/template/defaultfilters.py	78	83	-	-
 defaultfilters.py:85-91	django/template/defaultfilters.py	85	91	-	-
 defaultfilters.py:94-220	django/template/defaultfilters.py	94	220	-	-
 defaultfilters.py:152-159	django/template/defaultfilters.py	152	159	-	-
+defaultfilters.py:153-154	django/template/defaultfilters.py	153	154	str(text)	-
+defaultfilters.py:153	django/template/defaultfilters.py	153	-	str(text)	-
+defaultfilters.py:158-159	django/template/defaultfilters.py	158	159	except (ValueError, InvalidOperation, TypeError):	-
+defaultfilters.py:163	django/template/defaultfilters.py	163	-	return input_val	-
+defaultfilters.py:168-170	django/template/defaultfilters.py	168	170	except TypeError:	-
+defaultfilters.py:177	django/template/defaultfilters.py	177	-	return input_val	-
+defaultfilters.py:180	django/template/defaultfilters.py	180	-	m = int(d) - d	-
+defaultfilters.py:182	django/template/defaultfilters.py	182	-	return input_val	-
 defaultfilters.py:186	django/template/defaultfilters.py	186	-	-	-
+defaultfilters.py:194-205	django/template/defaultfilters.py	194	205	exp = Decimal(1).scaleb(-abs(p))	-
+defaultfilters.py:197	django/template/defaultfilters.py	197	-	len(tupl[1])	-
+defaultfilters.py:200	django/template/defaultfilters.py	200	-	prec = max(getcontext().prec, prec)	-
+defaultfilters.py:205-212	django/template/defaultfilters.py	205	212	sign, digits, exponent = rounded_d.as_tuple()	-
+defaultfilters.py:206	django/template/defaultfilters.py	206	-	[str(digit) for digit in reversed(digits)]	-
+defaultfilters.py:207	django/template/defaultfilters.py	207	-	while len(digits) <= abs(exponent):	-
+defaultfilters.py:210	django/template/defaultfilters.py	210	-	if sign and rounded_d	-
+defaultfilters.py:214	django/template/defaultfilters.py	214	-	formats.number_format(	-
 defaultfilters.py:223-227	django/template/defaultfilters.py	223	227	iriencode	-
+defaultfilters.py:225-227	django/template/defaultfilters.py	225	227	return iri_to_uri(value)	-
 defaultfilters.py:230-244	django/template/defaultfilters.py	230	244	linenumbers	-
 defaultfilters.py:247-251	django/template/defaultfilters.py	247	251	-	-
 defaultfilters.py:254-263	django/template/defaultfilters.py	254	263	make_list	-
 defaultfilters.py:266-274	django/template/defaultfilters.py	266	274	-	-
 defaultfilters.py:277-294	django/template/defaultfilters.py	277	294	stringformat	-
+defaultfilters.py:289	django/template/defaultfilters.py	289	-	isinstance(value, tuple)	-
+defaultfilters.py:292	django/template/defaultfilters.py	292	-	"%" + str(arg)	-
 defaultfilters.py:297-302	django/template/defaultfilters.py	297	302	-	-
 defaultfilters.py:305-313	django/template/defaultfilters.py	305	313	-	-
 defaultfilters.py:316-327	django/template/defaultfilters.py	316	327	truncatechars_html	-
@@ -152,8 +171,10 @@ defaultfilters.py:497-508	django/template/defaultfilters.py	497	508	linebreaksbr
 defaultfilters.py:511-516	django/template/defaultfilters.py	511	516	-	-
 defaultfilters.py:518-525	django/template/defaultfilters.py	518	525	safeseq	-
 defaultfilters.py:528-532	django/template/defaultfilters.py	528	532	striptags	-
+defaultfilters.py:540-575	django/template/defaultfilters.py	540	575	def _property_resolver(arg):	-
 defaultfilters.py:558-570	django/template/defaultfilters.py	558	570	-	-
 defaultfilters.py:578-588	django/template/defaultfilters.py	578	588	-	-
+defaultfilters.py:578-599	django/template/defaultfilters.py	578	599	def dictsort(value, arg):	-
 defaultfilters.py:590-600	django/template/defaultfilters.py	590	600	dictsortreversed	-
 defaultfilters.py:602-608	django/template/defaultfilters.py	602	608	-	-
 defaultfilters.py:611-621	django/template/defaultfilters.py	611	621	str.join(list)	-
@@ -161,6 +182,7 @@ defaultfilters.py:624-630	django/template/defaultfilters.py	624	630	-	-
 defaultfilters.py:633-639	django/template/defaultfilters.py	633	639	-	-
 defaultfilters.py:642-648	django/template/defaultfilters.py	642	648	-	-
 defaultfilters.py:651-665	django/template/defaultfilters.py	651	665	-	-
+defaultfilters.py:651-666	django/template/defaultfilters.py	651	666	@register.filter("slice", is_safe=True)	-
 defaultfilters.py:669-743	django/template/defaultfilters.py	669	743	-	-
 defaultfilters.py:745-754	django/template/defaultfilters.py	745	754	-	-
 defaultfilters.py:757-776	django/template/defaultfilters.py	757	776	get_digit	-
@@ -169,13 +191,22 @@ defaultfilters.py:797-808	django/template/defaultfilters.py	797	808	-	-
 defaultfilters.py:811-821	django/template/defaultfilters.py	811	821	-	-
 defaultfilters.py:812	django/template/defaultfilters.py	812	-	def timesince_filter(value, arg=None):	-
 defaultfilters.py:824-832	django/template/defaultfilters.py	824	832	-	-
+defaultfilters.py:825	django/template/defaultfilters.py	825	-	def timeuntil_filter(value, arg=None):	-
 defaultfilters.py:840-843	django/template/defaultfilters.py	840	843	-	-
 defaultfilters.py:846-851	django/template/defaultfilters.py	846	851	default_if_none	-
 defaultfilters.py:854-858	django/template/defaultfilters.py	854	858	divisibleby	-
 defaultfilters.py:860-891	django/template/defaultfilters.py	860	891	yesno	-
+defaultfilters.py:879	django/template/defaultfilters.py	879	-	bits = arg.split(",")	-
 defaultfilters.py:899-939	django/template/defaultfilters.py	899	939	filesizeformat	-
+defaultfilters.py:905-907	django/template/defaultfilters.py	905	907	bytes_ = int(bytes_)	-
+defaultfilters.py:908	django/template/defaultfilters.py	908	-	value = ngettext("%(size)d byte", "%(size)d bytes", 0) % {"size": 0}	-
+defaultfilters.py:911-912	django/template/defaultfilters.py	911	912	formats.number_format(round(value, 1), 1)	-
+defaultfilters.py:912	django/template/defaultfilters.py	912	-	formats.number_format(round(value, 1), 1)	-
 defaultfilters.py:914-925	django/template/defaultfilters.py	914	925	KB = 1 << 10	value = ngettext("%(size)d byte", "%(size)d bytes", bytes_) % {"size": bytes_}
+defaultfilters.py:925	django/template/defaultfilters.py	925	-	value = ngettext("%(size)d byte", "%(size)d bytes", bytes_) % {"size": bytes_}	-
+defaultfilters.py:927-935	django/template/defaultfilters.py	927	935	gettext("%s KB")	-
 defaultfilters.py:942-981	django/template/defaultfilters.py	942	981	-	-
+defaultfilters.py:942-982	django/template/defaultfilters.py	942	982	def pluralize(value, arg="s"):	-
 defaultfilters.py:965-966	django/template/defaultfilters.py	965	966	if "," not in arg:	arg = "," + arg
 defaultfilters.py:984-987	django/template/defaultfilters.py	984	987	-	-
 defaultfilters.py:990-996	django/template/defaultfilters.py	990	996	-	-
@@ -316,6 +347,7 @@ text.py:36	django/utils/text.py	36	-	\r\n	-
 text.py:193-261	django/utils/text.py	193	261	-	-
 text.py:203-204	django/utils/text.py	203	204	if length <= 0:	return ""
 text.py:205	django/utils/text.py	205	-	-	-
+text.py:220	django/utils/text.py	220	-	if unicodedata.combining(char):	-
 text.py:236	django/utils/text.py	236	-	-	-
 django/utils/text.py:282	django/utils/text.py	282	-	-	-
 text.py:308-310	django/utils/text.py	308	310	def normalize_newlines(text):	return re_newlines.sub("\n", str(text))
@@ -331,6 +363,7 @@ timesince.py:28	django/utils/timesince.py	28	-	-	-
 timesince.py:60-73	django/utils/timesince.py	60	73	now.astimezone(d.tzinfo)	-
 timesince.py:60-70	django/utils/timesince.py	60	70	-	-
 timesince.py:67-68	django/utils/timesince.py	67	68	-	-
+timesince.py:83	django/utils/timesince.py	83	-	total_months = (now.year - d.year) * 12 + (now.month - d.month)	-
 timesince.py:138-143	django/utils/timesince.py	138	143	timeuntil	-
 timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-

@@ -50,7 +50,7 @@ pub struct FilterCall<'a> {
 
 /// The arguments of `django.utils.formats.number_format`
 /// (`formats.py:172`), which is keyword-called from exactly two filters in three
-/// shapes: `defaultfilters.py:186`, `:214` and `:912`.
+/// shapes: `defaultfilters.py:186`, `defaultfilters.py:214` and `defaultfilters.py:912`.
 ///
 /// A struct rather than four positional parameters because
 /// `clippy::type_complexity` has already bitten this project, and because the
@@ -59,7 +59,7 @@ pub struct FilterCall<'a> {
 pub struct NumberFormatArgs<'a> {
     /// The value to format: an `int`, a `float`, or a **string** of digits.
     /// `floatformat`'s second call passes its own assembled decimal text
-    /// (`:214` passes `number`, not `rounded_d`), so this cannot be an `f64`.
+    /// (`defaultfilters.py:214` passes `number`, not `rounded_d`), so this cannot be an `f64`.
     pub value: &'a Value,
     /// Django's `decimal_pos`; `None` is its default.
     pub decimal_pos: Option<i64>,
@@ -111,7 +111,7 @@ impl NestedSequence {
 /// rounds it.
 ///
 /// The handle is a [`Value::Opaque`] rather than a second `str(value)` through
-/// the seam, because the source parses `str(text)` **once** (`:153-154`) and
+/// the seam, because the source parses `str(text)` **once** (`defaultfilters.py:153-154`) and
 /// every later use is the same object — a re-parse would be a second evaluation
 /// of a source-level expression.
 #[derive(Clone, PartialEq, Debug)]
@@ -119,25 +119,26 @@ pub struct ParsedDecimal {
     /// The `Decimal` itself, as an `Opaque`, for
     /// [`FilterHost::decimal_quantize`].
     pub value: Value,
-    /// `str(text)` (`:153`) — the payload of all three `return input_val` arms
-    /// (`:163`, `:177`, `:182`). A plain `str`, and **not** safe.
+    /// `str(text)` (`defaultfilters.py:153`) — the payload of all three `return input_val`
+    /// arms (`defaultfilters.py:163`, `defaultfilters.py:177`, `defaultfilters.py:182`). A
+    /// plain `str`, and **not** safe.
     pub input_val: String,
     /// `d.as_tuple()`'s sign.
     pub sign: bool,
     /// `d.as_tuple()`'s digits, most-significant first, so `digits.len()` is the
-    /// source's `len(tupl[1])` at `:197`.
+    /// source's `len(tupl[1])` at `defaultfilters.py:197`.
     pub digits: Vec<u8>,
     /// `d.as_tuple()`'s exponent, or `None` for the `"F"`/`"n"`/`"N"` a
     /// non-finite `Decimal` reports.
     ///
     /// **`None` is two source arms at once, and both mean `return input_val`**:
-    /// it is the `TypeError` the 200-digit sum catches (`:168-170`) *and* the
-    /// reason `int(d)` raises at `:180` (`OverflowError` for an infinity,
+    /// it is the `TypeError` the 200-digit sum catches (`defaultfilters.py:168-170`) *and* the
+    /// reason `int(d)` raises at `defaultfilters.py:180` (`OverflowError` for an infinity,
     /// `ValueError` or `InvalidOperation` for a NaN). A body tests this once and
     /// never reads [`ParsedDecimal::integral`], which is meaningless for a
     /// non-finite.
     pub exponent: Option<i64>,
-    /// `not (int(d) - d)` — the source's `m` at `:180` — and `false` when that
+    /// `not (int(d) - d)` — the source's `m` at `defaultfilters.py:180` — and `false` when that
     /// raised, which is exactly when `exponent` is `None`.
     ///
     /// **This is the *integral-value* test, not `exponent < 0`.** A whole number
@@ -148,7 +149,7 @@ pub struct ParsedDecimal {
 }
 
 /// [`FilterHost::decimal_parse`]'s answer: the parse, or the `return ""` its
-/// double failure produces (`:158-159`).
+/// double failure produces (`defaultfilters.py:158-159`).
 #[derive(Clone, PartialEq, Debug)]
 pub enum DecimalParse {
     Parsed(ParsedDecimal),
@@ -159,18 +160,18 @@ pub enum DecimalParse {
 }
 
 /// `Decimal.as_tuple()` **after** the quantization, for the Rust-side assembly
-/// (`:205-212`).
+/// (`defaultfilters.py:205-212`).
 #[derive(Clone, PartialEq, Debug)]
 pub struct DecimalTuple {
     pub sign: bool,
-    /// The **digit values**, not a count: `:206` is
+    /// The **digit values**, not a count: `defaultfilters.py:206` is
     /// `[str(digit) for digit in reversed(digits)]`, so the assembly needs the
     /// digits themselves where the parse side needs only `len`.
     pub digits: Vec<u8>,
     /// Always an integer: `quantize` cannot produce a non-finite, and the source
-    /// reads `abs(exponent)` to pad (`:207`).
+    /// reads `abs(exponent)` to pad (`defaultfilters.py:207`).
     pub exponent: i64,
-    /// `bool(rounded_d)` — the second half of `:210`'s `if sign and rounded_d`.
+    /// `bool(rounded_d)` — the second half of `defaultfilters.py:210`'s `if sign and rounded_d`.
     ///
     /// **A separate question from [`ParsedDecimal::integral`], and a separate
     /// field because of it.** `m` is the truthiness of `int(d) - d`, i.e. of the
@@ -196,16 +197,19 @@ pub trait FilterHost {
     /// `str(v)`. `@stringfilter`'s wrapper does this once per filter
     /// (`defaultfilters.py:46`), and `unordered_list` does it again per item.
     fn to_str(&self, value: &Value) -> Result<String, Error>;
-    /// `int(v)` — `get_digit` (`:757-776`), `divisibleby` (`:854-858`), and the
-    /// three padding filters (`:417-430`). Python's `int` accepts `" 5 "`, `"5_0"`
+    /// `int(v)` — `get_digit` (`defaultfilters.py:757-776`), `divisibleby`
+    /// (`defaultfilters.py:854-858`) and the three padding filters (`:417-430`).
+    /// Python's `int` accepts `" 5 "`, `"5_0"`
     /// and `"٠٥"`, and is arbitrary-precision, so this is not a parse.
     fn to_int(&self, value: &Value) -> Result<IntValue, Error>;
-    /// `float(v)` — `pluralize` (`:942-982`) and `floatformat` (`:94-220`).
+    /// `float(v)` — `pluralize` (`defaultfilters.py:942-982`) and `floatformat`
+    /// (`defaultfilters.py:94-220`).
     fn to_float(&self, value: &Value) -> Result<f64, Error>;
-    /// `bool(v)` — `default` (`:840-843`) and `yesno` (`:860-891`). For an
-    /// `Opaque` this is `__bool__` or `__len__`, which Rust cannot see.
+    /// `bool(v)` — `default` (`defaultfilters.py:840-843`) and `yesno`
+    /// (`defaultfilters.py:860-891`). For an `Opaque` this is `__bool__` or `__len__`,
+    /// which Rust cannot see.
     fn is_true(&self, value: &Value) -> Result<bool, Error>;
-    /// `len(v)` — `length` (`:633-639`), `pluralize`, `wordcount`'s fallback.
+    /// `len(v)` — `length` (`defaultfilters.py:633-639`), `pluralize`, `wordcount`'s fallback.
     fn len(&self, value: &Value) -> Result<usize, Error>;
     /// `list(v)`, **not** an index walk: `unordered_list`'s whole-value case is a
     /// generator (`test_unordered_list.py:141`), which has no `[]`. `first`/`last`
@@ -214,10 +218,11 @@ pub trait FilterHost {
     /// generator's `TypeError` escape, and an `iter_values`-based implementation
     /// would return a value where Django raises.
     fn iter_values(&self, value: &Value) -> Result<Vec<Value>, Error>;
-    /// `value[index]` — `first` (`:602-608`) and `last` (`:624-630`), including
-    /// the negative index and the `IndexError`/`TypeError` split.
+    /// `value[index]` — `first` (`defaultfilters.py:602-608`) and `last`
+    /// (`defaultfilters.py:624-630`), including the negative index and the
+    /// `IndexError`/`TypeError` split.
     fn get_index(&self, value: &Value, index: i64) -> Result<Value, Error>;
-    /// `value[start:stop:step]` — `slice` (`:651-666`). Not expressible as
+    /// `value[start:stop:step]` — `slice` (`defaultfilters.py:651-666`). Not expressible as
     /// [`FilterHost::get_index`] plus Rust slicing: `"abcdef"|slice:":3"` is
     /// `"abc"`, a *string*, where the index route yields a list. Every component
     /// is `Option` because `"::2"` and `":3"` are both legal and Django passes
@@ -229,15 +234,15 @@ pub trait FilterHost {
         stop: Option<i64>,
         step: Option<i64>,
     ) -> Result<Value, Error>;
-    /// `a + b` — `add` (`:745-754`). Int-plus-int, then sequence concatenation,
+    /// `a + b` — `add` (`defaultfilters.py:745-754`). Int-plus-int, then sequence concatenation,
     /// then a bare `except Exception` → `""`; all three arms are reachable
     /// because `+` is `__add__`, which no `Value` variant can answer for.
     fn add_values(&self, a: &Value, b: &Value) -> Result<Value, Error>;
     /// `format % value` — the `%` operator with the format string **already
     /// built**. Two callers, and they are the two shapes a Python `%` has:
-    /// `stringformat` (`:292`, whose own docstring makes the leading `%` part of
+    /// `stringformat` (`defaultfilters.py:292`, whose own docstring makes the leading `%` part of
     /// the *filter's* interface) and `filesizeformat`'s five unit branches
-    /// (`:927-935`, where the format is `gettext("%s KB")`'s **translation**).
+    /// (`defaultfilters.py:927-935`, where the format is `gettext("%s KB")`'s **translation**).
     ///
     /// The format string is Rust's to build and the operator is Python's, so
     /// `stringformat` passes `format!("%{}", to_str(arg))` and `filesizeformat`
@@ -249,7 +254,8 @@ pub trait FilterHost {
     /// see, which is the same blindness §11's rule is about.
     fn percent_format(&self, format: &str, value: &Value) -> Result<Value, Error>;
     /// `format % {name: size}` — the same operator with the **mapping** operand
-    /// `filesizeformat`'s two byte branches use (`:908`, `:925`).
+    /// `filesizeformat`'s two byte branches use (`defaultfilters.py:908`,
+    /// `defaultfilters.py:925`).
     ///
     /// A second method rather than a flag on the first, because the operand is
     /// not a `Value` at all: `{"size": n}` is a **dict**, and `classify` interns
@@ -280,8 +286,8 @@ pub trait FilterHost {
     fn conditional_escape(&self, value: &Value) -> Result<Value, Error>;
 
     // --- the one ordering operation Rust cannot express ---------------------
-    /// `dictsort`/`dictsortreversed` (`:578-599`) together with
-    /// `_property_resolver` (`:540-575`). One method, not two: the
+    /// `dictsort`/`dictsortreversed` (`defaultfilters.py:578-599`) together with
+    /// `_property_resolver` (`defaultfilters.py:540-575`). One method, not two: the
     /// float-vs-string branch, the private-name `AttributeError`, the
     /// five-exception `__getitem__`→`getattr` fallback and `dictsort`'s own
     /// `(AttributeError, TypeError)` → `""` catch are a single semantic unit, and
@@ -297,7 +303,7 @@ pub trait FilterHost {
     fn sort_by_property(&self, value: &Value, prop: &Value, reverse: bool) -> Result<Value, Error>;
 
     // --- the type questions Rust cannot answer ------------------------------
-    /// `stringformat`'s `isinstance(value, tuple)` (`:289`) — the test that
+    /// `stringformat`'s `isinstance(value, tuple)` (`defaultfilters.py:289`) — the test that
     /// decides whether the operand is stringified before `%` sees it.
     ///
     /// The branch is load-bearing rather than defensive, and measured on the
@@ -348,7 +354,7 @@ pub trait FilterHost {
     /// generator, which is truthy even when it yields nothing. See that type.
     fn as_nested_sequence(&self, value: &Value) -> Result<Option<NestedSequence>, Error>;
     /// The comma-separated bits of a filter's argument — `pluralize`
-    /// (`defaultfilters.py:965-966`) and `yesno` (`:879`) — as one call.
+    /// (`defaultfilters.py:965-966`) and `yesno` (`defaultfilters.py:879`) — as one call.
     ///
     /// `prepend_comma` is the whole of the difference between the two callers,
     /// and it is load-bearing in both directions rather than convenient:
@@ -499,7 +505,7 @@ pub trait FilterHost {
     /// `Truncator.chars` / `.words` (`text.py:193-261`), **whole**. Delegated
     /// rather than split because even the non-html path needs
     /// `unicodedata.normalize("NFC")`, `unicodedata.combining` per character
-    /// (`:205`, `:220`) and the translatable marker `add_truncation_text` falls
+    /// (`text.py:205`, `text.py:220`) and the translatable marker `add_truncation_text` falls
     /// back to — so a Rust `chars` would need a **third** Unicode table
     /// diverging from CPython's, which is the M1 `\w` problem reintroduced.
     /// `truncate_text` is Django's `truncate` argument; `None` is its default.
@@ -515,7 +521,7 @@ pub trait FilterHost {
     /// whitespace handling are not Rust's.
     fn wrap(&self, text: &str, width: usize) -> String;
     /// `django.utils.encoding.iri_to_uri`. `iriencode`'s entire body is this one
-    /// call (`:225-227`).
+    /// call (`defaultfilters.py:225-227`).
     ///
     /// **Infallible on the strength of an audit rather than by assumption.** The
     /// one input that makes it raise is a lone surrogate — `iri_to_uri("\ud800")`
@@ -526,7 +532,7 @@ pub trait FilterHost {
     /// FFI in both engines (`test_lone_surrogate_raises_at_the_ffi_boundary`).
     fn iri_to_uri(&self, text: &str) -> String;
     /// `urllib.parse.quote` called the way `urlencode`'s body calls it
-    /// (`:365-379`): with the `safe` keyword **omitted** when `safe` is `None`,
+    /// (`defaultfilters.py:365-379`): with the `safe` keyword **omitted** when `safe` is `None`,
     /// and otherwise with that object passed through as it is.
     ///
     /// `safe` is `Option<&Value>` rather than `Option<&str>` per **§D7.1**:
@@ -567,9 +573,9 @@ pub trait FilterHost {
     /// method's — `json_script`'s Rust body owns `_json_script_escapes`
     /// (`html.py:88-92`, three entries) and the two templates.
     fn json_dumps(&self, value: &Value) -> Result<String, Error>;
-    /// `pprint.pformat` — `pprint` (`:990-996`).
+    /// `pprint.pformat` — `pprint` (`defaultfilters.py:990-996`).
     fn pformat(&self, value: &Value) -> Result<String, Error>;
-    /// `random.choice` — `random` (`:642-648`), which is stateful and not a
+    /// `random.choice` — `random` (`defaultfilters.py:642-648`), which is stateful and not a
     /// function of its argument.
     fn random_choice(&self, value: &Value) -> Result<Value, Error>;
 
@@ -656,7 +662,7 @@ pub trait FilterHost {
     /// `time_strings` and `depth` have exactly two Rust callers, `timesince.rs`
     /// and `timeuntil.rs`, and both pass the three that remain: the template
     /// side reaches this helper only through `timesince_filter` and
-    /// `timeuntil_filter` (`defaultfilters.py:812`, `:825`), and neither sets
+    /// `timeuntil_filter` (`defaultfilters.py:812`, `defaultfilters.py:825`), and neither sets
     /// the last two. The omission is bounded by the **call site** and not by
     /// this signature — the same shape as [`Self::ngettext`]'s `u64` — so a
     /// caller that ever needs a custom `depth` must widen this first. (An
@@ -668,7 +674,7 @@ pub trait FilterHost {
     /// `timesince(d, now, reversed=False)` swaps `d` and `now` *after*
     /// normalising the timezones (`timesince.py:60-73`), so
     /// `now.astimezone(d.tzinfo)` expresses one operand in the other's zone and
-    /// the calendar fields `total_months` reads (`:83`) are zone-dependent. A
+    /// the calendar fields `total_months` reads (`timesince.py:83`) are zone-dependent. A
     /// caller-side swap normalises the opposite way and reports different months
     /// for two aware datetimes in different zones.
     ///
@@ -698,13 +704,14 @@ pub trait FilterHost {
     /// `ngettext` — the same, with the plural form.
     ///
     /// `n` is a `u64` where Python's is an arbitrary-precision int. Both call
-    /// sites are `filesizeformat`'s (`:908`, `:925`) and the only non-literal one
-    /// is the `bytes_ < KB` arm, so **`n < 1024`** holds; the other is a literal
+    /// sites are `filesizeformat`'s (`defaultfilters.py:908`, `defaultfilters.py:925`) and
+    /// the only non-literal one is the `bytes_ < KB` arm, so **`n < 1024`** holds; the
+    /// other is a literal
     /// `0`. So the narrowness is bounded by the *call site* rather than by the
     /// signature, and the bound is written here rather than left to be
     /// re-derived — a wider caller would have to widen this first.
     fn ngettext(&self, singular: &str, plural: &str, n: u64) -> String;
-    /// `formats.number_format(round(value, 1), 1)` whole (`:911-912`).
+    /// `formats.number_format(round(value, 1), 1)` whole (`defaultfilters.py:911-912`).
     ///
     /// A host call rather than [`FilterHost::number_format`] over a Rust-rounded
     /// argument, because Python's two-argument `round` on a **float** rounds
@@ -728,11 +735,11 @@ pub trait FilterHost {
     /// crosses the seam as.
     fn decimal_parse(&self, value: &Value) -> Result<DecimalParse, Error>;
 
-    /// `:194-205`: `exp = Decimal(1).scaleb(-abs(p))`, the `prec` computation and
+    /// `defaultfilters.py:194-205`: `exp = Decimal(1).scaleb(-abs(p))`, the `prec` computation and
     /// `d.quantize(exp, ROUND_HALF_UP, Context(prec=prec))`, as **one** call.
     ///
     /// Not three, because `prec = max(getcontext().prec, abs(p) + units + 1)`
-    /// (`:200`) is a read of thread-local state that *bounds the quantize three
+    /// (`defaultfilters.py:200`) is a read of thread-local state that *bounds the quantize three
     /// lines below it*: splitting the method would invite a Rust caller to
     /// compute its own `prec`, which is the divergence this seam exists to
     /// prevent. The context does reach the answer, measurably — below
@@ -762,7 +769,7 @@ pub trait FilterHost {
     /// again — two calls, which for an object whose `__int__` has side effects is
     /// two answers. Taking the `IntValue` puts the method at the division alone,
     /// which is exactly the source's own boundary: the `int()` sits inside the
-    /// `try` at `:905-907` (its `ValueError`/`TypeError` become `'0 bytes'`), and
+    /// `try` at `defaultfilters.py:905-907` (its `ValueError`/`TypeError` become `'0 bytes'`), and
     /// the division sits **outside** it, so its `OverflowError` escapes the
     /// filter. One method, one statement of the source, one failure mode.
     ///
@@ -800,7 +807,8 @@ pub trait FilterHost {
     /// nested `def`. Folding them would merge what Python separates.
     fn int_divide_by_power_of_two(&self, value: &IntValue, shift: u32) -> Result<f64, Error>;
 
-    /// `int(a) % int(b)` — `divisibleby` (`:854-858`), which has **no** `try`, so
+    /// `int(a) % int(b)` — `divisibleby` (`defaultfilters.py:854-858`), which has **no**
+    /// `try`, so
     /// `b == 0` is a `ZeroDivisionError` and a non-numeric operand a `ValueError`
     /// or `TypeError`; all three escape the filter.
     ///
