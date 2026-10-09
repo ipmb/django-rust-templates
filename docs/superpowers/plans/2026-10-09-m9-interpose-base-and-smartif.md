@@ -1666,3 +1666,90 @@ surfaced in the guard itself, both measured: `executable_lines` took a compound
 statement's whole span, so a 15-line region reported all 15 lines executable
 because one `import` sat inside a `FunctionDef`; and the snippet comparison
 matched unstripped lines, so an indentation difference read as a missing line.
+
+Task 3 is done and committed at `b34b2b0`, with the defect its own row exposed
+fixed first at `8c76ca0`. The transcription itself needed nothing: the generated
+file is 217 lines against upstream's 215, `difflib` reports one `delete` opcode
+(ours 2-3, upstream 2-1) and 215 equal lines, so the whole declared difference is
+the marker plus its blank separator. Three things the plan got wrong, and one it
+could not have known:
+
+**(1) Step 2's symbol claim is wrong, and its script is broken.** The step says
+"215 lines, 8 top-level symbols" and expects `operator` and `TOKEN_*` among them.
+Measured: **neither name exists anywhere in the file**, ours or upstream's.
+There are 7 distinct top-level definitions — `EndToken`, `IfParser`, `Literal`,
+`OPERATORS`, `TokenBase`, `infix`, `prefix` — across 8 top-level *statements*,
+because `EndToken = EndToken()` (line 153) rebinds the class to its singleton
+instance. The runtime namespace holds 9 names: those 7 plus `key` and `op`, the
+loop variables `for key, op in OPERATORS.items()` (line 115) leaves behind. So
+"8" was right about statements and wrong about everything it was attached to.
+The step's script is worse than its prose: its comprehension ends
+`(isinstance(n, ast.Assign) for _ in ())`, a generator object in a boolean
+position, which is always truthy — so the filter admits every statement and the
+assertion `not (theirs - ours)` passes for any file at all. It was not run as
+written; the measurement above is `ast.parse` plus `exec` into a throwaway
+module, which is what the step was reaching for.
+
+**(2) Step 6's premise is false, and the row is renamed and rewritten because of
+it.** The step asks for a row pinning that the interposed `IfParser` reaches
+`_native.parse_filter_expression`, and anticipates it failing "because the shell
+reaches Rust through a *different* binding". The failure is not the binding — it
+is that **nothing is reached at all**. Measured:
+`Engine().from_string("{% if a and b %}x{% endif %}")` calls
+`_native.parse_filter_expression` **zero** times and `smartif.IfParser.parse`
+**zero** times, and a corpus of `{% if %}` sources with `and`, `not`, `==`, `<`
+and `or` reaches the same six functions and no operator method. M5 moved the
+whole grammar into `crates/template-core/src/parser/smartif.rs`; the parse seam
+drives it inside `compile_template` and the shell rebuilds the tree with
+`if_condition_to_py` (`template-py/src/lib.rs:667`). A row named after the
+step's premise would have asserted something untrue about a call that does not
+happen, so it is `test_the_if_condition_tree_comes_from_rust_not_the_python_grammar`
+and pins the pair: `compile_template` ran, the Python grammar did not, and the
+`IfNode`'s condition — plus `defaulttags.TemplateLiteral`, Django's own leaf in
+the *unshimmed* `defaulttags` — is an object our file defines.
+
+**(3) A `COMPARED_PATH` blind spot on this module, for Task 7 to close.**
+`measure` can only wrap functions reachable from the module namespace and its
+classes. `smartif` builds its operator classes inside `infix()`/`prefix()` and
+binds them into the `OPERATORS` dict, so the methods that actually evaluate
+`and`, `or`, `not` and every comparison are objects the instrument never wraps —
+`TokenBase.led` and `op.led` are defined and never entered, and `op` is not an
+operator at all but the loop variable from (1). A region declared over those
+methods would not be caught by clause 4. It is safe today because `smartif`'s
+only declared region is lines 2-3, but the hole is real and Task 7 owns it. This
+is the "what class of dependency can this metric not see" question asked of a
+new metric, and the answer here is *decorator-generated classes*.
+
+**(4) The shim re-executed modules, and Task 3's row is what caught it.**
+`install()`/`uninstall()` dropped every `django.template` module and imported it
+again, so a cycle produced new class objects while everything holding the old
+ones kept them. Two failures from one cycle, both measured:
+
+    render.TemplateSyntaxError is django.template.exceptions.TemplateSyntaxError
+    -> False
+    host.django_own_tags()["if"] is defaulttags.register.tags["if"]  -> False
+
+The first makes `assertRaises(TemplateSyntaxError)` miss what
+`render.django_exception` raises. The second is the serious one: `django_own_tags()`
+is frozen at import *by design*, so the re-executed `defaulttags` published new
+tag callables, `ShellHost.has_tag` judged `{% if %}` to be Django's, and Rust
+stopped parsing the condition — Task 3's row failing for exactly the reason it
+exists. The fix (`8c76ca0`) executes each module at most once per process and
+restores from a cache, and `_place()` sets the parent package's attribute too,
+without which `sys.modules["django.template"]` is ours while `django.template`
+is still Django's.
+
+None of this was visible in the accepted run, and the reason is ordering:
+`run_django_suite.sh` installs once at interpreter start, and `unittest discover`
+happens to run `test_interposition` before `test_shim` because "i" sorts before
+"s". A row that is green because of the alphabet is the same failure mode as a
+region declared to pass, and it is why the fix landed before the row that found
+it rather than after.
+
+**(5) The guard could not see an undeclared transcription.** Measured on the
+tree before `b34b2b0`: `python -I scripts/check_transcriptions.py` returned
+**exit 0** with `_impl/smartif.py` on disk and absent from `DECLARED`, because
+every clause iterates the files it was told about. The clause added in that
+commit scans `_impl/*.py` for the marker and requires the key sets to be equal,
+mirroring the `COMPARED_PATH` clause; it was verified to fail on a planted
+marked file before it was committed.
