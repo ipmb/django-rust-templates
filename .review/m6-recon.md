@@ -1037,3 +1037,121 @@ tree. "28 rows, 12 wrong" and "2 files with nothing wrong" are different facts
 about the same sweep, and the second is the one that says the tree is not
 uniformly bad — which is what decides whether the remaining passes need the
 detectors at all, or only care.
+
+## Follow-up measurement, 2026-10-09: the census over two trees, and the third provenance class
+
+`.review/m6-verification-order.md` was re-derived after `crates/` became a
+checkable base (`6754684`) and after the naming passes that followed, and the
+re-derivation moved numbers this file records as facts. Measured now:
+
+| quantity | before | after |
+|---|---|---|
+| distinct anchors spelled | 524 | **545** |
+| occurrences (`file`, `line`) | 917 | **955** |
+| relations (`anchor`, citing file) | 795 | **824** |
+| constructs cited from two or more files | 163 | **169** |
+| constructs cited from three or more | 57 | **60** |
+
+The occurrence delta is 38, which is the count B2 reported for the widened
+scan's new occurrence lines — the naming passes replace one spelling with
+another and add no occurrences, so the two measurements are about the same 38
+lines and the arithmetic is a cross-check rather than a coincidence. Everything
+here that says "524" or "917" or "163" is a true statement about the tree
+before `6754684` and is superseded by the row beneath it.
+
+Two quantities do not move at all, and they are the two that matter: the census
+is still **invariant under naming**, and it is still a **prior, not a
+detector**. The most-agreed anchors remain agreed-upon and right.
+
+The shape is unchanged, and the re-measurement also settles the one count in
+this series that had a gap in it. Counted on constructs, **31.4% of them (169)
+cover 56.8% of the citations, and 11.1% (60) cover 30.2%** — against 31.1% /
+56.6% / 54.6% and 10.9% / 30.0% / 27.9% before. The occurrence half of the pair
+now equals the relation half exactly (955 and 955). The candidate explanation is
+the six duplicate spellings — splitting one construct's relations across two
+keys would depress the relation half and leave the occurrence half alone, which
+is the direction the gap ran — but the claim I can stand behind is the weaker
+one: on constructs the two units agree exactly, so the fifth "two right answers
+to two questions" in this series was two readings that agree once the unit is
+fixed.
+
+### A third kind of provenance, which the first two kinds of repair cannot reach
+
+The registry thread has been classifying wrong numbers as *drift* (right when
+written, moved since) and *misreading* (never pointed at the claim). There is a
+third, and the reviewer found it by falsifying my own account of one:
+
+**`parser/mod.rs:392-418` was correct at birth.** At `52f1cb1^`,
+`pub fn extend_nodelist(` is at 392 and 418 is `nodelist.nodes.push(node);`. The
+commit `52f1cb1` wrote the citation into `host.py` **and** added 40 lines to
+`mod.rs`, moving the function to 429 — leaving 392-418 as
+`invalid_block_tag`'s tail. The citing commit made its own citation stale before
+it landed.
+
+I had called this "never correct", and it was wrong because I measured the
+interval against `6242cbc`, a *later* commit, instead of the citing one. The
+distinction is not pedantic: `--update` repairs drift and a re-reading repairs a
+misreading, but neither reaches a citation stale with respect to the file its
+own commit leaves behind. Only a rule does. The rule is now `--check --frozen`
+on the commit, which reddens the build before such a citation lands, and it is
+live in `scripts/check.sh` as of `d416cb4`.
+
+`d81abb3`'s sentence "One was never correct." is therefore **superseded**, and
+it is corrected forward in this close-out rather than by rewriting three landed
+commits. The class, not the instance, is what belongs in the record.
+
+### `--update` contains a negative case, and the obvious optimisation would lose it
+
+The reviewer measured the last two provenances still open, both written by
+`ae5ef19` in one commit and both correct at the time:
+
+| anchor | drift | evidence at `ae5ef19` |
+|---|---|---|
+| `parser/mod.rs:186` → 267 | **+81** | `186\|  let node = NodeDesc::new("VariableNode").attr(` — exactly the claim; `ae5ef19` touched neither file's stat, so the third class is ruled out and pre-edit equals post-edit |
+| `tags/mod.rs:182` → 180 | **−2** | `182\|  Ok(NodeDesc::with_nodelist(` / `183\|  "StandinBlockNode",` — the claim *and* its second half ("the class name starts on the following line") both hold then and now |
+
+Every other drift in this set moved forward. `182 → 180` moved **backward**,
+because lines were removed above the target. `--update` searches the whole file,
+so it finds it — but the tempting future optimisation (search near the cited
+line first, widen only if there is no hit) would be written as a forward scan by
+anyone who had seen only the other nine, and it would silently miss this one.
+That warning goes beside the implementation, because `crates/` will now drift
+routinely and the files are large.
+
+There is a second thing in that pair worth recording, and it is the inverse of
+the pattern this whole section has been cataloguing: **one commit, one citing
+file, two different targets, both numbers right at the time**. The agreement
+cases say the author's reading is not the failure mode — `base.py:774` copied
+into two files and `defaulttags.py:106-112` into three were both copied wrong;
+this says two numbers from one reading were both right. Put together they say
+what the exercise is actually for: a number is a snapshot, and nothing in this
+tree was comparing it to anything.
+
+### The census's own agreement caveat, re-measured
+
+The construct key merges spellings, so the six duplicated spellings this file's
+sibling reported as one are now visible. Two of the six are a single file
+spelling one construct two ways — `filesizeformat.rs` cites `html.py:502-507`
+*and* `django/utils/html.py:502-507`, `test_host_tags.py` cites
+`tests.py:148-155` *and* `.django/tests/template_tests/tests.py:148-155`. The
+other four are two different files disagreeing about how to spell a construct
+they both cite. The earlier "exactly one" is not reproducible from the current
+census and is superseded.
+
+### One more unnamed population, and it is the reviewer's
+
+An earlier measurement in this task reported "0 blank/EOF hits" for the
+degenerate `.rs` citation classes. It was measured correctly and it was true of
+the classes it named — and it was read, by both of us, as reassurance about the
+`.rs` citations as a whole, which subsequently measured **11 of 21 wrong**. That
+is the sixth instance of the same failure in this task: a denominator that
+silently excluded the population the reader extended it to. It is recorded here
+rather than in the thread because it is the reviewer's own, and because a
+detector that reports only its true positives has no way to show what it never
+looked at.
+
+### The clean-file count, restated for the whole sweep
+
+The point made above about `parser/error.rs` and `parser/tags/with.rs` holds at
+the close of M6 and is the one number that should travel with the defect total:
+the tree is not uniformly bad, and a count of defects alone cannot say that.

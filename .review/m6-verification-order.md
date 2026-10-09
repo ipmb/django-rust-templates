@@ -1,25 +1,60 @@
 # M6 close-out verification order
 
-Computed from the agreement census (see `.review/m6-recon.md`), sorted by
+Computed from the two-tree census (see `.review/m6-recon.md`), sorted by
 citation count descending — the reviewer's scheduling rule. The order is
 durable: the census canonicalises a shorthand and a full path to one key, so
 it is **invariant under naming**, and this list stays valid through every
 remaining file without recomputation.
 
-163 anchors are cited from two or more files. The head was verified
-against `.django/` @ 6.0.9 on 2026-10-09 (`base.py:816`, `:813`, `:669-670`,
-`:773`, `defaultfilters.py:46`, `defaulttags.py:929`); the rest are unverified.
+Re-derived on 2026-10-09 over both trees, which is what changed the counts
+below. `crates/` became a checkable base in `6754684`, so our own Rust is
+cited and cited-from in this list for the first time, and the naming passes
+that followed replaced shorthands with names. Measured: **545 distinct
+anchors spelled, 539 constructs, 955 occurrences, 824 (anchor, citing file)
+relations** — and **169 constructs are cited from two or more files**, 60 of
+them from three or more. The previous revision of this file said 163 and 57;
+both numbers were right about the tree that produced them and are superseded
+by this one.
+
+The head was verified against `.django/` @ 6.0.9 on 2026-10-09 (`base.py:816`,
+`:813`, `:669-670`, `:773`, `defaultfilters.py:46`, `defaulttags.py:929`);
+the rest are unverified. All six are still in the head, and none of them is
+touched by the spelling caveat below.
 
 The column is the number of *files* citing the anchor, which is the unit the
 ordering uses. Occurrence counts are higher — an anchor cited from two files
 can be cited twice in one of them.
 
-One caveat on the key: the census canonicalises by *spelling*, so the same
-construct written two ways counts twice. Exactly one of the 163 does —
-`html.py:115-127` and `django/utils/html.py:115-127` — so merging on
-`(file, start, end)` gives 162, and each of that pair shows one citer fewer
-than the construct has. It is recorded rather than fixed because a name-based
-key would need the resolver, which is the thing the census avoids.
+One caveat on the key. The census canonicalises by *construct* —
+`(resolved file, start, end)` — because the manifest's own key is the spelling
+and the same construct can be written more than one way. **Six constructs are
+spelled two ways**, so 545 rows name 539 constructs:
+
+| construct | spellings |
+|---|---|
+| `django/utils/html.py:115-127` | `django/utils/html.py:115-127`, `html.py:115-127` |
+| `django/utils/html.py:502-507` | `django/utils/html.py:502-507`, `html.py:502-507` |
+| `django/utils/text.py:313-344` | `.django/django/utils/text.py:313-344`, `text.py:313-344` |
+| `django/template/base.py:705` | `base.py:705`, `django/template/base.py:705` |
+| `tests/template_tests/templatetags/custom.py:396-399` | `.django/tests/template_tests/templatetags/custom.py:396-399`, `custom.py:396-399` |
+| `tests/template_tests/tests.py:148-155` | `.django/tests/template_tests/tests.py:148-155`, `tests.py:148-155` |
+
+This file previously reported exactly one such pair. That number is not
+reproducible from the current census and is superseded by the six measured
+here; it predates both the widened scan and the naming passes.
+
+Two of the six are worth separating out, because they are a different shape
+from the other four. `filesizeformat.rs` cites `html.py:502-507` **and**
+`django/utils/html.py:502-507`, and `test_host_tags.py` cites `tests.py:148-155`
+**and** `.django/tests/template_tests/tests.py:148-155` — one file, two
+spellings, one construct. The other four are two different files disagreeing
+about how to spell a construct they both cite.
+
+The table is merged on the construct, so each pair appears once, under its
+fuller spelling, showing the construct's citer count rather than either
+spelling's. The two single-file pairs are absent from the table for the
+reason they are interesting: each construct's citers merge to one file, so it
+never reaches the two-file threshold.
 
 | citers | anchor | line | the line holds |
 |---|---|---|---|
@@ -33,6 +68,7 @@ key would need the resolver, which is the thing the census avoids.
 | 5 | `base.py:771-772` | django/template/base.py | `filter_func = parser.find_filter(filter_name)` |
 | 5 | `base.py:822` | django/template/base.py | `def args_check(name, func, provided):` |
 | 5 | `defaulttags.py:744` | django/template/defaulttags.py | `_, rest = token.contents.split(None, 1)` |
+| 4 | `center.rs:86` | crates/template-core/src/filters/center.rs | `let width = match call.host.to_int(&arg.unwrap_or(Value::None))? {` |
 | 4 | `base.py:198-200` | django/template/base.py | `try:` |
 | 4 | `base.py:804-809` | django/template/base.py | `arg_vals = []` |
 | 4 | `defaultfilters.py:210` | django/template/defaultfilters.py | `if sign and rounded_d:` |
@@ -47,8 +83,10 @@ key would need the resolver, which is the thing the census avoids.
 | 4 | `defaulttags.py:326` | django/template/defaulttags.py | `match = condition.eval(context)` |
 | 4 | `defaulttags.py:669-671` | django/template/defaulttags.py | `if name not in parser._named_cycle_nodes:` |
 | 4 | `defaulttags.py:917-918` | django/template/defaulttags.py | `def eval(self, context):` |
-| 4 | `html.py:407-410` | django/utils/html.py | `def trim_url(self, x, *, limit):` |
 | 4 | `smartif.py:179-185` | django/template/smartif.py | `def translate_token(self, token):` |
+| 4 | `django/utils/html.py:115-127` | django/utils/html.py | `def conditional_escape(text):` |
+| 4 | `html.py:407-410` | django/utils/html.py | `def trim_url(self, x, *, limit):` |
+| 3 | `template-py/src/filters.rs:1587-1589` | crates/template-py/src/filters.rs | `let argument = match args.len() {` |
 | 3 | `base.py:1202` | django/template/base.py | `kwargs[key] = parser.compile_filter(value)` |
 | 3 | `base.py:518-519` | django/template/base.py | `if builtins is None:` |
 | 3 | `base.py:619-630` | django/template/base.py | `def error(self, token, e):` |
@@ -74,13 +112,13 @@ key would need the resolver, which is the thing the census avoids.
 | 3 | `defaulttags.py:106-112` | django/template/defaulttags.py | `# First time the node is rendered in template` |
 | 3 | `defaulttags.py:265` | django/template/defaulttags.py | `self._varlist = varlist` |
 | 3 | `defaulttags.py:693-696` | django/template/defaulttags.py | `node = CycleNode(values, name, silent=silent)` |
+| 3 | `library.py:211-212` | django/template/library.py | `nodelist = parser.parse((end_name,))` |
+| 3 | `smartif.py:81-83` | django/template/smartif.py | `def nud(self, parser):` |
 | 3 | `html.py:103` | django/utils/html.py | `json_str = json.dumps(value, cls=encoder or DjangoJSONEncoder).translate(` |
 | 3 | `html.py:319` | django/utils/html.py | `safe_input = isinstance(text, SafeData)` |
 | 3 | `html.py:44` | django/utils/html.py | `MAX_STRIP_TAGS_DEPTH = 50` |
-| 3 | `library.py:211-212` | django/template/library.py | `nodelist = parser.parse((end_name,))` |
-| 3 | `smartif.py:81-83` | django/template/smartif.py | `def nud(self, parser):` |
 | 3 | `text.py:205` | django/utils/text.py | `text = unicodedata.normalize("NFC", self._wrapped)` |
-| 2 | `bad_tag.py:6-8` | tests/template_tests/templatetags/bad_tag.py | `@register.tag` |
+| 2 | `crates/template-core/src/parser/mod.rs:429` | crates/template-core/src/parser/mod.rs | `pub fn extend_nodelist(` |
 | 2 | `base.py:1005` | django/template/base.py | `current = context.template.engine.string_if_invalid` |
 | 2 | `base.py:1011` | django/template/base.py | `current = context.template.engine.string_if_invalid` |
 | 2 | `base.py:1023` | django/template/base.py | `if getattr(e, "silent_variable_failure", False):` |
@@ -96,7 +134,6 @@ key would need the resolver, which is the thing the census avoids.
 | 2 | `base.py:585` | django/template/base.py | `raise self.error(token, e)` |
 | 2 | `base.py:615` | django/template/base.py | `node.token = token` |
 | 2 | `base.py:669` | django/template/base.py | `self.tags.update(lib.tags)` |
-| 2 | `base.py:705` | django/template/base.py | `(?P<filter_name>\w+)` |
 | 2 | `base.py:714` | django/template/base.py | `"var_chars": r"\w\.\+-",` |
 | 2 | `base.py:770` | django/template/base.py | `args.append((True, Variable(var_arg)))` |
 | 2 | `base.py:775` | django/template/base.py | `if upto != len(token):` |
@@ -111,8 +148,7 @@ key would need the resolver, which is the thing the census avoids.
 | 2 | `base.py:979-980` | django/template/base.py | `if not isinstance(current, BaseContext) and bit in dir(current):` |
 | 2 | `base.py:983-988` | django/template/base.py | `except (` |
 | 2 | `base.py:997` | django/template/base.py | `current = context.template.engine.string_if_invalid` |
-| 2 | `dateformat.py:332-335` | django/utils/dateformat.py | `def time_format(value, format_string):` |
-| 2 | `dateformat.py:42` | django/utils/dateformat.py | `for i, piece in enumerate(re_formatchars.split(str(formatstr))):` |
+| 2 | `django/template/base.py:705` | django/template/base.py | `(?P<filter_name>\w+)` |
 | 2 | `defaultfilters.py:141` | django/template/defaultfilters.py | `last_char = arg[-1]` |
 | 2 | `defaultfilters.py:152-159` | django/template/defaultfilters.py | `try:` |
 | 2 | `defaultfilters.py:153` | django/template/defaultfilters.py | `input_val = str(text)` |
@@ -164,25 +200,30 @@ key would need the resolver, which is the thing the census avoids.
 | 2 | `defaulttags.py:1676` | django/template/defaulttags.py | `extra_context = token_kwargs(remaining_bits, parser, support_legacy=True)` |
 | 2 | `defaulttags.py:1682-1684` | django/template/defaulttags.py | `raise TemplateSyntaxError(` |
 | 2 | `defaulttags.py:262` | django/template/defaulttags.py | `def __init__(self, nodelist_true, nodelist_false, *varlist):` |
-| 2 | `defaulttags.py:745` | django/template/defaulttags.py | `filter_expr = parser.compile_filter("var\|%s" % (rest))` |
+| 2 | `defaulttags.py:745` | django/template/defaulttags.py | `filter_expr = parser.compile_filter("var|%s" % (rest))` |
 | 2 | `defaulttags.py:886` | django/template/defaulttags.py | `loopvars = re.split(r" *, *", " ".join(bits[1:in_index]))` |
 | 2 | `defaulttags.py:922` | django/template/defaulttags.py | `error_class = TemplateSyntaxError` |
 | 2 | `defaulttags.py:993` | django/template/defaulttags.py | `condition = TemplateIfParser(parser, bits).parse()` |
-| 2 | `django/utils/html.py:115-127` | django/utils/html.py | `def conditional_escape(text):` |
 | 2 | `engine.py:194` | django/template/engine.py | `extra_data = getattr(template, "extra_data", {})` |
 | 2 | `engine.py:63` | django/template/engine.py | `self.template_builtins = self.get_template_builtins(self.builtins)` |
+| 2 | `library.py:454` | django/template/library.py | `args.append(parser.compile_filter(bit))` |
+| 2 | `smartif.py:54-56` | django/template/smartif.py | `def led(self, left, parser):` |
+| 2 | `smartif.py:55-56` | django/template/smartif.py | `self.first = left` |
+| 2 | `dateformat.py:332-335` | django/utils/dateformat.py | `def time_format(value, format_string):` |
+| 2 | `dateformat.py:42` | django/utils/dateformat.py | `for i, piece in enumerate(re_formatchars.split(str(formatstr))):` |
 | 2 | `formats.py:113` | django/utils/formats.py | `format_type = str(format_type)  # format_type may be lazy.` |
-| 2 | `html.py:115-127` | django/utils/html.py | `def conditional_escape(text):` |
 | 2 | `html.py:181-197` | django/utils/html.py | `class MLStripper(HTMLParser):` |
 | 2 | `html.py:210-229` | django/utils/html.py | `@keep_lazy_text` |
 | 2 | `html.py:47` | django/utils/html.py | `long_open_tag_without_closing_re = _lazy_re_compile(r"<[a-zA-Z][^>]{1000,}")` |
 | 2 | `html.py:88-92` | django/utils/html.py | `_json_script_escapes = {` |
 | 2 | `html.py:95-112` | django/utils/html.py | `def json_script(value, element_id=None, encoder=None):` |
-| 2 | `library.py:454` | django/template/library.py | `args.append(parser.compile_filter(bit))` |
 | 2 | `safestring.py:64-78` | django/utils/safestring.py | `@keep_lazy(SafeString)` |
-| 2 | `smartif.py:54-56` | django/template/smartif.py | `def led(self, left, parser):` |
-| 2 | `smartif.py:55-56` | django/template/smartif.py | `self.first = left` |
-| 2 | `test_unordered_list.py:143` | tests/template_tests/filter_tests/test_unordered_list.py | `unordered_list(item_generator()),` |
+| 2 | `.django/django/utils/text.py:313-344` | django/utils/text.py | `@keep_lazy_text` |
 | 2 | `text.py:220` | django/utils/text.py | `if unicodedata.combining(char):` |
 | 2 | `timesince.py:138-143` | django/utils/timesince.py | `def timeuntil(d, now=None, time_strings=None, depth=2):` |
 | 2 | `timesince.py:67-70` | django/utils/timesince.py | `if not now:` |
+| 2 | `test_unordered_list.py:143` | tests/template_tests/filter_tests/test_unordered_list.py | `unordered_list(item_generator()),` |
+| 2 | `bad_tag.py:6-8` | tests/template_tests/templatetags/bad_tag.py | `@register.tag` |
+| 2 | `.django/tests/template_tests/templatetags/custom.py:396-399` | tests/template_tests/templatetags/custom.py | `@register.tag("extra_data")` |
+| 2 | `tag_27584.py:8-9` | tests/template_tests/templatetags/tag_27584.py | `parser.parse(("endbadtag",))` |
+| 2 | `.django/tests/template_tests/tests.py:114-123` | tests/template_tests/tests.py | `Errors raised while compiling nodes should include the token` |

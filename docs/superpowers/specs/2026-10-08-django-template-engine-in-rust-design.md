@@ -276,9 +276,18 @@ Two more requirements on the same handle, both pinned by tests:
   `HashMap<String, Value>`. `custom.py:398` stores a string in it
   (asserted at `tests.py:148-155`); `{% partialdef %}` stores a
   `PartialTemplate` proxy, read at 20+ sites in `test_partials.py`.
-- **Arbitrary attributes must work.** `loader_tags.do_block:230-233` sets
-  `parser.__loaded_blocks` on the parser (a module-level function, so no name
-  mangling). The handle proxies unknown attributes to a host-side bag.
+- **Arbitrary attributes must work.** `loader_tags.do_block:228-234` reads
+  `parser.__loaded_blocks`, catches the `AttributeError` the first time, and
+  assigns the list on the parser (a module-level function, so no name
+  mangling). The handle proxies unknown attributes to a host-side bag. **This
+  requirement is M7's, not this milestone's** — it is `{% block %}`'s compile
+  function, and the host does not compile `block` until M7. One half of it is
+  not negotiable and travels with the requirement: the handle must *raise*
+  `AttributeError` for an attribute it does not have. `do_block`'s `except`
+  branch (`:233-234`) is the only place `__loaded_blocks` is created, so a
+  handle that answered every name would move that list's lifetime out of the
+  parse and into the bag, and Django's duplicate-block-name check would then be
+  asserting something about the bag rather than about the template.
 - **`extra_data` is absent after a failed parse.** `compile_nodelist`
   (`base.py`) assigns `self.extra_data = parser.extra_data` *inside* its `try`,
   so the attribute never appears on failure, and `test_partials.py:171` tests
@@ -756,7 +765,7 @@ the highest-risk milestone, and §5.5 is where the answer to it lives.
 | M3 | `FilterExpression`, `Variable`, `smartif`, primitive resolver | ✅ `{{ … }}` parses and materialises into Django's own `Variable`/`FilterExpression` over a 72-source corpus and 400 seeded random templates in both lexer modes; `_native.resolve` and the first `_native.render`; `token_kwargs`/`kwarg_re` for M5–M7; `smartif` ported with one bounded divergence on nesting depth. `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; progress meter unchanged at 25. **One deliberate deviation from §10.4's gate**, corrected and approved at the M3 round: what moves to M7 is Django's `{% extends %}` message and the one real `must_be_first` tag, **not** the refusal rule, which ships and is exercised against a stand-in — see that entry |
 | M4 | All 57 built-in filters | ✅ all 57 names have Rust bodies, asserted as a *set* by `tests/test_filter_inventory.py` (`STILL_STUBBED` is the empty array); corpus parity over `tests/filter_cases.py` — 539 `CASES` + 40 `ERROR_CASES`, every `expected` verified against Django as well as against the engine; `FilterFlags` round-tripping against the pinned registry; the delegating bodies derived by `tests/test_filter_inventory.py`'s four metrics — the set is not stated here, because the only assertion that keeps it current is the one that derives it from both the source and the Rust bodies. `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; progress meter unchanged at 25. **The 1547-test gate cannot see a single filter body** — its only route into the Rust filter layer is `check_filter`'s name-and-arity check — so the corpus, not the acceptance criterion, is what separates a landed body from a verified one; see the M4 summary's "acceptance blind spot" |
 | M5 | The eleven remaining built-in tags. **The set is cited, not copied**: it is `M5_TAGS` in `tests/test_tag_inventory.py`, and the assertion that keeps it current is the one that derives it — a list here would go stale the moment a tag moved | ✅ each of the eleven bodies landed, asserted as a *set* (`builtin_tag_stubs() & M5_TAGS == set()`); success corpus `tests/parser_corpus.py` (142 sources) + error corpus (78), every `expected` verified against Django as well as against the engine; `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; progress meter unchanged at 25. **The milestone's seam audit is `.review/m5-seams.md`** — it found `Host::repr`'s shell override and `IfParser::condition`'s `Raw` arm each guarded by a comment rather than by an input that discriminates |
-| M6 | `Library`, extension host callbacks; **and `querystring`**, moved here from M5 by the M5 plan's §D1 — it is `@register.simple_tag(…, takes_context=True)`, the sole non-`do_` registration among the built-ins, so it needs the extension host M5 does not build | Python-defined tags/filters work through the engine, incl. re-entrant `ParserHandle.parse` |
+| M6 | `Library`, extension host callbacks; **and `querystring`**, moved here from M5 by the M5 plan's §D1 — it is `@register.simple_tag(…, takes_context=True)`, the sole non-`do_` registration among the built-ins, so it needs the extension host M5 does not build | ✅ Python-defined tags/filters work through the engine, incl. re-entrant `ParserHandle.parse`. Ownership, measured: `builtin_tag_names()` is **22** and `builtin_tag_stubs()` is `['partial', 'partialdef']` — `load` and `querystring` are **host-owned**, so Rust implements neither, and `partial`/`partialdef` are names the registry knows with no compile function behind them yet. `unshimmed()` is unchanged at 25; `cargo test` is 645. Gates: `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; the parity corpora are `tests/parser_corpus.py` (152 sources) and `tests/parser_error_corpus.py` (91 errors), plus the 48-case differential harness. **`block`/`extends`/`include` are excluded from the host at M6, so `{% extends %}` still raises `Invalid block tag`** — a divergence from Django, owned by M7, which owes both the removal *and* `must_be_first` across the seam |
 | M7 | Inheritance: `block`, `extends`, `include` | Inheritance corpus parity; **`test_include_cache` passes**, proving the shadow tree is materialised once and node identity is stable (§5.5) |
 | M8 | Escaping and the Python object protocol | `SafeData`, `Promise`, callables, `alters_data`, `do_not_call_in_templates`; resolver complete |
 | M9 | Interpose `base`, `smartif` | ⚠️ **highest-risk milestone.** All 1547 tests flip onto our `NodeList.render`/`Node.render_annotated` at once (§5.5). Done when `test_base`, `test_parser`, `test_nodelist` (incl. `ErrorIndexTest`), `test_smartif` are real signal **and** the full suite is unchanged from §2 — budget accordingly, this is not a one-line step |
@@ -986,10 +995,30 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   on both the refusing and the permitting branch.
 
 - **M6 gate: a library that redefines a built-in tag name.** Host-first
-  dispatch order is argued from `Library.add_tag`/`add_library`
-  last-registration-wins semantics rather than measured. M6 pins it with a
-  template that loads a library registering a name already in Django's
+  dispatch order is argued from last-registration-wins semantics rather than
+  measured — and **the mechanism is not on `Library`**: there is no
+  `Library.add_tag` and no `Library.add_library`; a registration updates one
+  dict each, and the merge into the parser's tables is `Parser.add_library`
+  (`base.py:669-670`, called once per builtin library from `Parser.__init__` at
+  `:523`). §6's own text gets this right — "consumed via `add_library` and
+  **not stored**" — and this sentence contradicted it. M6 pins the behaviour
+  with a template that loads a library registering a name already in Django's
   builtins, and asserts the user's definition is the one that runs.
+
+  **Two ownership decisions are M6's, and they are recorded here rather than
+  only in the plan.** `load` and `querystring` are **host-owned** — a library is
+  a Python module, and `querystring` is the one built-in registered
+  `takes_context=True` — so Rust compiles neither. Measured: `builtin_tag_names()`
+  is 22, `builtin_tag_stubs()` is `['partial', 'partialdef']`. And `block`,
+  `extends` and `include` are **excluded from the host** at M6. They are Django's
+  builtins but not Rust's, and `NodeDesc.must_be_first` does not cross the seam
+  (`desc.rs:407`, defaulted `false` at `:445`), so a host-compiled `{% extends %}`
+  would be accepted **and** uncheckable — its must-be-first rule silently absent.
+  Accepting a tag whose ordering rule does not exist here is worse than today's
+  honest refusal. **So `{% extends %}` still raises `Invalid block tag` at M6,
+  and that is a divergence from Django, not coverage of it.** M7 removes the
+  exclusion, carries the `bool` across the seam, and gets
+  `parser.__loaded_blocks` for free, since the handle *is* Django's own `Parser`.
 
 - **`MAX_NESTING_DEPTH` diverges in the direction that matters, and only the
   differential corpus can pin it.** Django's bound is not a value to match: it

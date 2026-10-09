@@ -55,7 +55,9 @@ makes them agree is unmaking a measurement.
     python -I scripts/check_python_anchors.py --check            # gate, exit 1 on drift
     python -I scripts/check_python_anchors.py --check --frozen   # also fails on shorthand
     python -I scripts/check_python_anchors.py --triage           # suspicion list, exit 0
-    python -I scripts/check_python_anchors.py --update           # derive cited numbers
+    python -I scripts/check_python_anchors.py --update           # report both bases, write nothing
+    python -I scripts/check_python_anchors.py --update=django    # move Django's cited numbers
+    python -I scripts/check_python_anchors.py --update=crates    # …or ours
     python -I scripts/check_python_anchors.py --seed             # fill missing entries
     python -I scripts/check_python_anchors.py --prune            # drop rows nothing cites
 
@@ -98,6 +100,30 @@ claim. `--check` counts them separately (`name-only`), because a number written
 here goes stale the moment the manifest moves and a number in output cannot.
 The repair is not a tool change but the rule that the snippet be authored from
 the sentence's own claim in the same edit that names the file.
+
+**Three ways a number goes wrong, and only two of them are repairs a tool can
+make.** Worth separating, because the remedy differs and the wrong remedy is
+applied with confidence:
+
+  - **Drift.** The citation was right when written; the line moved under it.
+    `--update` derives the new number, and this is the class the manifest's
+    snippet-keying was built for.
+  - **A misreading.** The number never pointed at the claim — the sentence names
+    `translate_token` and cites the fold above it. Wants a re-read from the
+    sentence, not a derived number, because deriving one would ratify the
+    sentence's subject along with its number.
+  - **Stale at birth.** The citing commit is *also* the commit that edits the
+    cited file, so the number was measured against text that the same diff
+    replaced. Nothing drifted and nothing was misread: the measurement was
+    taken from the right file a moment too early. Measured instance: mod.rs
+    392-418 was `extend_nodelist` at `52f1cb1^` (the function is at 392, its
+    last line 418), and `52f1cb1` is the commit that wrote the citation into
+    `host.py` **and** moved the function to 429, leaving 392-418 as
+    `invalid_block_tag`'s tail. The remedy is a rule rather than a repair — a
+    citation into a file the same commit edits is measured against the post-edit
+    file — and it is now closed by construction: `--check --frozen` runs on the
+    commit, so a citation stale with respect to the file the commit leaves
+    behind reddens the build before it lands.
 
 **Every limit above is a limit of the per-file policy, which has no terminating
 condition of its own.** Naming is done a file at a time, and the file is visited
@@ -902,6 +928,13 @@ def update(manifest=None, checkout=None, report=None, base="?"):
         span = _span_of(anchor, lines)
         if span is not None and snippet in span:
             continue
+        # The whole file, deliberately, and not a window around `line`. Of the
+        # drifts this migration measured, one moved *backward* — `tags/mod.rs`
+        # 182 → 180, lines deleted above the target — so "scan near the cited
+        # line and widen only on a miss" would have been written as a forward
+        # scan by anyone who had seen only the others, and would lose it
+        # silently. A forward-only window is the optimisation this line is
+        # shaped to prevent.
         hits = [i for i, text in enumerate(lines, start=1) if snippet in text]
         if not hits:
             report(f"`{anchor}`: {snippet!r} is not in {named} at any line")
