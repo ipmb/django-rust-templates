@@ -91,6 +91,11 @@ def django_own_tags():
 
 _DJANGO_OWN_FILTERS = None
 
+# The registry object the map above was built from. Kept because ``None`` alone
+# cannot tell "not built yet" from "built against a registry that is no longer
+# the one in force", and the second is the failure this milestone exists to end.
+_DJANGO_OWN_FILTERS_SOURCE = None
+
 
 def django_own_filters():
     """The filter callables Rust ports, keyed by **handle** — the registry inverted.
@@ -128,12 +133,27 @@ def django_own_filters():
     `defaultfilters.register` itself — the case `django_own_tags`'s import-time
     freeze guards against for the same reason. Reading it per filter instead
     would rebuild the 57-entry dict on every filter of every rendered variable.
+
+    **Cached against the registry *object*, not against ``None``.** A cache keyed
+    on emptiness answers "already built" for a map built from a registry that no
+    longer exists, and the consequence is silent and total: re-executing
+    `defaultfilters` — a reload, or the scratch-universe instrumentation M11's
+    measurement scripts build — replaces `register.filters` with 57 fresh
+    handles, every one of which is absent from the stale map, so all 57 filters
+    fall through to the Python loop and **every test stays green**. That is
+    precisely the state M11 exists to end, arriving through the guard rather than
+    around it, so the identity of the source is part of the cache key.
+
+    Both halves are pinned as rows in
+    `tests/test_interposition.py::FilterRoutingTests`: the map names a handle from
+    a registry object it has not seen before, and the ordinary call does not
+    rebuild.
     """
-    global _DJANGO_OWN_FILTERS
-    if _DJANGO_OWN_FILTERS is None:
-        _DJANGO_OWN_FILTERS = {
-            func: name for name, func in _defaultfilters.register.filters.items()
-        }
+    global _DJANGO_OWN_FILTERS, _DJANGO_OWN_FILTERS_SOURCE
+    source = _defaultfilters.register.filters
+    if _DJANGO_OWN_FILTERS is None or _DJANGO_OWN_FILTERS_SOURCE is not source:
+        _DJANGO_OWN_FILTERS = {func: name for name, func in source.items()}
+        _DJANGO_OWN_FILTERS_SOURCE = source
     return _DJANGO_OWN_FILTERS
 
 

@@ -305,10 +305,10 @@ class InterpositionTests(unittest.TestCase):
         equal = sum(i2 - i1 for tag, i1, i2, _j1, _j2 in opcodes if tag == "equal")
         differing = [op for op in opcodes if op[0] != "equal"]
 
-        # The structure, which is what the guard reads: six edits — the marker
+        # The structure, which is what the guard reads: seven edits — the marker
         # and its blank line as one pure insertion of ours, then two pairs for
-        # `compile_nodelist`'s delegation, then M11 Task 2's filter seam as a
-        # second pure insertion, then two more for `Variable._resolve_lookup`'s.
+        # `compile_nodelist`'s delegation, then M11 Task 2's filter seam as two
+        # pure insertions, then two more for `Variable._resolve_lookup`'s.
         # Asserted here too because a re-alignment that merged two edits into
         # one would move `equal` in a way this row could not explain on its own.
         #
@@ -320,18 +320,27 @@ class InterpositionTests(unittest.TestCase):
         # is satisfied either way; this row is what would notice if a future
         # edit merged them and the declaration stopped describing the diff.
         #
-        # **Six rather than five since M11 Task 2, and the sixth is a `delete`.**
-        # That is the filter seam: nineteen lines of ours — a comment block, two
-        # imports, the identity test, the call and its `continue` — against none
-        # of upstream's, because the arm *replaces* `resolve`'s loop body with a
-        # call rather than wrapping it. `difflib` names a run that only one side
-        # has `delete` when it is ours and `insert` when it is theirs, so the
-        # shape of this list is also the check that the seam stayed an insertion:
-        # an arm that had been written as a *rewrite* of the loop would show up
-        # as a `replace` here and as a declared region with two spans.
+        # **Seven rather than five since M11 Task 2, and what it added is a
+        # pair of `delete`s.** That pair is the filter seam: seventeen lines of
+        # ours — a comment block, two imports, the identity test, the call and
+        # its `continue`, with upstream's `arg_vals` loop sitting untouched
+        # between them — against none of upstream's, because the arm *replaces*
+        # `resolve`'s loop body with a call rather than wrapping it. `difflib`
+        # names a run that only one side has `delete` when it is ours and
+        # `insert` when it is theirs, so the shape of this list is also the
+        # check that the seam stayed an insertion: an arm that had been written
+        # as a *rewrite* of the loop would show up as a `replace` here and as a
+        # declared region with two spans.
+        #
+        # Two `delete`s rather than one because the seam's six import statements
+        # are hoisted above the `for` — a reviewer's NIT, and the reason the
+        # declaration in `check_transcriptions.py` had to become two regions in
+        # this same commit. Upstream's verbatim `arg_vals` loop then sits
+        # between the imports and the branch, and `difflib` can only see a
+        # differing region on each side of equal lines.
         self.assertEqual(
             [op[0] for op in differing],
-            ["delete", "replace", "replace", "delete", "replace", "replace"],
+            ["delete", "replace", "replace", "delete", "delete", "replace", "replace"],
         )
 
         self.assertEqual(
@@ -1512,12 +1521,18 @@ class FilterRoutingTests(unittest.TestCase):
         other row of the 1547 stayed green — the acceptance suite is what found
         it, and this row is so the unit suite finds it next time.
 
-        **Which attribute the error names is part of the claim**, because
-        upstream's two branches have an order: `expects_localtime` is tested
-        first, so `date` must blame `use_tz` and `join` — which has
-        `needs_autoescape` only — must blame `autoescape`. Computed as arguments
-        to the FFI call, where `autoescape` comes first positionally, `date`
-        would blame the wrong attribute and a row asserting only "an
+        **Which attribute the error names is part of the claim**, and what
+        produces it is upstream's *conditionality* rather than its statement
+        order: each attribute is read only under its own flag, and the two flag
+        sets are disjoint — measured at 6.0.9, two filters set
+        `expects_localtime` (`date`, `time`), seven set `needs_autoescape`, and
+        the intersection is empty, so 48 of the 57 read neither. Order alone
+        would not be the reason: were one filter to set both, the first read
+        would be the one that raised. Within that, `expects_localtime` is tested
+        before `needs_autoescape`, so `date` must blame `use_tz` and `join` —
+        which has `needs_autoescape` only — must blame `autoescape`. Computed as
+        arguments to the FFI call, where `autoescape` comes first positionally,
+        `date` would blame the wrong attribute and a row asserting only "an
         AttributeError was raised" would not notice.
 
         Two registries, one per engine, so nothing of ours is the comparator's
@@ -1613,6 +1628,205 @@ class FilterRoutingTests(unittest.TestCase):
             ).render(Context({"x": escaped})),
             "a<b-c",
             "the flag did not travel: the body escaped with autoescape off",
+        )
+
+    def test_the_builtin_filter_map_tracks_the_registry_it_was_built_from(self):
+        """The cache's key is the registry *object*, not its own emptiness.
+
+        `host.django_own_filters()` inverts `defaultfilters.register.filters` and
+        caches the result, because the arm asks it for *every* filter of every
+        rendered variable. Cached on `None` alone, the map outlives its source:
+        re-executing `defaultfilters` — a reload, or the scratch-universe
+        instrumentation M11's measurement scripts build — installs 57 fresh
+        handles, none of which is in the stale map, so the arm misses on all 57
+        and falls through to the Python loop. **Every test stays green**, because
+        the Python loop is upstream's own body and produces the right answer; the
+        only thing lost is the milestone, silently. It is the same shape as the
+        `django_own_tags()` defect one level over, which is why the fix and this
+        row travel with the routing that depends on it.
+
+        The row reproduces the hazard rather than describing it: a registry
+        object the map has never seen, holding a *sentinel* handle under a
+        built-in name. The map must name the sentinel — and the stale map the old
+        cache would have returned must not, which is asserted too, so the row
+        cannot pass by asserting something both maps satisfy.
+        """
+        import django.template.defaultfilters as defaultfilters
+
+        from django.template import Context, Engine
+
+        from django_rust_templates import host
+
+        # Warm the cache against the registry actually in force.
+        Engine().from_string("{{ x|lower }}").render(Context({"x": "A"}))
+
+        def sentinel(value):  # pragma: no cover - never called, only named
+            return value
+
+        sentinel.__name__ = "lower"
+
+        original = defaultfilters.register.filters
+        replacement = dict(original)
+        replacement["lower"] = sentinel
+
+        stale = {func: name for name, func in original.items()}
+        self.assertNotIn(
+            sentinel,
+            stale,
+            "the control: the map built from the old registry cannot name it",
+        )
+
+        defaultfilters.register.filters = replacement
+        try:
+            self.assertIs(
+                host.django_own_filters().get(sentinel),
+                "lower",
+                "the map did not track its source, so a re-executed "
+                "`defaultfilters` would fall through to Python for all 57 filters",
+            )
+        finally:
+            defaultfilters.register.filters = original
+
+        # And restoring the object restores the map, so the row does not leave a
+        # poisoned cache behind for the rest of the session.
+        self.assertIs(host.django_own_filters().get(original["lower"]), "lower")
+
+
+class DefaultTagsInterpositionTests(unittest.TestCase):
+    """M11 Task 3: ``defaulttags`` is ours, and the tag-rebinding escape with it.
+
+    Three claims, and the middle one is the milestone's Review Focus 2 rather
+    than a restatement of the other two:
+
+    * the module and the ``Node`` classes its tag corpus builds are ours;
+    * a ``{% load %}``ed library that registers ``if`` wins over Rust's — the
+      same escape as the filter row above, one level over, and the reason the
+      host predicate is *identity* rather than a list of names it owns;
+    * a rendered ``{% for %}`` holds an instance of *our* ``ForNode``, because
+      the annotation and inheritance protocols compare classes.
+
+    **What makes the rebinding row non-vacuous here.** Of the 24 tags this module
+    registers, 20 are compiled and rendered by Rust, so their bodies are
+    unreachable through the render path — a test that only rendered ``{% if %}``
+    would pass whatever the module contained. The rebinding is the one input that
+    puts a body from this file back on a live path, which is why it is the row
+    that has to exist. (The other four — ``load``, ``querystring`` and the two
+    stubs — are reached for the opposite reason: Rust owns none of those names.)
+    """
+
+    def setUp(self):
+        _shim.install()
+
+    def test_defaulttags_resolves_to_our_file(self):
+        import importlib
+
+        module = importlib.import_module("django.template.defaulttags")
+        self.assertIn("_impl", module.__file__, module.__file__)
+
+    def test_the_node_classes_this_module_defines_are_not_djangos(self):
+        """Review Focus 5: the classes the corpus builds, compared by identity.
+
+        ``load_pinned`` executes the pinned file *fresh*, so every class here is
+        a new object and the comparison is between two real things. ``URLNode`` is
+        in the list because Django's own ``syntax_tests/test_url.py`` imports it
+        **by name** from this module — the one class in the file with a consumer
+        outside it.
+
+        ``Node`` is not compared, for ``LoaderTagsInterpositionTests``' reason:
+        the pinned file's ``from django.template.base import Node`` resolves
+        through the shim to our ``base``, so the pinned module's ``Node`` is ours
+        too and ``is not`` would fail on a correct tree.
+        """
+        import importlib
+        import inspect
+
+        from django.template import base, defaulttags
+
+        from tests.pinned_module import load_pinned
+
+        pinned = load_pinned("defaulttags.py")
+        for name in ("ForNode", "IfNode", "IfChangedNode", "CycleNode", "URLNode"):
+            with self.subTest(name=name):
+                ours = getattr(defaulttags, name)
+                self.assertIsNot(ours, getattr(pinned, name))
+                self.assertIn("_impl", inspect.getfile(ours))
+
+        self.assertIs(defaulttags.Node, base.Node)
+
+    def test_a_rendered_for_holds_our_for_node(self):
+        """The live half: the tree a render builds holds *our* class.
+
+        ``isinstance`` against Django's classes is not enough on its own — the
+        pinned module's bases are ours too — so this asserts the ``type`` of the
+        node and the file that defines it, which is what a half-interposed module
+        would fail.
+        """
+        import inspect
+
+        from django.template import defaulttags
+        from django_rust_templates.render import parse_template
+
+        template = parse_template("{% for i in xs %}{{ i }}{% endfor %}", Engine())
+        nodes = template.nodelist.get_nodes_by_type(defaulttags.ForNode)
+        self.assertEqual(len(nodes), 1)
+        self.assertIs(type(nodes[0]), defaulttags.ForNode)
+        self.assertIn("_impl", inspect.getfile(type(nodes[0])))
+
+    def test_a_loaded_library_that_rebinds_a_builtin_tag_runs_its_own_body(self):
+        """Review Focus 2: a library's ``if`` beats Rust's, decided by identity.
+
+        ``Parser.add_library`` is ``self.tags.update(lib.tags)``
+        (``base.py:669-670``), so a ``{% load %}``ed library that registers ``if``
+        replaces the compile function for that name *from the load onward*, and
+        the host predicate is asked per token. Read the other way — "is ``if`` a
+        name Rust owns?" — the second tag compiles in Rust and the library's body
+        never runs, with the output still looking like a conditional.
+
+        **Measured on the pinned tree first, and the template is a sandwich so
+        that the answer says which half ran.** ``{% if x %}A{% endif %}`` before
+        the load and ``{% if x %}B{% endif %}`` after it, with a library whose
+        ``if`` renders ``shadow(...)``: stock Django answers ``Ashadow(B)`` —
+        the first token bound the builtin, the second the library's. Ours must
+        answer the same string, and ``AB`` is what the name-keyed arm produces.
+        """
+        from django.template import Context, Engine, Library, Node
+
+        class ShadowIfNode(Node):
+            def __init__(self, nodelist):
+                self.nodelist = nodelist
+
+            def render(self, context):
+                return "shadow(%s)" % self.nodelist.render(context)
+
+        def compile_shadow_if(parser, token):
+            nodelist = parser.parse(("endif",))
+            parser.delete_first_token()
+            return ShadowIfNode(nodelist)
+
+        library = Library()
+        library.tag("if", compile_shadow_if)
+        engine = Engine()
+        engine.template_libraries["m11_shadow_tags"] = library
+
+        source = "{% if x %}A{% endif %}{% load m11_shadow_tags %}{% if x %}B{% endif %}"
+        self.assertEqual(
+            engine.from_string(source).render(Context({"x": True})),
+            "Ashadow(B)",
+            "the library's `if` did not run for the token after the load; the "
+            "routing decided by name rather than by the handle the parse bound",
+        )
+
+        # The discriminator, measured rather than asserted from the expected
+        # string: the same two conditionals with the load removed, so both tokens
+        # are Rust's. `AB` is what the name-keyed arm reports for the sandwich
+        # above, because a load it did not consult leaves the routing unchanged.
+        self.assertEqual(
+            engine.from_string("{% if x %}A{% endif %}{% if x %}B{% endif %}").render(
+                Context({"x": True})
+            ),
+            "AB",
+            "Rust's own `if` does not render as `AB`, so the row above would not "
+            "have discriminated a name-keyed arm from an identity-keyed one",
         )
 
 

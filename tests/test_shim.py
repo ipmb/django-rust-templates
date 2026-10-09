@@ -10,6 +10,7 @@ Django's fallback.
 import importlib
 import shutil
 import sys
+import types
 import unittest
 from pathlib import Path
 
@@ -98,12 +99,13 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         same commit as each interposition (25 at M8, 24 with `base`, 23 with
         `smartif`, 22 with `utils`, 21 with `context`, 20 with `engine`, 14 with
         the six `loaders` files — the milestone's number — 13 with
-        `loader_tags`, M11's first, and 12 with `defaultfilters`, M11's second).
+        `loader_tags`, M11's first, 12 with `defaultfilters`, M11's second, and
+        11 with `defaulttags`, M11's third).
         """
         _shim.install()
 
         remaining = _shim.unshimmed()
-        self.assertEqual(len(remaining), 12, sorted(remaining))
+        self.assertEqual(len(remaining), 11, sorted(remaining))
         self.assertNotIn("django.template.base", remaining)
         self.assertNotIn("django.template.smartif", remaining)
         self.assertNotIn("django.template.utils", remaining)
@@ -242,7 +244,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
 
         The cache-drop below is not incidental. The row writes a module and
         expects the finder to see it, but ``install()`` returns early when the
-        shim is already installed (``_shim.py:407``), and a session-start install
+        shim is already installed (``_shim.py:408``), and a session-start install
         (which ``check.sh`` now does, so every test module binds the same
         classes) means the shim *is* already installed by the time this row
         runs. A ``django.template.backends`` cached earlier in the session then
@@ -331,29 +333,48 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         defaulttags.register.tags["if"]`` going ``False``, which makes
         ``ShellHost.has_tag`` hand ``{% if %}`` back to Python's ``do_if``.
 
-        The state is reproduced rather than described: drop the cached
-        ``defaulttags``, import it while the shim is out, then install. A refused
-        install must also leave the process where it started, so the assertion
-        after it is that the shim is *not* installed.
+        **The holder is synthetic, and that is the change M11 Task 3 forced.**
+        This row used to take ``django.template.defaulttags`` as its example of
+        "a module in a capture namespace holding Django's ``Node``", by dropping
+        it from ``sys.modules`` and importing it while the shim was out. That
+        vehicle is gone: ``defaulttags`` is now one of ours, so ``install``
+        *replaces* it rather than leaving it stale, and the name no longer
+        reproduces the state at all — the row went from asserting a refusal to
+        asserting nothing (``ShimError`` not raised). Any real Django module under
+        ``django.template`` would work today and rot the moment a later milestone
+        interposes it, which is exactly the recurrence being fixed here, so the
+        holder is a module this row builds: it is in the capture namespace,
+        ``_impl`` does not serve it, and it holds Django's ``Node``. Nothing about
+        the hazard is synthetic — the binding, the identity comparison and the
+        refusal are the real ones.
+
+        The state is reproduced rather than described: with the shim out, import
+        Django's ``base`` — the finder is not installed, so the import reaches the
+        pin rather than our transcription — and hang its ``Node`` off a probe
+        module, then install. A refused install must also leave the process where
+        it started, so the assertion after it is that the shim is *not* installed.
         """
         _shim.uninstall()
         try:
-            sys.modules.pop("django.template.defaulttags", None)
-            import django.template.defaulttags as django_defaulttags
+            django_base = importlib.import_module("django.template.base")
+            self.assertNotIn("_impl", django_base.__file__ or "")
 
-            self.assertNotIn("_impl", django_defaulttags.__file__ or "")
+            probe = types.ModuleType("django.template.m11_stale_capture_probe")
+            probe.Node = django_base.Node
+            sys.modules[probe.__name__] = probe
 
             with self.assertRaises(_shim.ShimError) as caught:
                 _shim.install()
 
             message = str(caught.exception)
-            self.assertIn("django.template.defaulttags", message)
-            self.assertIn("Node", message)
+            self.assertIn("django.template.m11_stale_capture_probe.Node", message)
+            self.assertIn("django.template.base.Node", message)
             self.assertFalse(_shim.installed(), "a refused install left the shim in")
         finally:
-            # The module holding the capture is dropped so the next import takes
-            # ours, and the shim goes back to installed for every later row.
-            sys.modules.pop("django.template.defaulttags", None)
+            # The probe holding the capture is dropped so the next install finds
+            # nothing stale, and the shim goes back to installed for every later
+            # row.
+            sys.modules.pop("django.template.m11_stale_capture_probe", None)
             _shim.install()
 
     def test_uninstall_while_uninstalled_does_not_poison_the_cache(self):

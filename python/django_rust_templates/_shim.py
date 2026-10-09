@@ -110,6 +110,7 @@ SHADOWING = {
     "base.py": "transcribed",
     "context.py": "transcribed",
     "defaultfilters.py": "transcribed",
+    "defaulttags.py": "transcribed",
     "engine.py": "transcribed",
     "exceptions.py": "fresh",
     "loader_tags.py": "transcribed",

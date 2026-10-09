@@ -805,6 +805,18 @@ class FilterExpression:
                         obj = string_if_invalid
         else:
             obj = self.var
+        # Function-local rather than module-level: `host` reads `_impl`'s
+        # registries, so importing it while this module is being executed would
+        # run the host in the middle of that. Hoisted to just above the loop so
+        # the six statements run once per `resolve` rather than once per filter
+        # of it, which is the only difference from upstream's placement.
+        from django_rust_templates import _native
+        from django_rust_templates.host import (
+            django_own_filters,
+            effective_autoescape,
+            effective_use_tz,
+        )
+
         for func, args in self.filters:
             arg_vals = []
             for lookup, arg in args:
@@ -819,22 +831,21 @@ class FilterExpression:
             # running them here as well would apply `@stringfilter`'s coercion
             # and `mark_safe` twice. Decided by handle identity, so a
             # `{% load %}`ed filter that merely shares a name keeps this arm.
-            from django_rust_templates import _native
-            from django_rust_templates.host import (
-                django_own_filters,
-                effective_autoescape,
-                effective_use_tz,
-            )
-
             if (builtin_name := django_own_filters().get(func)) is not None:
-                # Upstream's order, so that a context attribute it never reads
-                # for this filter is never read here either: `expects_localtime`
-                # is tested first (`base.py:810-811`), then `needs_autoescape`
-                # (`base.py:812-815`), and a `dict` context — which Django's own
+                # Upstream's *conditionality*, not its order: each attribute is
+                # read only when its own flag is set, and the two flags are
+                # disjoint — measured at 6.0.9, two filters set
+                # `expects_localtime` (`date`, `time`), seven set
+                # `needs_autoescape`, the intersection is empty, and 48 of the
+                # 57 read neither. What the invariant is about is **attribute
+                # reads inside the loop**, and testing each flag before its
+                # attribute is what keeps them: `expects_localtime`
+                # (`base.py:810-811`), then `needs_autoescape`
+                # (`base.py:812-815`), so a `dict` context — which Django's own
                 # suite passes (`test_parser.py:207`) — sees exactly the one
-                # `AttributeError` upstream sees. Written as call arguments
-                # instead, the FFI's order would decide it and `date` would blame
-                # `autoescape`.
+                # `AttributeError` upstream sees. Passed as call arguments
+                # instead, the FFI's argument order would decide which name
+                # `date` blames.
                 use_tz = effective_use_tz(context, func)
                 autoescape = effective_autoescape(context, func)
                 obj = _native.filter(

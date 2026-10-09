@@ -32,8 +32,27 @@ DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
-from django.template.base import Variable  # noqa: E402
 from django.utils.safestring import SafeString  # noqa: E402
+
+# **Django's `Variable`, held under a name the shim cannot take.** `from
+# django.template.base import Variable` under the shim binds *our transcription*
+# of the class — byte-for-byte upstream, which is why the comparison stayed
+# meaningful, but `inspect.getsourcefile` resolves a class through
+# `sys.modules[cls.__module__]`, so the guard below read whichever copy of
+# `django.template.base` the test that ran before it had left installed. It was
+# green in the full suite and red alone: measured, `OK` while `tests.test_shim`'s
+# `tearDown` — which leaves the shim *out* — was the last thing to touch it, and
+# `FAILED` as soon as a preceding module left the shim in, which M11 Task 3's
+# `test_tag_inventory` interposition row does. A guard that is green because of a
+# test alphabet is the failure this project keeps finding, so the target is read
+# out of the pin instead, the way `tests/test_tag_inventory.py` and
+# `tests/test_filter_inventory.py` do it. The class is verbatim upstream —
+# `base.py`'s declared regions cover `FilterExpression.resolve` and
+# `Variable._resolve_lookup`, not `Variable.__init__` (871-922) — so holding the
+# pin costs nothing and removes the dependence altogether.
+from tests.pinned_module import load_pinned  # noqa: E402
+
+Variable = load_pinned("base.py").Variable
 
 from django_rust_templates import _native  # noqa: E402
 
@@ -252,6 +271,13 @@ class VariableParityTests(unittest.TestCase):
                     _native.parse_variable(raw)
 
     def test_the_comparison_target_is_genuinely_djangos_variable(self):
+        """The pin makes this a claim rather than a snapshot of `sys.modules`.
+
+        `Variable` is `load_pinned("base.py").Variable` — the class is defined by
+        the file under `.django/`, executed under the private name `pinned_base`,
+        so `getsourcefile` follows `Variable.__module__` to the checkout whatever
+        the shim has done to `django.template.base` in the meantime.
+        """
         source = inspect.getsourcefile(Variable)
         self.assertNotIn("_impl", source)
         self.assertTrue(Path(source).resolve().is_relative_to(DJANGO_CHECKOUT.resolve()))

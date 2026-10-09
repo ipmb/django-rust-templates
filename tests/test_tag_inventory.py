@@ -41,7 +41,20 @@ DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
-from django.template import defaulttags, loader_tags  # noqa: E402
+# **Django's files, not the names that now resolve to ours.** Until M11 these two
+# imports *were* Django's modules, and every metric in this module — the registry
+# set, the decorated-function count, the `querystring` decorator — was read off
+# them. Tasks 1 and 3 interposed both, so the import now delivers a verbatim
+# transcription and reading through it would make the counts silent about
+# upstream: the self-comparison the guard row at the end of this class exists to
+# refuse. `load_pinned` is the established way to hold Django's copy under a name
+# the shim has taken (`tests/pinned_module.py`, and `tests/test_filter_inventory.py`
+# for the same move one milestone-part over), and it restores the docstring's
+# "answers a question about Django" to a fact.
+from tests.pinned_module import load_pinned  # noqa: E402
+
+defaulttags = load_pinned("defaulttags.py")
+loader_tags = load_pinned("loader_tags.py")
 
 # Every tag a template can invoke: `defaulttags` (24) + `loader_tags` (3).
 REGISTERED = {
@@ -217,19 +230,65 @@ class TagInventoryTests(unittest.TestCase):
         )
 
     def test_the_parity_target_is_genuinely_djangos_registry(self):
-        """Guard against self-comparison once M9 interposes the shim.
+        """Guard against self-comparison, restated for the files it now names.
 
-        The same trap `test_lexer_parity`'s source-file guard exists for: after
-        M9, `django.template.defaulttags` resolves to our shell, and any
-        inventory read from it would be measuring our registry against itself.
+        M9 wrote this row against a hazard that had not arrived: "after M9,
+        `django.template.defaulttags` resolves to our shell, and any inventory
+        read from it would be measuring our registry against itself." **M11
+        Tasks 1 and 3 are that arrival — for `loader_tags` and `defaulttags`
+        both** — and the row's answer is the pair of imports at the top of this
+        module, which are now `load_pinned`. The object this asserts about is
+        Django's file rather than a transcription of it, so the row's *body* did
+        not have to change: the fix is the subject, not the assertion.
+
+        **The guard was a location proxy until now, and saying so is the point.**
+        It asserted that the imported module's file starts with the checkout path
+        — a proxy for "this is Django's registry" that held only while Django's
+        file was what the name resolved to. The interposition is precisely the
+        event that makes the proxy and the claim disagree, and it did so by
+        failing rather than by passing wrongly, which is why it was found in the
+        commit that moved the name.
         """
         import inspect
 
-        source_file = inspect.getsourcefile(defaulttags)
-        self.assertTrue(
-            source_file.startswith(str(DJANGO_CHECKOUT)),
-            f"inventory target is not the pinned checkout: {source_file}",
-        )
+        for module in (defaulttags, loader_tags):
+            with self.subTest(module=module.__name__):
+                source_file = inspect.getsourcefile(module)
+                self.assertTrue(
+                    source_file.startswith(str(DJANGO_CHECKOUT)),
+                    f"inventory target is not the pinned checkout: {source_file}",
+                )
+
+    def test_the_interposed_modules_register_the_pinned_registries(self):
+        """The other direction: the modules that ship register Django's sets.
+
+        Reading the inventory from the pin makes the counts honest about upstream
+        and opens the gap this row closes — "the source the pin names" and "the
+        registry the engine dispatches through" became two objects the moment
+        these modules were interposed. The transcription is the pin plus a
+        marker, so the two should agree name for name; nothing above would
+        notice if the shim's registration were broken, because every read now
+        goes to the pin.
+
+        It calls `install()` rather than assuming the shim, for
+        `test_filter_inventory.py`'s reason: run by hand in an unshimmed
+        interpreter the row would otherwise assert that Django's registry equals
+        Django's registry and pass.
+        """
+        import importlib
+
+        from django_rust_templates import _shim
+
+        _shim.install()
+
+        for name, pinned in (
+            ("django.template.defaulttags", defaulttags),
+            ("django.template.loader_tags", loader_tags),
+        ):
+            with self.subTest(module=name):
+                live = importlib.import_module(name)
+                self.assertIn("_impl", live.__file__, live.__file__)
+                self.assertEqual(set(live.register.tags), set(pinned.register.tags))
 
 
 class RustRegistryTests(unittest.TestCase):

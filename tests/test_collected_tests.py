@@ -64,7 +64,31 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # built-in, because the arm read `context.autoescape` eagerly. One row, and the
 # delta is the row. See the amendment in the M11 plan for why nothing smaller
 # than the 1547 could have caught it.
-PINNED = 383
+# 383 → 389 is M11 Task 3, **six** rows. This note has been wrong about that
+# number twice inside one task, which is the reason it is worth reading: it was
+# first written as 387 against a four-row list — `DefaultTagsInterpositionTests`'
+# module resolution, the node classes compared against the pinned file, the
+# rendered `{% for %}` holding our node, and the tag-rebinding escape — then 388
+# when `test_tag_inventory`'s "the interposed modules register the pinned
+# registries" was added while fixing that module's guard, and now 389 for
+# `test_interposition`'s "the builtin filter map tracks the registry it was built
+# from", which the reviewer's source-keyed-cache finding added. Each time
+# discovery had moved and the recorded number had not, and each time the
+# correction came from the same place: `git diff tests/ | grep -c "^+    def
+# test_"` is 6 and 383 + 6 = 389, so the whole delta is rows and no module left
+# the pattern. The lesson is the one this pin exists for: a count taken from the
+# failure message *and not from the diff* is a count taken at one moment.
+#
+# `tests/test_variable_parity.py` also changed in this commit and that is not
+# part of the delta: its `Variable` moved from `from django.template.base import
+# Variable` to `load_pinned("base.py").Variable`, a swap of one binding for
+# another rather than a row. It moved because a row above left the shim
+# installed where `tests.test_shim`'s `tearDown` used to leave it out, and the
+# module's guard had been green on that accident — `getsourcefile` follows a
+# class through `sys.modules[cls.__module__]`, so an interposed name answers for
+# the class defined in it. Same class of defect as the row above it, found the
+# same way: by an unrelated commit moving the ground under it.
+PINNED = 389
 
 
 def collected() -> unittest.TestSuite:

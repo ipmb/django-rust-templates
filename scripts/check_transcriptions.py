@@ -135,16 +135,16 @@ COMPARED_PATH = {
         (677, 681, "Parser.compile_filter"),
         (683, 687, "Parser.find_filter"),
         (744, 788, "FilterExpression.__init__"),
-        (860, 877, "FilterExpression.args_check"),
-        (909, 960, "Variable.__init__"),
-        (962, 978, "Variable.resolve"),
-        (1077, 1089, "Node.get_nodes_by_type"),
-        (1097, 1098, "NodeList.render"),
-        (1100, 1105, "NodeList.get_nodes_by_type"),
-        (1111, 1112, "TextNode.__init__"),
-        (1120, 1127, "TextNode.render_annotated"),
-        (1149, 1150, "VariableNode.__init__"),
-        (1170, 1214, "token_kwargs"),
+        (871, 888, "FilterExpression.args_check"),
+        (920, 971, "Variable.__init__"),
+        (973, 989, "Variable.resolve"),
+        (1088, 1100, "Node.get_nodes_by_type"),
+        (1108, 1109, "NodeList.render"),
+        (1111, 1116, "NodeList.get_nodes_by_type"),
+        (1122, 1123, "TextNode.__init__"),
+        (1131, 1138, "TextNode.render_annotated"),
+        (1160, 1161, "VariableNode.__init__"),
+        (1181, 1225, "token_kwargs"),
     ],
     # 8 functions, spans 56-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
@@ -301,6 +301,75 @@ COMPARED_PATH = {
     "defaultfilters.py": [
         (40, 54, "stringfilter"),
     ],
+    "defaulttags.py": [
+        # Measured, 44 of the file's 82 functions. **The plan's Step 2 predicted
+        # a small set — `load` and `querystring` "because the host does not own
+        # them", plus the two stub tags — and the measurement disagrees with it
+        # in both directions**, so recording which is which matters more than the
+        # list itself:
+        #
+        # * **`load` is in it and the other three are not.** `querystring`,
+        #   `partial` and `partialdef` are absent because the parity corpus
+        #   (`tests/parser_corpus.py`) holds no template that uses them, not
+        #   because the shell handles them host-side. The prediction reasoned
+        #   about the *render* path; this pin is about the *harness*'s path, and
+        #   the two reach different code.
+        # * **Everything else in it is the tags the shell does own** — `cycle`,
+        #   `do_if`, `do_for`, `url`, `widthratio` — for the same reason: the
+        #   harness's Django side is a bare `Parser` over this transcription, so
+        #   `parser.tags[command]` *is* this file's function whether or not the
+        #   shell would have routed elsewhere. The prediction's premise ("Rust's,
+        #   so unreachable") is true of the render path and false here.
+        #
+        # The direction of the error is the safe one for clause (4) — the guard
+        # protects a superset of the prediction — and the unsafe direction is
+        # already covered by the under-protection note below, which is the reason
+        # this list is re-measured live rather than trusted.
+        (53, 55, "AutoEscapeControlNode.__init__"),
+        (101, 104, "CycleNode.__init__"),
+        (139, 141, "FilterNode.__init__"),
+        (151, 153, "FirstOfNode.__init__"),
+        (171, 181, "ForNode.__init__"),
+        (264, 267, "IfChangedNode.__init__"),
+        (310, 311, "IfNode.__init__"),
+        (316, 318, "IfNode.__iter__"),
+        (320, 322, "IfNode.nodelist"),
+        (341, 344, "LoremNode.__init__"),
+        (364, 367, "RegroupNode.__init__"),
+        (400, 402, "NowNode.__init__"),
+        (441, 442, "ResetCycleNode.__init__"),
+        (450, 451, "SpacelessNode.__init__"),
+        (471, 472, "TemplateTagNode.__init__"),
+        (481, 485, "URLNode.__init__"),
+        (528, 529, "VerbatimNode.__init__"),
+        (536, 540, "WidthRatioNode.__init__"),
+        (569, 575, "WithNode.__init__"),
+        (586, 601, "autoescape"),
+        (604, 610, "comment"),
+        (613, 703, "cycle"),
+        (706, 708, "csrf_token"),
+        (711, 723, "debug"),
+        (726, 757, "do_filter"),
+        (760, 806, "firstof"),
+        (809, 908, "do_for"),
+        (912, 914, "TemplateLiteral.__init__"),
+        (926, 928, "TemplateIfParser.__init__"),
+        (930, 931, "TemplateIfParser.create_var"),
+        (934, 1022, "do_if"),
+        (1025, 1064, "ifchanged"),
+        (1067, 1077, "find_library"),
+        (1104, 1133, "load"),
+        (1136, 1180, "lorem"),
+        (1183, 1203, "now"),
+        (1354, 1419, "regroup"),
+        (1422, 1445, "resetcycle"),
+        (1448, 1476, "spaceless"),
+        (1479, 1513, "templatetag"),
+        (1516, 1586, "url"),
+        (1589, 1609, "verbatim"),
+        (1612, 1652, "widthratio"),
+        (1655, 1689, "do_with"),
+    ],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])
@@ -399,9 +468,25 @@ DECLARED = {
             # `self.filters` gains one branch, and it is a **pure insertion** —
             # upstream has no counterpart on these lines, hence `None` on the
             # upstream side and a snippet that names statements rather than
-            # pairing them. Eleven executable lines: the two imports that reach
-            # the shell, the identity test against the built-in registry, the
-            # call, and the `continue`.
+            # pairing them. Seventeen executable lines across the two regions
+            # below: the two imports that reach the shell in the first, and in
+            # the second the identity test against the built-in registry, the
+            # two flag reads, the call with its five arguments, and the
+            # `continue`.
+            #
+            # **Two regions rather than one, and the `arg_vals` loop between
+            # them is why.** The imports used to sit inside the loop, directly
+            # above the identity test, so `difflib` paired the whole block
+            # against upstream's nothing as a single opcode. Hoisting them above
+            # the `for` — a reviewer's NIT, six statements once per `resolve`
+            # instead of once per filter, which no test can observe — left
+            # upstream's verbatim `arg_vals` loop (ours 820-826, equal in place)
+            # between the imports and the branch, and equal lines are what makes
+            # the diff see two differing regions rather than one. The second
+            # region's span is therefore the branch, not the seam, and a reader
+            # comparing the two spans to upstream's emptiness would otherwise
+            # read the pairing as meaningful — the same note `_resolve_lookup`'s
+            # two regions carry below.
             #
             # **That `continue` is the design, not a shortcut.** The arm
             # *replaces* the loop body below rather than wrapping it, because
@@ -441,14 +526,18 @@ DECLARED = {
             # `test_filter_parity.py::test_the_comparison_target_is_not_rust_owned`
             # is what watches *that*.
             (
-                (815, 847),
+                (808, 819),
                 None,
                 "from django_rust_templates import _native\n"
                 "from django_rust_templates.host import (\n"
                 "django_own_filters,\n"
                 "effective_autoescape,\n"
                 "effective_use_tz,\n"
-                ")\n"
+                ")",
+            ),
+            (
+                (827, 858),
+                None,
                 "if (builtin_name := django_own_filters().get(func)) is not None:\n"
                 "use_tz = effective_use_tz(context, func)\n"
                 "autoescape = effective_autoescape(context, func)\n"
@@ -505,12 +594,12 @@ DECLARED = {
             # not — a non-raising signature carries the bit on an ordinary return
             # value) is what makes the alternative live rather than closed.
             (
-                (995, 1033),
+                (1006, 1044),
                 (957, 1021),
                 "from django_rust_templates import _native",
             ),
             (
-                (1035, 1035),
+                (1046, 1046),
                 (1023, 1028),
                 'return _native.resolve(".".join(self.lookups), context)',
             ),
@@ -704,6 +793,44 @@ DECLARED = {
                 (1, 2),
                 None,
                 "# TRANSCRIBED: django/template/defaultfilters.py (Django 6.0.9)",
+            ),
+        ],
+    ),
+    "defaulttags.py": (
+        "django/template/defaulttags.py",
+        [
+            # The marker and its blank separator — a pure insertion, hence `None`
+            # on the upstream side, and the whole of the difference.
+            #
+            # **Pin-plus-marker here is a stronger claim than it is in the two
+            # files above it, and the difference is worth stating — with the
+            # counts measured rather than taken from the plan, which had two of
+            # them wrong.** Measured on this tree: the module registers **24**
+            # tags and defines **26** module-level functions; the plan's "the 26
+            # `do_*` bodies are Rust-compiled" reads the second number as if it
+            # were the first. Of the 24 registered tags, **20 are Rust's** — not
+            # 24 — and their bodies are unreachable through the *render* path,
+            # because Rust compiles and renders them and `ShellHost.has_tag`
+            # answers False. The four reached host-side are `load`, `querystring`
+            # (Rust owns neither name) and the two stubs, `partial` and
+            # `partialdef`, which Rust reserves without implementing.
+            #
+            # So the honest reading of this file is "faithful, and mostly dead
+            # code", and that is the claim the verbatim transcription makes. The
+            # alternative — stubbing the 20 out — would be a *different* claim
+            # ("nothing here needs to be right") and a worse one: `{% load %}`
+            # rebinding a built-in tag puts Django's body back on a live path at
+            # runtime (`ShellHost.has_tag`'s identity test), and a stub would then
+            # be a stub in the one case this milestone is most concerned with.
+            #
+            # Measured rather than argued: `m9_measure_parse_path.py defaulttags.py`
+            # reports the harness's reached set (44 functions), and
+            # `tests/test_interposition.py`'s `DefaultTagsInterpositionTests` pins
+            # the one input that puts a body from this file on a live path.
+            (
+                (1, 2),
+                None,
+                "# TRANSCRIBED: django/template/defaulttags.py (Django 6.0.9)",
             ),
         ],
     ),

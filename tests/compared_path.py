@@ -83,6 +83,12 @@ _CACHED_PROPERTY_KINDS = frozenset(
 # `functools.cache` is `lru_cache(maxsize=None)` and has the same type, so one
 # name covers both.
 _LRU_CACHE_WRAPPER = getattr(functools, "_lru_cache_wrapper", None)
+# The type of a `collections.namedtuple` field accessor (`_tuplegetter` in
+# CPython), built by asking `namedtuple` for one rather than by naming a private
+# class. M11's `defaulttags.py` is what made this necessary: its `GroupedResult`
+# is a namedtuple, and its two field accessors were the first members in the tree
+# that `residue` had no case for. See `_is_foreign` for why they are foreign.
+_TUPLE_GETTER = type(collections.namedtuple("_Field", "field").field)
 
 
 def _is_cached_property(value):
@@ -309,6 +315,18 @@ def _is_foreign(value, module):
 
     1. ``ismemberdescriptor`` / ``isgetsetdescriptor`` — C slot wrappers and
        ``__dict__``/``__weakref__``, which cannot hold a Python function at all;
+       and a ``collections.namedtuple`` field accessor (``_tuplegetter``), which
+       is in this arm for the same reason and is the one member kind M11 added.
+       Measured on the probe the constant is built from: ``callable`` is False,
+       ``inspect.isroutine`` is False, ``isbuiltin`` is False, there is no
+       ``__func__`` — the *only* thing that made it a candidate at all is
+       ``hasattr(type(value), "__get__")``, ``_callable_member``'s descriptor
+       arm. It is positively foreign rather than unknown because ``namedtuple``
+       builds these from field names in C: no module writes one, so no module's
+       ``def`` can be hidden inside it. **The discrimination is by type, and the
+       ``Lazy`` case above is the control that keeps it honest** — a Python
+       descriptor class in another module holding one of *our* functions is not
+       an instance of this type, so it stays loud;
     2. a builtin — there is no Python source anywhere for it, so it cannot be a
        ``def`` this module wrote. This is what excludes ``TokenType._new_member_``
        (``object.__new__``), the same family as the ``__new__``
@@ -336,7 +354,11 @@ def _is_foreign(value, module):
     answer is to add ``partial.func`` to :func:`_innermost`'s table — a new row
     for a new shape — not to soften this arm.
     """
-    if inspect.ismemberdescriptor(value) or inspect.isgetsetdescriptor(value):
+    if (
+        inspect.ismemberdescriptor(value)
+        or inspect.isgetsetdescriptor(value)
+        or isinstance(value, _TUPLE_GETTER)
+    ):
         return True
     own = os.path.realpath(module.__file__)
     written = _innermost(value, own)

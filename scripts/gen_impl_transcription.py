@@ -79,6 +79,18 @@ MODULES = {
     # regions all saying the same thing. So this file is pin-plus-marker and the
     # generator owns it, which is the opposite of `base.py` (see HAND_WRITTEN).
     "defaultfilters.py": "django/template/defaultfilters.py",
+    # M11's third and last, added by its own task in the same commit as the file
+    # the row above describes the rule for.
+    #
+    # It belongs in this table rather than in HAND_WRITTEN because its tag
+    # bodies stay verbatim. Measured, since the plan's counts were not: the
+    # module registers 24 tags, 20 of them Rust's — those bodies are unreachable
+    # through the render path, because the host's `has_tag` answers False for a
+    # name Rust compiles. The four that are reached are `load` and `querystring`,
+    # which Rust does not own, and the two stubs `partial`/`partialdef`. Faithful
+    # is what a transcription is for, and the case that needs the bodies right is
+    # a `{% load %}`ed library rebinding a built-in tag.
+    "defaulttags.py": "django/template/defaulttags.py",
 }
 
 # Transcriptions this generator must **not** write, because their difference from

@@ -40,10 +40,10 @@ OWNERS = {
     # `test_the_table_partitions_the_universe` makes it unrepresentable here,
     # because `origin` is not in `django_modules()`.
     #
-    # §10.3's M11 row.
-    "defaulttags": "M11",
-    # `loader_tags` was here until the commit that interposed it; the other two
-    # follow in M11's own later tasks, in the order the plan takes them.
+    # §10.3's M11 row is now empty here, as M10's is above: `defaulttags` was
+    # the last of its three and moved to `INTERPOSED` in the commit that
+    # interposed it. `loader_tags` and `defaultfilters` went the same way, each
+    # in its own task's commit.
     # §10.3's M12 row owns no meter entry: `i18n`, `l10n`, `static`, `tz` and
     # `cache` are `django/templatetags/*`, outside the namespace the meter
     # covers. M12 moves tag bodies and retires nothing here.
@@ -108,7 +108,7 @@ INTERPOSED = {
         "loaders.cached",
         "loaders.locmem",
     ],
-    "M11": ["loader_tags", "defaultfilters"],
+    "M11": ["loader_tags", "defaultfilters", "defaulttags"],
 }
 
 

@@ -563,3 +563,131 @@ two rows in `FilterRoutingTests` redden — the `force_escape` row and the `join
 row — and the other four stay green. That is the measurement behind "these inputs
 discriminate"; the plan's list, taken as written, would have shipped a row that
 passed under the defect it was written to catch.
+
+## Task 3 amendment: three counts the plan conflated, and four things it did not predict
+
+*Appended after Task 3 was executed. Step 1's "the 26 `do_*` bodies are
+Rust-compiled" and Step 2's four-name expectation were both written from prose
+about the registry, and measured each is wrong — in a different way each time.
+The plan's text is left as written; what follows is what the measurements say.
+Two of the corrections are also in the tree, in the places that had to state
+them: `check_transcriptions.py`'s `DECLARED` comment for `defaulttags.py` and the
+report `m9_measure_parse_path.py defaulttags.py` prints.*
+
+**Step 1's sentence is three claims, and 26 answers the one it is not making.**
+Step 1 reads:
+
+> The 26 `do_*` bodies are Rust-compiled, so they are unreachable through the
+> shim; **transcribe them verbatim and say so in the `DECLARED` comment** …
+
+Measured on the pin: `defaulttags.py` defines **26 module-level functions**, of
+which **four** are named `do_*` (`do_filter`, `do_for`, `do_if`, `do_with`); the
+module registers **24** tags; and of those 24, **20** are Rust's — the four that
+are not are `load` and `querystring`, which Rust owns no compile function for,
+and the two stubs `partial`/`partialdef`, which Rust reserves without
+implementing. So 26 is the count of module-level functions, and it is *also* the
+count of `@register.tag`-decorated functions across **both** modules this
+milestone interposes (23 here, 3 in `loader_tags`) — the number
+`test_tag_inventory.py::test_the_two_counts_that_have_been_confused` pins against
+the registry's 27, whose gap is `querystring` alone, a `simple_tag`. One number,
+right for two questions, written as the answer to a third (20) that is the one
+the sentence is about. That is this project's recurring shape, so the guard is
+the one `TagInventoryTests` already had, extended by Task 3: the registry, the
+decorated set and the Rust set are each derived from the engine and asserted
+separately, so no one of them can be quoted for another.
+
+**Step 2 expected four names, got 44 functions, and only one of the four is among
+them.** Step 2 reads:
+
+> Expected: a non-empty set — `load` and `querystring` are the two names the host
+> does *not* own, so their `do_*` functions are executed from Python, and the
+> stub tags `partial`/`partialdef` route host-side too.
+
+`m9_measure_parse_path.py defaulttags.py` reports **44 of the 82 functions the
+module defines**, reached by the hand-written corpus (166 cases); the generated
+corpus's 400 cases reach 13, and the report says `reached only by the generator:
+none`. `load` is among the 44. `querystring`, `partial_func` and
+`partialdef_func` are **not** — the corpus never renders a `{% querystring %}` or
+a `{% partial %}` — so the prediction that those three "route host-side too" is
+about a path this comparison does not walk.
+
+The larger error is the phrase "a set". The plan expected the *host-side* names;
+the row measures everything the **parse** corpus executes, and that includes the
+compile functions of tags Rust owns. The 44 partition exactly: 19 `__init__`s
+(17 node classes, plus `TemplateLiteral` and `TemplateIfParser`), 3 further
+members (`IfNode.__iter__`, `IfNode.nodelist`, `TemplateIfParser.create_var`),
+and 22 module-level functions the corpus calls — of which **20 are registered
+tags Rust owns** (`filter`, `for`, `if`, `cycle`, `url`, `widthratio`, …), one is
+`load`, which it does not, and one is `find_library`, the helper `load` calls.
+Both readings are true at once and the distinction is the point: the corpus calls
+`tests/test_parser_parity.py`'s `django_parse`, which builds Django's `Parser`
+directly rather than going through Rust's compiler, so a body Rust will never run
+on the *render* path is still on the *parse* path this pin is about. The
+declaration in `check_transcriptions.py` says exactly that — "faithful, and mostly
+dead code" — and `COMPARED_PATH["defaulttags.py"]` is 44 spans, where the plan's
+four would have pinned a set that says nothing about the harness reading it.
+
+**The instrument gained its first `namedtuple` member kind.** `defaulttags.py`
+holds `GroupedResult`, a `collections.namedtuple`, and its two field accessors
+are C `_tuplegetter`s: `callable` is False, `inspect.isroutine` is False,
+`isbuiltin` is False, and there is no `__func__`. The only reason they were
+candidates at all is `hasattr(type(value), "__get__")`, `_callable_member`'s
+descriptor arm — and `residue` then reported them as a kind with no case, so
+`instrumented(defaulttags)` refused to run. `tests/compared_path.py` grew a
+`_TUPLE_GETTER` arm inside `_is_foreign`, built by asking `namedtuple` for one
+rather than by naming a private CPython class, with the argument that this is
+*positively* foreign rather than unknown: `namedtuple` builds these in C from
+field names, so no module writes one and no module's `def` can be hidden inside
+it. `Lazy` (`functools.cached_property` on a callable) is the control that keeps
+the discrimination honest.
+
+**The pin moved three times in one task, and the third move is the one to read.**
+Task 3 adds **six** rows, so `PINNED` is 383 + 6 = **389** — but the note beside
+it was first written as 387 (against a four-row list), then 388 (when
+`test_tag_inventory`'s registry row arrived while fixing that module's guard),
+and only then 389. Each time discovery had already moved and the recorded number
+had not, and each time the correction came from `git diff tests/ | grep -c "^+
+def test_"` rather than from the failure message that had just printed the true
+count. The pin exists to make a count expensive to change; the note is what makes
+the *reason* for a count expensive to fake, and it is the reason that kept being
+wrong.
+
+**A guard was green because of the alphabet, and the row that left the shim
+installed is what exposed it.** `tests/test_variable_parity.py` imported
+`Variable` from `django.template.base` and asserted that `inspect.getsourcefile`
+does not name `_impl` — true at HEAD only because `tests.test_shim`'s `tearDown`
+left the shim *out*, so `sys.modules["django.template.base"]` was still Django's
+by the time that row ran. Task 3's new `test_tag_inventory` row leaves the shim
+installed, and the same assertion then read our own file. The fix is the
+mechanism `test_filter_parity.py` already uses for the same hazard: the row now
+holds `load_pinned("base.py").Variable`, so the pin is a claim rather than a
+snapshot of whatever `sys.modules` happens to hold. The generalisation is worth
+keeping: `inspect.getsourcefile` resolves a class through
+`sys.modules[cls.__module__]`, so **any** row written that way can be satisfied
+by another test module's import order — and this one was, for two milestones.
+
+**Three reviewer findings folded in, one of them in the reason rather than the
+code.** (1) `host.django_own_filters()` now keys its cache on the registry
+*object* rather than on `None`, because a map built from a registry that has been
+replaced is stale in the one way that is invisible: all 57 filters fall through
+to the Python loop and the whole suite stays green. The row is
+`FilterRoutingTests::test_the_builtin_filter_map_tracks_the_registry_it_was_built_from`,
+with the stale map asserted first as its own control. (2) The comment inside
+`FilterExpression.resolve`'s Rust arm said "upstream's order"; measured at 6.0.9
+the invariant is upstream's *conditionality* — two filters set
+`expects_localtime` (`date`, `time`), seven set `needs_autoescape`, the
+intersection is empty, and 48 of the 57 read neither — so what the arm must
+preserve is that each attribute is read only when its own flag is set, and the
+falsification is that passing them as call arguments would let the FFI's argument
+order decide which name `date` blames. The row that tests it
+(`test_a_dict_context_is_read_only_where_upstream_reads_it`) was reworded to
+match. (3) The reviewer's NIT — hoist the six imports out of the per-filter loop
+— is in, and it cost more than a NIT usually does: it left upstream's verbatim
+`arg_vals` loop between the imports and the arm, which split
+`DECLARED["base.py"]`'s filter seam into two regions, shifted every
+`COMPARED_PATH["base.py"]` span below it by 11 lines (re-measured with
+`m9_measure_parse_path.py`, not by adding 11), moved three hardcoded spans in
+`test_compared_path_instrument.py`, and turned
+`test_the_transcription_is_the_pinned_source`'s opcode list from six edits into
+seven. Recorded because the next person to hoist a line in a declared region
+should expect all five of those.**

@@ -191,7 +191,7 @@ class DescriptorCountingTests(unittest.TestCase):
         from tests.compared_path import definitions
 
         base_defs = definitions(base)
-        self.assertEqual(base_defs["FilterExpression.args_check"], (860, 877))
+        self.assertEqual(base_defs["FilterExpression.args_check"], (871, 888))
         self.assertEqual(base_defs["Origin.loader_name"][0], 134)
         self.assertIsNone(base_defs.get("TokenType.__new__"))
 
@@ -240,7 +240,7 @@ class DescriptorCountingTests(unittest.TestCase):
         ``scripts/check_transcriptions.py``'s clause (4) refuses a transcription
         whose declared regions cover the code the parity harness executes, and
         before this fix ``args_check`` was not in the table it consults — so a
-        region placed on 860-877 was accepted, and the parity comparison then
+        region placed on 871-888 was accepted, and the parity comparison then
         ran Rust against Rust with both sides agreeing. That is the whole reason
         this module exists.
 
@@ -253,7 +253,7 @@ class DescriptorCountingTests(unittest.TestCase):
         import scripts.check_transcriptions as guard
 
         self.assertIn(
-            (860, 877, "FilterExpression.args_check"),
+            (871, 888, "FilterExpression.args_check"),
             guard.COMPARED_PATH["base.py"],
             "the span this row is about is not in the table any more",
         )
@@ -262,7 +262,7 @@ class DescriptorCountingTests(unittest.TestCase):
         # Same length as ours, so clause (5) — which requires prose for a
         # region whose two spans differ in length — has nothing to say and the
         # only clause with anything to report is the one under test.
-        synthetic = ((860, 877), (855, 872), "args_check")
+        synthetic = ((871, 888), (866, 883), "args_check")
         guard.DECLARED["base.py"] = (upstream, regions + [synthetic])
         try:
             failures = guard.check()
@@ -271,7 +271,7 @@ class DescriptorCountingTests(unittest.TestCase):
 
         self.assertTrue(
             any(
-                "FilterExpression.args_check (860-877)" in failure
+                "FilterExpression.args_check (871-888)" in failure
                 and "Rust against Rust" in failure
                 for failure in failures
             ),
