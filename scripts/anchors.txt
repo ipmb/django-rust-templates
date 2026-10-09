@@ -202,6 +202,7 @@ defaultfilters.py:365-379	django/template/defaultfilters.py	365	379	def urlencod
 defaultfilters.py:382-386	django/template/defaultfilters.py	382	386	def urlize(value, autoescape=True):	return mark_safe(_urlize(value, nofollow=True, autoescape=autoescape))
 defaultfilters.py:386	django/template/defaultfilters.py	386	-	return mark_safe(_urlize(value, nofollow=True, autoescape=autoescape))	-
 defaultfilters.py:389-400	django/template/defaultfilters.py	389	400	_urlize(value, trim_url_limit=int(limit), nofollow=True, autoescape=autoescape)	-
+defaultfilters.py:398	django/template/defaultfilters.py	398	-	return mark_safe(	-
 defaultfilters.py:399	django/template/defaultfilters.py	399	-	_urlize(value, trim_url_limit=int(limit), nofollow=True, autoescape=autoescape)	-
 defaultfilters.py:403-407	django/template/defaultfilters.py	403	407	wordcount	-
 defaultfilters.py:404	django/template/defaultfilters.py	404	-	@stringfilter	-
