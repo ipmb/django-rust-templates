@@ -19,6 +19,7 @@ and each inserts its own paths, because `-I` implies `-E`.
 | `m7_measure_origin.py` | `Origin(UNKNOWN_SOURCE).template_name is None`; `construct_relative_path(None, …)` raises rather than parsing on | plan A3, RF2 |
 | `m7_measure_nesting.py` | A5's predicate: is any `{% block %}` nested inside a body Django parses? | plan A5 |
 | `m7_measure_nest2.py` | the same predicate for `{% extends %}`, and for a library returning an `ExtendsNode` subclass | plan RF3 |
+| `m7_measure_pyposix.py` | Task 2's three functions transliterated to Python and diffed against the pinned `posixpath`: 37 table rows, 221,845 generated unary inputs and 800,000 `normpath(join(a, b))` pairs, 0 mismatches | plan Task 2 |
 
 **A verdict here is dated.** Each is a number only for as long as the tree it
 numbered holds still; `.django/` is pinned at 6.0.9 and the figures above are

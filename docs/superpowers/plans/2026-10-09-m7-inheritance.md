@@ -926,8 +926,16 @@ mod tests {
 
     #[test]
     fn normpath_matches_python_on_the_measured_table() {
-        // Measured against `posixpath.normpath` on the pinned interpreter; the
-        // table is the plan's evidence, not a guess.
+        // Measured against `posixpath.normpath` on the pinned interpreter
+        // (3.14.4, `posixpath.py` under mise's install); the table is the
+        // plan's evidence, not a guess.
+        //
+        // `("///a//b", "/a/b")` is here for one clause and it is a review
+        // finding: without it nothing exercises `initial_slashes`'s `else 1`
+        // arm from a path that *starts* with `///`, and the `!path
+        // .starts_with("///")` conjunct in the `== 2` arm is dead code as far
+        // as this table can tell. Deleting that conjunct changes this row to
+        // `"//a/b"` and changes nothing else.
         for (input, want) in [
             ("", "."),
             (".", "."),
@@ -937,6 +945,7 @@ mod tests {
             ("./a", "a"),
             ("a//b", "a/b"),
             ("//a//b", "//a/b"),
+            ("///a//b", "/a/b"),
             ("/a/../b", "/b"),
             ("a/./b", "a/b"),
             ("../a", "../a"),
@@ -967,12 +976,20 @@ mod tests {
         ] {
             assert_eq!(normpath(&join(a, b)), want, "normpath(join({a:?}, {b:?}))");
         }
+        // `("//a", "//")` and `("///a", "///")` are the second half of the same
+        // review finding. `("/a", "/")` already reaches the `"/".repeat(n)`
+        // guard, but only at n == 1, where `head != "/"` and
+        // `head != "/".repeat(head.len())` are the same test; the n > 1 rows
+        // are what separate the length-sized repeat from a hard-coded `"//"`,
+        // which `("//a", "//")` alone would let through.
         for (p, want) in [
             ("", ""),
             ("a", ""),
             ("a/b", "a"),
             ("a/b/", "a/b"),
             ("/a", "/"),
+            ("//a", "//"),
+            ("///a", "///"),
             ("sub/index.html", "sub"),
             ("/sub/index.html", "/sub"),
         ] {
@@ -981,6 +998,18 @@ mod tests {
     }
 }
 ```
+
+**The table is a subset of the evidence, and the rest was measured.** The port
+in Step 3 was transliterated to Python and diffed against `posixpath` on
+221,845 generated inputs (every string over `/ . a b` up to length 7, plus
+200,000 random ones of length 8–14) for `normpath` and `dirname` — 0 mismatches
+— and on 800,000 `normpath(join(a, b))` pairs — 0 mismatches. The two rows this
+plan's review added are in that corpus by construction, but the point of running
+it is the rows nobody proposed: the table is what a reader can check by eye, and
+the sweep is what says the table is not the whole story. Transliteration rather
+than the Rust itself is a real limit and is recorded as one — it cannot see a
+byte-versus-char slicing defect — so Task 2's own gate is `cargo test`, and the
+sweep above is not a substitute for it.
 
 - [ ] **Step 2: Run it to verify it fails**
 
@@ -1022,6 +1051,10 @@ pub fn join(a: &str, b: &str) -> String {
 /// `posixpath.dirname(p)` — Python 3.14's `rfind` form, **not** `split()[0]`.
 ///
 /// The two disagree on a bare filename: `dirname("a")` is `""`, not `"."`.
+/// The `"/".repeat(head.len())` comparison is a run of *slashes*, not one slash
+/// or two: `dirname("//a")` is `"//"` and `dirname("///a")` is `"///"`. Both
+/// rows are in the table, and the second is the one that fails a version
+/// written against a hard-coded `"//"`.
 pub fn dirname(p: &str) -> String {
     let i = p.rfind('/').map_or(0, |n| n + 1);
     let head = &p[..i];
@@ -1038,7 +1071,9 @@ pub fn normpath(path: &str) -> String {
         return ".".to_string();
     }
     // Python counts the leading slashes: 0 when relative, 2 for exactly `//x`,
-    // else 1. The count is what keeps `//a` distinct from `/a`.
+    // else 1 — so `///x` is 1, not 3, and not 2. The count is what keeps `//a`
+    // distinct from `/a`, and the `else` arm is pinned by the table's
+    // `///a//b` row.
     let initial_slashes = if !path.starts_with('/') {
         0
     } else if path.starts_with("//") && !path.starts_with("///") {
