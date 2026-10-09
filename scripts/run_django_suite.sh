@@ -20,6 +20,10 @@ if [ ! -d "$CHECKOUT" ]; then
   exit 1
 fi
 
+# §2:33-34, checked before the suite rather than after it: a transcript cannot
+# tell you the checkout it came from was stock.
+"$PROJECT_ROOT/.venv/bin/python" "$HERE/assert_checkout_pinned.py"
+
 LABELS=("$@")
 if [ ${#LABELS[@]} -eq 0 ]; then
   LABELS=(template_tests)

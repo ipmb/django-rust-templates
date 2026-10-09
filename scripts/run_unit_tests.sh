@@ -52,31 +52,12 @@ fi
 # top-level modules, and the checkout must be importable as `django`.
 export PYTHONPATH="$HERE/shimpath:$CHECKOUT:${PYTHONPATH:-}"
 
+# One pre-flight, not two: this block used to be a weaker copy of
+# `assert_engine_installed.py` — it named the meter and did not refuse on it —
+# which is the "written twice, one of them is wrong" failure this script's own
+# docstring warns about, one level up.
 if [ "${DJANGO_RUST_TEMPLATES:-1}" = "1" ]; then
-  "$PROJECT_ROOT/.venv/bin/python" - <<'PY'
-import sys
-
-import django.template.exceptions
-
-from django_rust_templates import _shim
-
-if not _shim.installed():
-    sys.exit("shim is not installed; refusing to run the suite")
-
-module_file = django.template.exceptions.__file__ or ""
-if "_impl" not in module_file:
-    sys.exit(
-        f"django.template.exceptions resolved to {module_file}, "
-        "not to our implementation; refusing to run the suite"
-    )
-
-print(
-    f"engine installed; {len(_shim.unshimmed())} engine module(s) still served by "
-    f"Django ({len(_shim.NOT_THE_ENGINE)} more of django.template are declared "
-    "not the engine)",
-    file=sys.stderr,
-)
-PY
+  "$PROJECT_ROOT/.venv/bin/python" "$HERE/assert_engine_installed.py"
 fi
 
 # `discover` with the same arguments `check.sh` used before this script existed,

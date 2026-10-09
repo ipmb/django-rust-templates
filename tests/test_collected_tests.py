@@ -365,7 +365,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # skip line, a swap that keeps the count at six, a changed run count, a skip on
 # a docstringed test, teardown lines after the verdict, plus the tie to §2's
 # prose and its control. Discovery agrees exactly: 464 + 14 = 478, no renames.
-PINNED = 478
+# 478 → 487 is M15 Task 2, **nine** rows and one new file:
+# `tests/test_checkout_pinned.py` drives `scripts/assert_checkout_pinned.py`,
+# which is §2:33-34 — "Django's checkout is never modified". Nine rather than the
+# eight the plan's step predicted, which is the plan's count and not discovery's:
+# three on `lock_values`/`dirt`, four on `refusals`' arms (clean, wrong sha, a
+# modified tracked file, an untracked one), and two against the live checkout —
+# the subject itself, and a path with no `.git`, which is the route a tarball
+# takes and the one that used to surface as a traceback. 478 + 9 = 487.
+PINNED = 487
 
 
 def collected() -> unittest.TestSuite:
