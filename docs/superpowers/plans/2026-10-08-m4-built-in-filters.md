@@ -2585,6 +2585,33 @@ So `ngettext` and `gettext` are still called by `filesizeformat` — for the for
 string — and `percent_format`/`percent_mapping` are the operator. Six new
 methods, two of them the `%`'s two operand shapes.
 
+**A seventh is a live question, and the division is what raises it.** The five
+unit branches divide by a power of two (`:927-935`) — **outside** the `try`, so an
+`OverflowError` there escapes while the same class from `int()` above is caught.
+Measured:
+
+```text
+  int(float("inf"))       OverflowError: cannot convert float infinity to integer
+  int(float("nan"))       ValueError: cannot convert float NaN to integer  -> caught, "0\xa0bytes"
+  10**400 / 2**50         OverflowError: integer division result too large for a float
+  float(10**400)          OverflowError: int too large to convert to float  <- a different message
+  number_format(inf, 1)   'inf.0'
+```
+
+`filesize_number_format` takes an `f64`, so the body must convert
+`IntValue::Big(text)` itself — and a Rust parse of a >308-digit decimal answers
+`inf` rather than raising. **The three-call seam therefore cannot express the
+source's behaviour for `|bytes_| > f64::MAX`**, and the predicted divergence is
+`'inf.0\xa0PB'` where Django raises. The `inf`/`nan` rows do **not** depend on
+this: they are `int()`'s, and `to_int` already propagates them (measured through
+`int_modulo`, whose `OverflowError` crosses the FFI with its class intact). Only
+the >308-digit case does. Two candidate fixes: a seventh method doing
+`int(value) / (1 << shift)` whole, or folding the division into
+`filesize_number_format`'s signature. The first leaves that method's doc intact —
+a doc whose whole content is that `round` on a **float** rounds against the binary
+value, not the decimal one. Decide when the body lands and the divergence is
+measured rather than predicted, not before.
+
 **3. What measurement says about the individual bullets above**, three of which
 the plan got wrong and the rest of which it got only partly:
 
@@ -2615,13 +2642,42 @@ the plan got wrong and the rest of which it got only partly:
 * **`floatformat` rounds `ROUND_HALF_UP` on the exact decimal**, not banker's:
   measured `floatformat(0.5, 0) -> "1"` and `floatformat(2.5, 0) -> "3"`, where
   `round(2.5)` is `2`.
-* **The 200-digit refusal is Rust and its boundary is exactly 200.** Measured:
-  199 zeros after a `1` (sum 200) formats to a `SafeString` 203 chars long; 200
-  zeros (sum 201) returns `input_val` as a plain `str`. `"1e300"` and `"1e-400"`
-  refuse; `inf`/`-inf`/`nan` reach the `int(d)` arm and return `"inf"`/`"-inf"`/
-  `"nan"` unmarked; `"abc"` and `None` are the `Unparseable` arm and answer `""`.
-  The exponent being `"F"`/`"n"`/`"N"` makes the sum 0 rather than raising, which
-  is why the refusal does not fire for the non-finites.
+* **The 200-digit refusal is Rust, its boundary is `digits + |exponent| <= 200`
+  inclusive, and the no-arg boundary row is what earns the safety check.**
+  Measured, with the arm that answered:
+
+  ```text
+    input                    arg    arm              text-len   safe
+    '1'+'0'*199  (sum 200)   none   integral :185      200      True
+    '1'+'0'*199  (sum 200)   2      quantize :213      203      True
+    '1'+'0'*200  (sum 201)   none   input_val :176     201      False
+    10**199      (sum 200)   none   integral :185      200      True
+    10**200      (sum 201)   none   input_val :176     201      False
+  ```
+
+  **The `none` row is the one that needs the flag, and the reason is an
+  off-by-one port.** At sum 200 the selected arm and the `input_val` arm emit
+  *the same 200 characters* — `"%d" % int(d)` is the digits, and `input_val` is
+  `str(text)`, which for an integer string is the same text — so a body whose
+  cutoff read `>= 200` for `> 200` sends that input down the `input_val` arm and
+  **only the flag moves**. `==` cannot see it; §D5's safety half is the only
+  thing that can. The `arg=2` row cannot serve that purpose: the quantize arm
+  appends `.00`, so its 203 characters differ from `input_val`'s 200 and a
+  mis-routed body is caught by text alone. An earlier revision of this bullet
+  cited that 203 without saying which argument produced it, which is what made
+  it read as a contradiction of the no-arg measurement.
+
+  `"1e300"` and `"1e-400"` refuse (sum 301 and 401); `inf`/`-inf`/`nan` reach the
+  `int(d)` arm and return `"inf"`/`"-inf"`/`"nan"` unmarked; `"abc"` and `None`
+  are the `Unparseable` arm and answer `""`. The exponent being `"F"`/`"n"`/`"N"`
+  makes the sum 0 rather than raising, which is why the refusal does not fire for
+  the non-finites.
+* **And the unmarked arms are reached by a *float*, so a body keying the flag off
+  the operand's type is wrong.** Measured: `floatformat(1e308) -> "1e+308"`
+  unmarked (`Decimal("1e+308")` is sum 309, so `:176` fires on a float),
+  `floatformat(float("inf")) -> "inf"` and `floatformat(float("nan")) -> "nan"`
+  unmarked (`:182`'s `int(d)` overflow) — while `floatformat(34.0) -> "34"` is
+  safe. The two outcomes are not separable by "was the value a string".
 * **`default`/`default_if_none` return the argument *object***, so their safety
   is the argument's and not the filter's: measured `default(0, "x")` is
   `SafeString("x")` — the quoted constant was `mark_safe`d by `resolve` — where
