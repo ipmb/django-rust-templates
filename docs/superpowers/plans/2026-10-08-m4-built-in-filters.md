@@ -2402,10 +2402,12 @@ function of the filter's arguments. What stays Rust is the control flow, the
 `arg`-suffix dispatch, the 200-digit refusal, the `not m and p <= 0` integer
 branch, the digit assembly, the `.` insertion and the sign.
 
-**2. The host contract this adds.** Six methods, and the rest of the group
-needs none of them — the two `%` methods because measurement showed
-`filesizeformat`'s operands are not shapes `percent_format` can take (below),
-and `decimal_quantize` gaining a fourth field for the reason in **4**:
+**2. The host contract this adds.** Six methods, all of them for `floatformat`
+and `filesizeformat` — the rest of the group needs none of them, and the one
+method the wave-2 half does need is in **6** below — the two `%` methods because
+measurement showed `filesizeformat`'s operands are not shapes `percent_format`
+can take (below), and `decimal_quantize` gaining a fourth field for the reason in
+**4**:
 
 ```rust
 /// `Decimal(str(value))`, then the `Decimal(str(float(value)))` retry
@@ -2597,15 +2599,20 @@ the plan got wrong and the rest of which it got only partly:
   `filesizeformat(1024) -> '1.0\xa0KB'`, unsafed. A body mirrored from the other
   gets the safety wrong in both directions, and §D5's safety half is the only
   thing that can see it.
-* **`yesno` and `pluralize` can raise from the `arg`'s *type*, and `yesno`'s
-  class is `AttributeError`.** Measured `yesno(True, 5)` raises
-  `AttributeError: 'int' object has no attribute 'split'` — the guard is absent,
-  so a Rust body must **mint** the class (`cut.rs`'s `PyErrorKind::TypeError`
-  helper is the pattern) rather than coercing with `to_str`, which would answer
-  `'yes'` where Django raises. Same shape in `pluralize`: measured
-  `pluralize(0, 5)` raises `TypeError: argument of type 'int' is not a container
-  or iterable` out of `"," not in arg`. Both are body tests, not corpus rows —
-  see `tests/filter_cases.py`'s "a row cannot express an exception".
+* **`yesno` and `pluralize` can raise from the `arg`'s *type*, and the two
+  classes differ for the same input.** Measured `yesno(True, 5)` raises
+  `AttributeError: 'int' object has no attribute 'split'`, where `pluralize(1, 5)`
+  raises `TypeError: argument of type 'int' is not a container or iterable` out
+  of `"," not in arg`. The revision of this bullet that said a Rust body must
+  **mint** the class is superseded, and the supersession is an improvement: with
+  `comma_bits` the class is CPython's own and crosses the seam intact, which is
+  strictly better than `cut.rs`'s synthesis — and that synthesis stays only
+  because no host operation performs `str.replace`, which is not true here. See
+  **6** for the seam and for why the split cannot be Rust's. The rows live in
+  `tests/filter_cases.py`'s `ERROR_CASES`, not among the `CASES` above: a `CASES`
+  row cannot carry an exception (`resolve` propagates it and the comparison
+  aborts), so the inputs whose *answer* is an exception get their own list, where
+  both engines must raise the same class **and the same message**.
 * **The deferred `floatformat(1.5, "-999999")` question is closed: there is no
   anomaly.** Measured, the quoted-constant row and the bare-int row are
   **identical** — 1,000,001 characters each, same digest — because both reach
@@ -2706,6 +2713,59 @@ host call with `getcontext().prec` set to 1 and a `places` past the boundary —
 i.e. the same shape as the measurement above. The counts are recorded in the
 group's commit, and each mutation asserts its pattern was found **and** that the
 file's md5 changed before it runs.
+
+**6. The wave-2 dispatch found the argument split two filters share, and it is
+the seam's second addition after Phase A.** `comma_bits(&value, prepend_comma)`
+is three lines of `defaultfilters.py`:
+
+```python
+if prepend_comma and "," not in arg:
+    arg = "," + arg
+return arg.split(",")
+```
+
+— `pluralize`'s argument handling (`:965-967`) with `prepend_comma = true`, and
+`yesno`'s (`:879`) with `false`. It is **one method rather than three
+primitives** (`contains`, `concat`, `split`), and what forces the fusion is
+§D7.1's rule: splitting them apart would put Python's exception classification
+on the Rust side, because *which* of the three raises, and with which class, is a
+function of the argument's type:
+
+```text
+  yesno(True, 5)          AttributeError: 'int' object has no attribute 'split'
+  pluralize(1, 5)         TypeError: argument of type 'int' is not a container or iterable
+  pluralize(1, [1])       TypeError: can only concatenate str (not "list") to str
+  pluralize(1, [","])     AttributeError: 'list' object has no attribute 'split'
+  pluralize(1, object())  TypeError: argument of type 'object' is not a container or iterable
+```
+
+The `[1]`/`[","]` pair is what settles it, and it is why five rows for one
+expression are not redundant: `[","]` is the only argument that gets **past** the
+`in` — a membership test a list can answer — and dies at the `.split`, so the two
+rows carry different classes from the same "not a string" input. A `concat`
+split out as its own operation would hand Rust a value whose next use it cannot
+see, which is exactly the classification this seam exists to keep on the Python
+side. Both templates that reach the raising arms are real: Django 6 parses a bare
+filter argument as a literal, so `{{ x|yesno:5 }}` and `{{ x|pluralize:5 }}` are
+legal syntax and hand the filter the `int` 5.
+
+**The flag is measurement-forced, not a convenience, and the first two rows are
+why.** Both filters perform the same three operations on the same input class and
+disagree about the class they raise, because `pluralize` runs the `in` first and
+`yesno` goes straight to the `split`: measured, an `int` argument is a
+`TypeError` through one and an `AttributeError` through the other. So the flag is
+the only thing selecting between two measured classes, and `false` does not mean
+"skip a step" — it means this filter's source has no such line.
+
+The rest of the wave's seams were all pre-existing, which is worth stating
+because it is the opposite of the `floatformat` half: `pluralize` reaches
+`to_float` and `len`, `yesno` reaches `gettext` and `is_true`, `default` reaches
+`is_true`, and **`default_if_none` reaches no host at all** — a pure
+`Value::None` test, and the only M4 body whose proof of purity is that it
+answers correctly under `NoFilterHost` rather than panicking into it. All four
+are `is_safe=False`, so none calls `mark_safe`.
+
+The trait is **42 methods, 25 of them `Result`**.
 
 ### Task 8: escaping and safety — 12 filters
 
