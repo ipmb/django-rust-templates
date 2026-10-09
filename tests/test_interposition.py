@@ -305,6 +305,13 @@ class InterpositionTests(unittest.TestCase):
 
         Both corpora, because they differ: the generator reaches ``Parser.error``
         and ``Parser.invalid_block_tag`` and the hand-written corpus does not.
+
+        The ``_impl`` assertion is the reviewer's question — "does ``module_of``
+        resolve a declared-but-not-yet-transcribed module?" — answered inside the
+        row rather than in prose: it does, and it resolves it to *Django's* file,
+        because that is what the fallback is for. The guard itself catches that
+        case (`ours_path.is_file()`), but the guard is a separate step of
+        ``check.sh`` and a bare ``python -m unittest`` runs this row without it.
         """
         import importlib
         import random
@@ -325,6 +332,16 @@ class InterpositionTests(unittest.TestCase):
 
         for name, pinned_entries in sorted(guard.COMPARED_PATH.items()):
             module = importlib.import_module(guard.module_of(name))
+            # That the import found *our* file, not Django's fallback. Without
+            # this the row measures Django's functions whenever the transcription
+            # is absent, and the pins would still match for a module whose
+            # declared regions are a copy of upstream's — the guard's own
+            # per-module loop reports a missing file, but it runs in `check.sh`
+            # *after* the unit suite, so a bare `python -m unittest` would have
+            # this row answering about the wrong module and saying nothing.
+            self.assertIn(
+                "_impl", module.__file__, f"{name} did not resolve to our file"
+            )
             measured = measure(module, sources, django_parse)
             pinned = {label: (first, last) for first, last, label in pinned_entries}
 

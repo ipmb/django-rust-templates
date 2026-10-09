@@ -1753,3 +1753,91 @@ every clause iterates the files it was told about. The clause added in that
 commit scans `_impl/*.py` for the marker and requires the key sets to be equal,
 mirroring the `COMPARED_PATH` clause; it was verified to fail on a planted
 marked file before it was committed.
+
+### Task 6 is not a pinning task — its premise was false, and the protocol was broken on both sides
+
+Executed ahead of Tasks 4 and 5, because the reviewer's Task 2 verdict asked
+whether `django_render` could be trusted from Task 6 and the answer turned out to
+be "no, and neither could `render_string`". Measurement:
+`.review/m9-measurements/m9_measure_render_annotation_wiring.py`.
+
+Task 6 above opens "At M9 these are Python nodes, so the protocol holds by
+transcription; the work is to **pin** it". Three things were wrong with that
+sentence, and each was measured rather than argued:
+
+**(1) `compile_template` never passed `origin` to `template_for`, so the
+comparison never held on the shell's own path.** The Rust docstring already
+claimed the opposite — "every materialised node's `node.origin`, and the
+`Template.origin` of the tree `template_for` builds" — and the call handed
+`origin` to `materialise` and to nothing else. Every node therefore carried the
+real `Origin` while the `Template` carried `None`, `Node.render_annotated`'s
+equality (`base.py:1058-1062`) was false for every exception, and
+`render_string` produced **no `template_debug` at all** where Django produces
+one. Nothing failed: the exception simply propagated bare. It is invisible to the
+whole Django suite for a structural reason worth stating — `Template.__init__`
+builds the object that renders, `compile_nodelist` returns only `nodelist` from
+the one `template_for` builds, and that object is discarded — so only a direct
+caller of `parse_template`/`render_string` ever saw it.
+
+**(2) `template_for` set `source = ""`, which made the repaired protocol lie
+politely.** With the origin threaded, `get_exception_info` no longer failed —
+it returned a full `template_debug` whose `start`/`end` were correct and whose
+`before`/`during`/`after`/`source_lines`/`line`/`total` were empty or wrong.
+Measured, both states, side by side:
+
+    origin=None,  source=""  -> no template_debug attached at all
+    origin=set,   source=""  -> start 9, end 25, line 0, total 2, during ""
+    origin=set,   source=SRC -> start 9, end 25, line 2, total 5, during "{% for x in a %}"
+
+`template_for` gained a `source` parameter and `compile_template` passes it; the
+attribute list is now exactly `Template.__init__`'s.
+
+**(3) `render.parser_for` always built a plain `Lexer`, so the Python side of
+`tests/test_render_parity.py` destroyed its own annotation.** Upstream reads
+`self.engine.debug` at the top of `compile_nodelist` to choose `DebugLexer`
+(`base.py:183-186`); `parser_for` transcribes the `Parser` construction and
+omitted that arm. The only difference is `Token.position`, and
+`get_exception_info` unpacks it — so `django_render` died *inside* its own
+`except` with `TypeError: cannot unpack non-iterable NoneType object`,
+**replacing** the exception it was annotating. Invisible on the Rust path, which
+lexes for itself and materialises positioned tokens (measured: a `{% for %}` node
+at `(9, 25)`), so it bit exactly the callers that parse *with* this parser — the
+parity harnesses.
+
+**(4) What replaces the plan's Task 6 Step 1 and Step 2.** The rows are not
+"pin the protocol"; they are `tests/test_render_parity.py`'s
+`test_the_oracle_template_has_djangos_attributes` (the oracle's `Template`
+carries Django's whole attribute surface, `vars()` set-equality plus `origin` and
+`source` by value) and `test_both_sides_annotate_a_render_error_the_same_way`
+(the two sides' `template_debug` dicts are equal, *and* the fields are pinned to
+their literals, because two sides that drifted together would agree about
+nothing). Both were made to fail before being trusted: setting
+`template.origin = None` removes the annotation from both sides — caught by the
+literals, not by the comparison, which is why the literals are there — and
+reverting `parser_for` to `Lexer` breaks the comparison, which is the one-sided
+case. Task 6 still owes the *direct-entry* rows its Step 1 describes
+(`_culprit_node` innermost-wins, the five measured `(start, end)` pairs from
+`m9_measure_render_annotated.py`); what it no longer owes is a claim that the
+protocol works by transcription.
+
+**(5) The reviewer's two other questions, answered by measurement rather than by
+edit.** *Is `host.last_error` stale-able?* No, structurally: `ErrorKind::Host` is
+built at one place (`crates/template-py/src/lib.rs:1104`, called only from the
+`call_tag` boundary at `crates/template-py/src/lib.rs:1251`), `last_error` is
+assigned at one place (`python/django_rust_templates/host.py:243`), and a host
+error is **terminal** — the parse loop's arm is `Err(error) => Err(error)`
+(`parser/mod.rs:394-403`) and its caller is `?`, so the failing call is
+necessarily the last to have touched either field. The host is per parse as well.
+Recorded in `django_exception`'s docstring, with a note that clearing on read
+would hide the regression it would be guarding against, rather than as a row
+about a negative that is structural. *Does `module_of()` resolve a
+declared-but-not-transcribed module?* Yes — it resolves to **Django's** file,
+which is what the fallback is for, so the row now asserts `"_impl" in
+module.__file__` before measuring. `check_transcriptions.py` catches the case,
+but it is a later step of `check.sh` than the unit suite, so a bare
+`python -m unittest` had this row answering about the wrong module in silence.
+
+**(6) The registry's two questions need two names — carried to Task 7.** The
+reviewer's remark that `builtin_tag_names()` / `builtin_tag_stubs()` confusion
+has now happened three times is right and is not fixed here; subtraction at the
+call site is the workaround, and Task 7 owns the rename.

@@ -179,11 +179,22 @@ def django_render(source, context, engine):
     against each node's, so leaving the template's ``None`` here would make the
     two sides differ on an attribute no row in this class reads but which every
     row would then be measuring differently.
+
+    ``source`` is the last argument and it is what makes the oracle *usable* for
+    Task 6 rather than merely output-correct. ``template_for`` used to fill in
+    ``""``, and an empty source is not a loud failure: ``get_exception_info``
+    returns a ``template_debug`` anyway, with the right ``start``/``end`` and
+    empty excerpts. Anything asking this function about the annotation would have
+    been told a plausible lie. The two attributes together — ``origin`` here and
+    ``source`` here — are the *whole* of what ``Template.__init__`` sets that the
+    shell's constructor does not, so with both passed the reconstructed surface
+    is Django's attribute-for-attribute; ``test_the_oracle_template_has_djangos_attributes``
+    is the row that says so rather than this paragraph.
     """
     parser = render.parser_for(source, engine)
     nodelist = parser.parse()
     template = materialiser().template_for(
-        nodelist, engine, parser, render.UNKNOWN_ORIGIN
+        nodelist, engine, parser, render.UNKNOWN_ORIGIN, source
     )
     return template.render(Context(context))
 
@@ -360,6 +371,91 @@ class RenderParityTests(_ParityTest):
             # changed together would keep passing, and these four strings are
             # the whole of the claim.
             self.assertEqual(ours, literal, f"literal for {source!r}")
+
+    def test_the_oracle_template_has_djangos_attributes(self):
+        """`django_render`'s `__new__`-built `Template` has Django's surface.
+
+        Asserted as a set rather than as a list of names, so a missing attribute
+        and an extra one are the same failure, and this row is what lets the
+        docstring claim "Django's attribute-for-attribute" instead of asking a
+        reader to diff `template_for` against `Template.__init__` by eye.
+
+        The two attributes that are *not* set by the ordinary constructor's
+        caller — `origin` and `source` — are compared by value as well, because
+        they are the two the render-annotation protocol reads. `source` is the
+        one that was `""` until M9's Task 6; a row that only compared attribute
+        *names* would have passed then, which is exactly the failure mode this
+        project keeps finding.
+
+        The `Template(source, engine=…)` on the other side is upstream's
+        `__init__` verbatim — it is not the Rust parse being compared here, only
+        the attribute list that constructor writes. That it *also* parses is
+        incidental and discarded.
+        """
+        from django.template import Template
+
+        source = "line one\n{{ a }}\nline three\n"
+        parser = render.parser_for(source, self.engine)
+        oracle = materialiser().template_for(
+            parser.parse(), self.engine, parser, render.UNKNOWN_ORIGIN, source
+        )
+        django_built = Template(source, engine=self.engine, origin=render.UNKNOWN_ORIGIN)
+
+        self.assertEqual(set(vars(oracle)), set(vars(django_built)))
+        self.assertEqual(oracle.source, source)
+        self.assertEqual(oracle.source, django_built.source)
+        self.assertEqual(oracle.origin, django_built.origin)
+        self.assertIsNotNone(oracle.origin)
+        self.assertEqual(oracle.name, django_built.name)
+        self.assertIs(oracle.engine, django_built.engine)
+
+    def test_both_sides_annotate_a_render_error_the_same_way(self):
+        """The annotation, not just the output — and it was absent on both sides.
+
+        `Node.render_annotated` compares `context.render_context.template.origin`
+        against `e._culprit_node.origin` before attaching `template_debug`
+        (`base.py:1058-1062`). **Measured, that comparison could not hold on
+        either side of this class until M9's Task 6**: `compile_template` passed
+        the origin to `materialise` but not to `template_for`, so the shell's own
+        `Template` carried `None` while every node carried the real `Origin`, and
+        `render_string` produced no `template_debug` at all where Django produces
+        one. `django_render` passed it — and was wrong in the other direction,
+        because `parser_for` built a plain `Lexer`, so its tokens had no
+        `position` and `get_exception_info` died unpacking `None`, replacing the
+        render error with `TypeError: cannot unpack non-iterable NoneType
+        object`.
+
+        So the assertion is on the pair *and* on the literal: the two sides must
+        agree, or this is not a parity harness; and the fields are pinned, or two
+        sides that drifted together would agree about nothing.
+        """
+        source = "line one\n{% for x in a %}body{% endfor %}\nline three\n"
+        engine = Engine(debug=True)
+
+        annotated = {}
+        for label, render_one in (
+            ("render_string", render_string),
+            ("django_render", django_render),
+        ):
+            with self.subTest(side=label):
+                with self.assertRaises(TypeError) as caught:
+                    render_one(source, {"a": 1}, engine)
+                annotated[label] = getattr(caught.exception, "template_debug", None)
+
+        self.assertEqual(
+            annotated["render_string"],
+            annotated["django_render"],
+            "the two sides annotate differently, so neither is the oracle's",
+        )
+
+        debug = annotated["render_string"]
+        self.assertIsNotNone(debug, "no template_debug on either side")
+        self.assertEqual((debug["start"], debug["end"]), (9, 25))
+        self.assertEqual(debug["during"], "{% for x in a %}")
+        self.assertEqual(debug["after"], "body{% endfor %}\n")
+        self.assertEqual(debug["line"], 2)
+        self.assertEqual(debug["total"], 5)
+        self.assertEqual(debug["message"], "'int' object is not iterable")
 
 
 class ResolverParityTests(_ParityTest):

@@ -380,7 +380,7 @@ def _materialise_operand(lookup, value, parser=None):
     return (lookup, variable if lookup else variable.resolve({}))
 
 
-def template_for(nodelist, engine=None, parser=None, origin=None):
+def template_for(nodelist, engine=None, parser=None, origin=None, source=None):
     """A real :class:`~django.template.base.Template` around a materialised tree.
 
     The render goes through this rather than calling ``nodelist.render(context)``
@@ -408,13 +408,34 @@ def template_for(nodelist, engine=None, parser=None, origin=None):
       `context.render_context.template.origin == e._culprit_node.origin`
       (`base.py:1058-1062`). The node origins come from the same object —
       `materialise`'s argument — so the shell passes the same value to both and
-      they are equal by construction. ``None`` (the default, and what every
-      hand-built fixture in `tests/test_materialise.py` gets) is that comparison
-      holding trivially, which is why the parameter defaults rather than being
-      required.
-    * ``source`` — only the debug exception path
-      (`get_exception_info`, `base.py:1060-1063`). Set so that path fails on Django's
-      terms rather than on an `AttributeError` from here.
+      they are equal by construction.
+
+      **That last sentence was false until M9's Task 6, and it is the worst
+      shape a defect can take here.** ``compile_template`` handed `origin` to
+      `materialise` and not to this function, so every node carried the real
+      ``Origin`` while the template carried ``None``: the comparison never held,
+      no render-time exception was ever annotated, and nothing failed — the
+      original exception simply propagated without its `template_debug`. It was
+      invisible to the Django suite because `Template.__init__` builds the
+      ``Template`` that actually renders and this one is discarded
+      (`compile_nodelist` returns only its `nodelist`), so only a direct caller
+      of `parse_template`/`render_string` saw it. Measured: with ``origin``
+      passed, the same template that produced no `template_debug` at all
+      produces Django's.
+
+      ``None`` (the default, and what every hand-built fixture in
+      `tests/test_materialise.py` gets) is that comparison holding trivially,
+      which is why the parameter defaults rather than being required.
+    * ``source`` — the debug exception path, and it is not optional in practice:
+      `get_exception_info` (`base.py:1060-1063`) both reads ``token.position``
+      *and* slices ``self.source``, so an empty source does not fail loudly, it
+      returns a `template_debug` whose ``start``/``end`` are right and whose
+      ``before``/``during``/``after``/``source_lines``/``line``/``total`` are all
+      empty or wrong. Measured, on the render path that reaches this function
+      through `compile_template`, which now passes the source; ``None`` here
+      means "the caller had none", which is the hand-built-fixture case, and
+      gives ``""`` — the same value this function set unconditionally before
+      M9's Task 6, when the Rust side did not pass one.
     * ``extra_data`` — ``self.extra_data = parser.extra_data``, but **not** in
       `Template.__init__`: it is inside `compile_nodelist`'s `try`, immediately
       after `parser.parse()` and before the `return nodelist`
@@ -447,7 +468,7 @@ def template_for(nodelist, engine=None, parser=None, origin=None):
     template.engine = engine
     template.name = None
     template.origin = origin
-    template.source = ""
+    template.source = "" if source is None else source
     template.extra_data = {} if parser is None else parser.extra_data
     return template
 

@@ -2346,9 +2346,15 @@ fn compile_template(
     let resolve_ref = refs.bind(py).getattr("__getitem__")?;
     let register_ref = refs.bind(py).getattr("__setitem__")?;
     let desc = with_ref_table(py, desc, &host)?;
+    // Bound once, because it is handed to two calls below: `materialise` puts it
+    // on every node, and `template_for` puts it on the `Template`. **They must
+    // be the same object**, which is what the paragraph above says and what this
+    // line exists to make true — the annotation comparison in
+    // `Node.render_annotated` is between the two.
+    let origin = origin.unwrap_or_else(|| py.None().into_bound(py));
     let nodelist = tree.getattr("materialise")?.call1((
         desc,
-        origin.unwrap_or_else(|| py.None().into_bound(py)),
+        &origin,
         resolve_ref,
         register_ref,
         parser.bind(py),
@@ -2357,9 +2363,23 @@ fn compile_template(
     // `parser.extra_data` there (`base.py:198-200`). Passing the parser rather
     // than the dict keeps the two in step: there is no way to hand over one
     // parse's state with another parse's tree.
-    let template =
-        tree.getattr("template_for")?
-            .call1((nodelist, engine.bind(py), parser.bind(py)))?;
+    //
+    // `source` is the fifth, and it is the render-annotation protocol's other
+    // half (`Template.get_exception_info` slices it). **This call used to pass
+    // neither `origin` nor `source`**, which meant the `Template` this builds
+    // carried `origin=None` and `source=""` while every node carried the real
+    // origin — so the equality that decides whether to annotate never held, and
+    // `parse_template`/`render_string` produced no `template_debug` at all where
+    // Django produces one. Invisible to the Django suite: `Template.__init__`
+    // builds the object that renders and this one is discarded by
+    // `compile_nodelist`. Measured, both halves.
+    let template = tree.getattr("template_for")?.call1((
+        nodelist,
+        engine.bind(py),
+        parser.bind(py),
+        &origin,
+        source,
+    ))?;
     Ok(template.unbind())
 }
 

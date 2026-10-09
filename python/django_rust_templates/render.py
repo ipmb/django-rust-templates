@@ -47,6 +47,7 @@ from pathlib import Path
 
 from django.template.base import (
     UNKNOWN_SOURCE,
+    DebugLexer,
     Lexer,
     Origin,
     Parser,
@@ -176,6 +177,32 @@ def django_exception(error, host=None):
     traceback, and matching on the name keeps this from handing back an object
     from an *earlier* host call than the one that failed.
 
+    **A stale ``last_error`` cannot be matched here, and it is structural rather
+    than lucky** — the reviewer asked, so the reasoning is written down instead
+    of being re-derived. Three facts, each checked in the tree:
+
+    * `ErrorKind::Host` is constructed at exactly one place,
+      `python_host_error` (`crates/template-py/src/lib.rs:1104`), called only
+      from the `call_tag` boundary (`crates/template-py/src/lib.rs:1251`), and
+      ``class_name`` is read straight off that error — so a name in the wire
+      error always came from a `call_tag` failure;
+    * ``last_error`` is assigned in one place, `ShellHost.call_tag`
+      (`python/django_rust_templates/host.py:243`), on the way out — so it
+      always names a `call_tag` failure too;
+    * a host error is **terminal**: the parse loop's arm is
+      `Err(error) => Err(error)` (`parser/mod.rs:394-403`) and its caller is
+      `?`, so no `call_tag` failure is caught and survived, and the failing call
+      is necessarily the last one to have touched either field.
+
+    ``host.last_error`` is therefore not cleared on read — clearing it would
+    suggest a staleness this cannot have, and would hide a *real* future
+    regression in which the parse learned to survive a host error.
+
+    The host is per parse as well — `parse_template` builds a fresh
+    `ShellHost` — so nothing survives between parses either. A second `call_tag`
+    that succeeds leaves `last_error` at `None`, which is the only other state it
+    can be in.
+
     **Otherwise only the class is chosen.** `args` rides across untouched, so
     the message stays Rust's, and `.token` is the same wire tuple turned into a
     real `Token`, which is what makes `e.token` usable by `get_exception_info`
@@ -227,11 +254,30 @@ def parser_for(source, engine=None, origin=UNKNOWN_ORIGIN):
     `None` for the reason that constant records. It reaches Django's `Parser`
     only: what Rust receives is `origin.template_name`, read in
     `_native.compile_template`.
+
+    **The lexer is `DebugLexer` when the engine is in debug, and that arm was
+    missing until M9's Task 6.** Upstream reads `self.engine.debug` at the top of
+    `compile_nodelist` to choose between the two (`base.py:183-186`), and the
+    difference is `Token.position` — which is not a debug nicety, it is what
+    `Template.get_exception_info` unpacks (`start, end = token.position`) for
+    every `template_debug` it builds. With a plain `Lexer` those tokens carry
+    `None` and the annotation path dies inside its own `except`, *replacing* the
+    exception being annotated with `TypeError: cannot unpack non-iterable
+    NoneType object`. Measured on `tests/test_render_parity.py::django_render`,
+    which parses with this parser and therefore lost the very annotation it was
+    being asked about.
+
+    Invisible on the Rust path, and that is why it survived: Rust lexes with its
+    own lexer and materialises tokens that already carry correct positions
+    (measured — a `{% for %}` node at ``(9, 25)``), so this parser's tokens are
+    read only for `find_filter` and `extra_data` there. It bites exactly the
+    callers that parse *with* it, which are the parity harnesses.
     """
     if engine is None:
         engine = Engine()
+    lexer = DebugLexer(source) if engine.debug else Lexer(source)
     return Parser(
-        Lexer(source).tokenize(),
+        lexer.tokenize(),
         builtins=engine.template_builtins,
         libraries=engine.template_libraries,
         origin=origin,
