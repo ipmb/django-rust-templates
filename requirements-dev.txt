@@ -1,0 +1,12 @@
+# Development dependencies for running Django's template test suite against the
+# Rust-backed engine.
+#
+# Deliberately does NOT include jinja2: five jinja2-backend tests skip because it
+# is absent, and those skips are enumerated as permitted in the design spec. If
+# you install jinja2, those five tests will run against the *Jinja2* backend and
+# their result says nothing about this project.
+asgiref>=3.9.1
+sqlparse>=0.5.0
+tzdata
+numpy
+maturin>=1.7,<2.0

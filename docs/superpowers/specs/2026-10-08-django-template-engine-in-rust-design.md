@@ -13,13 +13,33 @@ implementation.
 
 ## 2. Success criteria
 
-- The `django`-backend portion of Django 6.0.9's `tests/template_tests/` passes
-  against the Rust implementation, with **zero** skipped, `xfail`ed, or edited
-  tests. Target: ~1501 test methods across 122 files.
-- `jinja2/` is excluded: it is a single non-test fixture file (`using.html`),
-  referenced only by two `@require_jinja2` tests that auto-skip when Jinja2 is
-  not installed. This is an exclusion, not a skip — we do not install Jinja2.
-- Django's own source is not modified. The pinned checkout stays pristine.
+Measured baseline, established in M0 by running the suite with the shim active
+but every module still falling through to Django:
+
+> `Ran 1547 tests` … `OK (skipped=6)`
+
+The acceptance criterion is:
+
+- **1547 tests run; 1541 pass; exactly 6 skip**, and each of the 6 skips is one
+  of the structural cases enumerated below — not a test we skipped.
+- **Zero failures, zero errors, zero `xfail`ed, zero edited tests.** Django's
+  checkout is never modified; the suite is run unmodified.
+- The 6 permitted skips are:
+  - **5** jinja2-backend tests, which exercise a different template backend that
+    this project does not reimplement: `Jinja2TemplateReloadTests`
+    (`test_get_template_directories`, `test_reset_all_loaders`,
+    `test_watch_for_template_changes`) and `test_using` in both
+    `SimpleTemplateResponseTest` and `TemplateResponseTest`. These skip
+    automatically because Jinja2 is deliberately not installed.
+  - **1** `test_loaders.FileSystemLoaderTests.test_case_sensitivity`, which
+    requires a case-sensitive filesystem. This machine's APFS volume is
+    case-insensitive, so the test skips itself. Environmental, not elective.
+
+  Both Numpy array-index tests, which also skip in a bare environment, are made
+  to run by installing Numpy — they are genuine Django template tests and are
+  in scope.
+
+Any *new* skip appearing later is a regression, and is treated as a failure.
 
 ## 3. Non-goals
 

@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["crates/template-core", "crates/template-py"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "BSD-3-Clause"
+
+[workspace.dependencies]
+template-core = { path = "crates/template-core" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

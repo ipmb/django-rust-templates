@@ -13,6 +13,9 @@ target/
 # Pinned Django checkout (fetched, never committed)
 .django/
 
+# Baseline suite logs
+.baseline/
+
 # Build artifacts
 *.so
 dist/

@@ -1,2 +1,7 @@
+# Toolchain pins for this project.
+#
+# Rust is provided by rustup (installed on this machine), not by mise: the
+# project's scripts derive the active toolchain's bin directory rather than
+# relying on cargo shims being on PATH. See scripts/env.sh.
 [tools]
-"github:ollama/ollama" = "latest"
+python = "3.14"
