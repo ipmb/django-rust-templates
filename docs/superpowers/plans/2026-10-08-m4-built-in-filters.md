@@ -3095,6 +3095,33 @@ which is the raw-token defect this corpus has already been fixed for once.
   safe set; then `quote(value, safe=safe)`. Host for `quote`, Rust for the
   `safe`-set selection.
 
+**Three of these twelve — `linebreaks`, `linebreaksbr`, `linenumbers` — can never
+be given an argument, and no row of theirs may carry one.** They are three of the
+five `needs_autoescape` filters whose own second parameter is *named*
+`autoescape`; `unordered_list` (landed under Task 6) and Task 9's `urlize` are the
+other two, out of M4's seven `needs_autoescape` filters — `join` and
+`urlizetrunc` take an argument of their own, so their second parameter is not
+`autoescape` and neither collides. Django's loop calls
+`func(obj, autoescape=context.autoescape, *arg_vals)` (`base.py:813`), keyword
+**before** the positional arguments, so a positional argument binds to
+`autoescape` as well and **every** such token raises
+`TypeError: <py_func>() got multiple values for argument 'autoescape'`. Measured
+on the pinned tree; the five messages are a code block on `filter` in
+`crates/template-py/src/lib.rs`, and `<py_func>` is `linebreaks_filter` for
+`linebreaks` (the registered name is not the function's own) and the filter name
+for the other four. Note what does **not** catch it: `args_check` (`base.py:822`)
+counts `autoescape` among the filter's own parameters, so the **parse accepts**
+the token and the refusal is at call time — which is why the measured failure is a
+`TypeError` and not a `TemplateSyntaxError`, and why an implementation that
+rejected the argument while parsing would be wrong in a way the suite would see.
+This engine takes `autoescape` as a *value*, so there is no keyword to collide
+with, and the message needs the callable's Python name, which a name-keyed seam
+does not have. **So these three filters' rows carry neither
+`arg` nor `arg_variable`** — one would pin a divergence rather than a parity, and
+`tests/filter_cases.py`'s `ERROR_CASES` preamble records the exclusion beside the
+rows that would have been there. Their `autoescape` branches are still both
+tested: that is what the `context` key does, and it needs no argument.
+
 ### Task 9: URLs and markup — 6 filters
 
 `urlize`, `urlizetrunc`, `json_script`, `pprint`, `phone2numeric`, `slugify`
@@ -3115,7 +3142,10 @@ its own task rather than folded into Task 8.
   was wrong: M10's `utils` is `django/template/utils.py`. `urlize`'s Rust part is
   therefore the `limit`/`autoescape` arity and the flag behaviour, and nothing
   else, and Task 3's derivation test is what asserts that rather than a reader
-  taking this paragraph's word for it.
+  taking this paragraph's word for it. **`urlize` is the fifth filter that cannot
+  be given an argument at all** (`base.py:813`; see Task 8's note), so its rows
+  carry no `arg` and no `arg_variable` — unlike `urlizetrunc`, whose `limit` comes
+  *before* `autoescape` and is therefore reachable.
 - `json_script` (`:85-92`) — `element_id=None`, `is_safe=True`; escapes `<`, `>`
   and `&` in `json.dumps(value)` under `django.utils.html.json_script`. Host for
   `json_dumps`, Rust for the escaping and the `<script id=…>` assembly **if** the
