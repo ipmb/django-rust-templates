@@ -82,10 +82,17 @@ MARKER_WINDOW = 4
 # re-runs the instrument and fails if the two disagree. A pinned table with a
 # live re-measurement behind it is the same shape as the module meter.
 #
-# 28 functions, spanning 116-1181 in a file of 1181 lines — nearly the whole
+# 29 functions, spanning 116-1181 in a file of 1181 lines — nearly the whole
 # file, which is the finding.
 # A guard that checked only the named target's own lines would miss a region
-# declared in any of the other 27.
+# declared in any of the other 28.
+#
+# The count was 28 until the instrument learned to see through a descriptor.
+# `FilterExpression.args_check` is bound with `staticmethod(...)`, and the sweep
+# wrapped only `inspect.isfunction`, so the 85 calls the parity corpus makes to
+# it were counted by nothing and a declared region could have sat on 827-844
+# with clause (4) satisfied — Rust against Rust. The reviewer found it; the
+# measurement confirmed the span and the call count before anything changed.
 COMPARED_PATH = {
     # No function in the package `__init__` is reachable from a parity harness,
     # so its entry is empty — and it is *present*, because the guard asserts the
@@ -114,6 +121,7 @@ COMPARED_PATH = {
         (677, 681, "Parser.compile_filter"),
         (683, 687, "Parser.find_filter"),
         (744, 788, "FilterExpression.__init__"),
+        (827, 844, "FilterExpression.args_check"),
         (876, 927, "Variable.__init__"),
         (929, 945, "Variable.resolve"),
         (1044, 1056, "Node.get_nodes_by_type"),

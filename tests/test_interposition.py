@@ -652,7 +652,7 @@ class ModuleInterpositionTests(unittest.TestCase):
 
         The guard already covers that globally —
         ``test_the_compared_path_is_the_measured_one`` re-measures ``base.py``'s
-        twenty-eight functions in the same pass, so a globally dead instrument
+        twenty-nine functions in the same pass, so a globally dead instrument
         fails there. This row adds the same guarantee *locally*, beside the claim
         it underwrites, because "the instrument fires, and it did not fire here"
         is one statement and the two halves should not be able to drift apart.

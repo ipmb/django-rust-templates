@@ -16,7 +16,7 @@ So it is measured. Every function the module defines is wrapped with a counter,
 the corpus is parsed through the harness's own entry point, and the functions
 that ran, with the lines they occupy, *are* the compared path:
 
-    28 of 66 function(s) the module defines were executed, spanning 116-1181
+    29 of 68 function(s) the module defines were executed, spanning 116-1181
 
 which is why the answer matters — the reach covers nearly the whole file, not
 one function in it. (The span is the first start to the last end of the
@@ -24,6 +24,18 @@ executed functions. It was 116-1209 when `base.py` was a verbatim copy and
 shrank as Tasks 2 and 5 replaced bodies with calls; the number is quoted from
 the instrument rather than from this docstring, and the pin below is what the
 row re-measures.)
+
+**What "every function the module defines" means took two passes to get
+right.** The first sweep wrapped what `inspect.isfunction` accepts, which is the
+plain case and only the plain case: `FilterExpression.args_check` is a
+`staticmethod`, `Origin.loader_name` a `property`, `Engine.template_loaders` a
+`cached_property`, `get_app_template_dirs` an `lru_cache` — four shapes a class
+dict holds a function in, none of them a function. `args_check` alone runs 85
+times over the parity corpus. The sweep now asks `_invoked` what a member
+invokes and how to put it back in the same kind, and `residue` fails loudly on
+any kind `_invoked` has no case for, so the table of kinds cannot go stale
+quietly — an uncounted function is one the guard's clause (4) will let a
+declared transcription region sit on.
 
 ``scripts/check_transcriptions.py`` pins that result in ``COMPARED_PATH``, and
 ``tests/test_interposition.py::test_the_compared_path_is_the_measured_one``
@@ -35,8 +47,208 @@ says which of the two moved.
 
 import collections
 import contextlib
+import functools
 import inspect
+import os
 import sys
+
+
+class UnhandledMember(RuntimeError):
+    """A member that holds a function this module wrote and no sweep recognised.
+
+    Raised rather than logged, because the failure it prevents is silent: an
+    uncounted function is a function the guard's clause (4) will let a declared
+    transcription region sit on, and a parity row comparing Rust against Rust
+    then passes whatever Rust does.
+    """
+
+
+_CACHED_PROPERTY_KINDS = frozenset(
+    {
+        ("functools", "cached_property"),
+        ("django.utils.functional", "cached_property"),
+    }
+)
+# `functools.cache` is `lru_cache(maxsize=None)` and has the same type, so one
+# name covers both.
+_LRU_CACHE_WRAPPER = getattr(functools, "_lru_cache_wrapper", None)
+
+
+def _is_cached_property(value):
+    """Whether ``value`` is a ``cached_property``, from either implementation.
+
+    By the *type's* module and name rather than by ``isinstance``: the two
+    implementations live in different modules, and importing Django here would
+    make this file's importability depend on the checkout being on ``sys.path``
+    — true of every caller today, and not something an instrument should
+    require.
+    """
+    kind = type(value)
+    return (kind.__module__, kind.__name__) in _CACHED_PROPERTY_KINDS
+
+
+def _innermost(value):
+    """The ``def`` a member was written as, under any decorator or descriptor.
+
+    ``Engine.get_default`` is ``@staticmethod`` over ``@functools.lru_cache``
+    over a plain ``def``, so one layer is not enough: the ownership question —
+    did this module write it — is about the ``def``, and it is two wrappers
+    down. ``None`` for a member that holds no function at all.
+
+    ``__wrapped__`` is followed too, for a different reason. ``context.py``'s
+    ``Context.bind_template``, ``RenderContext.push_state`` and
+    ``RequestContext.bind_template`` are ``@contextlib.contextmanager``, whose
+    *result* is a helper function created in ``contextlib.py`` — so the object
+    in the class dict is real, callable, `inspect.isfunction`-true, and **written
+    in another file**, in both senses: its ``co_filename`` is ``contextlib.py``
+    and a span read from it is a line number in ``contextlib.py``. The previous
+    sweep included all three on the strength of ``isfunction`` alone and gave
+    them spans from the wrong file; none of them happened to be on the compared
+    path, so no pin ever carried the nonsense. ``functools.wraps`` sets
+    ``__wrapped__``, and it is the ``def`` this module wrote.
+    """
+    for _ in range(8):
+        if isinstance(value, (staticmethod, classmethod)):
+            value = value.__func__
+        elif isinstance(value, property):
+            if value.fget is None:
+                return None
+            value = value.fget
+        elif _is_cached_property(value):
+            value = value.func
+        elif _LRU_CACHE_WRAPPER is not None and isinstance(value, _LRU_CACHE_WRAPPER):
+            value = value.__wrapped__
+        elif inspect.isfunction(value) and getattr(value, "__wrapped__", None) is not None:
+            value = value.__wrapped__
+        else:
+            return value
+    return None  # pragma: no cover — no real member nests eight deep
+
+
+def _plain(wrapper):
+    """``rebox`` for a member that was not boxed: put the wrapper in as it is."""
+    return wrapper
+
+
+def _invoked(value):
+    """``(callable, rebox)`` for a member holding a function, or ``None``.
+
+    ``callable`` is what a caller ends up invoking, and ``rebox(wrapper)``
+    rebuilds the **same kind of member** around it, so putting a counter in its
+    place does not change how Python binds it. The re-boxing is the whole point.
+    ``FilterExpression.args_check`` is bound with ``staticmethod(...)``, and
+    ``getattr`` on a staticmethod already hands back the plain function — so a
+    sweep that read the member back and wrote a plain function in its place
+    would silently turn it into an *instance method*, and every call through
+    ``self`` would pass the instance as ``name``. Measured on the pinned tree:
+    ``args_check`` runs **85** times over the parity corpus, and the sweep knew
+    only ``inspect.isfunction``, so not one of them was counted.
+
+    An ``lru_cache`` wrapper is counted **outside** the cache — the wrapper
+    itself is wrapped rather than the function under it, because ``maxsize`` is
+    not recoverable from the wrapper and re-boxing it with a guess would change
+    the caching the compared code depends on. A cache hit therefore counts as
+    reached too; it is a walk of the function that returned early, which is the
+    question this table asks.
+    """
+    if inspect.isfunction(value):
+        return value, _plain
+    if isinstance(value, staticmethod):
+        return value.__func__, staticmethod
+    if isinstance(value, classmethod):
+        return value.__func__, classmethod
+    if isinstance(value, property):
+        if value.fget is None:
+            return None
+        return value.fget, lambda wrapper: property(
+            wrapper, value.fset, value.fdel, value.__doc__
+        )
+    if _is_cached_property(value):
+        return value.func, type(value)
+    if _LRU_CACHE_WRAPPER is not None and isinstance(value, _LRU_CACHE_WRAPPER):
+        return value, _plain
+    return None
+
+
+def _owning_file(value):
+    """The file the function behind ``value`` was written in, or ``None``."""
+    written = _innermost(value)
+    if written is None:
+        return None
+    try:
+        return os.path.realpath(inspect.getsourcefile(written))
+    except (OSError, TypeError):
+        return None
+
+
+def _is_ours(value, module):
+    """Whether ``value`` is a function **this module wrote**.
+
+    By the file the ``def`` sits in, not by ``__module__``: ``django_file_
+    prefixes`` is bound in ``base.py``'s namespace — ``from django.utils.
+    deprecation import django_file_prefixes`` — and its ``__module__`` names the
+    definition, so the file is what discriminates. The file is also the only
+    test that still works through a decorator, since ``functools.wraps`` copies
+    ``__module__`` across and the definition is the thing being asked about.
+
+    The second arm covers a hand-written descriptor class: its *instance* has no
+    source of its own, so ``getsourcefile`` raises — but the class was written
+    here, so a function it hands back is this module's function whatever
+    ``getsourcefile`` can see.
+    """
+    return _owning_file(value) == os.path.realpath(module.__file__) or (
+        hasattr(type(value), "__get__")
+        and getattr(type(value), "__module__", None) == module.__name__
+    )
+
+
+def _callable_member(value):
+    """Whether ``value`` is the sort of member that could be holding a function.
+
+    A class is excluded: its methods are swept under their own names as it is,
+    and without this the ``TokenType`` in ``base.py``'s namespace would make
+    every enum in the tree a suspicion. What is left is something callable, or
+    something that is a descriptor — the two shapes a class dict stores a
+    function in.
+    """
+    return not isinstance(value, type) and (
+        callable(value) or hasattr(type(value), "__get__")
+    )
+
+
+def members(module):
+    """``(owner, name, value)`` for every member the sweeps must consider.
+
+    The module namespace, then every class dict :func:`classes` finds. One
+    iterator and three readers — :func:`definitions`, :func:`instrumented` and
+    :func:`residue` — so the set the three of them see cannot drift apart, which
+    is exactly the drift that let ``args_check`` be invisible to a sweep that
+    ``definitions`` agreed with.
+    """
+    for name, value in list(vars(module).items()):
+        yield module, name, value
+    for cls in classes(module):
+        for name, value in list(vars(cls).items()):
+            yield cls, name, value
+
+
+def residue(module):
+    """Members that hold a function this module wrote and no sweep recognises.
+
+    The sweep is a *table* of the shapes a class dict uses to hold a function,
+    and a table is a claim about the world that nothing in the world checks.
+    This is the check: anything callable-ish that this module wrote and
+    :func:`_invoked` has no case for is reported, so a descriptor kind nobody
+    has written a case for fails loudly rather than quietly going uncounted —
+    which is how ``args_check`` went uncounted for two milestones.
+    """
+    return sorted(
+        name if owner is module else f"{label_of(owner)}.{name}"
+        for owner, name, value in members(module)
+        if _invoked(value) is None
+        and _callable_member(value)
+        and _is_ours(value, module)
+    )
 
 
 def span_of(func):
@@ -99,15 +311,22 @@ def definitions(module):
     and their lines lie inside it, which is the span the guard needs. The
     exception is a *class* made by a factory, whose methods are listed under the
     factory's qualified name — see `classes`.
+
+    A function a class dict holds behind a descriptor is listed under the name a
+    caller reaches it by — ``FilterExpression.args_check``, ``Origin.loader_
+    name`` — and spans the ``def`` it was written as, decorators included, since
+    the span comes from the innermost function. Reading the *member* instead
+    would give ``None`` for anything but the plain case: ``inspect`` cannot
+    recover source lines from an ``lru_cache`` wrapper or a ``cached_property``,
+    and a label whose span is ``None`` is dropped by :func:`measure`, which is
+    the measurement quietly going missing rather than the instrument saying so.
     """
     out = {}
-    for name, obj in list(vars(module).items()):
-        if inspect.isfunction(obj) and obj.__module__ == module.__name__:
-            out[name] = span_of(obj)
-    for cls in classes(module):
-        for attr, value in list(vars(cls).items()):
-            if inspect.isfunction(value):
-                out[f"{label_of(cls)}.{attr}"] = span_of(value)
+    for owner, name, value in members(module):
+        if _invoked(value) is None or not _is_ours(value, module):
+            continue
+        label = name if owner is module else f"{label_of(owner)}.{name}"
+        out[label] = span_of(_innermost(value))
     return out
 
 
@@ -173,38 +392,69 @@ def instrumented(module):
     in the class's own `__dict__`, where no identity sweep will find it. So each
     wrap also records where it was placed, and the restore puts those back
     explicitly, before the sweep.
-    """
-    counts = collections.Counter()
-    made = []  # (owner, name, wrapper, original), in wrap order
 
-    def wrap(owner, name, label):
-        original = getattr(owner, name)
+    **And the sweep wraps everything that holds a function, not everything that
+    *is* one.** `args_check`, `Origin.loader_name`, `Engine.template_loaders` and
+    `get_app_template_dirs` are held by a `staticmethod`, a `property`, a
+    `cached_property` and an `lru_cache`; a sweep that knew only
+    `inspect.isfunction` counted none of them, and the first of those runs 85
+    times over the parity corpus. :func:`_invoked` is the table of kinds and
+    :func:`residue` fails loudly on any kind it has no case for, so the table
+    cannot go stale quietly — which is the shape of the defect this closed.
+    """
+    escaped = residue(module)
+    if escaped:
+        raise UnhandledMember(
+            f"{module.__name__} writes function-bearing member(s) this instrument "
+            f"has no case for: {escaped}. Add the kind to `_invoked` — unwrap it "
+            "and re-box it in the same kind — or `definitions` will hand the "
+            "guard a span it never measured and clause (4) will accept a "
+            "declared region on code the parity harness runs."
+        )
+
+    counts = collections.Counter()
+    made = []  # (owner, name, wrapper, original, invoked), in wrap order
+
+    def wrap(owner, name, label, value):
+        invoked, rebox = _invoked(value)
+        original = value
 
         def counting(*args, **kwargs):
             counts[label] += 1
-            return original(*args, **kwargs)
+            return invoked(*args, **kwargs)
 
         counting.__name__ = name
-        counting.__doc__ = original.__doc__
-        counting.__wrapped__ = original
-        setattr(owner, name, counting)
-        made.append((owner, name, counting, original))
-        rebind(original, counting)  # consumers that imported the name
+        counting.__doc__ = getattr(invoked, "__doc__", None)
+        counting.__wrapped__ = invoked
+        replacement = rebox(counting)
+        setattr(owner, name, replacement)
+        # A `cached_property` builds its storage key in `__set_name__`, which
+        # Python calls at class-creation time and therefore not for a member
+        # installed afterwards. Both implementations fall back to the function's
+        # own name, so this is belt-and-braces rather than load-bearing — but it
+        # is the difference between a cache keyed by `template_loaders` and one
+        # keyed by the wrapper's name, which is the same string today and would
+        # not be if `counting.__name__` were ever set from anything else.
+        set_name = getattr(replacement, "__set_name__", None)
+        if set_name is not None and owner is not module:
+            set_name(owner, name)
+        made.append((owner, name, replacement, original, invoked))
+        rebind(invoked, replacement)  # consumers that imported the name
 
-    for name, obj in list(vars(module).items()):
-        if inspect.isfunction(obj) and obj.__module__ == module.__name__:
-            wrap(module, name, name)
-    for cls in classes(module):
-        for attr, value in list(vars(cls).items()):
-            if inspect.isfunction(value):
-                wrap(cls, attr, f"{label_of(cls)}.{attr}")
+    for owner, name, value in members(module):
+        if _invoked(value) is None or not _is_ours(value, module):
+            continue
+        wrap(owner, name, name if owner is module else f"{label_of(owner)}.{name}", value)
 
     try:
         yield counts
     finally:
         # Where the wrappers were placed, including class dicts no identity
-        # sweep reaches, then the sweep for consumers that hold the name.
-        for owner, name, _wrapper, original in made:
+        # sweep reaches, then the sweep for consumers that hold the name. The
+        # *original member* goes back, not `getattr`'s answer: for a
+        # `staticmethod` those differ, and writing back the plain function would
+        # leave the method demoted for the rest of the session.
+        for owner, name, _wrapper, original, _invoked_ in made:
             try:
                 setattr(owner, name, original)
             except (AttributeError, TypeError):  # pragma: no cover
@@ -212,8 +462,8 @@ def instrumented(module):
         # The second identity sweep, over `sys.modules` as it is *now*. A module
         # imported during the window holds the wrapper, and a list captured on
         # the way in would never visit it.
-        for _owner, _name, wrapper, original in made:
-            rebind(wrapper, original)
+        for _owner, _name, wrapper, _original, invoked in made:
+            rebind(wrapper, invoked)
 
 
 def measure(module, sources, calls) -> dict:

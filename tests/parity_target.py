@@ -132,7 +132,7 @@ def assert_target_is_not_rust_owned(testcase, target, module_name):
     # `extend_nodelist`, `compile_filter`, `invalid_block_tag` and every tag's
     # compile function, so a region declared inside a helper is on the compared
     # path while sitting outside `parse`'s own lines. The measured reach for
-    # `base.py` is 28 functions spanning lines 116-1209 — nearly the whole
+    # `base.py` is 29 functions spanning lines 116-1181 — nearly the whole
     # module — so for a transcription with a `COMPARED_PATH` entry the practical
     # rule is that no region may be in the module body at all.
     compared = guard.COMPARED_PATH.get(key, [])

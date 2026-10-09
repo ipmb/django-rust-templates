@@ -2000,6 +2000,50 @@ git commit -m "M10: interpose the loaders package — the meter is 14"
 
 ---
 
+**Reviewer finding, fixed in the commit after Task 7's: the instrument was blind
+to descriptors, and `FilterExpression.args_check` was on the compared path.**
+
+`tests/compared_path.py` wrapped what `inspect.isfunction` accepts, in both the
+wrap sweep and `definitions`. Five shapes a class dict holds a function in were
+therefore invisible — plain, `staticmethod`, `classmethod`, `property`,
+`cached_property` — plus a function under an `lru_cache`. The reviewer named
+`FilterExpression.args_check`, a `staticmethod` at `base.py:827-844`, and every
+element of the finding was measured against the pinned tree before anything
+changed: the predicate at `compared_path.py:195`/`:199`; the class-dict type
+`staticmethod`; **85** calls over the 566-source corpus; the span sitting in the
+*gap* between the pinned `(744, 788)` and `(876, 927)`; and no declared region of
+`base.py` covering it — so the defect was latent rather than live, which is the
+only reason it cost nothing to find late.
+
+`_invoked` is now the table of kinds (unwrap to the callable, re-box in the same
+kind), `residue` fails loudly on a kind it has no case for, and `members` is one
+iterator the three readers share. Re-measured, the reviewer's prediction held
+exactly: **one row moved, `base.py` 28 → 29, span unchanged at 827-844.** Four
+more members joined `definitions` without joining any pin — `Origin.loader_name`,
+`PartialTemplate.source`, `Engine.template_loaders`,
+`get_app_template_dirs` — and two corrections belong on the record:
+
+* **`_innermost` had to follow `__wrapped__` as well as descriptors.** The first
+  version of the fix dropped `Context.bind_template`, `RenderContext.push_state`
+  and `RequestContext.bind_template` from `definitions`, because they are
+  `@contextlib.contextmanager` and the object in the class dict is a helper
+  *created in `contextlib.py`*. The previous sweep included them on the strength
+  of `isfunction` alone and gave them spans read out of `contextlib.py` — real
+  line numbers, wrong file, and no pin ever carried one because none of the three
+  is reached by the corpus. Following `__wrapped__` restores them with the span
+  this file wrote.
+* **`TokenType.__new__` is no longer listed, and that is the correct answer.**
+  It is `Enum.__new__`, injected into the class by the metaclass from `enum.py`.
+  The previous sweep listed it with a span read out of `enum.py`. It is not
+  `base.py`'s code and cannot be inside a declared region of `base.py`, so
+  counting it was a false-positive generator for clause (4), not a safeguard.
+
+`tests/test_compared_path_instrument.py` pins all of it, including the
+reviewer's scenario run for real: a synthetic declared region on 827-844 is
+injected into `DECLARED` and the guard's own `check()` must refuse it.
+
+---
+
 ### Task 8: §2's case-sensitivity hole
 
 §2 states it as a consequence, not a wish: `FileSystemLoader`'s case-sensitivity is unexercised by the suite on any platform we will run, because the upstream guard is `os.path.normcase`, which is the identity function on POSIX — *structural, not environmental*. The spec schedules the project-side test at M10, which is the milestone that owns the loader.
