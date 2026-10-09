@@ -9,6 +9,8 @@ document comes from one of these, run 2026-10-09 against `.django/` @ 6.0.9.
 | `m8_measure_escape.py` | which object `defaultfilters.escape` is vs which one the registry holds; the six stock-vs-ours escape rows **through the registry** |
 | `m8_measure_filter_names.py` | the six registered filter names shadowed by a different module attribute, and the one name with no module attribute at all (`slice`) |
 | `m8_measure_corpus.py` | the ten M8-relevant `.django` modules: tests run/pass; and whether the `CallArm::Call` stub is reachable through a render at all |
+| `m8_measure_invalid.py` | the `string_if_invalid` substitution three ways: the loop-continuation trio (`{{ x }}` / `{{ x.upper }}` / `{{ x.name }}`, both layers); the unbound-context rows that force the read to be **lazy** and its failure to **propagate**; and the output-blindness row (`calls delta = 0` with `string_if_invalid=''`) |
+| `m8_measure_promise.py` | where a `Promise` is forced (nowhere in our code), that our resolver already returns it unforced, and a 57-filter sweep showing that **consumers do distinguish** forced from unforced in both directions — the falsification of an earlier "opposite directions" claim |
 
 Run each as:
 

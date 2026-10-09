@@ -2,19 +2,27 @@ center.rs:86	crates/template-core/src/filters/center.rs	86	-	arg.unwrap_or(Value
 center.rs:90	crates/template-core/src/filters/center.rs	90	-	text.starts_with('-')	-
 get_digit.rs:108	crates/template-core/src/filters/get_digit.rs	108	-	text.chars().rev().nth(index)	-
 get_digit.rs:153	crates/template-core/src/filters/get_digit.rs	153	-	fn invalid_literal(c: char) -> Error {	-
+filters/host.rs:195	crates/template-core/src/filters/host.rs	195	-	-	-
 filters/host.rs:519-526	crates/template-core/src/filters/host.rs	519	526	-	-
 filters/host.rs:576-739	crates/template-core/src/filters/host.rs	576	739	-	-
 linebreaks.rs:130	crates/template-core/src/filters/linebreaks.rs	130	-	call.autoescape && !call.host.is_safe(&value)	-
+filters/mod.rs:118	crates/template-core/src/filters/mod.rs	118	-	pub struct FilterFlags {	-
 slugify.rs:99	crates/template-core/src/filters/slugify.rs	99	-	pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {	-
 wordwrap.rs:73	crates/template-core/src/filters/wordwrap.rs	73	-	unwrap_or(Value::None)	-
+desc.rs:49	crates/template-core/src/parser/desc.rs	49	-	-	-
+desc.rs:181	crates/template-core/src/parser/desc.rs	181	-	-	-
 desc.rs:407	crates/template-core/src/parser/desc.rs	407	-	pub must_be_first: bool,	-
 desc.rs:445	crates/template-core/src/parser/desc.rs	445	-	must_be_first: false,	-
 error.rs:292-293	crates/template-core/src/parser/error.rs	292	293	str.replace	-
+parser/host.rs:22	crates/template-core/src/parser/host.rs	22	-	-	-
 parser/mod.rs:321	crates/template-core/src/parser/mod.rs	321	-	NodeDesc::new("VariableNode")	-
 crates/template-core/src/parser/mod.rs:408	crates/template-core/src/parser/mod.rs	408	-	self.extend_nodelist(&mut nodelist, node, &token)?;	-
 parser/mod.rs:434-439	crates/template-core/src/parser/mod.rs	434	439	token.or_else	-
 crates/template-core/src/parser/mod.rs:496	crates/template-core/src/parser/mod.rs	496	-	pub fn extend_nodelist(	-
 parser/mod.rs:502	crates/template-core/src/parser/mod.rs	502	-	if node.must_be_first && nodelist.contains_nontext {	-
+resolve.rs:28	crates/template-core/src/parser/resolve.rs	28	-	pub enum Step {	-
+parser/resolve.rs:107	crates/template-core/src/parser/resolve.rs	107	-	pub trait LookupTarget {	-
+resolve.rs:170	crates/template-core/src/parser/resolve.rs	170	-	pub enum LookupOutcome {	-
 extends.rs:71	crates/template-core/src/parser/tags/extends.rs	71	-	if !nodelist.get_nodes_by_type("ExtendsNode").is_empty() {	-
 tags/mod.rs:183	crates/template-core/src/parser/tags/mod.rs	183	-	Ok(NodeDesc::with_nodelist(	-
 parser/tags/mod.rs:198	crates/template-core/src/parser/tags/mod.rs	198	-	fn standin_first	-
@@ -25,6 +33,7 @@ crates/template-py/src/filters.rs:248-257	crates/template-py/src/filters.rs	248	
 crates/template-py/src/filters.rs:871	crates/template-py/src/filters.rs	871	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
 template-py/src/filters.rs:1587-1589	crates/template-py/src/filters.rs	1587	1589	Some(host.classify(&args.get_item(0)?)?)	-
 crates/template-py/src/filters.rs:1644-1645	crates/template-py/src/filters.rs	1644	1645	host.take_raised()	-
+template-py/src/lib.rs:117	crates/template-py/src/lib.rs	117	-	fn filter_flags	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-
@@ -125,9 +134,9 @@ base.py:850-925	django/template/base.py	850	925	-	-
 base.py:898-902	django/template/base.py	898	902	-	-
 base.py:906	django/template/base.py	906	-	self.literal = mark_safe(unescape_string_literal(var))	-
 base.py:910	django/template/base.py	910	-	if VARIABLE_ATTRIBUTE_SEPARATOR + "_" in var or var[0] == "_":	-
+base.py:924-940	django/template/base.py	924	940	def resolve(self, context):	-
 base.py:926-928	django/template/base.py	926	928	if self.lookups is not None	-
 base.py:932-939	django/template/base.py	932	939	gettext_lazy(msgid)	-
-base.py:948-1028	django/template/base.py	948	1028	def _resolve_lookup(self, context):	-
 base.py:959-1028	django/template/base.py	959	1028	for bit in self.lookups:	return current
 base.py:960-992	django/template/base.py	960	992	try:  # dictionary lookup	)  # missing attribute
 base.py:963	django/template/base.py	963	-	hasattr(type(current), "__getitem__")	-
@@ -166,6 +175,7 @@ base.py:1091	django/template/base.py	1091	-	SafeString("".join(	-
 base.py:1093-1098	django/template/base.py	1093	1098	"Return a list of all nodes of the given type"	-
 base.py:1113	django/template/base.py	1113	-	def render_annotated	-
 base.py:1113-1120	django/template/base.py	1113	1120	return self.s	-
+base.py:1123-1136	django/template/base.py	1123	1136	issubclass(type(value), str)	-
 base.py:1139	django/template/base.py	1139	-	-	-
 base.py:1160	django/template/base.py	1160	-	kwarg_re = _lazy_re_compile(r"(?:(\w+)=)?(.+)")	-
 base.py:1163-1207	django/template/base.py	1163	1207	token_kwargs	-
@@ -552,6 +562,7 @@ html.py:103-105	django/utils/html.py	103	105	json.dumps(value, cls=encoder or Dj
 html.py:106-110	django/utils/html.py	106	110	-	-
 django/utils/html.py:115-127	django/utils/html.py	115	127	isinstance(text, Promise)	-
 html.py:115-127	django/utils/html.py	115	127	def conditional_escape(text):	return escape(text)
+html.py:115-126	django/utils/html.py	115	126	-	-
 html.py:130-140	django/utils/html.py	130	140	-	-
 html.py:140	django/utils/html.py	140	-	-	-
 html.py:169-178	django/utils/html.py	169	178	-	-
@@ -609,7 +620,6 @@ test_unordered_list.py:143	tests/template_tests/filter_tests/test_unordered_list
 test_unordered_list.py:148	tests/template_tests/filter_tests/test_unordered_list.py	148	-	def test_nested_generators(self):	-
 i18n/test_blocktranslate.py:881	tests/template_tests/syntax_tests/i18n/test_blocktranslate.py	881	-	-	-
 tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py:16	tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py	16	-	-	-
-tests/test_host_tags.py:32-37	tests/test_host_tags.py	32	37	PROJECT_ROOT = Path(__file__).resolve().parent.parent	sys.path.insert(0, str(_path))
 syntax_tests/test_for.py:334	tests/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 syntax_tests/test_include.py:371-397	tests/template_tests/syntax_tests/test_include.py	371	397	def test_include_cache(self):	-
 bad_tag.py:6-8	tests/template_tests/templatetags/bad_tag.py	6	8	badtag	-
@@ -619,10 +629,12 @@ custom.py:396-399	tests/template_tests/templatetags/custom.py	396	399	parser.ext
 custom.py:398	tests/template_tests/templatetags/custom.py	398	-	parser.extra_data["extra_data"] = "CUSTOM_DATA"	-
 tag_27584.py:8-9	tests/template_tests/templatetags/tag_27584.py	8	9	delete_first_token	-
 tag_27584.py:13-15	tests/template_tests/templatetags/tag_27584.py	13	15	class BadNode(template.Node):	raise template.TemplateSyntaxError("error")
+tests/template_tests/test_nodelist.py:44-86	tests/template_tests/test_nodelist.py	44	86	-	-
 test_parser.py:36	tests/template_tests/test_parser.py	36	-	-	-
 test_parser.py:49	tests/template_tests/test_parser.py	49	-	<Lexer template_string="{% for i in 1 %}{{ a...", verbatim=False>	-
 test_partials.py:171	tests/template_tests/test_partials.py	171	-	def test_template_without_extra_data_attribute(self):	-
 .django/tests/template_tests/tests.py:114-123	tests/template_tests/tests.py	114	123	assertRaises(RuntimeError)	-
 tests.py:148-155	tests/template_tests/tests.py	148	155	def test_compile_tag_extra_data(self):	self.assertEqual(t.extra_data["extra_data"], "CUSTOM_DATA")
 .django/tests/template_tests/tests.py:148-155	tests/template_tests/tests.py	148	155	-	-
+tests/test_host_tags.py:32-37	tests/test_host_tags.py	32	37	PROJECT_ROOT = Path(__file__).resolve().parent.parent	sys.path.insert(0, str(_path))
 .django/tests/utils_tests/test_html.py:204-217	tests/utils_tests/test_html.py	204	217	-	-

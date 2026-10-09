@@ -134,101 +134,101 @@ keeps the engine's own correctness suite independent of the FFI, which matters:
 when the Django suite fails, we need to know whether the engine is wrong or the
 seam is wrong.
 
-### 5.2 The seam — two traits
+### 5.2 The seam — the traits Python is modelled behind
 
-The only place Python is modelled, and it lives in `template-core` as traits.
-Every signature here exists because the naive version was measured wrong; the
-reasoning is recorded with each, because these are the shapes most likely to be
-"simplified" back into breakage.
+**This section is design-time, and the tables below say which of its entries are
+descriptions and which were proposals.** It was written before the code. Where a
+name here has no counterpart there it is either a **retired** seam — replaced,
+with the reason, in the prose that follows — or an **open obligation**, named
+with the milestone that owes it. The code is the authority: a name lifted out of
+this section without checking the table reads the design's *intention* as if it
+were the implementation. Two review rounds read it that way.
 
-```rust
-/// Resolve a variable against a value. Fast paths for primitives; delegates to
-/// the host for anything opaque.
-pub trait ValueResolver {
-    /// **One path component, not a whole dotted path.**
-    ///
-    /// Django's `_resolve_lookup` (`base.py:948-1028`) is a per-bit loop whose
-    /// control flow is Python-exception-driven: it tries `current[bit]`, then
-    /// `getattr`, re-raising when a `@property` raised rather than swallowing
-    /// it, with `isinstance(current, BaseContext)` special cases that suppress
-    /// class attributes. It then auto-calls results unless
-    /// `do_not_call_in_templates` or `alters_data`.
-    ///
-    /// If the host owns that loop, Python owns `VariableDoesNotExist` and its
-    /// message, contradicting §6. So Rust keeps the loop *over bits* and
-    /// constructs the error; the host owns the cascade *within* a bit, because
-    /// that is Python exception semantics and cannot be modelled otherwise.
-    fn resolve_bit(&self, current: &Value, bit: &str)
-        -> Result<Value, LookupError>;
+Everything Python is modelled behind traits in `template-core`. Each method's
+reasoning — why the shape is what it is and what the naive version measured —
+lives in that method's own doc comment, which is where it has to be kept; this
+section points at it rather than restating it, because a copied code block
+propagates like a copied citation.
 
-    fn force_promise(&self, value: &Value) -> Value;      // lazy / Promise
-    fn is_safe(&self, value: &Value) -> bool;             // SafeData
-    fn is_callable(&self, value: &Value) -> bool;
-    fn call(&self, value: &Value, args: &[Value]) -> Result<Value, Error>;
-}
+| trait | where | what it is |
+|---|---|---|
+| `LookupTarget` | `parser/resolve.rs:107` | one resolved value, and the per-bit cascade Django's `_resolve_lookup` runs against it |
+| `Host` | `parser/host.rs:22` | the parser's callbacks — `has_tag`, `call_tag`, and a **defaulted** `check_filter` |
+| `FilterHost` | `filters/host.rs:195` | the Python value protocol a filter body needs: `to_str`, `to_int`, `to_float`, `len`, `iter_values`, `get_index`, `get_slice`, `add_values`, … |
+| `FilterFlags` | `filters/mod.rs:118` | the three per-filter attributes Django reads when calling a filter (`base.py:805-820`); `library.py:85` propagates all three, so they cross the seam |
 
-/// Why a single path component failed to resolve.
-pub enum LookupError {
-    /// Every strategy failed. The `repr` of the intermediate object comes from
-    /// the host (it is Python), but the *message* is built by Rust, so
-    /// `"Failed lookup for key [%s] in %r"` with `(bit, current)` lives in one
-    /// place — the same place as the rest of the error strings §6 makes Rust's.
-    Missing { bit: String, current_repr: String },
-    /// A `@property` raised. Django re-raises rather than converting this into a
-    /// failed lookup, so the original exception must survive to the caller.
-    Reraise(Error),
-}
+#### What this section proposed, and what exists
 
-/// Per-filter attributes Django reads when calling a filter
-/// (`base.py:805-820`). Not inferable from the name, and each changes the call
-/// or its result: `expects_localtime` runs the output through `localtime`;
-/// `needs_autoescape` changes the *signature* (the filter receives an
-/// `autoescape=` kwarg); `is_safe` changes output escaping when the input
-/// `isinstance(obj, SafeData)`. `library.py:85` propagates all three, so they
-/// have to cross the seam.
-pub struct FilterFlags {
-    pub is_safe: bool,
-    pub needs_autoescape: bool,
-    pub expects_localtime: bool,
-}
+| proposed here | actual | status |
+|---|---|---|
+| `ValueResolver` | `LookupTarget` | **renamed**; the per-bit loop it describes is right, and `LookupTarget` is where it lives |
+| `ValueResolver::resolve_bit` | — | **retired** |
+| `ValueResolver::force_promise` | — | **retired** |
+| `ValueResolver::is_safe`, `is_callable`, `call` | `LookupTarget::call_arm`, plus the host's value protocol | **replaced**; `call_arm` folds Django's `callable`, `do_not_call_in_templates` and `alters_data` into one round trip, because only the host can read the flags |
+| `LookupError` | `Step` (`resolve.rs:28`) + `LookupOutcome` (`resolve.rs:170`) | **split**; a per-bit verdict and a whole-path verdict are different lifetimes |
+| `ExtensionHost` | `Host` + `FilterHost` | **split**; the tag half and the value half have no method in common |
+| `ExtensionHost::call_tag` | `Host::call_tag` | **real**, in service |
+| `ExtensionHost::filter_flags` | `_native.filter_flags` (`template-py/src/lib.rs:117`) | **real**, but a free function: `template-core` never reads a flag, the binding does |
+| `ExtensionHost::call_filter` | — | **retired** |
+| `ExtensionHost::render_foreign_node` | — | **retired** |
+| `ExtensionHost::annotate_exception` | — | **open obligation** |
 
-/// Parse-time and render-time callbacks into user Python code.
-pub trait ExtensionHost {
-    /// Takes a `ParserHandle`, **not** `&mut Parser` — see below.
-    fn call_tag(&self, name: &str, parser: ParserHandle, token: &Token)
-        -> Result<NodeRef, Error>;
+#### Retired seams
 
-    fn render_foreign_node(&self, node: NodeRef, ctx: &mut Context)
-        -> Result<String, Error>;
+In prose, in the past tense, with the reason — and deliberately not left inside
+the Rust block above, because a name in a code block propagates regardless of
+the annotation beside it.
 
-    fn filter_flags(&self, name: &str) -> FilterFlags;
+- **`ValueResolver::resolve_bit`** proposed the whole per-bit cascade as one host
+  call. It was never built and the direction reversed: Rust keeps the loop *over
+  bits* and the host owns the cascade *within* a bit. §6 gives the reason —
+  Python owns `VariableDoesNotExist` and its message, but Rust owns the loop that
+  constructs it — and it survives as `LookupTarget`'s method set
+  (`get_item`/`get_attr`/`in_dir`/`get_index`), not as this name.
+- **`ValueResolver::force_promise`** proposed forcing a lazy `Promise` at the
+  seam. It was never built because **nothing needs it.** The claim it rests on is
+  that **no forcing site is on the resolve path**, which is what is checked; the
+  evidence is that the sites Django does have are both on the render path —
+  `render_value_in_context` (`base.py:1123-1136`, whose conversion test is
+  `issubclass(type(value), str)`) and `conditional_escape` (`html.py:115-126`,
+  reached by `|escape`) — and the resolver's contract is to hand the object back
+  **unforced**, which is what `Variable.resolve` (`base.py:924-940`) does. A
+  third site elsewhere would not change that. Kept that way by a gate at the
+  entry points (`tests/test_escape_protocol.py`, M8 Task 3).
+- **`ExtensionHost::call_filter`** proposed running a filter body through the
+  host. Bodies run through `_native.filter` → `filters::run_filter`, and what
+  they need from Rust is the *value protocol*, not a callback: `FilterHost`.
+- **`ExtensionHost::render_foreign_node`** proposed rendering a Python-owned node
+  from Rust, taking a context. Rendering is Django's until M9 interposes the
+  shadow tree, and the replacement is already in service: a Python node crosses
+  as an opaque handle (`NodeRef`, `desc.rs:49`; `NodeListRef`, `desc.rs:181`),
+  materialised into Django's own node objects by `_impl/parser.py` (§5.5). The
+  handle is **not** a render callback and does not take a context.
 
-    fn call_filter(&self, name: &str, value: Value, arg: Option<Value>,
-                   flags: &FilterFlags, autoescape: bool)
-        -> Result<Value, Error>;
+#### Open obligations
 
-    /// Django's `Node.render_annotated` protocol (`base.py:1044-1070`), which
-    /// mutates the *Python* exception object and reads from the *Python* node.
-    ///
-    /// On any render-time exception with `engine.debug`, Django attaches
-    /// `_culprit_node` — innermost node wins — and then attaches
-    /// `template_debug` only at the frame whose
-    /// `context.render_context.template.origin` matches the culprit's. That is
-    /// stateful across nested renders, and it is keyed on the exception's
-    /// identity, so it cannot be reconstructed after the fact.
-    ///
-    /// Rust-owned nodes have no Python frame of their own, so Rust calls this
-    /// for them; Python-owned nodes get it from Django's own unmodified
-    /// `render_annotated` (see §5.5). `test_nodelist.ErrorIndexTest` asserts
-    /// exact `(start, end)` pairs for a Python tag nested in a Rust-owned
-    /// `{% for %}`, which is why both halves are needed.
-    fn annotate_exception(&self, err: &Error, node: NodeRef, token: &Token);
-}
-```
+Not retired and not built. A separate bucket, because the two fail in opposite
+ways: a retired seam is work that was designed away, and an open obligation is
+work still owed. A reader who meets the second where the first belongs stops.
 
-`Error` keeps host exceptions **by identity**:
+- **`annotate_exception`** is **owed at M9.** It is Django's
+  `Node.render_annotated` protocol (`base.py:1044-1070`): on any render-time
+  exception with `engine.debug`, attach `_culprit_node` — innermost node wins —
+  and then attach `template_debug` only at the frame whose
+  `context.render_context.template.origin` matches the culprit's. That is stateful
+  across nested renders and keyed on the exception's **identity**, so it cannot be
+  reconstructed after the fact. Rust-owned nodes have no Python frame of their
+  own, so Rust must call it for them; Python-owned nodes get it from Django's own
+  unmodified `render_annotated` (§5.5). It goes live when
+  `setup_test_environment` routes the suite's 1547 tests through
+  `NodeList.render`, and **nothing supplies it today.** Pinned by
+  `tests/template_tests/test_nodelist.py:44-86`
+  (`ErrorIndexTest.test_correct_exception_index`, exact `(start, end)` pairs for a
+  Python tag nested in a Rust-owned `{% for %}`) and `tests.py:146,166-172`.
 
 ```rust
+/// Why this shape and not a flattened Python exception. Kept as a block because
+/// the type is real; the *methods* that consume it are in the trait table above.
 pub enum Error {
     /// An exception raised by the host. Opaque to `template-core`, which stores
     /// and re-raises it but never inspects it. Flattening a Python exception
@@ -241,9 +241,10 @@ pub enum Error {
 }
 ```
 
-`NodeRef` is an opaque handle to a Python-owned `Node` returned by a user tag
-callback. `template-core` never dereferences it — it stores it, renders it via
-the host, and asks the host for its identity when building the shadow tree.
+`NodeRef` and `NodeListRef` are opaque handles to Python-owned nodes returned by
+a user tag callback. `template-core` never dereferences them — it stores them,
+renders them via the host, and asks the host for their identity when building the
+shadow tree.
 
 #### `ParserHandle` — re-entrancy is the contract
 
