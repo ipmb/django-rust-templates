@@ -120,27 +120,35 @@ COMPARED_PATH = {
         (1116, 1117, "VariableNode.__init__"),
         (1137, 1181, "token_kwargs"),
     ],
-    # 6 functions, spans 138-214 — the same instrument and the same pin
+    # 8 functions, spans 56-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
     # `tests/test_interposition.py::test_the_compared_path_is_the_measured_one`.
     #
-    # **A blind spot, measured rather than assumed.** `measure` can only wrap
-    # names reachable from the module namespace and its classes; `smartif`
-    # builds its operator classes inside `infix()`/`prefix()` and binds them
-    # into the `OPERATORS` dict (lines 98-113), so the methods that actually
-    # evaluate `and`, `or`, `not` and every comparison are objects nothing here
-    # wrapped. Probed: four sources — `{% if a and b %}`, `{% if not a %}`,
-    # `{% if a == 1 %}`, `{% if a > 1 and b < 2 or c %}` — all reach the same
-    # six functions and none reaches `TokenBase.led` or `op.led`. (`op` is not
-    # an operator at all: it is the loop variable `for key, op in
-    # OPERATORS.items()` at line 115, left in the namespace, so the only class
-    # the instrument can see is `"<="`'s.) A declared region placed on those
-    # methods would not be caught by clause 4 — Task 7 closes that.
+    # **The blind spot this table used to carry, and how it was closed.** The
+    # first version of the instrument could only wrap names reachable from the
+    # module namespace and its classes; `smartif` builds its operator classes
+    # inside `infix()`/`prefix()` and binds them into the `OPERATORS` dict
+    # (lines 98-113), so the methods that actually evaluate `and`, `or`, `not`
+    # and every comparison were objects nothing wrapped. Measured then: four
+    # sources — `{% if a and b %}`, `{% if not a %}`, `{% if a == 1 %}`,
+    # `{% if a > 1 and b < 2 or c %}` — reached the same six functions and none
+    # reached `Operator.led`/`Operator.nud`, so a declared region placed on them
+    # would not have been caught by clause 4.
     #
-    # `IfParser.error`, `IfParser.create_var`, `Literal.__init__` and the
-    # `TokenBase` display/`__repr__` helpers are defined and simply not entered
-    # by these corpora, which is the ordinary meaning of "compared path".
+    # `tests/compared_path.py::classes` now looks one level into module-level
+    # containers, and the two entries at the top of this table are what that
+    # found: the corpus does reach `infix`'s and `prefix`'s generated methods.
+    # They are listed by the factory's qualified name because all the classes one
+    # factory makes share it — and share the span, since the methods are defined
+    # in the factory's body.
+    #
+    # `IfParser.error`, `IfParser.create_var`, `Literal.__init__`, the
+    # `TokenBase` display/`__repr__` helpers and the operators' `eval` are
+    # defined and simply not entered by these corpora, which is the ordinary
+    # meaning of "compared path".
     "smartif.py": [
+        (56, 59, "infix.<locals>.Operator.led"),
+        (83, 86, "prefix.<locals>.Operator.nud"),
         (138, 139, "Literal.nud"),
         (161, 179, "IfParser.__init__"),
         (181, 187, "IfParser.translate_token"),
@@ -171,9 +179,10 @@ DECLARED = {
             # rewritten docstring — see the module docstring's reason and design
             # spec §6. The upstream span reaches line 39 because the matcher
             # pairs our closing prose against the tail of upstream's docstring.
-            # No snippet: the docstring is a string expression, so the region
-            # holds no executable line.
-            ((1, 23), (1, 39), None),
+            # No executable line, so the snippet is clause (5)'s note rather
+            # than a list of statements: 23 of our lines stand against 39 of
+            # upstream's, and what moved is the docstring.
+            ((1, 23), (1, 39), "rewritten module docstring and the marker line"),
             # Upstream's `# NOQA isort:skip` markers are **stripped**, not added.
             # Django runs isort on this file and needs them; our transcription
             # does not carry Django's lint directives (design spec §6: the file
@@ -208,9 +217,11 @@ DECLARED = {
         "django/template/base.py",
         [
             # The `# TRANSCRIBED:` marker and its blank separator, ours only —
-            # a pure insertion, hence `None` on the upstream side, and no
-            # executable line, hence no snippet.
-            ((2, 3), None, None),
+            # a pure insertion, hence `None` on the upstream side. No executable
+            # line, so the snippet is clause (5)'s required note rather than a
+            # list of statements: two of our lines against none of upstream's,
+            # and what moved is the marker.
+            ((2, 3), None, "# TRANSCRIBED: django/template/base.py (Django 6.0.9)"),
             # M9's parse seam: `Template.compile_nodelist` delegates to Rust.
             # Upstream's lexer construction and `Parser(...)` call are gone, and
             # in their place is a comment block plus the import that reaches the
@@ -298,8 +309,10 @@ DECLARED = {
         "django/template/smartif.py",
         [
             # The `# TRANSCRIBED:` marker and its blank separator, ours only —
-            # a pure insertion, hence `None` on the upstream side, and no
-            # executable line, hence no snippet. **This is the entire file**:
+            # a pure insertion, hence `None` on the upstream side. No executable
+            # line, so the snippet is clause (5)'s required note rather than a
+            # list of statements: two of our lines against none of upstream's,
+            # and what moved is the marker. **This is the entire file**:
             # measured with `difflib`, ours is 217 lines and upstream 215, the
             # diff is one `delete` opcode at ours 2-3 against upstream 2-1, and
             # the other 215 lines are equal in place.
@@ -314,7 +327,7 @@ DECLARED = {
             # import to resolve to us rather than to the checkout, and once it
             # exists the claim it makes is that it is upstream's, which is what
             # this declaration states and what the diff above measures.
-            ((2, 3), None, None),
+            ((2, 3), None, "# TRANSCRIBED: django/template/smartif.py (Django 6.0.9)"),
         ],
     ),
 }
@@ -610,12 +623,43 @@ def check() -> list:
                         "executes, so the comparison would be Rust against Rust"
                     )
 
+            # (5) A region whose two spans differ in length is a region the line
+            # diff cannot describe, so prose is the only witness and the guard
+            # requires it. **This is the clause M9's Task 5 needed and did not
+            # have**: `_resolve_lookup`'s exception handler — thirty-odd lines of
+            # upstream — was replaced by a one-line call, the declaration
+            # recorded `ours 1002` against `upstream 1023-1028` honestly, and
+            # nothing made anyone say so. The reviewer's objection to the first
+            # version of this rule was that a ratio threshold is a number with no
+            # data behind it, and this project has produced a wrong number from a
+            # chosen scope parameter three times; the *existence* of a shape
+            # change is binary and needs no threshold. A region whose spans match
+            # can be read off the diff; one whose spans do not, cannot.
+            ours_len = 0 if ours_span is None else ours_span[1] - ours_span[0] + 1
+            theirs_len = (
+                0 if theirs_span is None else theirs_span[1] - theirs_span[0] + 1
+            )
+            shape_changed = ours_len != theirs_len
+            if shape_changed and snippet is None:
+                failures.append(
+                    f"{name}: region ours:{_fmt(ours_span)} "
+                    f"upstream:{_fmt(theirs_span)} holds {ours_len} of our "
+                    f"line(s) against {theirs_len} of upstream's, so the line "
+                    "diff cannot say what happened — declare a note naming what "
+                    "moved, not only the span"
+                )
+
             # (2) A region holding executable lines must name them.
             if ours_span is None:
                 continue
             inside = sorted(set(range(ours_span[0], ours_span[1] + 1)) & executable)
             if not inside:
-                if snippet is not None:
+                # A snippet on a region with no executable line is only wrong
+                # when the spans *match*: then it declares nothing the region
+                # does not already say. When they differ it is clause (5)'s
+                # required note, and a pure insertion — the marker line, whose
+                # upstream span is `None` — is exactly that case.
+                if snippet is not None and not shape_changed:
                     failures.append(
                         f"{name}: region ours:{_fmt(ours_span)} has no "
                         "executable line, so its snippet declares nothing — "

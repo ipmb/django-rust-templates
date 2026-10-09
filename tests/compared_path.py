@@ -44,21 +44,66 @@ def span_of(func):
     return (first, first + len(lines) - 1)
 
 
+def _one_level(value):
+    """``value``, or the values of the module-level container holding it."""
+    if isinstance(value, dict):
+        yield from value.values()
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        yield from value
+    else:
+        yield value
+
+
+def label_of(cls):
+    """``cls``'s name, or its qualified name when it was made inside a function.
+
+    ``smartif``'s operator classes are built by ``infix()``/``prefix()``, so
+    ``__qualname__`` is ``infix.<locals>.Operator``. All the classes one factory
+    makes share that name and share the span their methods occupy, so collapsing
+    them under one label loses nothing: the label answers "does the corpus reach
+    a method this factory generated".
+    """
+    return cls.__name__ if cls.__qualname__ == cls.__name__ else cls.__qualname__
+
+
+def classes(module):
+    """Every class ``module`` defines, including ones held in a container.
+
+    **This closes the instrument's one blind spot.** ``smartif`` binds its
+    operator classes into ``OPERATORS``, a module-level dict, so a sweep of the
+    module namespace's own attributes cannot see them — measured, the methods
+    that evaluate ``and``, ``or``, ``in`` and every comparison were invisible
+    while the guard's clause 4 would have accepted a declared region sitting on
+    them. A class in a module-level dict is still a class the module defines, so
+    the sweep looks one level into containers, and one level is enough: the
+    factory's output is bound directly.
+    """
+    for value in vars(module).values():
+        for candidate in _one_level(value):
+            if (
+                inspect.isclass(candidate)
+                and candidate.__module__ == module.__name__
+            ):
+                yield candidate
+
+
 def definitions(module):
     """Qualified name -> ``(first, last)`` for every function ``module`` defines.
 
     Nested functions are not reachable from the module namespace and so are not
     listed; the ones on the parse path are called from their enclosing function
-    and their lines lie inside it, which is the span the guard needs.
+    and their lines lie inside it, which is the span the guard needs. The
+    exception is a *class* made by a factory, whose methods are listed under the
+    factory's qualified name — see `classes`.
     """
     out = {}
     for name, obj in list(vars(module).items()):
         if inspect.isfunction(obj) and obj.__module__ == module.__name__:
             out[name] = span_of(obj)
-        elif inspect.isclass(obj) and obj.__module__ == module.__name__:
-            for attr, value in list(vars(obj).items()):
-                if inspect.isfunction(value):
-                    out[f"{name}.{attr}"] = span_of(value)
+    for cls in classes(module):
+        for attr, value in list(vars(cls).items()):
+            if inspect.isfunction(value):
+                out[f"{label_of(cls)}.{attr}"] = span_of(value)
     return out
 
 
@@ -117,9 +162,16 @@ def instrumented(module):
     silently running wrapped code. Restoring is therefore "find every binding
     that *is* one of my wrappers and put the original back", which is complete
     by construction because the wrappers are objects this function made.
+
+    **The identity sweep is not sufficient for a class the module holds in a
+    container.** `rebind` walks module namespaces, and an operator class built by
+    `smartif.infix()` is bound nowhere but inside `OPERATORS`; the wrapper lives
+    in the class's own `__dict__`, where no identity sweep will find it. So each
+    wrap also records where it was placed, and the restore puts those back
+    explicitly, before the sweep.
     """
     counts = collections.Counter()
-    made = []  # (wrapper, original), in wrap order
+    made = []  # (owner, name, wrapper, original), in wrap order
 
     def wrap(owner, name, label):
         original = getattr(owner, name)
@@ -132,24 +184,31 @@ def instrumented(module):
         counting.__doc__ = original.__doc__
         counting.__wrapped__ = original
         setattr(owner, name, counting)
-        made.append((counting, original))
+        made.append((owner, name, counting, original))
         rebind(original, counting)  # consumers that imported the name
 
     for name, obj in list(vars(module).items()):
         if inspect.isfunction(obj) and obj.__module__ == module.__name__:
             wrap(module, name, name)
-        elif inspect.isclass(obj) and obj.__module__ == module.__name__:
-            for attr, value in list(vars(obj).items()):
-                if inspect.isfunction(value):
-                    wrap(obj, attr, f"{name}.{attr}")
+    for cls in classes(module):
+        for attr, value in list(vars(cls).items()):
+            if inspect.isfunction(value):
+                wrap(cls, attr, f"{label_of(cls)}.{attr}")
 
     try:
         yield counts
     finally:
+        # Where the wrappers were placed, including class dicts no identity
+        # sweep reaches, then the sweep for consumers that hold the name.
+        for owner, name, _wrapper, original in made:
+            try:
+                setattr(owner, name, original)
+            except (AttributeError, TypeError):  # pragma: no cover
+                continue
         # The second identity sweep, over `sys.modules` as it is *now*. A module
         # imported during the window holds the wrapper, and a list captured on
         # the way in would never visit it.
-        for wrapper, original in made:
+        for _owner, _name, wrapper, original in made:
             rebind(wrapper, original)
 
 

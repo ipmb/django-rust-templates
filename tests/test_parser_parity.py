@@ -850,6 +850,18 @@ class ShapeTests(unittest.TestCase):
         """
         assert_target_is_not_rust_owned(self, Parser, "Parser")
 
+        # And the other interposed module this corpus executes. A `{% if %}`
+        # condition is a `smartif` tree (`describe` below walks one), so the
+        # transcription defining its operator classes is Python-side code this
+        # comparison runs. Until M9's close-out **nothing consulted
+        # `COMPARED_PATH["smartif.py"]`** — no row named a `smartif` target, so
+        # the table was measured and then never read, and a declared region on
+        # the operators' methods would have gone unnoticed twice over. The
+        # instrument could not see those methods either (`infix()`/`prefix()`
+        # build them inside the module body and bind them into `OPERATORS`),
+        # which is the other half of the same blind spot.
+        assert_target_is_not_rust_owned(self, smartif.IfParser, "smartif.IfParser")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,7 +12,10 @@ working tree is never mutated:
 4. a region with executable lines declares no snippet;
 5. a region's snippet does not account for every executable line in it;
 6. a transcribed module has no `COMPARED_PATH` entry, so nothing checks whether
-   its declared regions sit on code a parity harness executes.
+   its declared regions sit on code a parity harness executes;
+7. a region whose ours-span and upstream-span differ in length declares no note,
+   so the line diff is the only thing describing a shape change it cannot
+   describe (added in Task 7, and the clause Task 5's one-line handler needed).
 
 Run it:
 
@@ -53,6 +56,13 @@ _parse_executable = sorted(
     if PARSE_FIRST <= n <= PARSE_LAST
 )
 PARSE_HEAD = (_parse_executable[0], _parse_executable[2])
+
+# The marker insertion, exactly as the declaration carries it. Scenarios below
+# need a *second* region so the file's real differences stay declared, and
+# clause (5) now requires this one to carry a note — using the real note keeps
+# each scenario's output to the one failure it is about. Scenario 7 removes the
+# note on purpose.
+MARKER_REGION = ((2, 3), None, "# TRANSCRIBED: django/template/base.py (Django 6.0.9)")
 
 results = []
 
@@ -131,7 +141,7 @@ print("=== 3. a region may not cover code the parity harness executes ===")
 # and the region covers them.
 scenario(
     "a region inside Parser.parse",
-    regions=[((2, 3), None, None), (PARSE_HEAD, None, None)],
+    regions=[MARKER_REGION, (PARSE_HEAD, None, None)],
     expected="which the parity harness executes",
 )
 
@@ -139,17 +149,25 @@ print()
 print("=== 4/5. snippets on regions with executable lines ===")
 scenario(
     "executable region with no snippet",
-    regions=[((2, 3), None, None), (PARSE_HEAD, None, None)],
+    regions=[MARKER_REGION, (PARSE_HEAD, None, None)],
     expected="declares no snippet",
 )
 _first_statement = REAL_BASE.read_text().splitlines()[_parse_executable[0] - 1].strip()
 scenario(
     "snippet naming only part of the region",
     regions=[
-        ((2, 3), None, None),
+        MARKER_REGION,
         (PARSE_HEAD, None, _first_statement),  # the rest left unnamed
     ],
     expected="snippet does not name line(s)",
+)
+
+print()
+print("=== 7. a region of a different shape must say what moved ===")
+scenario(
+    "pure insertion with no note",
+    regions=[((2, 3), None, None)],
+    expected="declare a note naming what moved",
 )
 
 print()
