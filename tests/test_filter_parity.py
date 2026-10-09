@@ -25,6 +25,7 @@ already uses for the materialiser, and it keeps the probe out of the suite:
 import importlib.util
 import sys
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -180,6 +181,34 @@ class FilterParityTests(unittest.TestCase):
             case["filter"], case_value(case), case_arg(case), context
         )
 
+    def settings_for(self, case):
+        """The row's `settings` override, wrapped around **both** engines' calls.
+
+        A row's answer can turn on a setting — `floatformat`'s grouping and
+        separator, `filesizeformat`'s byte unit word, `yesno`'s default
+        arguments — and a setting that reaches one side and not the other is
+        indistinguishable from a body that ignored it. So the override is entered
+        for the pair rather than for either call, and it is entered here rather
+        than inside a body because a body cannot see a setting at all: its whole
+        contact with the outside world is the host trait.
+
+        **A settings-bearing row must carry `expected`, and the literal is the
+        test.** Both engines are handed the same override, so a misspelt or
+        ineffective setting name moves them *together* and every comparison above
+        stays green — measured: `USE_THOUSAND_SEPERATOR` (sic), the natural typo,
+        moved nothing anywhere. Only the pinned literal can tell a live setting
+        from a dead one, which is why this is a rule and not a courtesy.
+
+        `nullcontext` rather than an empty `override_settings()`: the latter
+        still fires `setting_changed` for no setting, which is a real signal to
+        anything listening and a different question from "no override".
+        """
+        if case.get("settings"):
+            from django.test import override_settings
+
+            return override_settings(**case["settings"])
+        return nullcontext()
+
     def assert_same(self, case, django_result, rust_result, membership=False):
         self.assertEqual(
             type(django_result).__name__,
@@ -231,8 +260,9 @@ class FilterParityTests(unittest.TestCase):
     def test_every_case(self):
         for case in CASES:
             with self.subTest(case=case["name"]):
-                django_result, expression, context = self.render_django(case)
-                rust_result = self.render_rust(case, context)
+                with self.settings_for(case):
+                    django_result, expression, context = self.render_django(case)
+                    rust_result = self.render_rust(case, context)
                 self.assert_same(
                     case,
                     django_result,
@@ -321,27 +351,28 @@ class FilterParityTests(unittest.TestCase):
         for case in ERROR_CASES:
             with self.subTest(case=case["name"]):
                 given, extra = arg_token(case)
-                self.assert_raises_same(
-                    case,
-                    "Django",
-                    lambda: probe.django_answer(
-                        case["filter"],
-                        case_value(case),
-                        given,
-                        case.get("context"),
-                        extra,
-                    ),
-                )
-                context = probe.context_for(
-                    case_value(case), case.get("context"), extra
-                )
-                self.assert_raises_same(
-                    case,
-                    "ours",
-                    lambda: probe.rust_answer(
-                        case["filter"], case_value(case), case_arg(case), context
-                    ),
-                )
+                with self.settings_for(case):
+                    self.assert_raises_same(
+                        case,
+                        "Django",
+                        lambda: probe.django_answer(
+                            case["filter"],
+                            case_value(case),
+                            given,
+                            case.get("context"),
+                            extra,
+                        ),
+                    )
+                    context = probe.context_for(
+                        case_value(case), case.get("context"), extra
+                    )
+                    self.assert_raises_same(
+                        case,
+                        "ours",
+                        lambda: probe.rust_answer(
+                            case["filter"], case_value(case), case_arg(case), context
+                        ),
+                    )
 
     def test_every_implemented_filter_has_cases(self):
         """The corpus and the bodies name the same filters — both directions.
@@ -371,7 +402,7 @@ class FilterParityTests(unittest.TestCase):
         """The stub set is what M4 has left, and the count says so out loud.
 
         `filter_names()` is asserted first because everything below is silent if
-        the registry itself is short: 41 stubs out of 41 names would pass a count
+        the registry itself is short: 57 stubs out of 57 names would pass a count
         check while sixteen filters had gone missing from the registry.
 
         The **count** is the deliberate-edit signal, and the filter names are
@@ -386,21 +417,22 @@ class FilterParityTests(unittest.TestCase):
         self.assertEqual(
             len(all_names), 57, "the registry itself is not Django's 57 filters"
         )
-        # 24: the 57 minus `lower` and `upper`, which Task 3 lands as the corpus's
+        # 22: the 57 minus `lower` and `upper`, which Task 3 lands as the corpus's
         # seed, minus Task 4's six — `capfirst`, `title`, `cut`, `addslashes`,
         # `make_list`, `wordcount` — minus Task 5's eight: `center`, `ljust`,
         # `rjust`, `truncatechars`, `truncatechars_html`, `truncatewords`,
         # `truncatewords_html`, `wordwrap` — minus Task 6's nine: `first`,
         # `last`, `length`, `slice`, `join`, `random`, `dictsort`,
         # `dictsortreversed`, `unordered_list` — minus Task 7's first wave of
-        # four: `add`, `divisibleby`, `get_digit`, `stringformat` — and minus
+        # four: `add`, `divisibleby`, `get_digit`, `stringformat` — minus
         # Task 7's second wave of four: `pluralize`, `yesno`, `default`,
-        # `default_if_none`. Each group's commit decreases this by its own size
-        # and adds its rows to tests/filter_cases.py — one number and one list,
-        # edited together, in the commit that does the work.
+        # `default_if_none` — and minus Task 7's third wave of two:
+        # `floatformat`, `filesizeformat`. Each group's commit decreases this by
+        # its own size and adds its rows to tests/filter_cases.py — one number
+        # and one list, edited together, in the commit that does the work.
         self.assertEqual(
             len(stubs),
-            24,
+            22,
             f"the stub count moved: {len(stubs)} left, {sorted(stubs)}. If a "
             f"group landed, this number and tests/filter_cases.py both move with "
             f"it; if nothing landed, a body has been reverted or a registry row "

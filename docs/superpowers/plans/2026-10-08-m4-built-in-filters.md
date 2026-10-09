@@ -501,6 +501,12 @@ The same applies to `filters/mod.rs`, `filters/value.rs`, `filters/host.rs`,
 a report naming, for each guard in its tests, the mutation it was observed
 failing under.
 
+**An agent brief goes to the agent, not to the reviewer.** The reviewer reviews
+plans and landed code; it does not need, and did not ask for, the per-agent
+dispatch text for work it is not doing. Sending it there costs the reviewer a
+round on material it cannot act on and invites it to review a brief instead of
+the code the brief produced.
+
 **D7.1 — `&str` or `&Value` for a host parameter, which is a type-safety rule and
 not a style choice.** `&str` is correct exactly when the value has already been
 coerced: a parameter that arrives through `@stringfilter` is `str(first)` by the
@@ -2415,9 +2421,20 @@ no-op mutation in this project already produced one false "passed".
   | `filesizeformat(1234567890)` | `'1.1\xa0GB'` | `'1.1\xa0GB'` — **unmoved** | `'1,1\xa0GB'` |
   | `stringformat(1234567, 'd')` | `'1234567'` | unmoved | unmoved |
 
-  `USE_THOUSAND_SEPARATOR` therefore has leverage on **one** row shape only — a
-  `floatformat` argument *without* `'g'` — because `floatformat` passes
-  `force_grouping=True` on the `'g'` path, so the separator is there either way.
+  `USE_THOUSAND_SEPARATOR` therefore has leverage on **two** row shapes, and the
+  table above shows only one of them. The first is a `floatformat` argument
+  *without* `'g'` — the `'g'` path passes `force_grouping=True`, so its separator
+  is there either way (`floatformat(1234567.5, 2)`: `'1234567.50'` against
+  `'1,234,567.50'`, the row `thousands-separator-needs-the-no-flag-path`). The
+  second is `filesizeformat` in the narrow band where the mantissa itself reaches
+  four digits: the body divides by `2**shift` and hands
+  `number_format(round(value, 1), 1)` a mantissa in `[1, 1024)`, so grouping
+  appears only in `[1000 * 2**shift, 1024 * 2**shift)` — about 2.4% of each unit's
+  range, and the table's `filesizeformat(1234567890)` (mantissa 1.1) sits outside
+  it, reading **unmoved** while hiding the shape. Measured inside the band,
+  `filesizeformat(1024000)` is `'1000.0\xa0KB'` by default and `'1,000.0\xa0KB'`
+  under the setting (the row `thousands-separator-in-the-four-digit-mantissa`).
+  That row had to be built for it deliberately; no round-number input finds it.
   `stringformat` moves under neither, so a settings row for it would be a row that
   tests nothing. **`LANGUAGE_CODE` is the axis**, and the `filesizeformat` row is
   the one that matters: `'1,1\xa0GB'` is reachable only through the host's

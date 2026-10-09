@@ -1368,7 +1368,7 @@ pub fn run_filter(
     if entry.flags.expects_localtime {
         current = host
             .localtime(current, use_tz)
-            .map_err(|error| crate::filter_py_error(&error))?;
+            .map_err(|error| crate::filter_py_error(py, &error))?;
     }
     let was_safe = host.is_safe(&current);
     // The wrapper's half, and it runs for all 29 `stringfilter` filters rather
@@ -1378,7 +1378,7 @@ pub fn run_filter(
     let (current, coerced_is_safe) = if entry.stringfilter {
         let coerced = host
             .coerce_stringfilter(&current)
-            .map_err(|error| crate::filter_py_error(&error))?;
+            .map_err(|error| crate::filter_py_error(py, &error))?;
         // `isinstance(first, SafeData)` — already answered, because `classify`
         // puts a `str` in `Value::Safe` only after asking it.
         let safe = matches!(&coerced, Value::Safe(_));
@@ -1391,12 +1391,12 @@ pub fn run_filter(
         autoescape,
         use_tz,
     };
-    let result =
-        (entry.run)(current, argument, &call).map_err(|error| crate::filter_py_error(&error))?;
+    let result = (entry.run)(current, argument, &call)
+        .map_err(|error| crate::filter_py_error(py, &error))?;
     let result = if entry.flags.is_safe && (was_safe || coerced_is_safe) {
         host.mark_safe_checked(result)
             .map_err(|error| host.host_error("mark_safe", error))
-            .map_err(|error| crate::filter_py_error(&error))?
+            .map_err(|error| crate::filter_py_error(py, &error))?
     } else {
         result
     };

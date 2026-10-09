@@ -88,11 +88,35 @@ def ensure_settings() -> None:
     Guarded rather than unconditional for the reason `tests/test_render_parity.py`
     gives: a module-scope `settings.configure` changes what any module imported
     afterwards sees.
+
+    **`USE_I18N=True` plus `django.setup()`, and both are load-bearing** — measured
+    on the pinned tree, in three fresh interpreters, because the two are easy to
+    mistake for one another:
+
+    | `USE_I18N` | `django.setup()` | `gettext("yes,no,maybe")` under `LANGUAGE_CODE="de"` |
+    |---|---|---|
+    | `False` | no | `'yes,no,maybe'` |
+    | `False` | yes | `'yes,no,maybe'` |
+    | `True` | yes | `'Ja,Nein,Vielleicht'` |
+
+    `False` makes `gettext` return its argument unconditionally whatever is
+    loaded, and without `setup()` the catalog cannot be read at all — asking for
+    one first raises `AppRegistryNotReady`. This was `USE_I18N=False` and no
+    `setup()`, so every `gettext`/`ngettext` in the harness returned its msgid and
+    the corpus could not see the translation seam: a body that inlined the English
+    literal scored exactly as well as one that asked the host. That is the
+    blindness the setting closes, and the English default is why closing it moved
+    no existing row — `gettext` under `en-us` is the identity either way.
+
+    A row's own locale is its `settings` key; see `tests/filter_cases.py`.
     """
     from django.conf import settings
 
     if not settings.configured:
-        settings.configure(USE_I18N=False)
+        import django
+
+        settings.configure(USE_I18N=True)
+        django.setup()
 
 
 def effective_use_tz(context) -> bool:

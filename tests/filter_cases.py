@@ -35,7 +35,7 @@ lets a row be `mark_safe("AbC")` — and the safety rows are the point of this
 file. A textual format would have needed a second, private encoding for
 `safestring` and then a reason to trust it.
 
-**Three optional keys change what the row is, and each exists because the
+**Four optional keys change what the row is, and each exists because the
 default would quietly score a different question.** `value_factory` replaces
 `value` for a **one-shot** input — a generator is consumed by whichever side
 reads it first, so a shared one makes the second side's answer a statement about
@@ -43,6 +43,18 @@ an exhausted iterator; see [`case_value`]. `context` overrides the `Context` the
 loop reads `autoescape` and `use_tz` off, which is how the `needs_autoescape`
 filters get both branches: `join` with and without escaping answers different
 text from the same input, so nothing but the key can tell the two rows apart.
+
+**`settings` is the fourth, and it is the one key whose rows must carry
+`expected`.** It is an `override_settings` entered around **both** engines' calls
+— the only way a setting can be an input at all, since a body cannot see one: its
+whole contact with the outside world is the host trait. Because both sides get
+the same override, a misspelt setting name is a **silent no-op** that moves both
+answers together and leaves every comparison green — measured, `USE_THOUSAND_SEPERATOR`
+(the natural typo) moved nothing anywhere — so on these rows the pinned literal
+is the test and not a nicety. `floatformat`'s separator, `filesizeformat`'s unit
+words and `yesno`'s default arguments are the three seams the key reaches; see
+`scripts/filter_probe.py` for why the harness runs with `USE_I18N=True` and
+`django.setup()`, without which the last two are invisible.
 
 **`expected` pins the literal, and it is for the rows a comparison cannot fail.**
 The comparison is two engines agreeing; where a broken body moves **both** engines
@@ -2239,6 +2251,631 @@ CASES: list[dict] = [
         "value": 2,
         "arg": mark_safe("s"),
     },
+    # --- wave 3: `floatformat` ---------------------------------------------
+    #
+    # `floatformat` has **five return sites** and the rows below are grouped by
+    # which one answers rather than by input shape, because two of them emit the
+    # same characters: `floatformat(10**199)` is `SafeString('1' + '0' * 199)`
+    # and `floatformat(10**200)` is the same digits as a plain `str`. The
+    # comparison above cannot see the difference at all — the safety assertion is
+    # what does — and the pairing is deliberate for that reason.
+    #
+    # Three of the five sites are the *same* line: `return input_val`
+    # (`:162`, `:177`), reached by an argument that will not parse, by a value
+    # whose digits-and-exponent sum exceeds 200, and by a non-finite value whose
+    # `as_tuple()` exponent is a letter. A body that got any one of them right and
+    # collapsed the others into it would pass a corpus that held one row per
+    # *text*, so the rows are one per route.
+    {
+        # `arg=-1` (`:95`) on a value with nothing after the point: `m` is falsy
+        # and `p <= 0`, so this is the integral arm (`:184-192`) and the text is
+        # `"%d" % int(d)`. The `mark_safe` is the first of two, and this row is a
+        # `SafeString` while the refusal rows below are not.
+        "name": "floatformat/no-argument-integers-are-whole",
+        "filter": "floatformat",
+        "value": 34.0,
+    },
+    {
+        # The same arm on the same default with a fractional value: still `-1`
+        # place, and `quantize`'s `ROUND_HALF_UP` rounds *away from zero* here.
+        "name": "floatformat/no-argument-rounds-half-up",
+        "filter": "floatformat",
+        "value": 34.26,
+    },
+    {
+        # **`0` is an argument and not the absence of one**, which is the whole
+        # row: `p = 0` is not `p = -1`, so the same value that answers `'34.3'`
+        # above answers `'34'` here. A body reading a falsy argument as the
+        # default agrees on `floatformat` and diverges on this token.
+        "name": "floatformat/zero-argument-is-not-no-argument",
+        "filter": "floatformat",
+        "value": 34.26,
+        "arg": 0,
+    },
+    {
+        # A negative `p` rounds to the left of the point and pads with zeros to
+        # `abs(p)` places, which is what separates it from `3`: `abs(p)` is used
+        # for the *scale* and the sign only decides the direction.
+        "name": "floatformat/negative-argument-rounds-left-of-the-point",
+        "filter": "floatformat",
+        "value": 34.26,
+        "arg": -3,
+    },
+    {
+        # The ordinary right-hand case, and the base the `'g'` rows below are
+        # read against.
+        "name": "floatformat/two-argument-keeps-two-places",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": 2,
+    },
+    {
+        # `abs(p)` large enough that the zero padding is visible, and the row
+        # that shows the padding is string repetition over `digits` rather than a
+        # formatted precision — `prec` is raised past `getcontext().prec` for it.
+        "name": "floatformat/twenty-argument-is-long-form",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": 20,
+    },
+    {
+        # `'g'` sets `force_grouping=True` *and* leaves `use_l10n=True`
+        # (`:142-144`), so the separator appears **whatever the settings say** —
+        # which is why no `USE_THOUSAND_SEPARATOR` row sits on this shape and one
+        # sits on the no-flag shape below.
+        "name": "floatformat/g-flag-groups-thousands",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": "g",
+    },
+    {
+        # The digit and the flag together: `arg[:-1] or -1` strips the flag
+        # *before* the `int()`, so the digit survives and the flag is still set.
+        "name": "floatformat/g-flag-with-a-digit",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": "2g",
+    },
+    {
+        # **The flag match is case-sensitive**, and this is the row that says so:
+        # `'G'` is not `'g'`, so no flag is stripped, `int('G')` is a `ValueError`
+        # and the answer is the *unmarked* `str(value)` — `'6666.6666'`, not the
+        # `'6,666.7'` a case-insensitive body would produce. Measured, and it
+        # refutes what this row was first written to claim.
+        "name": "floatformat/upper-G-is-not-the-g-flag",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": "G",
+    },
+    {
+        # `'g0'` and `'2G'` are the same row from the other side: the suffix test
+        # reads the **last** character, so a string that has the flag earlier is
+        # not a flagged argument at all.
+        "name": "floatformat/flag-not-at-the-end-is-not-a-flag",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": "g0",
+    },
+    {
+        # `'u'` turns localization off (`:148-151`), and the row exists to be
+        # compared with `g-flag-groups-thousands` above: same value, same digits,
+        # and the separator is the difference. It is also the row that would move
+        # under `LANGUAGE_CODE` if `use_l10n` were not being passed through.
+        "name": "floatformat/u-flag-suppresses-grouping",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": "u",
+    },
+    {
+        # Both flags, `'u'` first — and the measured answer is **ungrouped**,
+        # even though `force_grouping` is set: the grouping is `use_l10n and
+        # USE_THOUSAND_SEPARATOR` *or* `force_grouping`, and the second term
+        # reaches a separator only when the first is on. The two orders are
+        # separate rows because `arg[-2:] in {"gu", "ug"}` is a set membership
+        # while the digit test reads one character, so a body keyed on order
+        # would pass one and fail the other.
+        "name": "floatformat/u-then-g-still-ungrouped",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": "ug",
+    },
+    {
+        "name": "floatformat/g-then-u-still-ungrouped",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": "gu",
+    },
+    {
+        # A digit with `'u'`: two places, and `use_l10n=False` means the locale
+        # cannot move it.
+        "name": "floatformat/digit-then-u-keeps-the-digit",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": "2u",
+    },
+    {
+        # The argument will not parse (`int('x')` at `:160`), so the value comes
+        # back as `str(value)` and **unmarked** where every row above is a
+        # `SafeString`. The text is the one a safe arm could have produced, which
+        # is exactly why the flag and not the string is this row's content.
+        "name": "floatformat/unparseable-argument-returns-the-value",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": "x",
+    },
+    {
+        # A *number* that is not an integer: `int('2.5')` is a `ValueError` too,
+        # so this is the same arm as the row above by a different route — and the
+        # pair separates "not a number" from "not an int".
+        "name": "floatformat/non-integer-argument-returns-the-value",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": "2.5",
+    },
+    {
+        # `Decimal(str(text))` raises at `:159` and `float(text)` raises as well,
+        # so `.pop()` leaves `input_val` empty: `''`, unmarked, and the shortest
+        # of the five exits.
+        "name": "floatformat/non-numeric-value-returns-empty",
+        "filter": "floatformat",
+        "value": "abc",
+    },
+    {
+        # `None` reaches the same unparseable pair through `str(None)`.
+        "name": "floatformat/none-value-returns-empty",
+        "filter": "floatformat",
+        "value": None,
+    },
+    {
+        # `Decimal("1e300")` parses — so this is *not* the unparseable arm — but
+        # one digit and an exponent of 300 sum past 200, so `:177` returns the
+        # value. A body that parsed the value as a float would agree on the text
+        # and lose the flag.
+        "name": "floatformat/scientific-string-returns-the-value",
+        "filter": "floatformat",
+        "value": "1e300",
+    },
+    {
+        # **200 digits is inside the limit**, because the test is `> 200`: this
+        # is the integral arm and the answer is a `SafeString` of 200
+        # characters. It is here rather than beside a shorter input because at
+        # this value the arm and the refusal below emit the *same* 200
+        # characters, so an off-by-one in the condition moves only the safety
+        # flag — and the flag is the half of the comparison a rendered template
+        # cannot make.
+        "name": "floatformat/at-the-digit-limit-the-integral-arm-answers",
+        "filter": "floatformat",
+        "value": "1" + "0" * 199,
+    },
+    {
+        # One digit over, so `:177` returns the input **unmarked**: the same
+        # digits, the same length story, and the opposite flag.
+        "name": "floatformat/one-digit-over-the-limit-returns-the-value",
+        "filter": "floatformat",
+        "value": "1" + "0" * 200,
+    },
+    {
+        # The same boundary reached from an `int` rather than from a string —
+        # `str()` happens during the parse in one case and before it in the
+        # other, and the sum is over `Decimal.as_tuple()` either way.
+        "name": "floatformat/wide-int-at-the-limit-is-safe",
+        "filter": "floatformat",
+        "value": 10**199,
+    },
+    {
+        "name": "floatformat/wide-int-over-the-limit-returns-the-value",
+        "filter": "floatformat",
+        "value": 10**200,
+    },
+    {
+        # **`'F'` is two source arms at once.** `abs(exponent)` on a letter tuple
+        # is the `TypeError` the sum catches at `:168-170`, *and* `int(d)` on an
+        # infinity is the `OverflowError` caught at `:180-182` — both mean
+        # `return input_val`, and a body that tested only one of them would agree
+        # on `inf` and diverge on `nan` (`'n'`), so the pair is the measurement.
+        "name": "floatformat/infinity-returns-the-value",
+        "filter": "floatformat",
+        "value": float("inf"),
+    },
+    {
+        # The sign survives the round trip through `str(value)`, which is what
+        # makes this a row rather than a repeat.
+        "name": "floatformat/negative-infinity-returns-the-value",
+        "filter": "floatformat",
+        "value": float("-inf"),
+    },
+    {
+        "name": "floatformat/nan-returns-the-value",
+        "filter": "floatformat",
+        "value": float("nan"),
+    },
+    {
+        # A **finite** float whose `str()` is exponential, so this reaches the
+        # exponent refusal rather than the non-finite one: `'1e+308'`, unmarked.
+        # The two refusals are different routes to the same line, and this is the
+        # row that shows a float can take either.
+        "name": "floatformat/float-beyond-decimal-repr-returns-the-value",
+        "filter": "floatformat",
+        "value": 1e308,
+    },
+    {
+        # The same refusal from the other end of the range — the smallest
+        # denormal, whose `str()` is `'5e-324'` and whose exponent is 324.
+        "name": "floatformat/tiny-float-returns-the-value",
+        "filter": "floatformat",
+        "value": 5e-324,
+    },
+    {
+        # **`m` is the *unrounded* value's polarity and `rounded_d` is the
+        # rounded one's**, and here they disagree: the value is not whole (so the
+        # integral arm is skipped) and the rounded value is zero (so `if sign and
+        # rounded_d` at `:210` drops the minus). A body that tested the sign of
+        # the value it was rounding, or that read `integral` where the seam
+        # exposes `truthy`, emits `'-0.00'`.
+        "name": "floatformat/negative-rounding-to-zero-drops-the-sign",
+        "filter": "floatformat",
+        "value": -0.0001,
+        "arg": 2,
+    },
+    {
+        # The same expression with both halves true, so the minus survives — the
+        # pair is what makes the row above a statement about the polarity rather
+        # than about a dropped sign.
+        "name": "floatformat/negative-keeps-its-sign",
+        "filter": "floatformat",
+        "value": -0.5,
+        "arg": 0,
+    },
+    # --- wave 3: `filesizeformat` ------------------------------------------
+    #
+    # One `int()` inside a `try` for three classes, one negation, and a six-arm
+    # branch compared on the **absolute** value — the negation at `:922` is three
+    # lines above the branch and reads like part of the output formatting. Every
+    # answer here is a plain `str` whatever the settings: the filter's
+    # `is_safe=True` is the registry's flag and not the body's, which is why the
+    # safety half of the comparison is a constant on this filter.
+    #
+    # The unit words come from `ngettext`/`gettext`, so under the harness's
+    # default `en-us` they are the msgids and a body that inlined the English
+    # text scores identically. The rows that can tell the two apart are the
+    # `LANGUAGE_CODE` ones at the end of this block, and they are the reason
+    # `scripts/filter_probe.py` configures `USE_I18N=True` and calls
+    # `django.setup()`.
+    {
+        # The fallback branch: `int()` refused the value, so the answer is
+        # `ngettext(..., 0)`'s plural with a zero — and `avoid_wrapping` runs on
+        # **every** branch including this one, so even `'0 bytes'` is spelled
+        # with a non-breaking space. A body that applied the wrap only to the
+        # unit branches agrees on nine rows out of ten and diverges here.
+        "name": "filesizeformat/zero",
+        "filter": "filesizeformat",
+        "value": 0,
+    },
+    {
+        # `ngettext`'s singular, so the count that reaches the choice is the
+        # magnitude and not the digits' spelling.
+        "name": "filesizeformat/one-byte-is-singular",
+        "filter": "filesizeformat",
+        "value": 1,
+    },
+    {
+        # The plural half of the same call.
+        "name": "filesizeformat/two-bytes-is-plural",
+        "filter": "filesizeformat",
+        "value": 2,
+    },
+    {
+        # The byte branch's upper edge, where the next row takes the unit branch
+        # — `bytes_ < KB` is **strict**, so 1024 belongs to KB.
+        "name": "filesizeformat/just-below-one-KB",
+        "filter": "filesizeformat",
+        "value": 1023,
+    },
+    {
+        "name": "filesizeformat/exactly-one-KB",
+        "filter": "filesizeformat",
+        "value": 1024,
+    },
+    {
+        # And it stays in that branch, so the boundary is not a rounding
+        # artifact of the division.
+        "name": "filesizeformat/one-KB-plus-one",
+        "filter": "filesizeformat",
+        "value": 1025,
+    },
+    {
+        # Still KB, and the mantissa is `1024.0` rather than a rounded `1.0` —
+        # which is what shows the division happens *before* `round(value, 1)`.
+        "name": "filesizeformat/just-below-one-MB",
+        "filter": "filesizeformat",
+        "value": 1048575,
+    },
+    {
+        "name": "filesizeformat/exactly-one-MB",
+        "filter": "filesizeformat",
+        "value": 1 << 20,
+    },
+    {
+        "name": "filesizeformat/exactly-one-GB",
+        "filter": "filesizeformat",
+        "value": 1 << 30,
+    },
+    {
+        "name": "filesizeformat/exactly-one-TB",
+        "filter": "filesizeformat",
+        "value": 1 << 40,
+    },
+    {
+        # `PB`, the last arm — there is no threshold above it, so the source's
+        # `else` is `"%s PB"` and not a sixth comparison.
+        "name": "filesizeformat/exactly-one-PB",
+        "filter": "filesizeformat",
+        "value": 1 << 50,
+    },
+    {
+        # The last threshold's other side, which is TB.
+        "name": "filesizeformat/just-below-one-PB",
+        "filter": "filesizeformat",
+        "value": (1 << 50) - 1,
+    },
+    {
+        "name": "filesizeformat/beyond-one-PB",
+        "filter": "filesizeformat",
+        "value": (1 << 50) + 1,
+    },
+    {
+        # `int("1024.5")` is a `ValueError`, so this is the **fallback** branch:
+        # `'0 bytes'`. Paired with the row below, where the same digits as a
+        # `float` give `'1.0 KB'` — the pair is the measurement that fixes `int()`
+        # as the converter and rules out a parse.
+        "name": "filesizeformat/numeric-string-is-converted-then-truncated",
+        "filter": "filesizeformat",
+        "value": "1024.5",
+    },
+    {
+        # `int(1024.5)` truncates to `1024`, so the value lands in the KB branch
+        # — off the same digits as the row above and one class apart.
+        "name": "filesizeformat/float-is-truncated-not-refused",
+        "filter": "filesizeformat",
+        "value": 1024.5,
+    },
+    {
+        # `int()` does not accept exponent syntax at all, so this is
+        # `'0 bytes'` rather than an `OverflowError`: a body that parsed the
+        # string as a float would answer `inf` and then raise the *wrong* error
+        # for the same input.
+        "name": "filesizeformat/exponent-string-is-not-an-integer",
+        "filter": "filesizeformat",
+        "value": "1e400",
+    },
+    {
+        # A `TypeError` from `int()`, which the `except` names — the fallback
+        # branch rather than an escape.
+        "name": "filesizeformat/list-is-not-an-integer",
+        "filter": "filesizeformat",
+        "value": [1, 2],
+    },
+    {
+        # The same for a mapping, and a second row because the two are different
+        # `int()` refusals in CPython.
+        "name": "filesizeformat/dict-is-not-an-integer",
+        "filter": "filesizeformat",
+        "value": {"a": 1},
+    },
+    {
+        # `int(True)` is `1`, so a `bool` is **not** the fallback — and the
+        # singular is chosen from it, which is the row that shows the byte arm's
+        # count is the int and not the object.
+        "name": "filesizeformat/bool-is-an-integer",
+        "filter": "filesizeformat",
+        "value": True,
+    },
+    {
+        # `int(nan)` raises `ValueError`, which **is** in the `except` tuple, so
+        # this answers `'0 bytes'` where the `inf` row in `ERROR_CASES` escapes —
+        # the same converter, one class apart, and the class is the whole
+        # distinction.
+        "name": "filesizeformat/nan-is-caught",
+        "filter": "filesizeformat",
+        "value": float("nan"),
+    },
+    {
+        # **The negation, at its shortest distance from the boundary.** The byte
+        # branch takes the singular because `ngettext` is handed the *negated*
+        # (positive) `1`, and the minus is prefixed afterwards — three steps, and
+        # this is the only row where the sign reaches the count at all.
+        "name": "filesizeformat/negative-one-byte",
+        "filter": "filesizeformat",
+        "value": -1,
+    },
+    {
+        # Still the byte branch and plural, so the count that reaches `ngettext`
+        # is again the negated one.
+        "name": "filesizeformat/negative-below-one-KB",
+        "filter": "filesizeformat",
+        "value": -500,
+    },
+    {
+        # **The row that catches a body comparing the signed value.**
+        # `-1025` is below `KB` *signed*, so such a body takes the byte branch
+        # and answers `'-1025 bytes'`; Django negates first and answers
+        # `'-1.0 KB'`. Every negative below `KB` in magnitude agrees, which is
+        # why the corpus holds three at three distances rather than one.
+        "name": "filesizeformat/negative-just-above-one-KB",
+        "filter": "filesizeformat",
+        "value": -1025,
+    },
+    {
+        # The same defect further from the boundary, and therefore harder to
+        # argue away: signed, `'-2048 bytes'`; Django, `'-2.0 KB'`.
+        "name": "filesizeformat/negative-two-KB",
+        "filter": "filesizeformat",
+        "value": -2048,
+    },
+    {
+        # And far from it — `'-1000.0 KB'` against a signed body's
+        # `'-1024000 bytes'`.
+        "name": "filesizeformat/negative-thousand-KB",
+        "filter": "filesizeformat",
+        "value": -1024000,
+    },
+    {
+        # A unit boundary from below zero, where an off-by-one in the negation
+        # shows as the wrong *unit* rather than the wrong text.
+        "name": "filesizeformat/negative-exactly-one-MB",
+        "filter": "filesizeformat",
+        "value": -(1 << 20),
+    },
+    {
+        # **The row Rust cannot answer by negating in place.** `-(2**63)` is
+        # `i64::MIN`, so `to_int` returns `Small(i64::MIN)` and a Rust `-x`
+        # overflows — a panic in debug and a wrap in release — where Django
+        # answers `'-8192.0 PB'` because Python's `int` is unbounded. The
+        # negation is a representation question and not an arithmetic one.
+        "name": "filesizeformat/negative-i64-min",
+        "filter": "filesizeformat",
+        "value": -(2**63),
+    },
+    {
+        # A magnitude that is a `Big` on both sides of the negation, so the sign
+        # is carried in the text rather than in a register.
+        "name": "filesizeformat/negative-beyond-i64",
+        "filter": "filesizeformat",
+        "value": -(2**100),
+    },
+    {
+        # Just past `f64::MAX` in digits and nowhere near it in value:
+        # `10**309 / 2**50` is finite, so the division answers, while
+        # `float(10**309)` raises. That asymmetry is why the seam divides rather
+        # than converting — and the answer is `'8.8e+293 PB'`, because the
+        # quotient's `str()` carries an `'e'`, so `numberformat.format` sends it
+        # through `Decimal(str(...))` and then formats a decimal whose exponent
+        # plus digits exceed its 200-digit cut-off with `"{:e}"`.
+        "name": "filesizeformat/wide-int-that-is-not-a-float",
+        "filter": "filesizeformat",
+        "value": 10**309,
+    },
+    # --- wave 3: the settings axis -----------------------------------------
+    #
+    # **Every row here carries `expected`, and on these rows the literal is the
+    # whole test.** `test_filter_parity.settings_for` hands both engines the same
+    # override, so a setting that reaches neither — or a name misspelt into a
+    # silent no-op, which is the failure mode measured for
+    # `USE_THOUSAND_SEPERATOR` — moves both answers together and leaves every
+    # comparison above green. Only the pinned literal can tell a live setting
+    # from a dead one.
+    #
+    # `USE_THOUSAND_SEPARATOR` has leverage on **two** row shapes, and the first
+    # claim here was wrong about that: it is not only `floatformat` without
+    # `'g'`. `filesizeformat(1024000)` is the second — `'1000.0 KB'` becomes
+    # `'1,000.0 KB'` — because the separator has nothing to do until a mantissa
+    # reaches four digits, which happens only inside
+    # `[1000 * 2**shift, 1024 * 2**shift)` for each unit. `filesizeformat(2048)`,
+    # `filesizeformat(1048576)` and `floatformat(6666.6666, "g")` are each
+    # unmoved by it, and are not rows.
+    {
+        # The locale reaches the host's `number_format` through `get_format`, and
+        # both the thousands separator and the decimal comma move. A body
+        # formatting in Rust answers `'1,234,567.5'` under every locale; this
+        # literal is what separates it from the one that asks.
+        "name": "floatformat/locale-changes-the-separator",
+        "filter": "floatformat",
+        "value": 1234567.5,
+        "arg": "g",
+        "settings": {"LANGUAGE_CODE": "de"},
+        "expected": "1.234.567,5",
+    },
+    {
+        # The same locale on the **no-flag** path, where grouping is off and only
+        # the decimal comma moves. Separate from the row above because the two
+        # reach `number_format` with different `force_grouping`, and a body that
+        # passed one flag and not the other would move one and not the other.
+        "name": "floatformat/locale-changes-the-decimal-comma-on-plain-digits",
+        "filter": "floatformat",
+        "value": 1234567.5,
+        "arg": 2,
+        "settings": {"LANGUAGE_CODE": "de"},
+        "expected": "1234567,50",
+    },
+    {
+        # The setting's first shape: without `'g'` there is no `force_grouping`,
+        # so `USE_THOUSAND_SEPARATOR` is what puts the commas in — and `arg=2`
+        # rather than `'g'` is precisely what makes this a different row from
+        # `g-flag-groups-thousands` above rather than a duplicate of it.
+        "name": "floatformat/thousands-separator-needs-the-no-flag-path",
+        "filter": "floatformat",
+        "value": 1234567.5,
+        "arg": 2,
+        "settings": {"USE_THOUSAND_SEPARATOR": True},
+        "expected": "1,234,567.50",
+    },
+    {
+        # The locale reaches `filesizeformat`'s `number_format` too, and the row
+        # proves the number went through the host rather than through a Rust
+        # `format!("{:.1}")`, which answers `'1.1'` in every locale.
+        "name": "filesizeformat/locale-changes-the-decimal-comma",
+        "filter": "filesizeformat",
+        "value": 1234567890,
+        "settings": {"LANGUAGE_CODE": "de"},
+        "expected": "1,1\xa0GB",
+    },
+    {
+        # **The row that tests the translation seam**, and the one the harness
+        # could not make before `ensure_settings` turned i18n on: the unit word
+        # is `gettext`'s, the German catalog spells it `Bytes` with a capital
+        # `B`, and a body with the English literal in it is correct under the
+        # default settings and wrong here. `500` is plural, so this is
+        # `ngettext`'s second form rather than its first.
+        "name": "filesizeformat/locale-translates-the-byte-unit",
+        "filter": "filesizeformat",
+        "value": 500,
+        "settings": {"LANGUAGE_CODE": "de"},
+        "expected": "500\xa0Bytes",
+    },
+    {
+        # And the singular, because `ngettext` chooses on the count: a body that
+        # asked the host for the plural and kept the singular as a literal would
+        # pass the row above and fail here.
+        "name": "filesizeformat/locale-translates-the-singular-unit",
+        "filter": "filesizeformat",
+        "value": 1,
+        "settings": {"LANGUAGE_CODE": "de"},
+        "expected": "1\xa0Byte",
+    },
+    {
+        # `USE_THOUSAND_SEPARATOR`'s second row shape, and the four-digit
+        # mantissa band that makes it possible: the grouping lands *inside* the
+        # number `filesizeformat` composed, which only a body that handed the
+        # quotient to the host's formatter can produce.
+        "name": "filesizeformat/thousands-separator-in-the-four-digit-mantissa",
+        "filter": "filesizeformat",
+        "value": 1024000,
+        "settings": {"USE_THOUSAND_SEPARATOR": True},
+        "expected": "1,000.0\xa0KB",
+    },
+    {
+        # `yesno`'s default argument *is* `gettext("yes,no,maybe")` (`:863`),
+        # so the wave-2 rows with no argument are the harness's second
+        # translation seam: under `en-us` a body that returned `"maybe"` without
+        # asking the host is indistinguishable from one that asked.
+        "name": "yesno/locale-translates-the-default-arguments",
+        "filter": "yesno",
+        "value": None,
+        "settings": {"LANGUAGE_CODE": "de"},
+        "expected": "Vielleicht",
+    },
+    {
+        # The row that shows the translation is the *default* and not a step the
+        # filter performs: an explicit argument is used as it is, comma-split in
+        # whatever language it arrives in. `meh` is the third element either way,
+        # so the literal is the negative half of the pair above.
+        "name": "yesno/locale-does-not-touch-an-explicit-argument",
+        "filter": "yesno",
+        "value": None,
+        "arg": "yeah,nope,meh",
+        "settings": {"LANGUAGE_CODE": "de"},
+        "expected": "meh",
+    },
 ]
 
 
@@ -2391,5 +3028,50 @@ ERROR_CASES: list[dict] = [
         "arg_variable": object(),
         "raises": "TypeError",
         "message": "argument of type 'object' is not a container or iterable",
+    },
+    # --- wave 3: the third filter in the list whose message Rust authors ------
+    {
+        # `{{ x|floatformat:"" }}` — `arg[-1]` at `:141`, before the parse and
+        # before any host call. It is an `IndexError` rather than a syntax error
+        # because the arity check counts arguments and this one is present.
+        #
+        # **This message is synthesised in Rust**, like `cut`'s: no host
+        # operation performs `arg[-1]`, so `floatformat.rs` raises
+        # `index_out_of_range` with the wording CPython would have used. By the
+        # module doc's rule that makes this list the *only* check on the text —
+        # the body test beside it asserts the class and that the seam was never
+        # reached, and deliberately does not restate the message.
+        "name": "floatformat/empty-string-argument",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": "",
+        "raises": "IndexError",
+        "message": "string index out of range",
+    },
+    {
+        # `int(inf)` raises `OverflowError`, which is **not** in the `except`
+        # tuple (`TypeError`, `ValueError`, `UnicodeDecodeError`), so it escapes
+        # the filter — where `nan` in the corpus above is caught by the same
+        # `int()` call. The class and not the number is what the pair separates,
+        # and the message is CPython's on both sides.
+        "name": "filesizeformat/infinity-is-not-caught",
+        "filter": "filesizeformat",
+        "value": float("inf"),
+        "raises": "OverflowError",
+        "message": "cannot convert float infinity to integer",
+    },
+    {
+        # The division's own message, from **outside** the `try` — and the reason
+        # the seam divides instead of converting: `float(10**400)` raises
+        # `OverflowError: int too large to convert to float`, a *different text*
+        # for the same class, so a body reaching for the float seam would give
+        # the right class and the wrong message. `10**309` in the corpus above is
+        # the row on the other side of this line, where the division still
+        # answers.
+        "name": "filesizeformat/beyond-float-range-in-the-division",
+        "filter": "filesizeformat",
+        "value": 10**400,
+        "raises": "OverflowError",
+        "message": "integer division result too large for a float",
     },
 ]

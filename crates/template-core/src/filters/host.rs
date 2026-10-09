@@ -571,7 +571,7 @@ pub trait FilterHost {
     /// | `number_format(inf, 1)` | `'inf.0'` |
     ///
     /// The last three are why this cannot be answered by a Rust `f64`: a
-    /// >308-digit decimal parses to `inf`, and `inf.0` formats to `'inf.0\xa0PB'`
+    /// \>308-digit decimal parses to `inf`, and `inf.0` formats to `'inf.0\xa0PB'`
     /// — a plausible string, silently wrong, where Django raises. The last two
     /// are why it cannot be answered by [`FilterHost::to_float`] either: both
     /// raise `OverflowError` and the **messages differ**, so a body reaching for

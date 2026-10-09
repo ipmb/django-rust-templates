@@ -140,10 +140,21 @@ fn filter(
 /// error. The exception *object* is reconstructed from the class name rather than
 /// being the one Python raised, because an exception crossing `template-core`'s
 /// error type cannot keep its identity — the boundary `ErrorKind::FilterHost`'s
-/// own doc records. For the six classes Django's filters catch the reconstruction
-/// is faithful; a class that is neither one of those nor in `builtins` keeps its
-/// name in the message rather than being lost.
-fn filter_py_error(error: &Error) -> PyErr {
+/// own doc records.
+///
+/// Reconstruction is by name in two steps: the six classes Django's filters
+/// **catch** get a named `PyXError`, because those are the ones a body branches
+/// on; everything else is looked up in `builtins` and instantiated with the
+/// message. The second step is what makes `int(inf)`'s `OverflowError` arrive as
+/// an `OverflowError` rather than as an `Exception` whose text begins with the
+/// word — measured, and the two `filesizeformat` rows in `ERROR_CASES` are the
+/// instrument that found it, since they compare `type(e).__name__` against
+/// Django's. A name whose class refuses a single message argument
+/// (`UnicodeDecodeError` needs five) or that is not in `builtins` at all falls
+/// back to `Exception` with the name prefixed; `decimal.InvalidOperation` lands
+/// there, because [`PyErrorKind`] records `__name__` and not the module it came
+/// from, so the name alone cannot find it.
+fn filter_py_error(py: Python<'_>, error: &Error) -> PyErr {
     let ErrorKind::FilterHost(inner) = &error.kind else {
         // An `Unimplemented` is a filter this engine has not built. Anything else
         // is a parser error, which a filter body cannot produce.
@@ -159,8 +170,22 @@ fn filter_py_error(error: &Error) -> PyErr {
         "TypeError" => PyTypeError::new_err(inner.message.clone()),
         "ValueError" => PyValueError::new_err(inner.message.clone()),
         "ZeroDivisionError" => PyZeroDivisionError::new_err(inner.message.clone()),
-        other => PyException::new_err(format!("{other}: {}", inner.message)),
+        other => rebuilt_builtin(py, other, &inner.message)
+            .unwrap_or_else(|| PyException::new_err(format!("{other}: {}", inner.message))),
     }
+}
+
+/// `builtins.<name>(message)` as a `PyErr`, or `None` if that is not a thing.
+///
+/// `None` for a name that `builtins` does not hold, and for a class whose
+/// constructor will not take one string — the caller then prefixes the name onto
+/// the message, which loses the class but not the word. Nothing here panics: the
+/// input is a name Python produced, arriving on an error path, and an error path
+/// that raises while reporting an error is worse than one that degrades.
+fn rebuilt_builtin(py: Python<'_>, name: &str, message: &str) -> Option<PyErr> {
+    let class = py.import("builtins").ok()?.getattr(name).ok()?;
+    let instance = class.call1((message,)).ok()?;
+    Some(PyErr::from_value(instance))
 }
 
 /// Every code point `pyunicode::is_space` accepts, ascending.

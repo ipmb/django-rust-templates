@@ -643,30 +643,31 @@ mod tests {
         "yesno",
     ];
 
-    /// The filters whose bodies are still stubs: the 28 of the 57 that M4 has
+    /// The filters whose bodies are still stubs: the 26 of the 57 that M4 has
     /// not landed yet.
     ///
     /// A literal rather than an alias of [`MEASURED_NAMES`] now that groups have
     /// landed, because the two are no longer the same set and an alias would have
-    /// to be trimmed in place to say so. The 28 are the 57 minus `lower` and
+    /// to be trimmed in place to say so. The 26 are the 57 minus `lower` and
     /// `upper` (Task 3's corpus seed), minus Task 4's six — `capfirst`,
     /// `title`, `cut`, `addslashes`, `make_list`, `wordcount` — minus Task 5's
     /// eight: `center`, `ljust`, `rjust`, `truncatechars`, `truncatechars_html`,
-    /// `truncatewords`, `truncatewords_html`, `wordwrap` — and minus Task 6's
+    /// `truncatewords`, `truncatewords_html`, `wordwrap` — minus Task 6's
     /// nine: `first`, `last`, `length`, `slice`, `join`, `random`, `dictsort`,
-    /// `dictsortreversed`, `unordered_list` — and minus Task 7's first wave of
-    /// four, `add`, `divisibleby`, `get_digit` and `stringformat`.
+    /// `dictsortreversed`, `unordered_list` — and minus Task 7's three waves:
+    /// `add`, `divisibleby`, `get_digit`, `stringformat`; then `pluralize`,
+    /// `yesno`, `default`, `default_if_none`; then `filesizeformat` and
+    /// `floatformat`. The wave numbering matches
+    /// `tests/test_filter_parity.py`'s, which counts the same three.
     ///
     /// **The central commit that lands a group moves that group's names out of
     /// this list**, in the same commit — and the assertion below is what makes
     /// forgetting fail rather than pass.
-    const STILL_STUBBED: [&str; 24] = [
+    const STILL_STUBBED: [&str; 22] = [
         "date",
         "escape",
         "escapejs",
         "escapeseq",
-        "filesizeformat",
-        "floatformat",
         "force_escape",
         "iriencode",
         "json_script",

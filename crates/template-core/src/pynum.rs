@@ -21,6 +21,23 @@
 /// decimal text and the shell calls `int()` on it; saturating to `i64::MAX`
 /// would render a wrong number, which is the failure mode this type exists to
 /// prevent.
+///
+/// **`Small` iff the value fits in an `i64`, and `Big` otherwise — an invariant
+/// every constructor keeps, not a hint about the usual case.** It is what
+/// licenses a filter body to decide something from a value's *variant* instead
+/// of from its digits, which is the only way a body can compare a `Big` against
+/// a small threshold at all: a `Big` magnitude exceeds `i64::MAX` and therefore
+/// exceeds every power of two a filter compares against (`filesizeformat`'s
+/// `2^10`…`2^50`), so the branch is settled without reading the text. Both
+/// constructors fall back exactly on "does not fit": `template-py`'s
+/// `int_of`/`to_int` (`extract::<i64>()` first, `str()` on its failure) and
+/// `int_modulo`'s remainder.
+///
+/// The same invariant is why `neg` is a **representation** question and not an
+/// arithmetic one — the sign of a `Big` is its leading `'-'`, and negating
+/// `Small(i64::MIN)` does not fit back into `i64`. Neither is a corner Rust can
+/// talk itself out of: `-2**63` reaches `to_int` from a context value and
+/// Django answers it (`filesizeformat(-(2**63))` is `'-8192.0\xa0PB'`, measured).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IntValue {
     Small(i64),
