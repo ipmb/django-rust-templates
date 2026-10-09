@@ -661,6 +661,50 @@ git add crates/template-core/src/parser crates/template-py/src/lib.rs tests/test
 git commit -m "M3 task 1: one module per tag behind a registry written once"
 ```
 
+**Task 1 as implemented — five corrections, `87efec7`.** Recorded here because the
+plan and the tree must not disagree, and each of these is a place the plan's
+text could not be followed literally:
+
+1. **The plan never retired `the_registry_holds_exactly_the_nine_m2_tags`**
+   (`tags.rs:683` as it was). It asserts the other eighteen names are *not*
+   registered, and Step 7 makes that false by design — a stub is an entry whose
+   compile function errors, which is the whole point of writing the registry in
+   full. So the assertion moved to where the complement can be *computed* rather
+   than hand-listed: `tests.test_tag_inventory.RustRegistryTests` subtracts
+   `{"block", "extends", "include"}` from Django's real `register.tags`. In
+   Rust its place is taken by the registry's own invariants (ascending, no
+   duplicates, 24 names, the three loader tags absent, every entry reachable,
+   and the fifteen stubs by name).
+2. **`csrf_token_and_debug_read_no_arguments` named two tags in one test.** Step
+   5 moves each tag into its own file, so one test naming both would have had to
+   live in one of the two files and reach across. Split into
+   `csrf_token_reads_no_arguments` and `debug_reads_no_arguments`.
+3. **`pub(crate) use crate::parser::registry::CompileFn;` is a warning.** The
+   plan's `tags/mod.rs` sketch has it ungated; nothing outside `#[cfg(test)]`
+   reads it, and **`rustc` does lint an unused `pub(crate) use`** under
+   `-D warnings` — measured, not assumed. It is now `#[cfg(test)] pub(crate)
+   use`. (The assumption that carried the sketch — that `pub`-ish visibility
+   exempts a re-export — holds for a fully public `pub use` and not for
+   `pub(crate)`.)
+4. **The five shared test fixtures were not anticipated.** `compile`,
+   `failure`, `failure_with_origin`, `attr` and `texts` were `mod tests` local
+   helpers; once the tests live in ten files, every one of them needs all five.
+   They move to `#[cfg(test)] pub(crate) mod support`. The subtlety the plan
+   could not have known: test modules must import the harness names
+   **explicitly**, not by glob, because each tag file defines a `pub fn compile`
+   of its own and `use super::*` plus `use support::*` makes the name ambiguous
+   (`E0659`).
+5. **Two helpers moved with their one caller.** `render_text_only` goes to
+   `verbatim.rs` and `TEMPLATETAG_ARGUMENTS` to `templatetag.rs`. Each has
+   exactly one caller, so leaving them in the machinery would have made them
+   `pub(crate)` items reached from one other module — the pattern the split
+   exists to remove.
+
+The guards were made to fail before being kept: a registry entry removed, `block`
+added, two entries swapped, the `standin_tag` arm deleted, and — through a
+rebuild — `verbatim` dropped and `include` added, each observed failing the test
+named for it, in both languages where the check exists in both.
+
 ---
 
 ### Task 2: Python's `\w`, as two spellings, guarded from the compiled class
@@ -3358,6 +3402,17 @@ impl LookupTarget for PyTarget {
         // (`base.py:972-976`). Measured both ways — `{{ c.template }}` on a
         // `Context` renders `''` even though the instance holds `template=None`,
         // and a subclass with `zero = 0` renders the instance's `7`.
+        //
+        // `getattr` **walks the MRO**, and that is load-bearing rather than
+        // incidental: `BaseContext` defines `push`, `pop`, `update`, `flatten`
+        // and `__getitem__`, so for a `RequestContext` the class attribute
+        // Django finds is two classes up. A `type(obj).__dict__` probe would
+        // miss every inherited one, the condition would go false, and
+        // `{{ ctx.push }}` would render a bound method instead of the `''` the
+        // guard exists to produce. So this must stay `getattr`; the cheap check
+        // once it exists is `{{ c.push }}` against a `RequestContext`, which
+        // renders `''` here and a `<bound method ...>` repr if the MRO is
+        // skipped.
         Python::attach(|py| {
             self.value
                 .bind(py)
