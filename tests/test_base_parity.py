@@ -400,6 +400,18 @@ class RenderAnnotationTests(unittest.TestCase):
     drawn a conclusion from a mutation nothing could observe. What discriminates
     is node *identity* (first row) and the origin comparison's choice of frame
     (second row), and both were measured by mutation before being written.
+
+    **The pairs are not decorative, though, and the mutation above does not
+    reach the case they are for.** The §5.5 failure is not a removed guard, it is
+    a *missing frame*: once Rust renders the interior subtree, the inner
+    ``{% for %}``'s ``render_annotated`` never runs, so the innermost *available*
+    frame is an outer one and ``template_debug`` is computed from the **outer**
+    token. There the span moves, and moves with identity. That is why both
+    assertions belong in the row and why neither is a spare: identity catches a
+    frame that attached at the wrong level while every frame was present, the
+    span catches the frame that is not there at all. Trimming this to "the
+    identity assertion plus a descriptive extra" would remove the half that
+    fires at M11+.
     """
 
     # ``tests/template_tests/test_nodelist.py:44-86``'s nested case: the outer loop

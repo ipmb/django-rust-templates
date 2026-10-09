@@ -1896,6 +1896,22 @@ manifest** (`tests/template_tests/test_nodelist.py:44-86`, now carrying a start
 and end snippet rather than the bare span it had), because these fixtures are
 only defensible if they can be re-read off the tree.
 
+**(6) A fourth cause for the no-op family, and it is not any of the three.**
+The family the M8 plan's §D4 collects — inputs that do not reach the disputed
+state; a comparison that cannot distinguish; an effect absorbed before anything
+observes it — does not cover this one. Item (1) above is a mutation that is
+real, changes the program, and is invisible:
+
+> **A mutation is a no-op when it changes a value that has already been
+> consumed.**
+
+Both of `render_annotated`'s guards are idempotence guards on one exception
+object, and the first writer wins. Mutating one changes *who the attribute
+names*; it cannot change *what was computed from it*, because the computation
+already happened at the moment the attribute was first set. The signature is any
+guard shaped "set X only if unset", and the check is not "did the mutation
+land?" — it did — but "did anything read this after the point I changed?"
+
 ### Task 4's four predictions, all four of them measured and three of them false
 
 Task 4 is `render_value_in_context`, which §5.2 leaves as an open obligation

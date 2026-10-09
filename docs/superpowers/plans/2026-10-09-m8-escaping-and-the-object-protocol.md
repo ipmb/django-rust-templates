@@ -1805,3 +1805,19 @@ mutation against the resolver must change what happens *to* a failure, not
 whether one occurs.** And a green result under mutation now has two readings —
 "the guard is vacuous" and "the mutation never landed" — so before concluding
 the first, check the second.
+
+**A fourth cause arrived with M9's Task 6**, and it is the one that survives the
+check above: a mutation that *lands*, changes the program, and is still
+invisible.
+
+> **A mutation is a no-op when it changes a value that has already been
+> consumed.** The signature is a guard shaped "set X only if unset".
+
+`render_annotated` carries two of those, on one exception object, and the first
+writer wins — so mutating one changes *who the attribute names* while the thing
+computed from it was already computed. Measured: removing
+`if not hasattr(e, "_culprit_node")` moves the culprit from the inner node to
+the outer and leaves `template_debug`'s span unchanged. The check for this one
+is neither "did the inputs reach the state" nor "can the comparison tell", but
+**"did anything read this after the point I changed?"** The full measurement is
+in `2026-10-09-m9-interpose-base-and-smartif.md`'s Task 6 corrections, item (6).
