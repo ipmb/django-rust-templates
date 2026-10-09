@@ -90,15 +90,20 @@ base.py:975	django/template/base.py	975	-	-	-
 base.py:977	django/template/base.py	977	-	-	-
 base.py:979-980	django/template/base.py	979	980	if not isinstance(current, BaseContext) and bit in dir(current):	raise
 base.py:993-996	django/template/base.py	993	996	if callable(current):	elif getattr(current, "alters_data", False):
+base.py:997	django/template/base.py	997	-	current = context.template.engine.string_if_invalid	-
 base.py:999-1029	django/template/base.py	999	1029	-	-
 base.py:999	django/template/base.py	999	-	-	-
+base.py:1005	django/template/base.py	1005	-	current = context.template.engine.string_if_invalid	-
+base.py:1011	django/template/base.py	1011	-	current = context.template.engine.string_if_invalid	-
 base.py:1014	django/template/base.py	1014	-	-	-
 base.py:1014-1026	django/template/base.py	1014	1026	silent_variable_failure	-
 base.py:1016-1021	django/template/base.py	1016	1021	logger.debug	-
 base.py:1016-1020	django/template/base.py	1016	1020	-	-
 base.py:1023	django/template/base.py	1023	-	getattr(e, "silent_variable_failure", False)	-
 base.py:1023-1024	django/template/base.py	1023	1024	if getattr(e, "silent_variable_failure", False):	current = context.template.engine.string_if_invalid
+base.py:1024	django/template/base.py	1024	-	current = context.template.engine.string_if_invalid	-
 base.py:1036	django/template/base.py	1036	-	-	-
+base.py:1054	django/template/base.py	1054	-	if context.template.engine.debug:	-
 base.py:1139	django/template/base.py	1139	-	-	-
 base.py:1160	django/template/base.py	1160	-	kwarg_re = _lazy_re_compile(r"(?:(\w+)=)?(.+)")	-
 base.py:1163-1207	django/template/base.py	1163	1207	token_kwargs	-

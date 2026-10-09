@@ -134,12 +134,12 @@ fn filter_flags(name: &str) -> PyResult<(bool, bool, bool)> {
 ///
 /// **`args` is the filter's argument list and not an `Option`, which is the one
 /// shape this parameter must not have.** Django's loop builds `arg_vals`
-/// (`base.py:804-809`) and calls `func(obj, *arg_vals)` (`:815`), so the list is
-/// **empty for `{{ x|f }}` and one `None` for `{{ x|f:None }}`** — two different
-/// calls, and `{{ x|floatformat:price }}` with `price = None` is a template a user
-/// writes by accident. An `Option` cannot hold that distinction: `None` would
-/// have to mean both "no argument" and "the argument `None`", and the second
-/// would silently take the first's branch.
+/// (`base.py:804-809`) and calls `func(obj, *arg_vals)` (`base.py:815`), so the
+/// list is **empty for `{{ x|f }}` and one `None` for `{{ x|f:None }}`** — two
+/// different calls, and `{{ x|floatformat:price }}` with `price = None` is a
+/// template a user writes by accident. An `Option` cannot hold that
+/// distinction: `None` would have to mean both "no argument" and "the argument
+/// `None`", and the second would silently take the first's branch.
 ///
 /// It was an `Option<&PyAny>` defaulting to `None` until this, and the collapse
 /// was measured rather than argued: of the 23 landed filters that take an
@@ -486,13 +486,14 @@ impl NodeSlot {
 
 /// `AttrValue::IfCondition` — one node of a `{% if %}` condition.
 ///
-/// The one attribute on the wire whose value is a parse **tree**, and the reason
-/// is that its leaves are Python objects: `IfNode.render` calls
+/// The one attribute on the wire whose value is a parse **tree**, and the
+/// reason is that its leaves are Python objects: `IfNode.render` calls
 /// `condition.eval(context)` on each branch (`defaulttags.py:326`), an
 /// `Operator`'s `eval` recurses through its own `first`/`second`, and a
-/// `TemplateLiteral`'s calls `self.value.resolve(context, ignore_failures=True)`
-/// (`:917-918`). So the shell rebuilds real `smartif` objects and this is the
-/// shape it rebuilds them from.
+/// `TemplateLiteral`'s calls
+/// `self.value.resolve(context, ignore_failures=True)` (`defaulttags.py:917-918`).
+/// So the shell rebuilds real `smartif` objects and this is the shape it
+/// rebuilds them from.
 ///
 /// **One class with two kind-specific halves rather than two classes**, because
 /// the materialiser dispatches on `kind` and both halves are needed at once by
@@ -653,9 +654,9 @@ fn attr_value_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
 ///
 /// Recursive, and the recursion is the shape: an `Operator` is two more
 /// conditions and a `TemplateLiteral` is a leaf. `first` is `Some` on every
-/// operator — `nud` and `led` both set it (`smartif.py:54-56`, `:81-83`) — and the
-/// `expect` says so rather than emitting a `None` the shell would turn into an
-/// `AttributeError` three frames away.
+/// operator — `nud` and `led` both set it (`smartif.py:54-56`,
+/// `smartif.py:81-83`) — and the `expect` says so rather than emitting a `None`
+/// the shell would turn into an `AttributeError` three frames away.
 fn if_condition_to_py(py: Python<'_>, tree: &IfConditionDesc) -> PyResult<Py<PyAny>> {
     let condition = match tree {
         IfConditionDesc::Operator { key, first, second } => IfCondition {
@@ -2105,13 +2106,14 @@ fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>
 /// `nodelist.render(context)`, and that is a third thing the plan did not
 /// anticipate.** Rendering a nodelist needs a *bound* context, and binding is a
 /// `Template`-level act: the render path reads `context.template.engine` for
-/// `string_if_invalid` (`base.py:793`, `:997`, `:1005`, `:1011`, `:1024`) and
-/// for `engine.debug` (`:1054`). With `context.template` left `None`, `{{ nope }}`
-/// raises `AttributeError: 'NoneType' object has no attribute 'engine'` —
-/// measured, on this very call. So the shell builds a real `Template` around the
-/// tree (`__new__` plus assignment, because the constructor would parse the
-/// source a second time in Python) and `Template.render` binds it. See
-/// `template_for` in `_impl/parser.py`, which owns the attribute list.
+/// `string_if_invalid` (`base.py:793`, `base.py:997`, `base.py:1005`,
+/// `base.py:1011`, `base.py:1024`) and for `engine.debug` (`base.py:1054`).
+/// With `context.template` left `None`, `{{ nope }}` raises
+/// `AttributeError: 'NoneType' object has no attribute 'engine'` — measured, on
+/// this very call. So the shell builds a real `Template` around the tree
+/// (`__new__` plus assignment, because the constructor would parse the source a
+/// second time in Python) and `Template.render` binds it. See `template_for` in
+/// `_impl/parser.py`, which owns the attribute list.
 ///
 /// **`engine` is a fifth argument, and it is the caller's for the same reason
 /// the parser is.** The render path reads the engine in six places, so a shell
