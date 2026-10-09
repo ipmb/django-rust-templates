@@ -965,11 +965,24 @@ get_digit(...)    → ValueError → the original value (:757-776)
 ```
 
 So the value-protocol methods return
-`Error::FilterHost { kind: PyErrorKind, message, operation }`, with `PyErrorKind` ∈
+`Error::FilterHost(Box<FilterHostError>)` — `{ kind, message, operation }`,
+**boxed** — with `PyErrorKind` ∈
 `{AttributeError, IndexError, KeyError, TypeError, ValueError, ZeroDivisionError}`,
-and a body matches on `kind` rather than on a message. Task 6's `first(5)` row
+plus `Other(Box<str>)` for the one body that needs a class name it cannot name in
+advance (`pprint`, `:990-996`), and a body matches on `kind` rather than on a
+message. Task 6's `first(5)` row
 asserts the *escape*, not a value, and that is only expressible if the class
 survives the seam.
+
+**The `Box` is not stylistic and this paragraph records why it was added in Task
+2's own commit.** Written inline, `FilterHost` is 64 bytes and takes `Error` to
+exactly 128 — the threshold `clippy::result_large_err` fires at — which failed the
+build at **122 call sites**, every one a `Result<_, Error>` in a file the change
+never touched. Boxed, `Error` is 96 bytes, and `error.rs` pins `size_of::<Error>()
+< 128` so the next field added there fails one local test rather than 122 distant
+ones. The same lesson as the two-version Unicode tables: a shared type's layout is
+a project-wide constraint, so the cost of growing it must land where the growth
+happened.
 
 **It is a new variant, not a reshape of `ErrorKind::Host`, and the reason is
 churn.** M1–M3's `ErrorKind::Host(String)` is the *parse-time* host's refusal —
@@ -1161,7 +1174,11 @@ unset field fail. Restore both.
 
 `crates/template-core/src/filters/mod.rs` declares all 57 modules and the
 `REGISTRY` table of 57 entries, ascending by name, each with its flags — the
-measured values, which are not guessed:
+measured values, which are not guessed. The table has only four distinct shapes —
+`NONE` (19), `SAFE` (29), `SAFE_AUTOESCAPE` (7), `LOCALTIME` (2) — so
+`FilterFlags` carries them as four associated constants and each registry entry
+names one. That keeps an entry to a single line, so only the 11 filters that carry
+a second flag stand out:
 
 | flag | value | filters |
 |---|---|---|
@@ -1192,22 +1209,36 @@ use crate::filters::host::FilterCall;
 use crate::filters::value::Value;
 use crate::parser::error::Error;
 
-pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
+pub fn run(_value: Value, _arg: Option<Value>, _call: &FilterCall<'_>) -> Result<Value, Error> {
     Err(Error::unimplemented_filter("upper"))
 }
 ```
 
+The underscore on all three parameters is not cosmetic and the first draft of this
+snippet was wrong without it: the gate runs `cargo clippy … -- -D warnings`, and a
+stub binds three values it never reads, so `unused_variables` is an error. (The
+imports stay, because the signature uses them.) The same applies to every one of
+the 57, so a group that replaces a body renames the parameters it actually uses
+and leaves the rest underscored.
+
 Add, to `parser/error.rs` and **without touching `ErrorKind::Host`**:
 
 - `pub enum PyErrorKind { AttributeError, IndexError, KeyError, TypeError,
-  ValueError, ZeroDivisionError }` (§D5's taxonomy).
-- `ErrorKind::FilterHost { kind: PyErrorKind, message: String, operation: &'static str }`,
-  one new arm in `message()`, and the constructor
-  `Error::filter_host(kind, operation, message)`.
+  ValueError, ZeroDivisionError, Other(Box<str>) }` (§D5's taxonomy, plus the
+  seventh variant `pprint`'s `e.__class__.__name__` needs) with a `name()` method
+  returning Python's `__name__` for all seven.
+- `pub struct FilterHostError { kind: PyErrorKind, message: String,
+  operation: &'static str }` and `ErrorKind::FilterHost(Box<FilterHostError>)`,
+  one new arm in `message()` returning the message **verbatim** (it is Python's
+  exception text and the shell re-raises it; `operation` stays on the struct for
+  `Debug`), and the constructor `Error::filter_host(kind, operation, message)`.
+  The `Box` is required, not stylistic — see §D5's paragraph above.
 - `Error::unimplemented_filter(name)`, alongside the existing `Error::host`, with
   the same `#[cfg(test)]`-visible kind, and a test in `error.rs` that the message
   names the filter *and* the milestone that owns it — the `UnimplementedTag`
   precedent.
+- A `size_of::<Error>() < 128` test, so the next payload that would re-break 122
+  call sites fails here instead.
 
 Three tests in `error.rs` compare `ErrorKind::Host(….)` and must still pass
 unchanged; that they do is the evidence that this step is additive, and it is
@@ -1216,19 +1247,44 @@ worth saying in the commit message rather than leaving a reviewer to notice.
 - [ ] **Step 4: Write the `m3_owns_no_filters` replacement**
 
 `filters/mod.rs`'s current test asserts `filter_names().is_empty()`. Replace it
-with `the_registry_is_the_measured_57`, asserting the exact sorted name list
-against a literal, plus `every_registry_entry_is_a_stub_at_m4` asserting that
-calling all 57 `run`s returns `Error::unimplemented_filter`. That second test is
-what makes each group's Task 4–10 deliverable *visible*: it is edited by the
-central commit as each group lands, and its failure message names the filters
-still stubbed.
+with three tests:
+
+- `the_registry_is_the_measured_57`, asserting the exact sorted name list against
+  a literal. Comparing to a *sorted* literal also pins the "ascending by name"
+  claim, so there is no separate ordering test to drift from it.
+- `the_flags_are_the_measured_ones`, checking each entry's three flags against the
+  Step 3 table's sets, spelled out in the test rather than derived from the same
+  constants the registry uses — otherwise the test agrees with whatever the
+  registry says.
+- `every_registry_entry_is_a_stub_at_m4`, which is what makes each group's Task
+  4–10 deliverable *visible*. Two details the first draft got wrong:
+  - A body counts as a stub only if its error is an `Unimplemented` naming **its
+    own filter**, not merely if it returned `Err`. "Any error means still stubbed"
+    is wrong in both directions: a real `add` given `Value::None` raises, so an
+    implemented filter would look stubbed, and a copy-pasted `run:` line in the
+    registry would look implemented.
+  - The expectation is a `STILL_STUBBED` list checked in **both** directions, so
+    the failure names which way the two disagree. While all 57 are stubs it is an
+    alias of the name list — a second literal copy of the same 57 names could
+    neither be wrong nor be right — and the commit that lands the first group
+    replaces it with the literal remainder. An `assert_eq!` of two 57-name lists
+    would make a reader find the difference by eye.
 
 - [ ] **Step 5: Observe both guards failing**
 
 (a) Delete `("upper", …)` from `REGISTRY`. Expected:
-`the_registry_is_the_measured_57` fails naming `upper`. (b) Implement `upper`'s
-body in place of the stub. Expected: `every_registry_entry_is_a_stub_at_m4`
-fails naming `upper`. Restore both.
+`the_registry_is_the_measured_57` fails naming `upper`.
+(b) Implement `upper`'s body in place of the stub. Expected:
+`every_registry_entry_is_a_stub_at_m4` fails with
+`declared but already implemented: ["upper"]`.
+(c) Also observe the other direction: trim `upper` from `STILL_STUBBED` while its
+body is still a stub, and expect `still stubbed but not declared: ["upper"]`.
+Restore all three.
+
+Note what (a) shows by *not* failing: `every_registry_entry_is_a_stub_at_m4`
+passes when a row is deleted, because both sides lose the name. That is the
+division of labour, not a gap — (a)'s guard is what sees a missing row, and
+(b)'s is what sees a landed body.
 
 - [ ] **Step 6: Run the gate and commit**
 
