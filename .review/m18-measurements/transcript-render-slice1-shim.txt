@@ -1,0 +1,110 @@
+tree:    /Users/pete/projects/lincolnloop/django-rust-templates/python/django_rust_templates/_impl/base.py
+django:  6.0.9
+side:    rust-shim
+python:  3.14.4
+native:  0.1.0
+
+part 1 -- the gate: floor (dispatch-free) vs this engine's render
+  workload    chars  nodes   floor us  render us floor/render
+  tiny            7      1      1.692      3.390        0.499
+  textonly    10208      1      0.619      1.890        0.327
+  mixed        8770    241    131.751    187.571        0.702
+  large       11286    309    169.013    239.375        0.706
+
+  gate (best-of-7; floor vs engine-render, engine here = rust-shim):
+    tiny       floor     1.692 us vs render     3.390 us  -> 0.499x, faster  [floor faster than rust-shim's render; NOT THE GATE]
+    textonly   floor     0.619 us vs render     1.890 us  -> 0.327x, faster  [floor faster than rust-shim's render; NOT THE GATE]
+    mixed      floor   131.751 us vs render   187.571 us  -> 0.702x, faster  [floor faster than rust-shim's render; NOT THE GATE]
+    large      floor   169.013 us vs render   239.375 us  -> 0.706x, faster  [floor faster than rust-shim's render; NOT THE GATE]
+    note: this process's engine is our shim, so every `render` above is *our* materialised render.
+          The gate's stock denominator is in transcript-render-slice1-stock.txt.
+    verdict: every floor arm is faster than this engine's render (= rust-shim). Whether
+    that opens the design is decided in transcript-render-slice1-stock.txt.
+
+  the gate, interleaved (40 rounds, arms alternate order within each round):
+    workload    floor med  render med  ratio med  floor wins  reading
+    tiny            1.651       3.383     0.4877    40/40     floor
+    textonly        0.629       1.916     0.3282    40/40     floor
+    mixed         135.003     190.613     0.7087    40/40     floor
+    large         169.357     240.056     0.7055    40/40     floor
+
+  decomposition -- what of the public render is walk, and what is machinery:
+    workload    render us  walk-only us  machinery us   floor us  floor/walk
+    tiny            3.383         1.704         1.678      1.651      0.9684
+    textonly        1.916         0.374         1.542      0.629      1.6796
+    mixed         190.613       187.732         2.881    135.003      0.7191
+    large         240.056       240.053         0.002    169.357      0.7055
+    `walk-only` is the same `NodeList.render` the floor replaces, with the per-call
+    `push_state`/`bind_template` hoisted out, so `floor/walk` is the walk against the walk —
+    no public-API machinery either side. It is a few percent below 1.0 at `mixed`/`large`
+    and never a multiple: the floor deletes a Python loop over `Node`s and pays FFI crossings
+    of comparable cost for what it still has to ask Python for. On a variable-heavy template
+    that is most of the render, and the block below prices it.
+
+  what the walk cannot reach -- the same tree with its look-ups made literals:
+    workload            nodes   floor us  render us  floor med  render med
+    154 look-ups          309    172.452    241.133    172.851     241.756
+    154 literals          309    168.167     57.243    170.230      58.104
+    `us` is best-of-7 per call; `med` is the median of the interleaved 30-round
+    pairing. They disagree here because this effect is small against `measure()`'s noise,
+    so every delta in the prose below is read from the `med` columns, not the `us` ones.
+    The 154 `Context` look-ups cost our materialised render 183.652 us (1.193 us each, from `render med`) and the floor 2.621 us
+    (0.017 us each, from `floor med`). Per variable that is our materialised render's 1.193
+    against the floor's 0.017. `wins` counts rounds an arm's look-up came in under its
+    literal one: our materialised render's is 0/30, the floor's 3/30 and not stable across runs --
+    the floor's delta is positive this run. So resolution is not where the floor's time goes, and
+    the floor is not paying Django's Python `_resolve_lookup`.
+    What is left is identical in both rows: one crossing to `render_value_in_context` per
+    variable. Strip the look-ups and the floor spends 1.105 us per variable where our materialised render spends
+    0.377 us -- the same Python function, called from Rust instead of from Python.
+    So the gate's few percent is the residue of two larger opposite effects: the floor wins at the
+    resolution and hands most of it back at the escaper. On this evidence the headroom slice
+    1 found is in *resolution*, and the escaper is what to bring across next -- not the
+    dispatch, which the interleaved table below prices in its `tax% of render` column.
+
+part 2 -- the dispatched walk (route (a)) and the rest, for the reader
+  workload      rust us   floor us  dispatch us   parse us  engine-full  our-mat.  rust/floor
+  tiny            1.669      1.692       -0.023      0.863       18.496    18.593       0.987
+  textonly        0.622      0.619        0.003     38.390       59.949    60.153       1.005
+  mixed         134.460    131.751        2.708    132.979      791.129   798.611       1.021
+  large         171.450    169.013        2.437    169.315     1012.508  1010.893       1.014
+  `engine-full` is `engine.from_string(s).render(c)` and `our-mat.` is `render.parse_template(s,
+  engine).render(...)`: two independent totals, not addends of `parse` or of each other. Under
+  the shim they are the same pipeline twice (our engine); under stock they are stock's pipeline
+  beside ours, which is the comparison §3 exists to make.
+
+  the dispatch tax, interleaved (40 rounds each pairing):
+    workload    floor med   rust med  render med  floor/rust    wins   tax us  tax% of render  rust/render    wins
+    tiny            1.643      1.646       3.388      0.9963  27/40     0.003            0.09       0.4874  40/40 
+    textonly        0.625      0.631       1.901      0.9908  35/40     0.006            0.30       0.3292  40/40 
+    mixed         136.054    136.962     190.722      0.9923  33/40     0.908            0.48       0.7160  40/40 
+    large         170.621    171.174     240.399      0.9939  30/40     0.553            0.23       0.7098  40/40 
+    `floor/rust` and `rust/render` are the **median of the 40 per-round ratios**, not a
+    ratio of the medians printed beside them — `wins` counts those same ratios. `tax us`,
+    `tax% of render` (that `tax us` over the `render med` on its left) and both medians are
+    plain arithmetic.
+    `wins` is the count of rounds the first arm of the pair was under the second, so 40/40
+    is an effect this run can resolve and ~20/40 is one it cannot. `rust/render` in the
+    stock transcript is route (a) against stock; in the shim transcript it is against our
+    materialised render, and no column here is the gate.
+
+control -- bytes of every arm against the engine's own render (positive control)
+  tiny       match=True sha256=b94d27b9934d3e08 len=11 engine='hello world'
+  textonly   match=True sha256=d821d2d6a912ba31 len=10208 engine='<p>Lorem ipsum dolor sit amet, consectet'
+  mixed      match=True sha256=b8e73027a3882b5d len=9250 engine='<p>Lorem ipsum dolor sit amet, consectet'
+  large      match=True sha256=0a14cc9c1acce96e len=11902 engine='<p>Lorem ipsum dolor sit amet, consectet'
+
+reachability -- handled/delegated class sets, and a template that must decline
+  tiny       handled=[('VariableNode', 1)] delegated=[]
+  textonly   handled=[('TextNode', 1)] delegated=[]
+  mixed      handled=[('TextNode', 121), ('VariableNode', 120)] delegated=[]
+  large      handled=[('TextNode', 155), ('VariableNode', 154)] delegated=[]
+  saw_handled=True  (a report empty because the walk never ran would agree with 'everything was handled')
+  decline source='<p>{{ a }}</p>{% for x in y %}{{ x }}{% endfor %}'
+    render_floor handled=[('TextNode', 2), ('VariableNode', 1)] delegated=[('ForNode', 1)] output=None
+    render_desc  handled=[('TextNode', 2), ('VariableNode', 1)] delegated=[('ForNode', 1)] output=None
+    output is None on both: a declined node is named, not silently skipped, so a fallback
+    reads as a set difference and not as a passing render.
+
+chars: tiny=7  textonly=10208  mixed=8770  large=11286
+nodes: tiny=1  textonly=1  mixed=241  large=309
