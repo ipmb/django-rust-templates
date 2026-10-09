@@ -1,9 +1,9 @@
 //! Python's `\w`, which is not Rust's.
 //!
 //! Django builds `filter_re` on `\w` (`django/template/base.py:705` `\w+` for a
-//! filter name, `:714` `var_chars = r"\w\.\+-"` spliced into `[\w\.\+-]`, and
-//! `:1160` `kwarg_re`), so the engine's `\w` must be Python's, not the `regex`
-//! crate's.
+//! filter name, `base.py:714` `var_chars = r"\w\.\+-"` spliced into
+//! `[\w\.\+-]`, and `base.py:1160` `kwarg_re`), so the engine's `\w` must be
+//! Python's, not the `regex` crate's.
 //!
 //! Python's `\w` for `str` patterns is exactly `str.isalnum() or '_'` — 142,940
 //! code points, measured equal to `re.fullmatch(r"\w", c)` over the whole range
