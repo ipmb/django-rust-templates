@@ -3,9 +3,9 @@
 //! # The third argument is compiled *around* the fifth, not from itself
 //!
 //! `expression = parser.compile_filter(var_name + "." + bits[3])`
-//! (`:1414-1416`), so `{% regroup m by k as g %}` builds its `expression`
-//! `FilterExpression` from the source **`"g.k"`** — the `var_name` `bits[5]`
-//! joined to the key `bits[3]` through `VARIABLE_ATTRIBUTE_SEPARATOR`
+//! (`defaulttags.py:1414-1416`), so `{% regroup m by k as g %}` builds its
+//! `expression` `FilterExpression` from the source **`"g.k"`** — the `var_name`
+//! `bits[5]` joined to the key `bits[3]` through `VARIABLE_ATTRIBUTE_SEPARATOR`
 //! (`base.py:75`, `"."`). A body written from the tag's surface syntax compiles
 //! `bits[3]` and produces an `expression` of `"k"`, which parses without error
 //! and resolves the wrong variable at render time — the same class of quiet
@@ -15,19 +15,19 @@
 //!
 //! # Arity is checked first, then the two keywords, and the target between them
 //!
-//! `len(bits) != 6` (`:1400-1401`) runs before anything else, so
+//! `len(bits) != 6` (`defaulttags.py:1400-1401`) runs before anything else, so
 //! `{% regroup m by k %}` reports the arity message even though it is also
-//! missing its `as`. The `by` check (`:1403-1404`) runs after `target` is
-//! compiled, so a malformed target reports its *filter* error first; the `as`
-//! check (`:1405-1406`) runs last. All three messages are literal — no
-//! interpolation — and the order is preserved here rather than reordered for
-//! readability, because a reordering changes which message a doubly-bad call
-//! gets.
+//! missing its `as`. The `by` check (`defaulttags.py:1403-1404`) runs after
+//! `target` is compiled, so a malformed target reports its *filter* error first;
+//! the `as` check (`defaulttags.py:1405-1406`) runs last. All three messages are
+//! literal — no interpolation — and the order is preserved here rather than
+//! reordered for readability, because a reordering changes which message a
+//! doubly-bad call gets.
 //!
 //! # The node is positional
 //!
-//! `RegroupNode(target, expression, var_name)` (`:361-365`) — all three are
-//! plain attributes, and the descriptor names every one.
+//! `RegroupNode(target, expression, var_name)` (`defaulttags.py:361-365`) — all
+//! three are plain attributes, and the descriptor names every one.
 
 use crate::parser::desc::{AttrValue, NodeDesc};
 use crate::parser::error::Error;
@@ -58,7 +58,7 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
 
     let var_name = bits[5].clone();
     // `var_name + VARIABLE_ATTRIBUTE_SEPARATOR + bits[3]` — the derived string
-    // this tag exists in Task 4 to get right (`:1414-1416`).
+    // this tag exists in Task 4 to get right (`defaulttags.py:1414-1416`).
     let expression = parser.compile_filter(&format!("{var_name}.{}", bits[3]))?;
 
     Ok(NodeDesc::new("RegroupNode")
@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn the_arity_check_runs_before_the_keyword_checks() {
         // Five bits: neither `by` nor `as` is in place, and the arity message is
-        // the one that fires (`:1400-1401`).
+        // the one that fires (`defaulttags.py:1400-1401`).
         for source_text in [
             "{% regroup m by k %}",
             "{% regroup m by k as %}",
@@ -123,7 +123,8 @@ mod tests {
     fn the_target_is_compiled_before_the_by_check() {
         // A malformed target reports its filter error, not the `by` message, so
         // this six-bit call with a bad `by` still fails on the target — the
-        // order `:1402` then `:1403` is what makes it so.
+        // order `defaulttags.py:1402` then `defaulttags.py:1403` is what makes
+        // it so.
         assert_eq!(
             failure("{% regroup m| by k as g %}").kind,
             ErrorKind::Syntax("Could not parse the remainder: '|' from 'm|'".to_string()),

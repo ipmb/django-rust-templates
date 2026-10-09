@@ -290,6 +290,7 @@ defaulttags.py:308-309	django/template/defaulttags.py	308	309	def __init__(self,
 defaulttags.py:323	django/template/defaulttags.py	323	-	-	-
 defaulttags.py:323-333	django/template/defaulttags.py	323	333	for condition, nodelist in self.conditions_nodelists:	return nodelist.render(context)
 defaulttags.py:326	django/template/defaulttags.py	326	-	condition.eval(context)	-
+defaulttags.py:361-365	django/template/defaulttags.py	361	365	class RegroupNode(Node):	self.var_name = var_name
 defaulttags.py:403	django/template/defaulttags.py	403	-	tzinfo = timezone.get_current_timezone() if settings.USE_TZ else None	-
 defaulttags.py:439	django/template/defaulttags.py	439	-	-	-
 defaulttags.py:611-701	django/template/defaulttags.py	611	701	@register.tag	return node
@@ -346,6 +347,12 @@ defaulttags.py:1268	django/template/defaulttags.py	1268	-	@register.tag(name="pa
 defaulttags.py:1286	django/template/defaulttags.py	1286	-	simple_tag	-
 defaulttags.py:1286-1287	django/template/defaulttags.py	1286	1287	@register.simple_tag(name="querystring", takes_context=True)	def querystring(context, *args, **kwargs):
 defaulttags.py:1352-1419	django/template/defaulttags.py	1352	1419	-	-
+defaulttags.py:1400-1401	django/template/defaulttags.py	1400	1401	if len(bits) != 6:	raise TemplateSyntaxError("'regroup' tag takes five arguments")
+defaulttags.py:1402	django/template/defaulttags.py	1402	-	target = parser.compile_filter(bits[1])	-
+defaulttags.py:1403-1404	django/template/defaulttags.py	1403	1404	if bits[2] != "by":	raise TemplateSyntaxError("second argument to 'regroup' tag must be 'by'")
+defaulttags.py:1403	django/template/defaulttags.py	1403	-	if bits[2] != "by":	-
+defaulttags.py:1405-1406	django/template/defaulttags.py	1405	1406	if bits[4] != "as":	raise TemplateSyntaxError("next-to-last argument to 'regroup' tag must be 'as'")
+defaulttags.py:1414-1416	django/template/defaulttags.py	1414	1416	expression = parser.compile_filter(	-
 defaulttags.py:1441-1443	django/template/defaulttags.py	1441	1443	return ResetCycleNode(parser._last_cycle_node)	raise TemplateSyntaxError("No cycles in template.")
 defaulttags.py:1514-1586	django/template/defaulttags.py	1514	1586	-	-
 defaulttags.py:1575	django/template/defaulttags.py	1575	-	kwarg_re.match	-
