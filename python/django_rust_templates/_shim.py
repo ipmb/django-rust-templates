@@ -111,6 +111,7 @@ SHADOWING = {
     "context.py": "transcribed",
     "engine.py": "transcribed",
     "exceptions.py": "fresh",
+    "loader_tags.py": "transcribed",
     "loaders/__init__.py": "transcribed",
     "loaders/app_directories.py": "transcribed",
     "loaders/base.py": "transcribed",

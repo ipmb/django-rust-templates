@@ -431,3 +431,61 @@ git commit -m "M11: defaulttags is our module — the meter is 11"
 - [ ] **Step 4: Sweep every new prose line number** against the pinned tree
   (`scripts/check_python_anchors.py --check --frozen`).
 - [ ] **Step 5: Send the close-out to the reviewer** and fold in what they find.
+
+---
+
+## Task 1 amendment: the compared-path sweep could not see a registry-dispatched function
+
+*Appended after Task 1 was executed, rather than edited into Step 4 — the plan is
+the record of what was expected and the amendment is the record of what was
+measured, and a prediction silently rewritten is a prediction that cannot be
+checked. Step 4's expectation was: "the three `do_*` functions are Rust's, so
+what the parity harness reaches here is likely `[]` or a small set." It is
+neither — it is **7**, and the three `do_*` are in it.*
+
+**The disagreement, and it is the instrument's.** Step 4's sweep printed **4**
+functions for `loader_tags.py`. An independent instrument built on call frames
+(`sys.setprofile`; `frame.f_code.co_firstlineno` resolved to a label through
+`definitions`' spans) read **7**. The three the sweep could not see were exactly
+`do_block`, `do_extends` and `do_include`.
+
+**Why, measured rather than argued.** Django does not call a tag's compile
+function through the module that defines it. `Parser.parse` dispatches through
+`parser.tags[command]`, and `Parser.add_library` builds that dict by copying —
+`self.tags.update(lib.tags)` (`base.py:669`). So the callable is a dict *value*,
+and `bindings()` walks module *namespaces*. The wrapper went on the module
+global; the object the parse actually called was the unwrapped original.
+
+**The direction is the unsafe one, which is why this is not a count to shrug
+at.** Clause (4) refuses a declared region on the compared path so the parity
+comparison cannot become Rust against Rust — and the sweep is clause (4)'s
+input. Under-reporting means a region declared inside `do_block` is accepted
+while the harness runs `do_block`. For M11 specifically, a tag's compile function
+is where a transcription would most plausibly hide such a region.
+
+**The fix, two names, in `tests/compared_path.py`.** `registries()` yields every
+`Library`-shaped dispatch table reachable from any `django.*` module namespace;
+`rebind_registries(old, new)` rewrites every entry that `is old`. Both are called
+where the existing `rebind` is: on the way in from `wrap()`, and on the way out
+from the restore loop.
+
+**A sub-finding worth its line, because it only appears under full discovery.**
+The first `registries()` read `getattr(value, "tags", None)` off arbitrary module
+attributes. On Django's staticfiles storage that fires `LazyObject._setup()` and
+raised `ImproperlyConfigured: You're using the staticfiles app without having set
+the required STATIC_URL setting` — never in a targeted run, only in the whole
+suite. `vars(value)` inside `try/except TypeError` is the fix. The rule is in the
+docstring because it generalises: **a probe that can execute the code it is
+probing is not a probe.**
+
+**Verified in both directions.** With the fix, sweep and frames agree at 7 and
+both disagreement lists are empty; with `rebind_registries` disabled, the pre-fix
+reading reproduces at **4** — so the delta is the defect and not the corpus. Both
+instruments agreed on all eleven other pinned modules, before and after.
+
+**The alternative, offered and not taken.** The frame instrument is the
+independent one and is more faithful to "the code the comparison runs": it
+observes execution rather than reachability-by-binding, and it is structurally
+immune to this whole family. Replacing the sweep with it is a larger change — a
+profiler in the guard's path, and a way to attribute frames to spans — so it is
+raised with the reviewer rather than decided inside Task 1.

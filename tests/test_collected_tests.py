@@ -36,7 +36,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # as the change that moves it, and only after asking whether the *delta* is the
 # one you intended — a jump of four where you expected seven is what this row is
 # for.
-PINNED = 370
+#
+# 370 → 371 is M11 Task 1's registry-escape row in
+# `tests/test_compared_path_instrument.py`; 371 → 374 is the same task's
+# `LoaderTagsInterpositionTests`, three rows. Both deltas are the rows added, so
+# no module went uncollected on the way.
+PINNED = 374
 
 
 def collected() -> unittest.TestSuite:

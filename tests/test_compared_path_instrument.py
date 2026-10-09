@@ -356,6 +356,64 @@ class DescriptorCountingTests(unittest.TestCase):
         )
         self.assertNotIn("TokenType._new_member_", residue(base))
 
+    def test_a_function_dispatched_through_a_registry_is_counted(self):
+        """The escape the binding sweep could not see, on the shape Django uses.
+
+        ``bindings`` walks module namespaces, and Django does not dispatch
+        through module namespaces: ``Parser.add_library`` *copies* a
+        ``Library``'s ``tags``/``filters`` dicts into the parser
+        (``base.py:668-670``), so ``parser.tags[command]`` is a dict value and
+        the wrapper placed on the module global is never the object called.
+        Measured on ``loader_tags.py`` the day it was interposed: the sweep read
+        4 functions where call frames read 7, and the three it missed were
+        ``do_block``/``do_extends``/``do_include`` — the tag compile functions,
+        which the *reference* parse runs. The error direction is the unsafe one
+        for clause (4), which exists so a declared region cannot sit on code the
+        comparison runs.
+
+        The fixture is registered in ``sys.modules`` under a ``django.`` name
+        because that is the population the sweep visits — a module named
+        anything else is deliberately not swept, and a row that dodged that
+        would be testing a different function.
+        """
+        from tests.compared_path import instrumented
+
+        class Registry:  # duck-typed like `Library`: two dicts of callables
+            def __init__(self):
+                self.tags = {}
+                self.filters = {}
+
+        def thing(parser, token):
+            return "ran"
+
+        subject = types.ModuleType("django.template.registry_probe")
+        subject.__file__ = __file__
+        registry = Registry()
+        registry.tags["thing"] = thing
+        subject.registry = registry
+        subject.thing = thing
+
+        sys.modules[subject.__name__] = subject
+        try:
+            with instrumented(subject) as counts:
+                self.assertIsNot(
+                    registry.tags["thing"],
+                    thing,
+                    "the premise: the wrapper must be *in the table*, because "
+                    "the parser dispatches through a copy of it",
+                )
+                registry.tags["thing"](None, None)
+                self.assertEqual(
+                    counts["thing"],
+                    1,
+                    "a call through the registry is a call the module made",
+                )
+            self.assertIs(
+                registry.tags["thing"], thing, "and the table is put back on exit"
+            )
+        finally:
+            del sys.modules[subject.__name__]
+
     def test_a_wrapper_we_wrote_around_a_foreign_function_stays_ours(self):
         """The mirror of the ``@contextmanager`` case: the walk must not leave.
 

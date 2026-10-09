@@ -245,6 +245,25 @@ COMPARED_PATH = {
     "loaders/app_directories.py": [],
     "loaders/cached.py": [],
     "loaders/locmem.py": [],
+    # The three `do_*` compile functions are here and they are the interesting
+    # part of this entry. The engine does not run them — Rust compiles
+    # `block`/`extends`/`include` host-side (M7's design B) — but the *reference*
+    # parse does, because `Parser.parse` is upstream's text driving
+    # `parser.tags[command](parser, token)`. They were missing until the sweep
+    # learned to see registry entries; the frames instrument read 7 while the
+    # sweep read 4. Left in the pin rather than noted as a blind spot, because
+    # clause (4)'s whole purpose is that a declared region cannot sit on code
+    # the comparison runs — and a tag's compile function is where a
+    # transcription of it would most plausibly hide one.
+    "loader_tags.py": [
+        (45, 48, "BlockNode.__init__"),
+        (92, 96, "ExtendsNode.__init__"),
+        (168, 174, "IncludeNode.__init__"),
+        (216, 245, "do_block"),
+        (248, 290, "construct_relative_path"),
+        (293, 314, "do_extends"),
+        (317, 372, "do_include"),
+    ],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])
@@ -548,6 +567,23 @@ DECLARED = {
                 (2, 3),
                 None,
                 "# TRANSCRIBED: django/template/loaders/locmem.py (Django 6.0.9)",
+            ),
+        ],
+    ),
+    # M11's first. The pin opens with `import posixpath`, so there is no
+    # docstring to carry the marker and it is a comment on line 1 — the
+    # docstring-less form `loaders/base.py` uses. Nothing else in the file
+    # differs from the pin: M7 made the three `block`/`extends`/`include` tags
+    # Rust's by compiling them host-side, which changes who *runs* `do_block`,
+    # not one character of the transcription, and `BlockNode.render`'s
+    # render-time node building stays Python by M7's measured design.
+    "loader_tags.py": (
+        "django/template/loader_tags.py",
+        [
+            (
+                (1, 2),
+                None,
+                "# TRANSCRIBED: django/template/loader_tags.py (Django 6.0.9)",
             ),
         ],
     ),

@@ -43,7 +43,8 @@ OWNERS = {
     # §10.3's M11 row.
     "defaulttags": "M11",
     "defaultfilters": "M11",
-    "loader_tags": "M11",
+    # `loader_tags` was here until the commit that interposed it; the other two
+    # follow in M11's own later tasks, in the order the plan takes them.
     # §10.3's M12 row owns no meter entry: `i18n`, `l10n`, `static`, `tz` and
     # `cache` are `django/templatetags/*`, outside the namespace the meter
     # covers. M12 moves tag bodies and retires nothing here.
@@ -108,6 +109,7 @@ INTERPOSED = {
         "loaders.cached",
         "loaders.locmem",
     ],
+    "M11": ["loader_tags"],
 }
 
 

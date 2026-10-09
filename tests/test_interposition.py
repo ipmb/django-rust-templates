@@ -898,6 +898,109 @@ class ModuleInterpositionTests(unittest.TestCase):
                 engine.get_template("index.html")
 
 
+class LoaderTagsInterpositionTests(unittest.TestCase):
+    """M11 Task 1: ``loader_tags`` is ours, and the row it expires is re-read.
+
+    ``loader_tags`` is the module whose interposition **expires a vacuity reason
+    M7 recorded**, so this class carries two claims that are usually separate:
+
+    * that the module, its classes and the ``Node`` it inherits are ours; and
+    * that Django's own ``test_include_cache`` — the row §10.3 names as M7's gate
+      and M7 had to declare vacuous — is now **real signal**, decided by
+      breaking the behaviour and watching which rows fail rather than by
+      inference.
+
+    The measurement, since the second claim cannot be read off a green run: with
+    ``IncludeNode.render``'s cache bypassed in ``_impl/loader_tags.py`` — the
+    three lines keyed on ``self`` replaced by a bare
+    ``context.template.engine.select_template(template_name)`` — Django's row at
+    ``syntax_tests/test_include.py:371-397`` fails ``'000000000' != '012345678'``,
+    and so does ``tests/test_inheritance_gate.py``'s counter row. Before the
+    interposition the first of those could not move: it ran on stock Django's
+    ``IncludeNode`` whatever we wrote.
+
+    **Both instruments stay, and which is which is now stated rather than left
+    to inference.** Django's row is the *end-to-end* one — it reaches the cache
+    through ``render_to_string`` and the real loader, which is the path a Django
+    project takes and the one nothing else here reproduces. The gate's counter
+    row is the *direct-entry* one: it calls our ``render_string`` directly and
+    renders stock in the same row, so it is the only one of the two that can
+    report our engine disagreeing with Django about the same input. And the
+    gate's other row — the node-count shape assertion — is neither, and is the
+    one thing the pair above still cannot see: two nodes rendering identical
+    output pass both counter rows. §10.3's Step 6 caution applies to all three:
+    a vacuity justification is a claim about the tree on a date, and this is the
+    milestone that dated it.
+    """
+
+    def setUp(self):
+        _shim.install()
+
+    def test_loader_tags_resolves_to_our_file(self):
+        import importlib
+
+        module = importlib.import_module("django.template.loader_tags")
+        self.assertIn("_impl", module.__file__, module.__file__)
+
+    def test_the_classes_this_module_defines_are_not_djangos(self):
+        """The classes with the file as their ``co_filename``, and the one it imports.
+
+        ``load_pinned`` executes the pinned file *fresh*, so ``BlockNode``,
+        ``ExtendsNode`` and ``IncludeNode`` are new class objects and the
+        comparison is between two real things rather than a name and itself.
+
+        ``Node`` is deliberately **not** compared that way, and the reason is the
+        interposition working as intended: the pinned file's
+        ``from django.template.base import Node`` resolves through the shim to
+        *our* ``base``, so the pinned module's ``Node`` is ours too. Asserting
+        ``is not`` there would fail on a correct tree. What is asserted instead
+        is the identity that matters — the two modules name one class — because
+        that is what makes ``isinstance`` against either true for every node the
+        tree holds.
+        """
+        import importlib
+        import inspect
+
+        from django.template import base, loader_tags
+
+        from tests.pinned_module import load_pinned
+
+        pinned = load_pinned("loader_tags.py")
+        for name in ("BlockNode", "ExtendsNode", "IncludeNode"):
+            with self.subTest(name=name):
+                ours = getattr(loader_tags, name)
+                self.assertIsNot(ours, getattr(pinned, name))
+                self.assertIn("_impl", inspect.getfile(ours))
+
+        self.assertIs(loader_tags.Node, base.Node)
+
+    def test_the_include_node_djangos_cache_row_renders_is_ours(self):
+        """The live half of the re-read: the *object the row renders* is ours.
+
+        The mutation above is a measurement and not a row — no test can edit its
+        own subject's source and stay honest. This is the durable assertion it
+        stands on: parse a template containing ``{% include %}`` through our
+        engine and check that the node the resulting tree holds is our class,
+        by ``type`` and by the file that defines it. That is the object Django's
+        row hands to ``render_context`` and keys its cache on.
+        """
+        import inspect
+
+        from django.template import loader_tags
+        from django_rust_templates.render import parse_template
+
+        engine = Engine(
+            loaders=[
+                ("django.template.loaders.locmem.Loader", {"n": "{% include \"m\" %}"})
+            ]
+        )
+        template = parse_template('{% include "n" %}', engine)
+        includes = template.nodelist.get_nodes_by_type(loader_tags.IncludeNode)
+        self.assertEqual(len(includes), 1)
+        self.assertIs(type(includes[0]), loader_tags.IncludeNode)
+        self.assertIn("_impl", inspect.getfile(type(includes[0])))
+
+
 class ShadowingTests(unittest.TestCase):
     """Which ``_impl`` files wear a real module's name, and that each was meant.
 

@@ -60,6 +60,19 @@ MODULES = {
     "loaders/app_directories.py": "django/template/loaders/app_directories.py",
     "loaders/cached.py": "django/template/loaders/cached.py",
     "loaders/locmem.py": "django/template/loaders/locmem.py",
+    # M11's first, and the only one this table names yet. Unlike M10's loader
+    # files it is a module the tag and filter corpus renders through, so a
+    # verbatim transcription here moves the *registry's* owner and the node
+    # classes' owner; the routing that puts the filter bodies on Rust's path is
+    # `base.py`'s and is hand-written.
+    #
+    # `defaultfilters.py` and `defaulttags.py` are M11's other two and are
+    # deliberately **not** listed: this table is also what `--check` walks, and a
+    # name here for a file `_impl` does not have fails the generator step in
+    # every commit that runs before the task which creates it. Each is added by
+    # its own task, in the same commit as the file it generates — measured, in
+    # the commit that interposed `loader_tags` alone.
+    "loader_tags.py": "django/template/loader_tags.py",
 }
 
 # Transcriptions this generator must **not** write, because their difference from

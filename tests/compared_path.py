@@ -582,6 +582,66 @@ def rebind(old, new):
             continue
 
 
+def registries():
+    """Every ``Library`` dispatch table in ``sys.modules``, as dicts.
+
+    **This is the table the sweep could not see, and it is the one Django
+    dispatches through.** ``Library`` holds ``tags`` and ``filters`` as dicts,
+    and both are *copied* on the way to the parser: ``Parser.add_library`` does
+    ``self.tags.update(library.tags)`` and ``self.filters.update(library.filters)``
+    (``base.py:668-670``), so ``parser.tags[command]`` is a value in a dict, not a
+    module attribute — and :func:`bindings` walks module attributes. Measured on
+    ``loader_tags.py`` after interposition: the binding sweep read 4 functions
+    where call frames read 7, and the three it missed were exactly
+    ``do_block``/``do_extends``/``do_include``, the tag compile functions, which
+    the *reference* parse reaches through ``Parser.parse``'s
+    ``parser.tags[command](parser, token)``. A wrapper placed on the module
+    global is never the object called.
+
+    That matters beyond a count: clause (4) refuses a declared region on the
+    compared path precisely so the parity comparison cannot become Rust against
+    Rust, and a tag's compile function is where M11's transcription could most
+    easily hide one. The direction of the error is the unsafe one — the guard
+    would accept a region over code the harness runs.
+
+    Duck-typed rather than ``isinstance(value, Library)``: importing Django's
+    ``Library`` here would bind the module the shim may be serving, and this
+    instrument is imported by the guard that reads the pin. **And it reads
+    ``vars(value)`` rather than ``getattr``**, because the values being examined
+    are arbitrary objects out of other people's modules: measured the first run
+    of this function, ``getattr(value, "tags", None)`` reached the lazy
+    staticfiles storage, which ran ``_setup()`` and raised
+    ``ImproperlyConfigured`` under the unit suite's settings. A probe that can
+    execute the code it is probing is not a probe.
+    """
+    for other in list(sys.modules.values()):
+        if other is None or not getattr(other, "__name__", "").startswith("django."):
+            continue
+        for value in list(vars(other).values()):
+            try:
+                attributes = vars(value)
+            except TypeError:
+                continue
+            tags, filters = attributes.get("tags"), attributes.get("filters")
+            if isinstance(tags, dict) and isinstance(filters, dict):
+                yield tags
+                yield filters
+
+
+def rebind_registries(old, new):
+    """Point every registry entry that *is* ``old`` at ``new``, per entry.
+
+    The companion of :func:`rebind` for the tables it cannot reach, and it has
+    to run for the same two moments: on the way in so the parser's copy holds
+    the wrapper, and on the way out so the library the rest of the session sees
+    is Django's own again.
+    """
+    for table in registries():
+        for key, value in list(table.items()):
+            if value is old:
+                table[key] = new
+
+
 @contextlib.contextmanager
 def instrumented(module):
     """Count calls to every function ``module`` defines, restoring on exit.
@@ -661,6 +721,7 @@ def instrumented(module):
             set_name(owner, name)
         made.append((owner, name, replacement, original, invoked))
         rebind(invoked, replacement)  # consumers that imported the name
+        rebind_registries(invoked, replacement)  # and the tables they are keyed in
 
     for owner, name, value in members(module):
         if _invoked(value) is None or not _is_ours(value, module):
@@ -685,6 +746,7 @@ def instrumented(module):
         # the way in would never visit it.
         for _owner, _name, wrapper, _original, invoked in made:
             rebind(wrapper, invoked)
+            rebind_registries(wrapper, invoked)
 
 
 def measure(module, sources, calls) -> dict:

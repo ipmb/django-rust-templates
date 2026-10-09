@@ -23,9 +23,12 @@ rather than the Rust, and where the 1547 cannot see it:
   one, so a host node setting it was accepted where Django refuses.
 
 - **A6, the include cache.** §10.3 names `test_include_cache` as M7's gate, and
-  the `.django` row cannot be it: the shim does not yet interpose `loader_tags`,
-  so the suite runs on stock Django's parser and would pass whether or not M7
-  shipped.
+  the `.django` row could not be it: the shim did not interpose `loader_tags`
+  at M7, so the suite ran on stock Django's parser and would have passed whether
+  or not M7 shipped. That reason expired at M11 Task 1 and the row is now real
+  signal — measured by mutating our `IncludeNode.render`, see
+  `IncludeCacheGateTests` below, which also says which of the two instruments is
+  direct-entry and which is end-to-end.
 """
 
 import sys
@@ -331,11 +334,27 @@ class IncludeCacheGateTests(unittest.TestCase):
     loop whose body includes a template that increments a counter. If the node is
     re-created per render the counter restarts and the output repeats digits.
 
-    The `.django` row cannot be M7's gate, and that is the whole of A6: the shim
-    does not yet interpose `loader_tags`, so the pinned suite runs that row on
-    **stock Django's** parser — it passes whether or not M7 shipped. This is the
+    The `.django` row could not be M7's gate, and that was the whole of A6: the
+    shim did not yet interpose `loader_tags`, so the pinned suite ran that row on
+    **stock Django's** parser — it passed whether or not M7 shipped. This is the
     same instrument pointed at our engine, and the same reason the two engines
     are compared in one row.
+
+    **That reason expired at M11 Task 1, and the re-read is a measurement
+    rather than a re-reading of this paragraph.** With `IncludeNode.render`'s
+    cache bypassed in `_impl/loader_tags.py`, Django's row at
+    `syntax_tests/test_include.py:371-397` fails `'000000000' != '012345678'` — so
+    it is now real signal and no longer a row about the schedule. **Both
+    instruments stay.** Which is which: Django's row is the *end-to-end* one
+    (it reaches the cache through `render_to_string` and a real loader, the path
+    a Django project takes); the counter row below is the *direct-entry* one,
+    because it calls our `render_string` directly and renders stock in the same
+    row, which is the only way to see our engine disagreeing with Django about
+    one input. `test_the_loop_body_holds_exactly_one_include_node` is the third
+    and the one neither counter row can replace: two nodes rendering identical
+    output pass both of them. The general form, worth keeping beside the row:
+    **a vacuity justification is a claim about the tree on a date, and
+    interposing the module is precisely the event that expires one.**
 
     The cache is Python's own: `IncludeNode.render` keys
     `render_context.dicts[0]` on `self` (`loader_tags.py:197`), so identity is
