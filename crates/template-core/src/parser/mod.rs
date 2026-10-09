@@ -547,13 +547,15 @@ impl<'a> Parser<'a> {
 /// * the host answers whether the template loaded a library providing
 ///   `command` — `ShellHost.library_tag_loaded` is `command in parser.tags`,
 ///   which `{% load %}` mutates, and it is `true` for **all 18**
-///   `django.templatetags` names, 2 of which are Python's as of M12 Task 6a;
+///   `django.templatetags` names, 0 of which are Python's as of M12 Task 6b;
 /// * the registry answers whether Rust has a body for it ([`registry`]'s
-///   `LIBRARY_REGISTRY` — sixteen names as of M12 Task 6a).
+///   `LIBRARY_REGISTRY` — eighteen names as of M12 Task 6b).
 ///
-/// Either question alone routes wrongly. The host's alone sends a loaded
-/// `{% blocktranslate %}` to a Rust compiler for `blocktranslate` that does not
-/// exist; the
+/// Either question alone routes wrongly. The host's alone compiles any loaded
+/// name whose spelling the registry also carries, whether or not Rust has a
+/// body for it — the shape `blocktranslate` had until M12 Task 6b, when a
+/// loaded `{% blocktranslate %}` had to reach Django's body and the registry
+/// had no arm for it; the
 /// registry's alone compiles `{% static %}` in a template that never wrote
 /// `{% load static %}`, which Django refuses.
 ///

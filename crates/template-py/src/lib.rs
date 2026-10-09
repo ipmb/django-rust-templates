@@ -76,11 +76,13 @@ fn builtin_tag_stub_names() -> Vec<&'static str> {
 /// Exposed because the shell cannot derive it. `ShellHost._rust_owned` has to
 /// name the library tags Rust owns in order to answer `has_tag` for them the way
 /// it answers for a built-in, and the natural-looking source — the tag tables of
-/// the five `django.templatetags` modules — holds **all 18** library tags. Seven
-/// of those Rust does not compile, and claiming them would send `trans`,
-/// `timezone` and the rest to `Invalid block tag` instead of to the host that
-/// compiles them. That is the same shape as the `245 failures of the 1547`
-/// measurement recorded on `builtin_tag_names_including_stubs`, one scope over.
+/// the five `django.templatetags` modules — holds **all 18** library tags, the
+/// same eighteen this registry carries as of M12 Task 6b (0 of the 18 are
+/// Python's). It was not always the same set: while a library was only partly
+/// ported, claiming its unported names would have sent `trans`, `timezone` and
+/// the rest to `Invalid block tag` instead of to the host that compiles them.
+/// That is the same shape as the `245 failures of the 1547` measurement recorded
+/// on `builtin_tag_names_including_stubs`, one scope over.
 ///
 /// The doc on `template_core::parser::registry::library_tag_names` carries the
 /// argument; this is only the wire.
@@ -516,6 +518,39 @@ impl NodeSlot {
     }
 }
 
+/// `AttrValue::Tokens` — a `BlockTranslateNode`'s `singular`/`.plural`.
+///
+/// The one attribute on the wire that is a slice of the **token stream** rather
+/// than a subtree: `do_block_translate` scans its body token by token
+/// (`i18n.py:560-578`) and hands the node the `Token` objects themselves, which
+/// `render_token_list` (`i18n.py:134-146`) walks by `token.token_type` and
+/// `token.contents`. See `AttrValue::Tokens` for why no existing variant can
+/// carry that.
+///
+/// **Its own class rather than a bare `list`**, and the reason is
+/// `NodeListRef`'s turned around: a bare list of 4-tuples would decode through
+/// `_decode_value`'s *list* arm into a list of plain tuples, and
+/// `render_token_list`'s `token.token_type` would then be an `AttributeError`
+/// at **render** time — after a parse that looked fine. The payload is a Python
+/// `list` of the same `(token_type, contents, lineno, position)` tuples
+/// `_native.lex` and `NodeDesc.token` emit, so the shell rebuilds each element
+/// with the one `_decode_token` it already has and the token wire form stays
+/// single-spelt.
+#[pyclass(frozen)]
+#[derive(Debug)]
+pub struct Tokens {
+    /// A Python `list` of `(token_type, contents, lineno, position)` tuples.
+    #[pyo3(get)]
+    pub tokens: Py<PyAny>,
+}
+
+#[pymethods]
+impl Tokens {
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!("<Tokens {}>", self.tokens.bind(py).repr()?))
+    }
+}
+
 /// `AttrValue::IfCondition` — one node of a `{% if %}` condition.
 ///
 /// The one attribute on the wire whose value is a parse **tree**, and the
@@ -679,6 +714,19 @@ fn attr_value_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
             PyTuple::new(py, items)?.into_any().unbind()
         }
         AttrValue::IfCondition(tree) => if_condition_to_py(py, tree)?,
+        AttrValue::Tokens(tokens) => {
+            // The elements are tokens, so each goes through `token_to_py` — the
+            // one spelling of a token's wire form, shared with `_native.lex` and
+            // `NodeDesc.token`. The list is built here, inside the pyclass, so
+            // the shell's decoder stays a decoder; `_decode_value` recognises the
+            // class and rebuilds each element with `_decode_token`.
+            let items: Vec<Py<PyAny>> = tokens
+                .iter()
+                .map(|token| token_to_py(py, token))
+                .collect::<PyResult<_>>()?;
+            let list = PyList::new(py, items)?.into_any().unbind();
+            Py::new(py, Tokens { tokens: list })?.into_any()
+        }
     })
 }
 
@@ -2608,6 +2656,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<NodeRef>()?;
     m.add_class::<NodeListRef>()?;
     m.add_class::<NodeSlot>()?;
+    m.add_class::<Tokens>()?;
     m.add_class::<IfCondition>()?;
     m.add_class::<SafeStr>()?;
     m.add_class::<Variable>()?;

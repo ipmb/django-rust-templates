@@ -234,6 +234,8 @@ pub fn builtin_tag(command: &str) -> Option<CompileFn> {
 ///
 /// [`Host::library_tag_loaded`]: crate::parser::host::Host::library_tag_loaded
 const LIBRARY_REGISTRY: &[Entry] = &[
+    ("blocktrans", tags::i18n::block_translate),
+    ("blocktranslate", tags::i18n::block_translate),
     ("cache", tags::cache::compile),
     (
         "get_available_languages",
@@ -274,24 +276,25 @@ pub fn library_tag(command: &str) -> Option<CompileFn> {
 /// `ShellHost.has_tag` for a library tag the way it answers for a built-in one —
 /// see `python/django_rust_templates/host.py`'s `_rust_owned`. The shell cannot
 /// derive it: the natural-looking source, `django_own_tags()`, holds **all 18**
-/// library tags, and claiming all 18 would send `blocktrans`, `blocktranslate`
-/// and the rest to `invalid_block_tag` instead of to the host that compiles them
-/// (the defect
+/// library tags, and claiming one Rust has no body for would send it to
+/// `invalid_block_tag` instead of to the host that compiles it (the defect
 /// M12's `245 failures of the 1547` measurement is about). So the list of
 /// library tags Rust actually compiles has to come from Rust.
 ///
-/// **Sixteen of the 18 as of M12 Task 6a**, the last name-adding task: `i18n`'s
-/// eight joined the eight `cache`/`static`/`tz`/`l10n` already had, and the two
-/// left — `blocktranslate` and `blocktrans` — are Task 6b's Rust bodies. So this
-/// table and `django_own_tags()` now differ by exactly those two.
+/// **All 18 as of M12 Task 6b**, the last name-adding task: `blocktranslate` and
+/// `blocktrans` joined the sixteen Task 6a left, so this table and
+/// `django_own_tags()` now hold the same set — the `245 failures` defect is
+/// closed for the library scope. The list stays derived from this table rather
+/// than hardcoded, because it is still the *Rust* answer the shell must ask for.
 ///
 /// Three of the entries share [`tags::static_tag::compile`], which is
 /// Django's own shape rather than a shortcut here — `do_static`,
 /// `get_static_prefix` and `get_media_prefix` are one class-method call with
 /// different arguments (`static.py:74`, `static.py:92`, `static.py:171`), and that function
-/// recovers the command from the token. [`tags::i18n::translate`] is shared the
-/// same way: `translate` and `trans` are one body registered twice
-/// (`i18n.py:358-359`).
+/// recovers the command from the token. [`tags::i18n::translate`] and
+/// [`tags::i18n::block_translate`] are shared the same way: `translate`/`trans`
+/// (`i18n.py:358-359`) and `blocktranslate`/`blocktrans` (`i18n.py:456-457`) are
+/// each one body registered twice.
 pub fn library_tag_names() -> Vec<&'static str> {
     LIBRARY_REGISTRY.iter().map(|(name, _)| *name).collect()
 }
@@ -589,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn the_library_registry_holds_the_sixteen_names_m12_has_landed_so_far() {
+    fn the_library_registry_holds_the_eighteen_names_m12_has_landed() {
         // The literal, because the *set* is a claim about Django's libraries and
         // not a consequence of anything in this file. `tests/test_tag_inventory.py`
         // cross-checks `REGISTRY` against Django's built-in registry; the library
@@ -599,14 +602,17 @@ mod tests {
         //
         // Four at Task 3 (`cache`, `static`, and the two `static.py` prefix
         // readers), three more at Task 4 (`tz`'s three tags), one more at Task 5
-        // (`l10n`'s single tag, `localize`), and eight at Task 6a (`i18n`'s eight
-        // non-translating tags). Task 6b adds the last two (`blocktranslate`,
-        // `blocktrans`) and takes this to 18, the whole of `django_own_tags()`.
-        // Task 7 adds the nine *filters* of the five libraries and moves none
-        // of these names: filters are not tags and never enter this table.
+        // (`l10n`'s single tag, `localize`), eight at Task 6a (`i18n`'s eight
+        // non-translating tags) and the last two at Task 6b (`blocktranslate`,
+        // `blocktrans`). Eighteen is the whole of `django_own_tags()`, so this is
+        // the first commit at which the library table and Django's own set agree.
+        // Task 7 adds the nine *filters* of the five libraries and moves none of
+        // these names: filters are not tags and never enter this table.
         assert_eq!(
             library_tag_names(),
             [
+                "blocktrans",
+                "blocktranslate",
                 "cache",
                 "get_available_languages",
                 "get_current_language",

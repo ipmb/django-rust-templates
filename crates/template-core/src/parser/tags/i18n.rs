@@ -1,14 +1,20 @@
-//! `i18n`'s eight non-translating tags — `django/templatetags/i18n.py` @ 6.0.9.
+//! `i18n`'s ten tags — `django/templatetags/i18n.py` @ 6.0.9.
 //!
-//! # Eight bodies, and the two that are not here
+//! # Ten bodies, and the library is complete
 //!
-//! The file registers ten tag names. Eight gain Rust compile functions here:
-//! `get_available_languages`, `get_language_info`, `get_language_info_list`,
-//! `get_current_language`, `get_current_language_bidi`, `translate`, `trans`
-//! and `language`. The two left — `blocktranslate`/`blocktrans`, one body
-//! (`do_block_translate`, `i18n.py:456-596`) — are M12 Task 6b's, and their
-//! *registry* entries deliberately stay absent so that this task's commit moves
-//! the library-tag predicate by exactly eight.
+//! The file registers ten tag names and all ten gain Rust compile functions
+//! here: `get_available_languages`, `get_language_info`,
+//! `get_language_info_list`, `get_current_language`,
+//! `get_current_language_bidi`, `translate`, `trans`, `language`,
+//! `blocktranslate` and `blocktrans`. The last two are **one body**
+//! ([`block_translate`], `i18n.py:456-596`) registered under two names, exactly
+//! as `translate`/`trans` are. Task 6a landed the first eight; Task 6b lands
+//! these two, which take `LIBRARY_REGISTRY` to the whole of
+//! `django_own_tags()`'s eighteen library names.
+//!
+//! `blocktranslate` is the milestone's one node with **no nodelist**: its body is
+//! a slice of the token stream, carried as [`AttrValue::Tokens`]. See
+//! [`block_translate`] for the scan and the four message shapes it produces.
 //!
 //! The file's four *filters* (`language_name`, `language_name_translated`,
 //! `language_name_local`, `language_bidi`, `i18n.py:293,298,304,309`) are Task
@@ -102,12 +108,13 @@
 //! [`Parser::compile_filter`]: crate::parser::Parser::compile_filter
 //! [`Parser::py_repr`]: crate::parser::Parser::py_repr
 
-use crate::parser::desc::{AttrValue, NodeDesc};
+use crate::parser::desc::{AttrValue, NodeDesc, TokenDesc};
 use crate::parser::error::Error;
+use crate::parser::kwargs::token_kwargs;
 use crate::parser::tags::{python_list_repr, split_contents};
 use crate::parser::Parser;
 use crate::pyunicode;
-use crate::token::Token;
+use crate::token::{Token, TokenType};
 
 /// `do_get_available_languages` (`i18n.py:219-239`).
 ///
@@ -299,6 +306,231 @@ pub fn language(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Erro
     let nodelist = parser.parse(&["endlanguage"])?;
     parser.delete_first_token();
     Ok(NodeDesc::with_nodelist("LanguageNode", "nodelist", nodelist).attr("language", language))
+}
+
+/// `do_block_translate` (`i18n.py:458-596`) — `{% blocktranslate %}` and
+/// `{% blocktrans %}`.
+///
+/// One body registered under two names (`i18n.py:456-457`), like [`translate`].
+/// It is the milestone's one node that carries no nodelist: `singular`/`plural`
+/// are **lists of `Token` objects** ([`AttrValue::Tokens`]), scanned out of the
+/// token stream and handed to `BlockTranslateNode`, whose `render_token_list`
+/// walks them by `token.token_type` and `token.contents`.
+///
+/// # The scan reassigns the function's own `token` parameter
+///
+/// `def do_block_translate(parser, token)` and the loop at `i18n.py:562-567`
+/// writes `token = parser.next_token()`, so the name after the loop is the last
+/// token *read*, not the tag's — and that is observable: when the stream ends
+/// before the end tag and nothing was read, `token` is still the tag's own, so
+/// `{% blocktranslate %}` alone reports `(seen 'blocktranslate')` while
+/// `{% blocktranslate %}x` reports `(seen 'x')` (the last TEXT token). Rust has
+/// no parameter aliasing, so the rule is carried by `scan_token` below, which
+/// starts as the tag's token and is overwritten by every read.
+///
+/// # The four message shapes come from *which scan stopped*
+///
+/// Not from "`count` decides": `count` only decides whether the plural check
+/// happens at all (`i18n.py:568`). The singular scan's stopping token is
+/// compared against `plural` and raises **without** naming it
+/// (`i18n.py:569-572`); the final token is compared against `end_tag_name` and
+/// raises **naming** it (`i18n.py:580-584`). So with `count` both forms are
+/// reachable — a `count` template whose `{% plural %}` is present and whose end
+/// tag is not takes the second. And the named token is whatever `scan_token`
+/// last held, which inside the plural scan is a TEXT or VAR token: the
+/// parenthetical can be a text node's *contents* (`... (seen 'many')`), not a
+/// tag name. Formatting it as a command, or stripping a `{% %}` wrapper, would
+/// diverge on a template Django accepts the shape of.
+///
+/// [`AttrValue::Tokens`]: crate::parser::desc::AttrValue::Tokens
+pub fn block_translate(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error> {
+    let bits = split_contents(token)?;
+    // A dispatched block tag always has a first bit — `Parser::parse` rejects an
+    // empty block tag before it looks the command up — so this is Django's
+    // `bits[1:]` without the slice's empty-safety dance.
+    let tag_name = bits[0].clone();
+    let mut remaining_bits: Vec<String> = bits[1..].to_vec();
+
+    // `options` is Django's dict, kept as ordered pairs so the duplicate check
+    // reads the source's `option in options` and the insertion order survives.
+    // Each value is stored as the `AttrValue` its branch produces: a `Map` for
+    // `with`/`count`, a compiled `FilterExpr` for `context`, `Bool` for
+    // `trimmed`, `Str` for `asvar`.
+    let mut options: Vec<(String, AttrValue)> = Vec::new();
+    let mut asvar: Option<String> = None;
+
+    while !remaining_bits.is_empty() {
+        let option = remaining_bits.remove(0);
+        // The duplicate check runs **before** dispatch (`i18n.py:506-509`), so a
+        // repeated option is refused even when its first use was valid. Only a
+        // recognised option can be in `options`, so `option` here is always one
+        // of the five ASCII names and its `%r` is the plain quoted form.
+        if options.iter().any(|(name, _)| name == &option) {
+            return Err(Error::syntax(format!(
+                "The {} option was specified more than once.",
+                parser.py_repr(&option),
+            )));
+        }
+        let value = if option == "with" {
+            let kwargs = {
+                let mut compile_filter = |source: &str| parser.compile_filter(source);
+                token_kwargs(&mut remaining_bits, &mut compile_filter, true)?
+            };
+            if kwargs.is_empty() {
+                return Err(Error::syntax(format!(
+                    "\"with\" in {} tag needs at least one keyword argument.",
+                    parser.py_repr(&tag_name),
+                )));
+            }
+            AttrValue::Map(kwargs)
+        } else if option == "count" {
+            let kwargs = {
+                let mut compile_filter = |source: &str| parser.compile_filter(source);
+                token_kwargs(&mut remaining_bits, &mut compile_filter, true)?
+            };
+            if kwargs.len() != 1 {
+                return Err(Error::syntax(format!(
+                    "\"count\" in {} tag expected exactly one keyword argument.",
+                    parser.py_repr(&tag_name),
+                )));
+            }
+            AttrValue::Map(kwargs)
+        } else if option == "context" {
+            // `except Exception`, not `except IndexError` (`i18n.py:524-530`): a
+            // **malformed filter** and a **missing argument** become the same
+            // message, so any failure from `compile_filter` is caught.
+            let Some(source) = remaining_bits.first().cloned() else {
+                return Err(Error::syntax(format!(
+                    "\"context\" in {} tag expected exactly one argument.",
+                    parser.py_repr(&tag_name),
+                )));
+            };
+            remaining_bits.remove(0);
+            match parser.compile_filter(&source) {
+                Ok(value) => value,
+                Err(_) => {
+                    return Err(Error::syntax(format!(
+                        "\"context\" in {} tag expected exactly one argument.",
+                        parser.py_repr(&tag_name),
+                    )))
+                }
+            }
+        } else if option == "trimmed" {
+            // The literal `True`, not a value read from `bits` (`i18n.py:531-532`).
+            AttrValue::Bool(true)
+        } else if option == "asvar" {
+            let Some(value) = remaining_bits.first().cloned() else {
+                // `%s` of `bits[0]` in Django's source, with the quotes in the
+                // format string — so the tag name goes in bare, not through `%r`.
+                return Err(Error::syntax(format!(
+                    "No argument provided to the '{}' tag for the asvar option.",
+                    tag_name,
+                )));
+            };
+            remaining_bits.remove(0);
+            asvar = Some(value.clone());
+            AttrValue::Str(value)
+        } else {
+            return Err(Error::syntax(format!(
+                "Unknown argument for {} tag: {}.",
+                parser.py_repr(&tag_name),
+                parser.py_repr(&option),
+            )));
+        };
+        options.push((option, value));
+    }
+
+    let (countervar, counter) = match options.iter().find(|(name, _)| name == "count") {
+        Some((_, AttrValue::Map(entries))) => {
+            // `next(iter(options["count"].items()))` — the dict has exactly one
+            // item, which the `count` branch above proved.
+            let (key, value) = entries
+                .first()
+                .cloned()
+                .expect("count carries exactly one keyword argument");
+            (Some(key), Some(value))
+        }
+        _ => (None, None),
+    };
+    let message_context = options
+        .iter()
+        .find(|(name, _)| name == "context")
+        .map(|(_, value)| value.clone())
+        .unwrap_or(AttrValue::None);
+    let extra_context = options
+        .iter()
+        .find(|(name, _)| name == "with")
+        .map(|(_, value)| value.clone())
+        .unwrap_or(AttrValue::Map(Vec::new()));
+    let trimmed = options.iter().any(|(name, _)| name == "trimmed");
+
+    // Django's `if countervar and counter:` (`i18n.py:568`), truthiness and all:
+    // `counter` is a `FilterExpression` and always truthy, so what the test
+    // really decides is that the `count` option is present with a non-empty
+    // name.
+    let has_counter =
+        countervar.as_deref().is_some_and(|name| !name.is_empty()) && counter.is_some();
+
+    let mut singular: Vec<TokenDesc> = Vec::new();
+    let mut plural: Vec<TokenDesc> = Vec::new();
+
+    // `while parser.tokens:` — read one token and stop at the first that is not
+    // TEXT or VAR. `scan_token` starts as the tag's own token, which is what
+    // `token` still holds when the stream is empty (see the doc above).
+    let mut scan_token = token.clone();
+    while let Some(next) = parser.next_token() {
+        scan_token = next;
+        if matches!(scan_token.token_type, TokenType::Var | TokenType::Text) {
+            singular.push(TokenDesc::of(&scan_token));
+        } else {
+            break;
+        }
+    }
+    if has_counter {
+        // `{% plural %}` is **not** a registered tag: it is compared as a bare
+        // string (`i18n.py:569`), which is why it in the wrong place produces
+        // this message rather than an unknown-tag error.
+        if pyunicode::strip(&scan_token.contents) != "plural" {
+            return Err(Error::syntax(format!(
+                "{} doesn't allow other block tags inside it",
+                parser.py_repr(&tag_name),
+            )));
+        }
+        while let Some(next) = parser.next_token() {
+            scan_token = next;
+            if matches!(scan_token.token_type, TokenType::Var | TokenType::Text) {
+                plural.push(TokenDesc::of(&scan_token));
+            } else {
+                break;
+            }
+        }
+    }
+
+    let end_tag_name = format!("end{}", tag_name);
+    if pyunicode::strip(&scan_token.contents) != end_tag_name {
+        return Err(Error::syntax(format!(
+            "{} doesn't allow other block tags (seen {}) inside it",
+            parser.py_repr(&tag_name),
+            parser.py_repr(&scan_token.contents),
+        )));
+    }
+
+    Ok(NodeDesc::new("BlockTranslateNode")
+        .attr("extra_context", extra_context)
+        .attr("singular", AttrValue::Tokens(singular))
+        .attr("plural", AttrValue::Tokens(plural))
+        .attr(
+            "countervar",
+            countervar.map(AttrValue::Str).unwrap_or(AttrValue::None),
+        )
+        .attr("counter", counter.unwrap_or(AttrValue::None))
+        .attr("message_context", message_context)
+        .attr("trimmed", AttrValue::Bool(trimmed))
+        .attr(
+            "asvar",
+            asvar.map(AttrValue::Str).unwrap_or(AttrValue::None),
+        )
+        .attr("tag_name", AttrValue::Str(tag_name)))
 }
 
 #[cfg(test)]
@@ -638,6 +870,278 @@ mod tests {
             ErrorKind::Syntax(
                 "Unclosed tag on line 1: 'language'. Looking for one of: endlanguage.".to_string(),
             ),
+        );
+    }
+
+    /// The `(token_type, contents)` of a `Tokens` attribute, so a row can state
+    /// the *scan* rather than the whole `TokenDesc`.
+    fn tokens_of(node: &NodeDesc, name: &str) -> Vec<(TokenType, String)> {
+        let AttrValue::Tokens(list) = attr(node, name) else {
+            panic!("{name} is not a Tokens attribute: {:?}", attr(node, name));
+        };
+        list.iter()
+            .map(|token| (token.token_type, token.contents.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn block_translate_carries_its_body_as_token_lists() {
+        // The milestone's one node with no nodelist and the one attribute that
+        // is a slice of the token stream: `singular` is the `Token` objects
+        // themselves, because `render_token_list` reads `token.token_type` and
+        // `token.contents` off them.
+        let node = compile_loaded("{% blocktranslate %}x{{ y }}{% endblocktranslate %}");
+        assert_eq!(node.class_name, "BlockTranslateNode");
+        assert!(
+            node.nodelists.is_empty(),
+            "`BlockTranslateNode` has no child nodelist: its body is tokens",
+        );
+        assert_eq!(
+            tokens_of(&node, "singular"),
+            [
+                (TokenType::Text, "x".to_string()),
+                (TokenType::Var, "y".to_string()),
+            ],
+            "both TEXT and VAR tokens are the body, contents kept verbatim",
+        );
+        assert_eq!(tokens_of(&node, "plural"), [], "no `count`, so no plural");
+        assert_eq!(
+            attr(&node, "tag_name"),
+            &AttrValue::Str("blocktranslate".to_string())
+        );
+    }
+
+    #[test]
+    fn block_translate_keeps_the_token_fields_not_just_the_contents() {
+        // `TokenDesc` and not a bare string: `lineno`/`position` are part of what
+        // the shell rebuilds a real `Token` from (the `Tokens` pyclass carries the
+        // same 4-tuple `_native.lex` emits), and dropping them would still render.
+        let node = compile_loaded("{% blocktranslate %}a\nb{% endblocktranslate %}");
+        let AttrValue::Tokens(list) = attr(&node, "singular") else {
+            panic!("singular is not Tokens");
+        };
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].token_type, TokenType::Text);
+        assert_eq!(list[0].contents, "a\nb");
+        assert_eq!(list[0].lineno, 1);
+        assert_eq!(list[0].position, None, "the non-debug lexer records none");
+    }
+
+    #[test]
+    fn block_translate_scans_the_plural_body_into_its_own_list() {
+        let node =
+            compile_loaded("{% blocktranslate count c=n %}a{% plural %}b{% endblocktranslate %}");
+        assert_eq!(
+            tokens_of(&node, "singular"),
+            [(TokenType::Text, "a".to_string())],
+        );
+        assert_eq!(
+            tokens_of(&node, "plural"),
+            [(TokenType::Text, "b".to_string())],
+        );
+        assert_eq!(attr(&node, "countervar"), &AttrValue::Str("c".to_string()));
+        assert_eq!(filter_token(attr(&node, "counter")), "n");
+    }
+
+    #[test]
+    fn block_translate_carries_the_whole_option_set() {
+        let node = compile_loaded(
+            "{% blocktranslate with a=1 context \"g\" trimmed asvar v %}x{% endblocktranslate %}",
+        );
+        let AttrValue::Map(extra) = attr(&node, "extra_context") else {
+            panic!("extra_context is not a Map");
+        };
+        assert_eq!(extra.len(), 1);
+        assert_eq!(extra[0].0, "a");
+        assert_eq!(filter_token(&extra[0].1), "1");
+        assert_eq!(filter_token(attr(&node, "message_context")), r#""g""#);
+        assert_eq!(attr(&node, "trimmed"), &AttrValue::Bool(true));
+        assert_eq!(attr(&node, "asvar"), &AttrValue::Str("v".to_string()));
+        // The option default: no `count` gives both a `None` name and a `None`
+        // counter, which the materialiser passes as the constructor defaults.
+        assert_eq!(attr(&node, "countervar"), &AttrValue::None);
+        assert_eq!(attr(&node, "counter"), &AttrValue::None);
+    }
+
+    #[test]
+    fn block_translate_defaults_with_empty_and_trimmed_false() {
+        let node = compile_loaded("{% blocktranslate %}x{% endblocktranslate %}");
+        assert_eq!(attr(&node, "extra_context"), &AttrValue::Map(Vec::new()));
+        assert_eq!(attr(&node, "trimmed"), &AttrValue::Bool(false));
+        assert_eq!(attr(&node, "asvar"), &AttrValue::None);
+        assert_eq!(attr(&node, "message_context"), &AttrValue::None);
+    }
+
+    #[test]
+    fn block_translate_supports_the_legacy_with_form() {
+        // `support_legacy=True` (`i18n.py:511`): the name is the third bit and the
+        // value the first (`base.py:1200`), exactly as `{% with %}`.
+        let node = compile_loaded("{% blocktranslate with a as b %}x{% endblocktranslate %}");
+        let AttrValue::Map(extra) = attr(&node, "extra_context") else {
+            panic!("extra_context is not a Map");
+        };
+        assert_eq!(extra.len(), 1);
+        assert_eq!(extra[0].0, "b");
+        assert_eq!(filter_token(&extra[0].1), "a");
+    }
+
+    #[test]
+    fn block_translate_needs_a_real_plural_section_when_count_is_given() {
+        // The family a port derives wrongly from reading the source: the missing
+        // plural is reported as a **block-tag** violation, with **no `(seen …)`**
+        // clause, and the message names the spelling used.
+        for source in [
+            "{% blocktranslate count n=x %}one{% endblocktranslate %}",
+            "{% blocktranslate count n=x %}one{% foo %}",
+        ] {
+            assert_eq!(
+                failure_loaded(source).kind,
+                ErrorKind::Syntax(
+                    "'blocktranslate' doesn't allow other block tags inside it".to_string(),
+                ),
+                "{source}",
+            );
+        }
+        // The alias as spelled, which is a different message from the same raise.
+        assert_eq!(
+            failure_loaded("{% blocktrans count n=x %}one{% endblocktrans %}").kind,
+            ErrorKind::Syntax("'blocktrans' doesn't allow other block tags inside it".to_string(),),
+        );
+    }
+
+    #[test]
+    fn block_translate_names_the_stopping_token_only_from_the_final_check() {
+        // Four shapes from two raise sites. Row three is the one no reading of the
+        // source produces: the parenthetical holds a TEXT token's *contents*,
+        // because it is whatever the reassigned `token` last held.
+        for (source, expected) in [
+            (
+                "{% blocktranslate count n=x %}one{% plural %}many{% foo %}",
+                "'blocktranslate' doesn't allow other block tags (seen 'foo') inside it",
+            ),
+            (
+                "{% blocktranslate count n=x %}one{% plural %}many",
+                "'blocktranslate' doesn't allow other block tags (seen 'many') inside it",
+            ),
+            (
+                "{% blocktranslate %}one{% plural %}many{% endblocktranslate %}",
+                "'blocktranslate' doesn't allow other block tags (seen 'plural') inside it",
+            ),
+            (
+                "{% blocktranslate %}x{% endblocktrans %}",
+                "'blocktranslate' doesn't allow other block tags (seen 'endblocktrans') inside it",
+            ),
+        ] {
+            assert_eq!(
+                failure_loaded(source).kind,
+                ErrorKind::Syntax(expected.to_string()),
+                "{source}",
+            );
+        }
+    }
+
+    #[test]
+    fn block_translate_reports_its_own_token_when_the_stream_runs_out() {
+        // Trap 2: `do_block_translate` reassigns its own `token` parameter, so an
+        // exhausted stream with nothing read leaves the tag's own token and
+        // `{% blocktranslate %}` reports itself. Rust has no parameter aliasing;
+        // the rule is `scan_token` starting at the tag's token.
+        assert_eq!(
+            failure_loaded("{% blocktranslate %}").kind,
+            ErrorKind::Syntax(
+                "'blocktranslate' doesn't allow other block tags (seen 'blocktranslate') inside it"
+                    .to_string(),
+            ),
+        );
+        // And once a token *has* been read, that one is reported instead — the
+        // last TEXT token, not the tag.
+        assert_eq!(
+            failure_loaded("{% blocktranslate %}x").kind,
+            ErrorKind::Syntax(
+                "'blocktranslate' doesn't allow other block tags (seen 'x') inside it".to_string(),
+            ),
+        );
+    }
+
+    #[test]
+    fn block_translate_option_scan_messages() {
+        for (source, expected) in [
+            (
+                "{% blocktranslate with %}",
+                "\"with\" in 'blocktranslate' tag needs at least one keyword argument.",
+            ),
+            (
+                "{% blocktranslate count %}",
+                "\"count\" in 'blocktranslate' tag expected exactly one keyword argument.",
+            ),
+            (
+                "{% blocktranslate count a=1 b=2 %}{% endblocktranslate %}",
+                "\"count\" in 'blocktranslate' tag expected exactly one keyword argument.",
+            ),
+            (
+                "{% blocktranslate context %}",
+                "\"context\" in 'blocktranslate' tag expected exactly one argument.",
+            ),
+            (
+                "{% blocktranslate asvar %}",
+                "No argument provided to the 'blocktranslate' tag for the asvar option.",
+            ),
+            (
+                "{% blocktranslate trimmed trimmed %}",
+                "The 'trimmed' option was specified more than once.",
+            ),
+            (
+                "{% blocktranslate with a=1 with b=2 %}",
+                "The 'with' option was specified more than once.",
+            ),
+            (
+                "{% blocktranslate nope %}",
+                "Unknown argument for 'blocktranslate' tag: 'nope'.",
+            ),
+        ] {
+            assert_eq!(
+                failure_loaded(source).kind,
+                ErrorKind::Syntax(expected.to_string()),
+                "{source}",
+            );
+        }
+    }
+
+    #[test]
+    fn block_translate_catches_a_malformed_context_filter() {
+        // `except Exception`, not `except IndexError` (`i18n.py:524-530`): a
+        // malformed filter becomes the *same* message as a missing argument.
+        // `x||y` is a filter chain Django cannot parse (`Could not parse some
+        // characters`), which `parse_filter_expression` raises before any host
+        // lookup — so `NoHost` is enough to reach the arm.
+        for source in [
+            "{% blocktranslate context %}",
+            "{% blocktranslate context x||y %}",
+        ] {
+            assert_eq!(
+                failure_loaded(source).kind,
+                ErrorKind::Syntax(
+                    "\"context\" in 'blocktranslate' tag expected exactly one argument."
+                        .to_string(),
+                ),
+                "{source}",
+            );
+        }
+    }
+
+    #[test]
+    fn block_translate_the_two_spellings_name_themselves() {
+        // `bits[0]` throughout, so one body registered twice produces two texts.
+        assert_eq!(
+            failure_loaded("{% blocktrans with %}").kind,
+            ErrorKind::Syntax(
+                "\"with\" in 'blocktrans' tag needs at least one keyword argument.".to_string(),
+            ),
+        );
+        let node = compile_loaded("{% blocktrans %}x{% endblocktrans %}");
+        assert_eq!(
+            attr(&node, "tag_name"),
+            &AttrValue::Str("blocktrans".to_string())
         );
     }
 }

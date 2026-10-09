@@ -21,11 +21,15 @@ the second. `parser.tags` holds the registered function object directly, so
 replacing the global changes nothing about routing — it only shows which body
 ran.
 
-**Covering three tags in two libraries.** The probe began as `l10n`'s alone and
+**Covering five tags in two libraries.** The probe began as `l10n`'s alone and
 was renamed when M12 Task 6a gave `i18n` its eight bodies: the question is the
 same for every ported library tag, and a per-library copy of the probe would be
 the drift this tree keeps writing rows against. The `l10n` case is kept
 unchanged as the historical measurement, so the rename is not a rewrite.
+M12 Task 6b adds the last one, `{% blocktranslate %}` (with `{% blocktrans %}` as
+the same body under the other name); it is the only node here whose constructor
+takes a positional list of Python `Token`s, but that changes the `control_args`
+and nothing about the signal.
 
 Measured at `ba64a52` (`M12: l10n is our module — the second count is 1`), for
 `l10n`:
@@ -36,7 +40,26 @@ Measured at `ba64a52` (`M12: l10n is our module — the second count is 1`), for
     {% localize %}     NODE_CLASSES : ['LocalizeNode', 'VariableNode']
                        localize_tag : (not called)
 
-and at this commit (M12 Task 6a), for `i18n`.
+at M12 Task 6a, for `i18n`:
+
+    control        : recorder fires
+    {% translate "Hello" %}      NODE_CLASSES : ['TranslateNode']
+                                 TranslateNode : (not called)
+    {% trans "Hello" noop %}     NODE_CLASSES : ['TranslateNode']
+                                 TranslateNode : (not called)
+    {% language "de" %}...{% endlanguage %}
+                                 NODE_CLASSES : ['LanguageNode', 'VariableNode']
+                                 LanguageNode : (not called)
+
+and at this commit (M12 Task 6b), for the last two registry names:
+
+    control        : recorder fires
+    {% blocktranslate %}x{% endblocktranslate %}
+                          NODE_CLASSES : ['BlockTranslateNode']
+                          BlockTranslateNode : (not called)
+    {% blocktrans %}x{% endblocktrans %}
+                          NODE_CLASSES : ['BlockTranslateNode']
+                          BlockTranslateNode : (not called)
 
 **Read that as the *compile function* being dead, and not as the module being
 inert.** The recorder observes the tag body — `localize_tag`, `do_translate`,
@@ -197,4 +220,18 @@ run(
     "LanguageNode",
     ('{% load i18n %}{% language "de" %}{{ x }}{% endlanguage %}',),
     ("control", _filter()),
+)
+
+# M12 Task 6b's addition. `BlockTranslateNode` is the one i18n node whose
+# `__init__` takes eight positional arguments — the two token lists are `[]`
+# here because the control only needs the constructor to fire, not to build a
+# real body. The two sources are the two registry names for one body.
+run(
+    "django.templatetags.i18n",
+    "BlockTranslateNode",
+    (
+        "{% load i18n %}{% blocktranslate %}x{% endblocktranslate %}",
+        "{% load i18n %}{% blocktrans %}x{% endblocktrans %}",
+    ),
+    ({}, [], [], None, _filter(), _filter(), False, None),
 )

@@ -170,7 +170,7 @@ class InterpositionTests(unittest.TestCase):
         ``{% if %}`` grammar into ``crates/template-core/src/parser/smartif.rs``,
         which the parse seam drives inside ``compile_template``, and the shell
         then materialises the resulting ``IfCondition`` tree into real
-        ``smartif`` objects (``template-py/src/lib.rs:692``). A row
+        ``smartif`` objects (``template-py/src/lib.rs:740``). A row
         named after the plan's premise would have asserted something untrue
         about a call that does not happen, so it is renamed and rewritten here;
         the substitution is recorded in the plan's Task 3 corrections.
@@ -2140,59 +2140,68 @@ class LibraryTagPredicateTests(unittest.TestCase):
     def test_the_clause_reads_a_library_tag_the_way_it_will_once_rust_owns_it(self):
         """The exact comparison `has_tag` makes, with the port staged.
 
-        `"blocktranslate"` is added to this host's `_rust_owned` and no further —
-        a local host, so nothing about the shipped routing changes and Task 2's
-        unchanged 18-`theirs` table stays the evidence that the widening alone is
-        behaviour-preserving.
+        **A fabricated name, not a real one.** This row staged `trans` while it
+        was a *future* Rust name; M12 Task 6a registered it and the unstaged
+        control below stopped answering True, failing loudly. It was repointed to
+        `blocktranslate` — the remaining unported name — and **Task 6b registers
+        that too**, so it is repointed once more to a name no registry can
+        overtake, spelled `unregistered_` (`FabricatedNameTests` states the
+        convention). M12 now owns all 18 library names, so no real library tag is
+        left to stage, and the fabricated name is what keeps the fixture a
+        negative forever.
 
-        **`blocktranslate` rather than `trans`, and this commit is why.** The row
-        staged `trans` while it was a *future* Rust name; M12 Task 6a registered
-        it, so the unstaged control below stopped answering True and the row
-        failed loudly — which is the expiry doing its job. `blocktranslate` is
-        the remaining unported name (Task 6b's) and the same shape of input: a
-        real library tag Rust does not own yet, so the staging still has two
-        answers to distinguish. Task 6b repoints it again, or the control fails
-        there for the same reason.
-
-        Two answers, and each is a different input: Django's own `blocktranslate`
-        bound by `{% load i18n %}` is **Rust's** to compile once staged (False),
-        and a library that rebinds `blocktranslate` is **the host's** (True).
-        Without the staging both names answer True by the early return, which is
-        why this row stages at all — an unstaged version asserts the early return
-        twice and says nothing about the clause.
+        The clause is `func is not self._django_tags.get(command)`: Rust's, unless
+        something replaced the registered callable — `add_library` is
+        `self.tags.update(lib.tags)` (`base.py:669-670`), so a `{% load %}` wins.
+        Two libraries and an injected `_django_tags` entry are the whole input:
+        one binds the fabricated name to the callable Django's own table holds
+        for it (False — Rust's), the other to a different callable (True — the
+        host's). Without the `_rust_owned` staging both answer True by the early
+        return, which is why this row stages at all — an unstaged version asserts
+        the early return twice and says nothing about the clause.
         """
-        import importlib
-
         from django.template import Library, Node
 
         from django_rust_templates.render import parser_for
+
+        name = "unregistered_blocktranslate"
 
         class ShadowNode(Node):
             def render(self, context):
                 return "shadow(blocktranslate)"
 
-        def compile_shadow_blocktranslate(parser, token):
+        # Two distinct callables: `rust_body` stands in for the callable Django's
+        # own table holds for the name, `shadow_body` for a library's replacement.
+        def rust_body(parser, token):
             return ShadowNode()
 
+        def shadow_body(parser, token):
+            return ShadowNode()
+
+        registered = Library()
+        registered.tag(name, rust_body)
         shadow = Library()
-        shadow.tag("blocktranslate", compile_shadow_blocktranslate)
+        shadow.tag(name, shadow_body)
 
         def routed(library):
             parser = parser_for("", Engine())
             parser.add_library(library)
             host = self.host_module.ShellHost(parser)
-            host._rust_owned = host._rust_owned | {"blocktranslate"}
-            return host.has_tag("blocktranslate")
+            host._rust_owned = host._rust_owned | {name}
+            # The fabricated name is in no registry, so `django_own_tags()` has
+            # no entry for it; injecting one is what lets the "the registered
+            # callable is Django's own" half be observable at all.
+            host._django_tags = {**host._django_tags, name: rust_body}
+            return host.has_tag(name)
 
-        i18n = importlib.import_module("django.templatetags.i18n")
         self.assertFalse(
-            routed(i18n.register),
-            "`{% load i18n %}` binds Django's own `blocktranslate`, so Rust owns "
-            "it — this is False only because the predicate now carries that callable",
+            routed(registered),
+            "the registered callable is the one Django's own table holds, so "
+            "Rust owns it",
         )
         self.assertTrue(
             routed(shadow),
-            "a library rebinding `blocktranslate` must still run its own body",
+            "a library rebinding the name must still run its own body",
         )
 
         # And the same two names without the staging: both True, so the row
@@ -2200,10 +2209,10 @@ class LibraryTagPredicateTests(unittest.TestCase):
         def unstaged(library):
             parser = parser_for("", Engine())
             parser.add_library(library)
-            return self.host_module.ShellHost(parser).has_tag("blocktranslate")
+            return self.host_module.ShellHost(parser).has_tag(name)
 
         self.assertTrue(
-            unstaged(i18n.register) and unstaged(shadow),
+            unstaged(registered) and unstaged(shadow),
             "the unstaged control did not answer True for both, so the staging "
             "above is not what makes the two answers differ",
         )
@@ -2405,11 +2414,10 @@ class I18nInterpositionTests(unittest.TestCase):
     """M12 Task 6a: ``i18n`` is our module — eight tags, seven node classes.
 
     ``django.templatetags.i18n`` is the fifth and last of the milestone's five
-    libraries, and the largest. Rust compiles **eight** of its ten tag names —
-    every one but ``blocktranslate``/``blocktrans``, which are Task 6b's — so
-    this commit is the one that takes the meter's second scope to zero and the
-    one that leaves ``BlockTranslateNode`` unregistered while the module is
-    already ours.
+    libraries, and the largest. Task 6a landed eight of its ten tag names; Task
+    6b adds ``blocktranslate``/``blocktrans`` — one body under two names, the
+    node that carries the token stream rather than a nodelist — so it is 6b that
+    takes the meter's second scope to zero and completes the library.
 
     **The five filters the same file registers — ``language_name``,
     ``language_name_translated``, ``language_name_local``, ``language_bidi`` and
@@ -2435,6 +2443,14 @@ class I18nInterpositionTests(unittest.TestCase):
     blind-spot probe (``.review/m12-measurements/m12_measure_instrument_blindspot.py``)
     shows repointing ``__file__`` alone flips 10 of 10. The rows below are the
     direct-entry version, so a green instrument is not the whole story.
+
+    6b's rows are at the end, and the two that matter are the ones no reading of
+    ``do_block_translate``'s source produces: the missing-``{% plural %}``
+    complaint is a *block-tag* message with **no** ``(seen …)`` clause (§4 trap
+    4), and the ``(seen …)`` text can hold a **TEXT token's contents** because
+    the scan loop reassigns the function's own ``token`` (§4 trap 2). Those two
+    are why the assertions are on the full message rather than on the exception
+    class.
     """
 
     @classmethod
@@ -2455,13 +2471,14 @@ class I18nInterpositionTests(unittest.TestCase):
         self.assertIn("_impl", module.__file__, module.__file__)
 
     def test_each_i18n_tag_compiles_to_our_node_class(self):
-        """The routing claim, end to end, for the eight names and seven classes.
+        """The routing claim, end to end, for the ten names and eight classes.
 
         ``translate`` and ``trans`` are one body under two registry entries, so
         both are asserted against the same class — the shape `static`'s three
-        tag names have. The node class is compared *by identity* to the one our
-        transcribed module defines, which is the object `get_nodes_by_type` and
-        every downstream ``isinstance`` sees.
+        tag names have, and the same shape ``blocktranslate``/``blocktrans``
+        have from Task 6b. The node class is compared *by identity* to the one
+        our transcribed module defines, which is the object
+        ``get_nodes_by_type`` and every downstream ``isinstance`` sees.
         """
         import importlib
         import inspect
@@ -2495,6 +2512,14 @@ class I18nInterpositionTests(unittest.TestCase):
             (
                 '{% load i18n %}{% language "de" %}x{% endlanguage %}',
                 "LanguageNode",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate %}x{% endblocktranslate %}",
+                "BlockTranslateNode",
+            ),
+            (
+                "{% load i18n %}{% blocktrans %}x{% endblocktrans %}",
+                "BlockTranslateNode",
             ),
         ]:
             with self.subTest(source=source):
@@ -2734,6 +2759,274 @@ class I18nInterpositionTests(unittest.TestCase):
             str(caught.exception),
             "Unclosed tag on line 1: 'language'. Looking for one of: endlanguage.",
         )
+
+    # --- M12 Task 6b: `{% blocktranslate %}` / `{% blocktrans %}` -----------
+
+    def test_block_translate_carries_the_token_stream_and_no_nodelist(self):
+        """The one node in the milestone with no child nodelist.
+
+        ``singular``/``plural`` are lists of real ``Token`` objects — the wire
+        type is ``AttrValue::Tokens``, and a shell that decoded the body to
+        strings would still render, so this asserts the *objects*. Then
+        ``get_nodes_by_type``: ``Node.child_nodelists`` is ``("nodelist",)`` and
+        the walk reads ``getattr(self, attr, None)`` (``base.py:1079``), so a
+        node with no ``nodelist`` is skipped silently — confirmed here rather
+        than assumed (§4 trap 7).
+        """
+        from django.template.base import Token, TokenType
+
+        engine = self._engine()
+        template = engine.from_string(
+            "{% load i18n %}{% blocktranslate %}x{{ y }}{% endblocktranslate %}"
+        )
+        node = next(
+            n for n in template.nodelist if type(n).__name__ == "BlockTranslateNode"
+        )
+        self.assertEqual([type(item) for item in node.singular], [Token, Token])
+        self.assertEqual(
+            [(item.token_type, item.contents) for item in node.singular],
+            [(TokenType.TEXT, "x"), (TokenType.VAR, "y")],
+        )
+        self.assertEqual(node.plural, [], "no `count`, so no plural split")
+        # The walk finds the node and nothing under it: there is no `nodelist`
+        # to descend into, and no token in the two lists holds a node.
+        self.assertEqual(node.get_nodes_by_type(type(node)), [node])
+
+    def test_block_translate_the_four_message_shapes(self):
+        """Four shapes from two raise sites, and the reassigned parameter.
+
+        Row three is the one no reading of ``do_block_translate`` produces: the
+        parenthetical holds a **TEXT token's contents** (``many``), because the
+        scan loop writes ``token = parser.next_token()`` — the function's own
+        parameter — and inside the plural scan the last write was a text token.
+        Row one is the other message, with **no** ``(seen …)``, and it is
+        reachable *with* ``count``: `{% plural %}`'s absence is reported by the
+        singular scan, not by the final check.
+        """
+        from django.template import TemplateSyntaxError
+
+        engine = self._engine()
+        for source, expected in [
+            (
+                "{% load i18n %}{% blocktranslate count n=x %}one{% endblocktranslate %}",
+                "'blocktranslate' doesn't allow other block tags inside it",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate count n=x %}one{% plural %}many{% foo %}",
+                "'blocktranslate' doesn't allow other block tags (seen 'foo') inside it",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate count n=x %}one{% plural %}many",
+                "'blocktranslate' doesn't allow other block tags (seen 'many') inside it",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate %}one{% plural %}many{% endblocktranslate %}",
+                "'blocktranslate' doesn't allow other block tags (seen 'plural') inside it",
+            ),
+            # The end-tag failures, one per scan, and the alias as spelled.
+            (
+                "{% load i18n %}{% blocktranslate %}x{% endblocktrans %}",
+                "'blocktranslate' doesn't allow other block tags (seen 'endblocktrans') inside it",
+            ),
+            (
+                "{% load i18n %}{% blocktrans %}x{% endblocktranslate %}",
+                "'blocktrans' doesn't allow other block tags (seen 'endblocktranslate') inside it",
+            ),
+        ]:
+            with self.subTest(source=source):
+                with self.assertRaises(TemplateSyntaxError) as caught:
+                    engine.from_string(source)
+                self.assertEqual(str(caught.exception), expected)
+
+    def test_block_translate_reports_its_own_token_when_the_stream_ends(self):
+        """Trap 2: ``token`` starts as the tag's own token and is reassigned.
+
+        So ``{% blocktranslate %}`` with nothing after it names *itself*, and a
+        template whose last token before exhaustion was text names that text.
+        Both are the same raise site; what differs is which token the scan last
+        held. Rust has no parameter aliasing, so this is the rule it must
+        reproduce.
+        """
+        from django.template import TemplateSyntaxError
+
+        engine = self._engine()
+        for source, seen in [
+            ("{% load i18n %}{% blocktranslate %}", "blocktranslate"),
+            ("{% load i18n %}{% blocktranslate %}x", "x"),
+        ]:
+            with self.subTest(source=source):
+                with self.assertRaises(TemplateSyntaxError) as caught:
+                    engine.from_string(source)
+                self.assertEqual(
+                    str(caught.exception),
+                    f"'blocktranslate' doesn't allow other block tags "
+                    f"(seen {seen!r}) inside it",
+                )
+
+    def test_block_translate_option_scan_messages(self):
+        """Every option-scan branch, each message written out in full.
+
+        The duplicate check runs **before** dispatch (``i18n.py:506-509``), so
+        ``trimmed trimmed`` reports the duplicate and not anything about the
+        repeated option's value — the row is one of a pair per branch.
+        ``context``'s failure handling is ``except Exception``
+        (`i18n.py:524-530`), not ``except IndexError``, so a *malformed filter*
+        and a *missing argument* share one message: the ``x||y`` row is the
+        malformed-filter half (§4 trap 5).
+        """
+        from django.template import TemplateSyntaxError
+
+        engine = self._engine()
+        for source, expected in [
+            (
+                "{% load i18n %}{% blocktranslate with %}",
+                "\"with\" in 'blocktranslate' tag needs at least one keyword argument.",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate count %}",
+                "\"count\" in 'blocktranslate' tag expected exactly one keyword argument.",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate count a=1 b=2 %}{% endblocktranslate %}",
+                "\"count\" in 'blocktranslate' tag expected exactly one keyword argument.",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate context %}",
+                "\"context\" in 'blocktranslate' tag expected exactly one argument.",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate context x||y %}",
+                "\"context\" in 'blocktranslate' tag expected exactly one argument.",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate asvar %}",
+                "No argument provided to the 'blocktranslate' tag for the asvar option.",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate trimmed trimmed %}",
+                "The 'trimmed' option was specified more than once.",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate with a=1 with b=2 %}",
+                "The 'with' option was specified more than once.",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate nope %}",
+                "Unknown argument for 'blocktranslate' tag: 'nope'.",
+            ),
+        ]:
+            with self.subTest(source=source):
+                with self.assertRaises(TemplateSyntaxError) as caught:
+                    engine.from_string(source)
+                self.assertEqual(str(caught.exception), expected)
+
+        # The alias reports its own spelling, so the same raise yields two texts.
+        with self.assertRaises(TemplateSyntaxError) as caught:
+            engine.from_string("{% load i18n %}{% blocktrans with %}")
+        self.assertEqual(
+            str(caught.exception),
+            "\"with\" in 'blocktrans' tag needs at least one keyword argument.",
+        )
+
+    def test_block_translate_renders(self):
+        """The render-time rows, through the shell and Django's own node.
+
+        Each is a value the port must produce, and the count family is a pair —
+        ``b`` for two and ``a`` for one — because a port that ignored the count
+        would render one of them for both. ``count c=s`` is the type check
+        (`i18n.py:161-165`), raised at *render* time off the compiled
+        expression. The two trim rows differ only by the option.
+        """
+        from django.template import TemplateSyntaxError
+
+        engine = self._engine()
+        for source, context, expected in [
+            (
+                "{% load i18n %}{% blocktranslate count c=n %}a{% plural %}b{% endblocktranslate %}",
+                {"n": 2},
+                "b",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate count c=n %}a{% plural %}b{% endblocktranslate %}",
+                {"n": 1},
+                "a",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate count c=n %}{% plural %}b{% endblocktranslate %}",
+                {"n": 1},
+                "",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate asvar v %}hi{% endblocktranslate %}[{{ v }}]",
+                {},
+                "[hi]",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate with x=y %}{{ x }}{% endblocktranslate %}",
+                {"y": 7},
+                "7",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate %}{{ missing }}{% endblocktranslate %}",
+                {},
+                "",
+            ),
+            (
+                "{% load i18n %}{% blocktrans %}x{% endblocktrans %}",
+                {},
+                "x",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate trimmed %}\n   a   b\n{% endblocktranslate %}",
+                {},
+                "a   b",
+            ),
+            (
+                "{% load i18n %}{% blocktranslate %}\n   a   b\n{% endblocktranslate %}",
+                {},
+                "\n   a   b\n",
+            ),
+        ]:
+            with self.subTest(source=source):
+                template = engine.from_string(source)
+                self.assertEqual(template.render(Context(context)), expected)
+
+        with self.assertRaises(TemplateSyntaxError) as caught:
+            engine.from_string(
+                "{% load i18n %}{% blocktranslate count c=s %}a{% plural %}b{% endblocktranslate %}"
+            ).render(Context({"s": "x"}))
+        self.assertEqual(
+            str(caught.exception),
+            "'c' argument to 'blocktranslate' tag must be a number.",
+        )
+
+    def test_block_translate_is_legal_inside_a_block(self):
+        """Trap 7: a node with no nodelist that Django still nests.
+
+        `{% blocktranslate %}` inside `{% block %}` is legal, and the walk that
+        `ExtendsNode` and `get_nodes_by_type` use must still find it — the block
+        *has* a nodelist and the translate node sits in it, so the finding is
+        about the container, and it confirms the node itself contributes no
+        children of its own. `{% plural %}` is **not** a registered tag (§4
+        trap 3), so on its own it is an `Invalid block tag`; inside
+        `{% blocktranslate %}` the scan consumes it and the parser never sees
+        it.
+        """
+        from django.template import TemplateSyntaxError
+        from django.templatetags.i18n import BlockTranslateNode
+
+        engine = self._engine()
+        template = engine.from_string(
+            "{% load i18n %}{% block a %}{% blocktranslate %}x"
+            "{% endblocktranslate %}{% endblock %}"
+        )
+        block = next(n for n in template.nodelist if type(n).__name__ == "BlockNode")
+        found = block.get_nodes_by_type(BlockTranslateNode)
+        self.assertEqual(len(found), 1, "the walk did not find the nested node")
+
+        with self.assertRaises(TemplateSyntaxError) as caught:
+            engine.from_string("{% load i18n %}{% plural %}")
+        self.assertIn("Invalid block tag", str(caught.exception))
 
 
 class DefaultTagsInterpositionTests(unittest.TestCase):

@@ -56,6 +56,7 @@ from django.template.defaulttags import (
 from django.template.loader_tags import BlockNode, ExtendsNode, IncludeNode
 from django.templatetags.cache import CacheNode
 from django.templatetags.i18n import (
+    BlockTranslateNode,
     GetAvailableLanguagesNode,
     GetCurrentLanguageBidiNode,
     GetCurrentLanguageNode,
@@ -154,22 +155,30 @@ NODE_CLASSES = {
     "FilterNode": FilterNode,
     "FirstOfNode": FirstOfNode,
     "ForNode": ForNode,
-    # M12 Task 6a's seven, `django.templatetags.i18n`'s. Ordinary keyword
-    # constructors like every entry here but `IfChangedNode` —
+    # M12 Task 6a's seven, `django.templatetags.i18n`'s, plus Task 6b's
+    # `BlockTranslateNode` — the whole of that library's node set. All are
+    # ordinary keyword constructors like every entry here but `IfChangedNode` —
     # `GetAvailableLanguagesNode.__init__(self, variable)` (`i18n.py:14`),
     # `GetLanguageInfoNode.__init__(self, lang_code, variable)` (`i18n.py:25`),
     # `GetLanguageInfoListNode.__init__(self, languages, variable)`
     # (`i18n.py:36`), `GetCurrentLanguageNode.__init__(self, variable)`
     # (`i18n.py:55`), `GetCurrentLanguageBidiNode.__init__(self, variable)`
     # (`i18n.py:64`), `TranslateNode.__init__(self, filter_expression, noop,
-    # asvar=None, message_context=None)` (`i18n.py:75`) and
-    # `LanguageNode.__init__(self, nodelist, language)` (`i18n.py:208`) — so the
-    # bare class is the factory. **`BlockTranslateNode` is deliberately absent:
-    # it is M12 Task 6b's**, and its refusal row in `test_materialise.py` stays
-    # green until then. `TranslateNode.__init__` rewrites a literal operand in
-    # place (`i18n.py:80-82`), which is this class's job and not Rust's — the
+    # asvar=None, message_context=None)` (`i18n.py:75`),
+    # `LanguageNode.__init__(self, nodelist, language)` (`i18n.py:208`) and
+    # `BlockTranslateNode.__init__(self, extra_context, singular, plural=None,
+    # countervar=None, counter=None, message_context=None, trimmed=False,
+    # asvar=None, tag_name="blocktranslate")` (`i18n.py:105-116`) — so the bare
+    # class is the factory. `TranslateNode.__init__` rewrites a literal operand
+    # in place (`i18n.py:80-82`), which is this class's job and not Rust's — the
     # materialiser runs the real constructor, so the rewrite happens exactly
     # once, here.
+    #
+    # `BlockTranslateNode` is the one whose `singular`/`plural` arrive as
+    # `AttrValue::Tokens` — a list of real `Token`s rather than a subtree. The
+    # `_decode_value` arm below is what turns them back into the objects
+    # `render_token_list` walks.
+    "BlockTranslateNode": BlockTranslateNode,
     "GetAvailableLanguagesNode": GetAvailableLanguagesNode,
     "GetCurrentLanguageBidiNode": GetCurrentLanguageBidiNode,
     "GetCurrentLanguageNode": GetCurrentLanguageNode,
@@ -753,6 +762,16 @@ def _decode_value(value, resolve_ref=None, parser=None, child_lists=None):
             ) from None
     if isinstance(value, _native.SafeStr):
         return mark_safe(value.text)
+    if isinstance(value, _native.Tokens):
+        # `AttrValue::Tokens` — `BlockTranslateNode.singular`/`.plural`. The one
+        # attribute that is a slice of the *token stream* rather than a subtree,
+        # and the reason it is its own wire class: a bare list of 4-tuples would
+        # decode through the `list` arm below into plain tuples, and
+        # `render_token_list`'s `token.token_type` would be an `AttributeError`
+        # at *render* time, after a parse that looked fine. Each element is
+        # rebuilt with `_decode_token`, so the token wire form stays single-spelt
+        # (`_native.lex` and `NodeDesc.token` use it too).
+        return [_decode_token(wire) for wire in value.tokens]
     # Both expressions are `#[pyclass]`es, so neither is an instance of the other
     # and their relative order is free. What is *not* free is that they come
     # before the sequence arms below: a descriptor that reached

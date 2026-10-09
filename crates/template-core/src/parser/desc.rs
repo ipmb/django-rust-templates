@@ -227,6 +227,35 @@ pub enum AttrValue {
     /// two more `IfConditionDesc`s, so an unboxed variant is an infinitely sized
     /// type (`E0072`).
     IfCondition(Box<IfConditionDesc>),
+    /// A list of **tokens**, not of nodes — `BlockTranslateNode.singular` and
+    /// `.plural`.
+    ///
+    /// The one attribute in the milestone whose value is a slice of the *token
+    /// stream* rather than a subtree. `BlockTranslateNode` carries no nodelist at
+    /// all: the body of a `{% blocktranslate %}` is scanned token by token
+    /// (`i18n.py:560-578`) and handed to the node as the `Token` objects
+    /// themselves, which `render_token_list` (`i18n.py:134-146`) then walks by
+    /// `token.token_type` and `token.contents` to build the gettext message —
+    /// TEXT contents verbatim (with `%` doubled) and VAR contents as a `%(name)s`
+    /// placeholder. A nodelist would lose both facts: the message needs the raw
+    /// *spelling* of each `{{ … }}` (the variable name as written, not a resolved
+    /// value) and the text around it, and Django builds it before any context
+    /// exists.
+    ///
+    /// **Its own variant, not [`AttrValue::List`].** The list arm converts
+    /// element-wise through the existing arms and none of them produces an
+    /// `AttrValue` that is a token, so a `List` of anything would arrive in
+    /// Python as something else entirely — see the `Tokens` pyclass in
+    /// `template-py`, which exists for [`AttrValue::NodeListRef`]'s reason: the
+    /// wire types are told apart by pyclass, and a bare 4-tuple would decode
+    /// through the *tuple* arm into a plain Python tuple whose `.token_type` is
+    /// an `AttributeError` at render time, after a parse that looked fine.
+    ///
+    /// It carries [`TokenDesc`], which already exists as `NodeDesc.token`'s type;
+    /// the descriptor's positional token field and an attribute-valued token list
+    /// are the same four fields, and a second token type would be a second thing
+    /// to keep in step.
+    Tokens(Vec<TokenDesc>),
 }
 
 /// One node of a `{% if %}` condition — `smartif.TokenBase` and its two

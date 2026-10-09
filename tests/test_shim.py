@@ -592,8 +592,10 @@ class NamespaceTests(unittest.TestCase):
         empty. This is the commit the milestone's second scope was for: it
         started at Django's five libraries and now names none of them, and
         ``unshimmed(scope="django.templatetags")`` returning ``[]`` is the
-        measurement that says so. Task 6b ports ``blocktranslate``'s *bodies*
-        and moves this count not at all.
+        measurement that says so. Task 6b ported ``blocktranslate``'s *bodies*
+        and moved this count not at all — it is still ``[]`` below, because the
+        count is **file ownership** and 6b added no file: ``i18n.py`` was already
+        ours when 6a interposed it.
         """
         _shim.install()
         self.assertEqual(_shim.unshimmed(), _shim.unshimmed(scope="django.template"))

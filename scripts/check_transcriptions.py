@@ -417,25 +417,33 @@ COMPARED_PATH = {
     # `test_the_compared_path_is_the_measured_one` would fail in the commit that
     # added it.
     "templatetags/l10n.py": [],
-    # M12 Task 6a's, measured with the same instrument rather than copied:
-    # `m9_measure_parse_path.py templatetags/i18n.py` reports **0 of 31**
-    # functions over both corpora (hand-written 166: 0; generated 400: 0), and
+    # M12 Task 6b's, measured with the same instrument rather than copied:
+    # `m9_measure_parse_path.py templatetags/i18n.py` reports **2 of 31**
+    # functions over both corpora (hand-written 172: 2; generated 400: 0), and
     # the 31 is `definitions()`' counting unit — **12 module-level defs** (the
     # seven tag bodies behind the eight names — `trans` aliases `translate` —
-    # plus `do_block_translate` which is Task 6b's, plus the
+    # plus `do_block_translate`, plus the
     # four filters `language_name`, `language_name_translated`,
     # `language_name_local` and `language_bidi` at `i18n.py:293,298,304,309`)
     # plus **19 methods** on the eight node classes (two each on the six flat
     # nodes, three on `GetLanguageInfoListNode` — `get_language_info` is its
-    # extra — and four on `BlockTranslateNode`). The zero has `cache.py`'s,
-    # `tz.py`'s and `l10n.py`'s reason one library further on:
-    # `tests/parser_corpus.py`'s `{% load %}` rows reach the `template_tests.*`
-    # libraries and never `django.templatetags.i18n`, so every one of the 31 is
-    # defined and simply not entered. The re-measurement row keeps it honest — a
-    # corpus that grew a `{% load i18n %}` row would move this entry, and
+    # extra — and four on `BlockTranslateNode`). Task 6a measured a zero, and
+    # 6b's corpus rows are what moved it: the `{% load i18n %}` rows reach
+    # `django.templatetags.i18n`, and the `{% blocktranslate %}` rows run its
+    # compile function on **both** sides — `do_block_translate` (458-598) when
+    # the reference parser compiles the tag, and `BlockTranslateNode.__init__`
+    # (107-127) when the tree is materialised. The other **29** are still
+    # `cache.py`'s case one library over: the corpus reaches only
+    # `blocktranslate`/`blocktrans` among the eight names, so the other seven
+    # tag bodies and every node method but `BlockTranslateNode.__init__` are
+    # defined and simply not entered. The re-measurement row keeps it honest —
+    # a corpus row that reached another name would move this entry, and
     # `test_the_compared_path_is_the_measured_one` would fail in the commit that
     # added it.
-    "templatetags/i18n.py": [],
+    "templatetags/i18n.py": [
+        (107, 127, "BlockTranslateNode.__init__"),
+        (458, 598, "do_block_translate"),
+    ],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])

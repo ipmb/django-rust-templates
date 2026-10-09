@@ -168,7 +168,7 @@ propagates like a copied citation.
 | `LookupError` | `Step` (`resolve.rs:28`) + `LookupOutcome` (`resolve.rs:253`) | **split**; a per-bit verdict and a whole-path verdict are different lifetimes |
 | `ExtensionHost` | `Host` + `FilterHost` | **split**; the tag half and the value half have no method in common |
 | `ExtensionHost::call_tag` | `Host::call_tag` | **real**, in service |
-| `ExtensionHost::filter_flags` | `_native.filter_flags` (`template-py/src/lib.rs:144`) | **real**, but a free function: `template-core` never reads a flag, the binding does |
+| `ExtensionHost::filter_flags` | `_native.filter_flags` (`template-py/src/lib.rs:146`) | **real**, but a free function: `template-core` never reads a flag, the binding does |
 | `ExtensionHost::call_filter` | — | **retired** |
 | `ExtensionHost::render_foreign_node` | — | **retired** |
 | `ExtensionHost::annotate_exception` | — | **open obligation** |
@@ -1114,7 +1114,7 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   is 22, `builtin_tag_stub_names()` is `['partial', 'partialdef']`. And `block`,
   `extends` and `include` are **excluded from the host** at M6. They are Django's
   builtins but not Rust's, and `NodeDesc.must_be_first` does not cross the seam
-  (`desc.rs:407`, defaulted `false` at `desc.rs:445`), so a host-compiled
+  (`desc.rs:436`, defaulted `false` at `desc.rs:474`), so a host-compiled
   `{% extends %}` would be accepted **and** uncheckable — its must-be-first rule
   silently absent.
   Accepting a tag whose ordering rule does not exist here is worse than today's

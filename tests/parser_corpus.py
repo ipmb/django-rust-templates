@@ -31,6 +31,12 @@ LIBRARIES = {
     # bad_tag %}{% badtag %}")` must raise `RuntimeError`, and that test is in
     # the 1547.
     "bad_tag": "template_tests.templatetags.bad_tag",
+    # The stdlib library the M12 `blocktranslate` rows reach. A dotted path like
+    # the rest, so both sides get the *same* module-level `Library` object —
+    # `django.templatetags.i18n` resolves to Django's own file here (this module
+    # is not the shim's), and its node classes are the ones the materialiser's
+    # `NODE_CLASSES` builds from our descriptors.
+    "i18n": "django.templatetags.i18n",
 }
 
 
@@ -344,6 +350,32 @@ TEMPLATES = [
     # The variable form, which is why this tag splits with `split_contents()`
     # too.
     "{% include template_name %}",
+    # --- M12 Task 6b: `{% blocktranslate %}` / `{% blocktrans %}` -----------
+    # The one node whose body is the token stream itself rather than a nodelist:
+    # `BlockTranslateNode.singular`/`.plural` are **lists of `Token`**, so these
+    # are the rows that first carry a `Token` through `describe` (see its `Token`
+    # arm) — a value type with no `__eq__`, which is why they are parity rows and
+    # not only render rows.
+    #
+    # The library path is `LIBRARIES["i18n"]` above. The minimal row first, then
+    # one that puts both token kinds in the body, since a TEXT-only row cannot
+    # tell a port that keeps the stream from one that keeps strings.
+    "{% load i18n %}{% blocktranslate %}x{% endblocktranslate %}",
+    "{% load i18n %}{% blocktranslate %}x{{ y }}{% endblocktranslate %}",
+    # The alias, registered under the same body: the node records the *spelling*
+    # (`tag_name`), which is what its error messages echo.
+    "{% load i18n %}{% blocktrans %}x{% endblocktrans %}",
+    # `count` gives both a counter variable and a counter expression and splits
+    # the body at `{% plural %}` into a second token list.
+    "{% load i18n %}{% blocktranslate count c=n %}a{% plural %}b{% endblocktranslate %}",
+    # Every option at once: `with` (a compiled `FilterExpression` per entry),
+    # `context` (one more), `trimmed` (a bool, not a string), and `asvar` (a
+    # name), so the whole descriptor body is on the wire in one row.
+    '{% load i18n %}{% blocktranslate with a=1 context "g" trimmed asvar v %}x{% endblocktranslate %}',
+    # The legacy `with … as …` form (`support_legacy=True`), which reverses the
+    # keyword's name and value — a port that calls `token_kwargs` without the
+    # flag compiles `a` as the name and `b` as the value and still parses.
+    "{% load i18n %}{% blocktranslate with a as b %}x{% endblocktranslate %}",
 ]
 
 

@@ -171,7 +171,26 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # a modification, not an addition. `git diff tests/` since `b83ec01` is `+12` rows
 # in three files, no removals (measured by discovery, and the failure text before
 # the pin moved read `discovery found 426 tests, the pin says 414`).
-PINNED = 426
+#
+# 426 → 432 is M12 Task 6b, a **net six** in three files — and it is a net
+# because one row *left*. `test_interposition.py::I18nInterpositionTests`
+# contributes **six** (the token stream and the absent nodelist;
+# `{% blocktranslate %}` inside `{% block %}` with `{% plural %}`'s
+# unregisteredness; the four message shapes plus the two end-tag ones; trap 2's
+# own-token-before-exhaustion case; the nine option-scan messages with the
+# malformed-`context` filter; and the render rows with the count-type refusal).
+# `test_parser_parity.py` contributes **one**
+# (`test_a_block_translate_body_is_a_list_of_real_tokens`) — the class the new
+# corpus rows carry. `test_materialise.py` **loses one**:
+# `test_the_refusal_is_live_for_block_translate_node_until_task_6` is deleted in
+# the commit that registers the entry, which its own docstring said was its
+# whole purpose; the registration row beside it gains `BlockTranslateNode`
+# as a modification, not a row. `LibraryTagPredicateTests`' staged-name row is
+# likewise repointed, not added. `git diff tests/` since `ec47f4f` is `+8/-1`
+# rows in three files, so 426 + 8 - 1 = 432 — measured by discovery (and the
+# failure text before the pin moved read
+# `discovery found 432 tests, the pin says 426`).
+PINNED = 432
 
 
 def collected() -> unittest.TestSuite:

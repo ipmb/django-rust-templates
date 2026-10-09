@@ -57,6 +57,8 @@ from django.template.base import (  # noqa: E402
     NodeList,
     Origin,
     Parser,
+    Token,
+    TokenType,
 )
 from django.template.base import FilterExpression, Variable  # noqa: E402
 from django.template.engine import Engine  # noqa: E402
@@ -232,6 +234,18 @@ def describe(value):
         return describe_filter_expression(value)
     if isinstance(value, Variable):
         return describe_variable(value)
+    if isinstance(value, Token):
+        # The class body at `base.py:358-403` defines no `__eq__` — verified in
+        # the pinned tree — so two tokens with the
+        # same four fields compared unequal by identity — the same failure the
+        # arms above exist for, one level down. `BlockTranslateNode.singular` and
+        # `.plural` are the first attributes in the corpus that hold the token
+        # stream itself rather than a value built from it, which is why this arm
+        # arrives with M12 Task 6b rather than with the nodes that carry a
+        # `token`. All four fields are compared, `position` included: it is the
+        # one field the non-debug lexer leaves `None`, so including it is what
+        # makes a dropped position a diff instead of a coincidence.
+        return token_shape(value)
     if isinstance(value, SafeData):
         # `SafeString` subclasses `str`, so a value-only comparison cannot tell
         # a marked-safe literal from a plain one — and the mark is what decides
@@ -513,6 +527,36 @@ class CorpusParityTests(unittest.TestCase):
         # pinned tree: `(19, 31)`, with `(0, 19)` for the `{% load %}` before it.
         self.assertEqual(host.token.position, (19, 31))
         self.assertIsNotNone(rust.token.position)
+
+    def test_a_block_translate_body_is_a_list_of_real_tokens(self):
+        """`BlockTranslateNode` is the one node whose body is the token stream
+        itself rather than a nodelist, and `AttrValue::Tokens` is the wire type
+        that carries it into `singular`/`plural`.
+
+        Named, beside the corpus rows that exercise it, because every other row
+        would still pass if the shell decoded the body to a list of *strings*:
+        `describe` compares a `Token` by its four fields (`token_shape`), and the
+        render path reads `token.token_type` and `token.contents` off a real
+        object. So this asserts the objects, and all four fields — `position`
+        included, which is `None` here and non-`None` for the debug lexer, the
+        field that tells a stamped token from a rebuilt one.
+        """
+        tree = ours_parse(
+            "{% load i18n %}{% blocktranslate %}x{{ y }}{% endblocktranslate %}",
+            debug=False,
+        )
+        node = tree[1]
+        self.assertEqual(type(node).__name__, "BlockTranslateNode")
+        self.assertEqual([type(item) for item in node.singular], [Token, Token])
+        self.assertEqual(
+            [token_shape(item) for item in node.singular],
+            [
+                (TokenType.TEXT.value, "x", 1, None),
+                (TokenType.VAR.value, "y", 1, None),
+            ],
+        )
+        # No `count`, so no `{% plural %}` split: an empty list, not `None`.
+        self.assertEqual(node.plural, [])
 
     def test_the_corpus_covers_every_implemented_tag_with_a_success_path(self):
         """Every tag the engine can *parse* has a happy-path corpus row.
