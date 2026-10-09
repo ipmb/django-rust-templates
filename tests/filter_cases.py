@@ -326,11 +326,11 @@ def _typeerror_from_membership(value) -> str:
     Django's: Django supplies only the call site
     (`django/utils/translation/__init__.py:279`, `if "-" not in lang_code:`),
     whose expression this function reproduces on the row's own value.
-    CPython re-worded this refusal at **3.14** — 3.9 through 3.13 say
-    `argument of type 'int' is not iterable`, where 3.14.4 (this interpreter)
-    says `argument of type 'int' is not a container or iterable` — so a literal
-    in the row would redden on a Python upgrade for a change that is not a defect
-    in anything this project owns.
+    **Derived, not frozen, and the reason is ownership, not stability**: this
+    text is a *carrier* — the claim is that it travelled through the port
+    unchanged — where Django's `KeyError` text is the row's *subject* and is
+    frozen. CPython re-worded it at **3.14** (3.9-3.13: `is not iterable`;
+    3.14.4: `is not a container or iterable`), which made the question visible.
 
     **The value is a parameter, not a literal, because the message interpolates
     the input's type name.** `7` gives `'int'`, `7.5` gives `'float'`, and so on,
