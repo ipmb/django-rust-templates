@@ -83,12 +83,17 @@ OWNERS = {
     # §10.3's M13 row, **as corrected**: partials and `library`. The row used to
     # read "partials, `library`, `backends`, `response`" and this bucket used to
     # hold nine names; eight of them moved to `NOT_THE_ENGINE` below, and the
-    # ninth (`loader`) went with them. `library` is what is left, and it is the
-    # engine's own rather than an adapter: `Library`, `register`, `simple_tag`,
-    # `inclusion_tag` and `parse_bits` are what `{% load %}` compiles a
-    # third-party tag library *with*. That is the line this table now draws, and
-    # `_shim.NOT_THE_ENGINE` is where the other side of it is recorded.
-    "library": "M13",
+    # ninth (`loader`) went with them. `library` was the last name here — the
+    # engine's own rather than an adapter, because `Library`, `register`,
+    # `simple_tag`, `inclusion_tag` and `parse_bits` are what `{% load %}`
+    # compiles a third-party tag library *with* — and it moved to `INTERPOSED`
+    # below in M13's Task 1, the commit that takes `unshimmed()` over
+    # `django.template` to `[]`.
+    #
+    # **The table is empty from that commit, and `pending()` with it** — which is
+    # the scope correction's own claim, and why `_shim.NOT_THE_ENGINE` is where
+    # the other side of the line is recorded. A row left here would be a name
+    # asserting a set of nothing.
 }
 
 # Names no milestone will take, because they are **not the template engine** —
@@ -233,6 +238,10 @@ INTERPOSED = {
         "templatetags.static",
         "templatetags.tz",
     ],
+    # M13's one, and the *last* name in either scope: `unshimmed()` over
+    # `django.template` is `[]` from this commit. The scope correction's fourteen
+    # names are now ten in `NOT_THE_ENGINE` and four interposed here and above.
+    "M13": ["library"],
 }
 
 # The namespace a table key belongs to, derived from the shim's own roots.

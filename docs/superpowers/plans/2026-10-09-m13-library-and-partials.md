@@ -76,7 +76,9 @@ The engine's last module. `unshimmed()` is one name today — `['django.template
 - Modify: `scripts/check_transcriptions.py` (`COMPARED_PATH`, `:117-460`; `DECLARED`, `:469-1050`)
 - Modify: `tests/milestone_ownership.py` (`OWNERS` `:59-92`, `INTERPOSED` `:207-243`)
 - Modify: `tests/test_milestone_ownership.py` (`:151-181`)
-- Test: `tests/test_milestone_ownership.py`, `tests/test_shim.py`
+- Modify: `tests/test_shim.py` — **three rows read the meter as a pinned literal and all three move**; the draft named this file without listing them, and the gate is what found them. `test_unshimmed_reports_progress` (`:184`, `1` → `[]`) and `test_the_meter_keeps_its_meaning_and_gains_a_second_population` (`:635`, `len(...) == 1` → `0`) are mechanical. The third is not, and it is the interesting one: `test_strict_mode_raises_while_falling_back` (`:518`) asserts that `install(strict=True)` **refuses**, and with `unshimmed()` empty the refusal's premise is gone — the branch is not dead (it fires against any Django holding a module we have not transcribed) but nothing in the pinned tree can trigger it, so the row becomes two: strict install now *succeeds*, and the refusal is re-triggered by appending a directory to `django.template.__path__` — a real lever, since `django_modules` reads `find_spec`, and no monkeypatch
+- Modify: `tests/test_collected_tests.py` (`PINNED`, `:236`) — the unit-test count pin, `442` → `443`: one row out, two in, net one
+- Test: `tests/test_milestone_ownership.py`, `tests/test_shim.py`, `tests/test_collected_tests.py`
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks; this is the plan's first.
@@ -90,13 +92,16 @@ The measurement then confirms reach rather than carrying the argument: 250 calls
 
 - [ ] **Step 1: Measure what the parity harness reaches inside `library.py`**
 
-`COMPARED_PATH` is a *measurement* — the functions a parity harness executes in this module — and clause (4) refuses any declared region that intersects it. Do not write `[]` from the `utils.py` precedent; measure it.
+**Run this after Steps 4 and 5, not here** — the ordering in this plan's first draft was wrong and the instrument says so twice. `m9_measure_parse_path.py` exits with *"`django.template.library` is not ours; this measurement is meaningless"* while the module is still Django's, and `module_of(name)` raises `KeyError` for a name that is not yet in `DECLARED`. So the file must exist and both shim and gate must know about it before the measurement can run; Step 5 below is what it needs, and this step is placed first only because it answers a question Step 5's text depends on.
+
+`COMPARED_PATH` is a *measurement* — the functions a parity harness executes in this module — and clause (4) refuses any declared region that intersects it. Do not write `[]` from the `utils.py` precedent; measure it. **The invocation needs the shim environment**, which the first draft omitted:
 
 ```bash
-.venv/bin/python .review/m9-measurements/m9_measure_parse_path.py library.py
+PYTHONPATH="$PWD/scripts/shimpath:$PWD/.django" DJANGO_RUST_TEMPLATES=1 \
+    .venv/bin/python .review/m9-measurements/m9_measure_parse_path.py library.py
 ```
 
-Record the printed spans. Expected shape: the harness parses no template that registers a tag library, so the set is likely empty — but it is empty *for a reason* (no parity corpus row builds a `Library`), and that reason goes in the entry's comment rather than being assumed.
+Record the printed spans. **The draft predicted "likely empty" and the measurement falsified it — 12 of 18 functions are on the compared path.** The reason is the harness's *setup* rather than its comparison: the corpus's `{% load custom %}` rows run `tests/template_tests/templatetags/custom.py` at import, and that module calls `Library.__init__` and seven `@register.*` decorators, which is where `parse_bits` is entered. That makes `library.py` the second entry in the table (with `loader_tags.py`) whose functions the comparison *runs*, and the entry's comment carries the measurement rather than a guess.
 
 - [ ] **Step 2: Rewrite the meter row to its post-M13 claim, and watch it fail**
 
@@ -165,7 +170,7 @@ wc -l python/django_rust_templates/_impl/library.py   # 494 = 492 upstream + 2
 
 - [ ] **Step 5: Declare it to the shim and to the transcription gate**
 
-`python/django_rust_templates/_shim.py`, in `SHADOWING` (alphabetical, after `loader_tags.py`):
+`python/django_rust_templates/_shim.py`, in `SHADOWING` (**alphabetically between `exceptions.py` and `loader_tags.py`** — the draft said "after `loader_tags.py`", and `library.py` sorts before it):
 
 ```python
     # M13's module and the last one in this namespace. Verbatim: the pin plus a
@@ -181,14 +186,7 @@ wc -l python/django_rust_templates/_impl/library.py   # 494 = 492 upstream + 2
 
 `scripts/check_transcriptions.py` — both tables, because their key sets are asserted equal (`:1250`, `:1258`):
 
-```python
-    # M13's. No function here is reached by a parity harness — the corpus holds
-    # no template that builds a `Library` — so the entry is present and empty,
-    # for the reason `__init__.py`'s is: an absent entry is invisible to a
-    # re-measurement that iterates the pin. Measured rather than assumed:
-    # `.review/m9-measurements/m9_measure_parse_path.py library.py` (Step 1).
-    "library.py": [],
-```
+**`COMPARED_PATH` is not `[]`, and the draft's comment saying it is comes from the same falsified prediction Step 1 records.** The measured entry is twelve spans, its comment carries the measurement (`12 of 18`, hand-written 172 / generated 400) and the reason for the reach (the corpus's `{% load custom %}` rows importing `custom.py`), and neither is a value to copy — re-run the Step 1 command and use what it prints.
 
 ```python
     "library.py": (
@@ -218,10 +216,18 @@ wc -l python/django_rust_templates/_impl/library.py   # 494 = 492 upstream + 2
 
 ```bash
 scripts/run_unit_tests.sh tests.test_milestone_ownership -v
+scripts/run_unit_tests.sh tests.test_shim -v
 .venv/bin/python scripts/check_transcriptions.py
 ```
 
-Expected: the meter row PASSES; the transcription gate reports no undeclared difference.
+Expected: the meter row PASSES; **`test_shim` fails on its three pinned meter literals, which is Step 6b below**; the transcription gate reports no undeclared difference.
+
+- [ ] **Step 6b: Move the three pinned meter literals in `test_shim.py`, and the unit count**
+
+See this task's Files block. Two are mechanical; `test_strict_mode_raises_while_falling_back` becomes two rows and the reasoning is in its docstring. Then `tests/test_collected_tests.py`'s `PINNED` moves `442` → `443` — **and the two rows are each other's control**, which is why replacing the one row with a pair is better than deleting it: `test_strict_mode_accepts_a_complete_engine` would fail if the staged row's lever were silently inert, and the staged row would fail if the meter were not actually empty.
+
+Run: `scripts/run_unit_tests.sh tests.test_shim tests.test_collected_tests -v`
+Expected: PASS, 25 tests (22 + 3).
 
 - [ ] **Step 7: Run the acceptance suite — this task's real risk**
 
@@ -240,7 +246,8 @@ bash scripts/check.sh
 git add python/django_rust_templates/_impl/library.py \
         python/django_rust_templates/_shim.py \
         scripts/check_transcriptions.py \
-        tests/milestone_ownership.py tests/test_milestone_ownership.py
+        tests/milestone_ownership.py tests/test_milestone_ownership.py \
+        tests/test_shim.py tests/test_collected_tests.py
 git commit
 ```
 
@@ -1229,6 +1236,8 @@ gives `'012'` on the pinned tree (measured; `'000'` is what three *independent* 
 | `NodeSlot` | the **materialiser**, as it builds | `alloc_slot` reserves `None` (`lib.rs:1468`), `materialise_node` fills it on the way out (`_impl/parser.py:404-407`) | yes — `None` until something builds it |
 
 `_impl/parser.py:726-731` states that split in as many words ("a `NodeRef` entry is filled by the host during the parse, a `NodeSlot` entry by the materialiser as it builds"). And the second row is *one tag wide*: `alloc_slot` has a single caller in the whole workspace, `crates/template-core/src/parser/tags/cycle.rs:128` (`resetcycle.rs` only reads the slot a cycle reserved). So the population a snapshot can lose is the cycle's slot alone — and the cycle's behaviour is precisely what `push_state` masks. A behavioural row therefore **cannot** see this defect, and the identity assertion is not a taste for instrumentation over behaviour; it is the defect's only observable.
+
+**Say which fact the conditional rests on, not only what it concluded.** The sentence above is a dated verdict and it has to be readable as one: the identity assertion is the defect's only observable **because** `cycle.rs:128` is `alloc_slot`'s sole production caller **and** `push_state` masks a cycle. The moment a second tag allocates a slot, the snapshot-losable population widens beyond `CycleNode`, and if that tag's state is not masked the way a cycle's is, a behavioural row becomes possible — and the reason for preferring identity stops being true while this paragraph stays readable. So the next person gets a thing to re-measure rather than a conclusion to trust; the measured count is in the row above, and it is three `alloc_slot` hits, two of which are `Parser::alloc_slot`'s own body (`parser/mod.rs:180`) and a `#[cfg(test)]` support host (`tags/mod.rs:387`) — "one production caller" is right and is not what a bare `grep` prints.
 
 **Files:**
 - Modify: `crates/template-py/src/lib.rs` — **only if the identity row fails** (`refs` field `:1227`, `ref_list` `:1257`, `alloc_slot` `:1468`, the three construction sites `:1539`, `:1663`, `:2566` — **re-derive every one of these with `grep -n` before editing**: Tasks 1-4 land first, Task 1 transcribes a module and Task 2 adds two methods to this very file, so these are pre-M13 numbers)

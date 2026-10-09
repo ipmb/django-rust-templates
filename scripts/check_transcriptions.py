@@ -451,6 +451,52 @@ COMPARED_PATH = {
         (107, 127, "BlockTranslateNode.__init__"),
         (458, 598, "do_block_translate"),
     ],
+    # M13's, and **the plan predicted an empty entry here — the measurement
+    # disagrees, 12 of 18, and the reason it disagrees is the reason the number
+    # matters.** The plan's Step 1 read the corpus as holding "no template that
+    # registers a tag library"; the corpus holds `{% load custom %}` rows, and
+    # `tests/template_tests/templatetags/custom.py` runs `register =
+    # template.Library()` and seven `@register.*` decorators **at import time**,
+    # which is what `{% load custom %}` triggers. So the reach is a property of
+    # the harness's *setup* rather than of its comparison — the same shape as
+    # `defaultfilters.py`'s `stringfilter`, one module over — and it makes
+    # `library.py` the second entry in this table (with `loader_tags.py`) whose
+    # functions the comparison runs rather than merely defines.
+    #
+    # Measured with
+    # `m9_measure_parse_path.py library.py` (hand-written 172: 12; generated
+    # 400: 8; reached only by the generator: none), and the 18 is
+    # `definitions()`' counting unit: 8 `Library` methods, 2 module-level defs
+    # (`parse_bits`, `import_library`) and 8 node methods (two each on
+    # `TagHelperNode`, `SimpleNode`, `SimpleBlockNode` and `InclusionNode`). The
+    # six not entered are `Library.inclusion_tag`, `TagHelperNode.
+    # get_resolved_arguments`, `SimpleNode.render`, `SimpleBlockNode.
+    # get_resolved_arguments`, `InclusionNode.__init__` and
+    # `InclusionNode.render` — `custom.py` registers no inclusion tag and the
+    # corpus never renders a library node, because the harness parses rather than
+    # renders.
+    #
+    # **Clause (4) is satisfied and this entry is what keeps it so**: the
+    # declared region in this file is `(1, 2)`, the marker, which intersects
+    # nothing below `:27` — and the re-measurement row now protects the whole
+    # registration surface rather than an empty set, because a corpus row that
+    # stopped loading `custom` would move the pin and
+    # `test_the_compared_path_is_the_measured_one` would fail in the commit that
+    # made it.
+    "library.py": [
+        (27, 29, "Library.__init__"),
+        (31, 53, "Library.tag"),
+        (55, 57, "Library.tag_function"),
+        (59, 101, "Library.filter"),
+        (103, 104, "Library.filter_function"),
+        (106, 159, "Library.simple_tag"),
+        (161, 243, "Library.simple_block_tag"),
+        (304, 308, "TagHelperNode.__init__"),
+        (321, 323, "SimpleNode.__init__"),
+        (337, 339, "SimpleBlockNode.__init__"),
+        (390, 475, "parse_bits"),
+        (478, 494, "import_library"),
+    ],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])
@@ -1045,6 +1091,32 @@ DECLARED = {
                 None,
                 "# TRANSCRIBED: django/templatetags/i18n.py (Django 6.0.9)",
             ),
+        ],
+    ),
+    # M13's, and the last entry in either table. The pin opens with
+    # `from collections.abc import Iterable`, so there is no docstring to carry
+    # the marker and it is a comment on line 1 — the `utils.py`/`smartif.py`
+    # form. Nothing else differs from the pin: `cat` produced the file and the
+    # diff below the marker is empty.
+    "library.py": (
+        "django/template/library.py",
+        [
+            # The marker and its blank separator, ours only — a pure insertion
+            # (`None` upstream). Upstream has no docstring here, so the marker is
+            # a comment on line 1 and the region is `(1, 2)`.
+            #
+            # **The file is verbatim, and here that claim is load-bearing in a
+            # way it is not for M11's three.** `library.py`'s classes are
+            # observed by *identity*: the suite's `assertRaises(
+            # InvalidTemplateLibrary)` and `isinstance(lib, Library)` rows are
+            # about the object, and `_impl/__init__.py:54`, `defaulttags.py:44`,
+            # `defaultfilters.py:30`, `loader_tags.py:9` and `engine.py:12` all
+            # bind these names at import. A re-export would satisfy every
+            # behavioural row and leave five modules holding Django's objects —
+            # measured in `.review/m13-recon.md` §7, where a module-attribute
+            # patch on `import_library` read `0` while the bound name read
+            # `11050`.
+            ((1, 2), None, "# TRANSCRIBED: django/template/library.py (Django 6.0.9)"),
         ],
     ),
 }

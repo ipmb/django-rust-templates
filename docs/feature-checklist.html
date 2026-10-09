@@ -295,9 +295,9 @@
       <span class="num">23 / 27</span>
       <span class="cap">built-in tags implemented in Rust</span>
     </div>
-    <div class="stat is-open">
-      <span class="num">1</span>
-      <span class="cap">module of the template <em>engine</em> still Django's own code — <code>library</code>. Ten more of <code>django.template</code> are adapters Django keeps for good</span>
+    <div class="stat is-done">
+      <span class="num">0</span>
+      <span class="cap">modules of the template <em>engine</em> still Django's own code — the engine is wholly Rust's. Ten more of <code>django.template</code> are adapters Django keeps for good</span>
     </div>
     <div class="stat is-done">
       <span class="num">0 / 5</span>
@@ -425,7 +425,7 @@
     <ul class="open" style="margin-top:16px">
       <li class="todo">
         <span class="name">{% load %}<span>custom tag libraries</span></span>
-        <span class="why">Still Django's tag. It is how every third-party template library enters a template, so it goes with the registration API below.</span>
+        <span class="why">Still a host-side tag. The registration API below is now Rust's, but Rust's tag registry deliberately does not own the name <code>load</code> — <code>do_load</code> is Django's and is called through the host, which is why this reads as in-progress rather than done.</span>
       </li>
       <li class="todo">
         <span class="name">{% querystring %}<span>query-string rewriting</span></span>
@@ -443,17 +443,25 @@
   </section>
 
   <section>
-    <h2>Tag and filter registration <span class="pill todo">To do</span></h2>
+    <h2>Tag and filter registration <span class="pill done">Done</span></h2>
     <p class="sub">
       What makes a template language extensible: the classes and decorators a project or a
-      third-party app uses to add its own tags and filters. This is the engine's last module
+      third-party app uses to add its own tags and filters. This was the engine's last module
       — <code>library</code> — and it is the engine's own rather than an adapter:
-      <code>{% load %}</code> compiles a third-party tag library <em>with</em> it.
+      <code>{% load %}</code> compiles a third-party tag library <em>with</em> it. It is now a
+      faithful, verbatim transcription of Django's file rather than a reimplementation, because
+      a tag library is Python by construction: <code>simple_tag</code> and its neighbours each
+      build a compile function as a closure over the user's own function, and nothing on the
+      Rust side can call it. What that buys is identity — <code>Library</code>,
+      <code>InvalidTemplateLibrary</code> and the node classes are <em>the same objects</em>
+      Django's own modules import, which is what the suite's <code>isinstance</code> and
+      <code>assertRaises</code> rows are about. A reimplementation would have rendered the same
+      output while answering those rows about the wrong class.
     </p>
     <ul class="open">
-      <li class="todo">
+      <li class="done">
         <span class="name">Library, register<span>tag and filter registration API</span></span>
-        <span class="why"><code>Library</code>, <code>@register.simple_tag</code>, <code>@register.inclusion_tag</code>, <code>@register.filter</code>, <code>SimpleNode</code>, <code>parse_bits</code> — all still Django's.</span>
+        <span class="why"><code>Library</code>, <code>@register.simple_tag</code>, <code>@register.inclusion_tag</code>, <code>@register.filter</code>, <code>SimpleNode</code> and <code>parse_bits</code> are ours, transcribed from Django's file line for line. The parity harness runs twelve of the module's eighteen functions, so the transcription is compared against the pin rather than merely trusted.</span>
       </li>
       <li class="done">
         <span class="name">Tags in Django's own libraries<span>{% translate %}, {% blocktranslate %}, {% static %}, {% timezone %}, {% localize %}, {% cache %}</span></span>
@@ -495,11 +503,12 @@
   </section>
 
   <section>
-    <h2>Where Django's code is still running <span class="count">1 module</span></h2>
+    <h2>Where Django's code is still running <span class="count">none</span></h2>
     <p class="sub">
       The number that moves when a feature really lands. Each module named here is still
       Django's, and the acceptance suite would pass with it in place — which is exactly why
-      it is tracked. One module of the engine is left.
+      it is tracked. <b>No module of the engine is left to name</b>, and the acceptance
+      suite runs entirely against Rust's code.
     </p>
     <div class="tablewrap">
       <table>
@@ -507,23 +516,23 @@
           <tr><th>Module of <code>django.template</code></th><th>What it does</th><th>Status</th></tr>
         </thead>
         <tbody>
-          <tr><td class="mod">library</td><td>Tag and filter registration</td><td><i class="pill todo">To do</i></td></tr>
+          <tr><td class="mod">—</td><td>the engine is wholly Rust's</td><td><i class="pill done">Done</i></td></tr>
         </tbody>
       </table>
     </div>
     <p class="sub" style="margin-top:16px">
-      Fifteen modules are already Rust's: the template base, its exceptions, expressions,
-      template utilities, context, the engine, the loader package and its five loaders, and —
-      the latest additions — template inheritance, the built-in filters and the built-in
-      tags.
+      Sixteen modules are Rust's, which is the whole engine: the template base, its
+      exceptions, expressions, template utilities, context, the engine, the loader package and
+      its five loaders, template inheritance, the built-in filters, the built-in tags, and —
+      the last of them — tag and filter registration.
     </p>
     <p class="sub" style="margin-top:16px">
       Django's five template-tag libraries are tracked as a <b>second scope</b> beside the
       module above — <code>django.templatetags.cache</code>, <code>.i18n</code>,
       <code>.l10n</code>, <code>.static</code> and <code>.tz</code>, the eighteen registered
       tags and the nine filters that go with them. That scope is <b>empty</b>: no module under
-      <code>django.templatetags</code> is still served by Django, so the meter that counts it
-      reads zero while <code>library</code> above is what remains of the engine.
+      <code>django.templatetags</code> is still served by Django. Both meters now read zero —
+      the engine is wholly Rust's.
     </p>
   </section>
 

@@ -233,7 +233,22 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # bucket list), which moves no count. Measured by discovery:
 # `git diff tests/` since `2761a88` is `+3/-1` rows in that one file, so
 # 440 + 3 - 1 = 442.
-PINNED = 442
+#
+# 442 → 443 is M13 Task 1, a **net one** in one file, and it is a net for the
+# same reason the scope correction's was: one row left as two arrived.
+# `test_shim.py` loses `test_strict_mode_raises_while_falling_back` — its
+# premise, that the meter still names a module, expired in the commit that took
+# the meter to zero — and gains two:
+# `test_strict_mode_accepts_a_complete_engine` (the new true state: a strict
+# install now completes) and `test_strict_mode_raises_when_a_module_is_still_
+# djangos` (the refusal branch re-triggered by appending a directory to
+# `django.template.__path__`, which is a real lever rather than a patch).
+# `test_milestone_ownership.py`'s `test_the_engines_remaining_work_is_one_module`
+# was **renamed** to `..._is_empty`, which moves no count — the row and its
+# assertions are the correction's, only the claim in the name moved. Measured by
+# discovery: `git diff tests/` since `1d05fb1` is `+2/-1` rows, in `test_shim.py`
+# alone, so 442 + 2 - 1 = 443.
+PINNED = 443
 
 
 def collected() -> unittest.TestSuite:

@@ -148,36 +148,34 @@ class OwnershipTableTests(unittest.TestCase):
         self.assertEqual(the_meter(), pending())
         self.assertEqual(claimed() - interposed(), pending() | set(NOT_THE_ENGINE))
 
-    def test_the_engines_remaining_work_is_one_module(self):
-        """The scope correction as a count, which is what the user asked for.
+    def test_the_engines_remaining_work_is_empty(self):
+        """The scope correction, closed: the engine's remaining work is none.
 
-        `pending()` is `OWNERS` minus what is taken — the engine's remaining
-        work — and `unshimmed()` over the *first* scope has to be exactly that,
-        because the second scope's names are in `INTERPOSED` and the declared
-        ones are subtracted. The meter half is written as a set equality against
-        the table rather than against a literal, so the two cannot disagree; the
-        literal half is `{"library"}` below, because *that* is the claim the
-        correction makes and a row that only compared the tables would be green
-        with the scope statement quietly reversed.
+        `pending()` is `OWNERS` minus what is taken. M9 through M12 took thirteen
+        of the fourteen names this correction left; M13 takes the last one, and
+        the meter over the *first* scope reads zero for the first time.
 
-        **The vacuity control is drawn from this population rather than from the
-        universe.** An empty `NOT_THE_ENGINE` would satisfy the meter equality
-        trivially *and* leave the engine's remaining work at the eleven this
-        correction removed, so the row says the subtraction bites: the declared
-        set is non-empty, and the meter is the bare file-ownership count minus
-        exactly it. Measured, not argued — `NOT_THE_ENGINE` is what strict mode
-        reads, so an empty set here would not merely be a wrong number.
+        **The positive control is drawn from this population, not from the
+        universe.** `unshimmed() - ours` passes happily on an empty universe: if
+        `django_modules(TARGET)` returned nothing, `owned_by_django` would be
+        empty, `pending()` would be empty, and every assertion below would be
+        green while the instrument measured nothing. So the row states the
+        population's members — `NOT_THE_ENGINE` is non-empty, and
+        `owned_by_django` is exactly it, so the meter is measuring a set that has
+        fourteen names in it (ten declared out of scope, and `library` until this
+        commit) rather than one that has none.
         """
         _shim.install()
-        self.assertEqual(suffixes(_shim.unshimmed(TARGET), TARGET), pending(TARGET))
-        self.assertEqual(pending(TARGET), {"library"})
-        self.assertEqual(pending(TEMPLATETAGS), set())
-        self.assertGreater(len(NOT_THE_ENGINE), 0, "nothing is declared out of scope")
         owned_by_django = set(_shim.django_modules(TARGET)) - _shim._our_modules_in(TARGET)
-        self.assertEqual(
-            suffixes(_shim.unshimmed(TARGET), TARGET),
-            owned_by_django - set(NOT_THE_ENGINE),
-        )
+        # The control, before the claim: the population the subtraction runs
+        # over is non-empty, and the declared set is exactly the difference.
+        self.assertEqual(owned_by_django, set(NOT_THE_ENGINE))
+        self.assertGreater(len(NOT_THE_ENGINE), 0, "nothing is declared out of scope")
+        # The claim.
+        self.assertEqual(pending(TARGET), set())
+        self.assertEqual(suffixes(_shim.unshimmed(TARGET), TARGET), set())
+        self.assertEqual(pending(TEMPLATETAGS), set())
+        self.assertEqual(suffixes(_shim.unshimmed(TEMPLATETAGS), TEMPLATETAGS), set())
 
     def test_the_declared_names_are_the_excluded_ones(self):
         """The membership lives in the shim; the reasons live here.

@@ -174,6 +174,15 @@ SHADOWING = {
     "defaulttags.py": "transcribed",
     "engine.py": "transcribed",
     "exceptions.py": "fresh",
+    # M13's module and the last one in this namespace. Verbatim: the pin plus a
+    # marker, `None` on the upstream side, and the whole of the difference —
+    # `library.py` opens with imports rather than a docstring, so this is the
+    # `utils.py`/`smartif.py` form and not `__init__.py`'s. See
+    # `check_transcriptions.py` for why a transcription is the right claim here
+    # (Rust owning `parse_bits` would buy no engine behaviour and would put a
+    # signature behind the seam that `contrib` imports) — measured, `.review/
+    # m13-recon.md` §6/§7.
+    "library.py": "transcribed",
     "loader_tags.py": "transcribed",
     "loaders/__init__.py": "transcribed",
     "loaders/app_directories.py": "transcribed",

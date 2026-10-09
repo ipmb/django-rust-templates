@@ -174,14 +174,24 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         **11 → 1 is the scope correction, not a ten-module interposition**, and
         it is the largest single move this number has ever made: ten of the
         eleven were declared *not the engine* and are subtracted now. The one
-        left is `library`, which M13 owns. The number is asserted as the set
-        below as well, because a count that fell by ten could mean ten modules
-        were ported.
+        left is `library`, which M13 owns.
+
+        **1 → 0 is M13 Task 1, and it is the last move this number can make.**
+        The engine is wholly ours from that commit — `library.py` was the final
+        module either scope was still owed — so the count is now the *end state*
+        rather than progress toward it, and it is asserted as a literal `[]` for
+        the reason it has always been asserted as a count: a number that fell
+        could mean a module was handed *back*, and the empty list is the only
+        value that says the subtraction ran out of names instead of out of
+        universe. `test_the_engines_remaining_work_is_empty` in
+        `test_milestone_ownership.py` is where that distinction is drawn, with
+        `NOT_THE_ENGINE` as the control; this row is the number a milestone is
+        accepted on, checked against nothing but the meter itself.
         """
         _shim.install()
 
         remaining = _shim.unshimmed()
-        self.assertEqual(sorted(remaining), ["django.template.library"])
+        self.assertEqual(sorted(remaining), [])
         self.assertNotIn("django.template.base", remaining)
         self.assertNotIn("django.template.smartif", remaining)
         self.assertNotIn("django.template.utils", remaining)
@@ -497,29 +507,104 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
             f"the second install put {ours.__file__} under our name",
         )
 
-    def test_strict_mode_raises_while_falling_back(self):
-        """Strict install refuses while any module would still be Django's.
+    def test_strict_mode_accepts_a_complete_engine(self):
+        """The end state: nothing is left for strict mode to refuse.
 
-        The premise — shim *out*, so the install is the one being refused — is
-        established here, like the row above. With the session baseline installed
-        this call is the idempotent re-install instead, and an install that is a
-        no-op has nothing to refuse: the row would assert nothing while staying
-        green, which is how it read before the teardown fix made the state at row
-        start explicit.
+        This row's subject was the *refusal* until M13 Task 1, and the refusal's
+        premise expired in that commit — see the row below, which stages the
+        premise back. What is asserted here is the claim the milestone actually
+        makes: ``unshimmed()`` is empty, so ``install(strict=True)`` completes,
+        and the two statements are one fact read twice. Left as a row rather than
+        deleted because "strict installs cleanly" is the *acceptance* condition
+        for M14 and this is where a regression that re-widened the meter would
+        show up as a refusal rather than as a count.
+
+        The premise — shim *out*, so the install is the one being run — is
+        established here, like the rows above. With the session baseline
+        installed this call is the idempotent re-install instead, and an install
+        that is a no-op has nothing to check.
+        """
+        _shim.uninstall()
+        _shim.install(strict=True)
+        self.assertTrue(_shim.installed())
+        self.assertEqual(_shim.unshimmed(), [], "strict accepted a partial engine")
+
+    def test_strict_mode_raises_when_a_module_is_still_djangos(self):
+        """The refusal branch, re-triggered through a lever the tree no longer supplies.
+
+        **The trigger expired in M13 Task 1, and this is the negative-fixture
+        rule catching up with it.** Until that commit `unshimmed()` named
+        `django.template.library`, so a plain ``install(strict=True)`` refused on
+        the real tree and the row above needed no staging; now the meter is empty
+        and the same call succeeds. The branch is *not* dead code — it is what
+        strict mode does against any Django whose tree holds a module we have not
+        transcribed, which is the ordinary case one Django release out — so the
+        row stages that state rather than dropping the coverage.
+
+        **The staging is a real lever, not a patch.** ``django_modules`` reads
+        Django's directories from ``find_spec("django.template")``, and
+        ``find_spec`` answers from ``sys.modules`` when the package is already
+        imported — so appending one directory to the *package's own* ``__path__``
+        is exactly "Django's ``template`` can be found in one more place",
+        which is how a package grows a module. Nothing in ``_shim`` is
+        monkeypatched and no file on disk is touched: the extra name is a real
+        module in a temporary directory, and the meter reports it for the same
+        reason it reports any of Django's.
+
+        Measured before it was written: with the directory appended,
+        ``_real_search_paths("django.template")`` widens, ``django_modules``
+        contains the staged name, and ``install(strict=True)`` raises naming it.
 
         **The message is asserted, because the meter's scope is the part that
         moved.** Since the scope correction ``unshimmed()`` counts the *engine*,
         not the package the engine lives in, so "these modules" would read as
         every module Django still serves — eleven — where one is listed. The
-        subject here is the scope word; the named module is asserted too, so the
+        subject here is the scope word; the staged name is asserted too, so the
         message and the meter cannot drift apart.
+
+        ``__path__`` and the installed finder are both restored in the
+        ``finally``: the refusal fires *after* the install has captured the
+        widened path list, so a row that left it standing would hand the next row
+        a finder holding a directory that no longer exists.
         """
         _shim.uninstall()
-        with self.assertRaises(_shim.ShimError) as ctx:
-            _shim.install(strict=True)
-        message = str(ctx.exception)
-        self.assertIn("engine modules", message, "the message does not name its scope")
-        self.assertIn("django.template.library", message, "the message is not the meter's")
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "not_yet_ported.py").write_text("")
+            package = sys.modules["django.template"]
+            package.__path__.append(tmp)
+            try:
+                with self.assertRaises(_shim.ShimError) as ctx:
+                    _shim.install(strict=True)
+                message = str(ctx.exception)
+                self.assertIn(
+                    "engine modules", message, "the message does not name its scope"
+                )
+                self.assertIn(
+                    "django.template.not_yet_ported",
+                    message,
+                    "the message is not the meter's",
+                )
+            finally:
+                # The install that refused left the finder installed and holding
+                # the widened paths, so it is dropped and rebuilt against the
+                # tree as it is. **The ``__path__`` removal happens after that
+                # ``uninstall()`` on purpose, and the reason is measured rather
+                # than assumed:** this row's first draft argued that the refused
+                # install had replaced ``django.template`` with ours, so the list
+                # appended to above was not the one to clean. It is the same
+                # object — the shim caches Django's module in ``_django_modules``
+                # and hands it back on ``uninstall`` (the property
+                # ``test_a_reinstall_does_not_re_execute_a_module`` pins), so
+                # uninstalling first is what makes ``sys.modules`` carry the very
+                # list the staging wrote to. The membership guard stays as
+                # insurance, not as the mechanism: if a later change does swap
+                # the object, this removes nothing rather than raising.
+                if _shim.installed():
+                    _shim.uninstall()
+                current = sys.modules["django.template"]
+                if tmp in list(current.__path__):
+                    current.__path__.remove(tmp)
+                _shim.install()
 
 
 class NamespaceTests(unittest.TestCase):
@@ -624,15 +709,22 @@ class NamespaceTests(unittest.TestCase):
         and moved this count not at all — it is still ``[]`` below, because the
         count is **file ownership** and 6b added no file: ``i18n.py`` was already
         ours when 6a interposed it.
+
+        It is **0** in M13 Task 1, which interposes ``library`` — the last name
+        in *either* scope, so both counts are empty in one commit and this row's
+        subject is now the symmetry rather than a movement. The scope correction
+        left fourteen names; ten were declared not the engine and four were
+        interposed across M13 and the two milestones before it, and the second
+        zero below is the one the two-population design was built to reach.
         """
         _shim.install()
         self.assertEqual(_shim.unshimmed(), _shim.unshimmed(scope="django.template"))
-        # **1, not 11, since the scope correction.** The ten that left are the
-        # declaration rather than ten interpositions, and this line is the only
-        # place the correction shows up as a number in *this* file — the
-        # membership and the arithmetic live in `test_milestone_ownership.py`,
-        # which is where a reader should go to ask why it is one and not eleven.
-        self.assertEqual(len(_shim.unshimmed()), 1)
+        # **0, not 11, since the scope correction — and 0, not 1, since M13
+        # Task 1.** The ten that left are the declaration rather than ten
+        # interpositions, and `library` was the eleventh; the membership and the
+        # arithmetic live in `test_milestone_ownership.py`, which is where a
+        # reader should go to ask why there were eleven and not one.
+        self.assertEqual(len(_shim.unshimmed()), 0)
         self.assertEqual(_shim.unshimmed(scope="django.templatetags"), [])
         # **The zero above needs a denominator, and the line beneath is it.**
         # `unshimmed` is `django_modules(scope) - ours - NOT_THE_ENGINE`, and
