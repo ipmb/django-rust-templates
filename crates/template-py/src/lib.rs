@@ -113,20 +113,67 @@ fn filter_flags(name: &str) -> PyResult<(bool, bool, bool)> {
 /// The **only** entry point the corpus and the shell use, and deliberately the
 /// only one: `filter_flags` reports flags and this applies them, so a test that
 /// called a filter's body directly would be testing a path no template reaches.
-/// `arg` is `None` for a filter written without an argument; `autoescape` and
-/// `use_tz` are the context's, and exist because seven filters branch on the
-/// first and two on the second (§D1).
+/// `autoescape` and `use_tz` are the context's, and exist because seven filters
+/// branch on the first and two on the second (§D1).
+///
+/// **`args` is the filter's argument list and not an `Option`, which is the one
+/// shape this parameter must not have.** Django's loop builds `arg_vals`
+/// (`base.py:804-809`) and calls `func(obj, *arg_vals)` (`:815`), so the list is
+/// **empty for `{{ x|f }}` and one `None` for `{{ x|f:None }}`** — two different
+/// calls, and `{{ x|floatformat:price }}` with `price = None` is a template a user
+/// writes by accident. An `Option` cannot hold that distinction: `None` would
+/// have to mean both "no argument" and "the argument `None`", and the second
+/// would silently take the first's branch.
+///
+/// It was an `Option<&PyAny>` defaulting to `None` until this, and the collapse
+/// was measured rather than argued: of the 23 landed filters that take an
+/// argument, `floatformat`, `pluralize` and `unordered_list` answered where Django
+/// raises — `floatformat:None` is `int(None)`'s `TypeError`, `pluralize:None` is
+/// `TypeError: argument of type 'NoneType' is not a container or iterable` — and
+/// the other 20 agreed only because their bodies happened to treat "no argument"
+/// as `Value::None`. Requiring the length makes the distinction structural: a
+/// caller cannot express "no argument" with a value.
+///
+/// **One divergence survives the split, and it is `base.py:813`'s rather than a
+/// body's.** For a `needs_autoescape` filter Django calls
+/// `func(obj, autoescape=context.autoescape, *arg_vals)` — the keyword goes in
+/// **before** the positional arguments — so a filter whose own second parameter
+/// is named `autoescape` cannot be given an argument at all: Python binds the
+/// positional one to the same name and raises. Measured, five filters are in that
+/// shape and the message names each Python function:
+///
+/// ```text
+/// {{ x|linebreaks:5 }}     -> TypeError: linebreaks_filter() got multiple values for argument 'autoescape'
+/// {{ x|linebreaksbr:5 }}   -> TypeError: linebreaksbr() got multiple values for argument 'autoescape'
+/// {{ x|linenumbers:5 }}    -> TypeError: linenumbers() got multiple values for argument 'autoescape'
+/// {{ x|unordered_list:5 }} -> TypeError: unordered_list() got multiple values for argument 'autoescape'
+/// {{ x|urlize:5 }}         -> TypeError: urlize() got multiple values for argument 'autoescape'
+/// ```
+///
+/// `join` and `urlizetrunc` take an argument of their own, so their second
+/// parameter is not `autoescape` and neither collides. **This seam cannot
+/// reproduce the collision and should not try**: it takes `autoescape` as a
+/// *value*, so there is no keyword to collide with, and the message needs the
+/// *callable's* Python name, which a name-keyed seam does not have — a
+/// `{% load %}`-ed `linebreaks` carries whatever name its library gave it, and
+/// the pinned tree's own `linebreaks` is `linebreaks_filter`. The behaviour is
+/// not lost where it is observable: it is CPython's binding of the *call* and not
+/// a body's decision, so it belongs to whoever makes the call — and M9 inherits
+/// it exactly, when the shim exposes these filters as Python functions carrying
+/// Django's own signatures.
+/// So no corpus row exists for it, by decision and not by omission; a row would
+/// have to pin a divergence we have chosen not to synthesise.
 #[pyfunction]
-#[pyo3(signature = (name, value, arg = None, autoescape = true, use_tz = true))]
+#[pyo3(signature = (name, value, args, autoescape = true, use_tz = true))]
 fn filter(
     py: Python<'_>,
     name: &str,
     value: &Bound<'_, PyAny>,
-    arg: Option<&Bound<'_, PyAny>>,
+    args: &Bound<'_, PyTuple>,
     autoescape: bool,
     use_tz: bool,
 ) -> PyResult<Py<PyAny>> {
-    filters::run_filter(py, name, value, arg, autoescape, use_tz)
+    filters::run_filter(py, name, value, args, autoescape, use_tz)
 }
 
 /// A filter failure (or a filter stub) as a Python exception.

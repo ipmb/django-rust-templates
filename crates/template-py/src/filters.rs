@@ -1327,6 +1327,18 @@ impl PyFilterHost<'_> {
 /// if is_safe and (was_safe or coerced_is_safe): result = mark_safe(result)
 /// ```
 ///
+/// **`args` is Django's `*arg_vals` (`base.py:804-809`) and the body's `arg` is
+/// `Option<Value>`, and the two are one model: a list of length 0 or 1 is `None`
+/// for the empty list and `Some` for the single element — including
+/// `Some(Value::None)`, which is the argument `None` and not its absence.** The
+/// list's *length* is the argument's presence and its element is the argument's
+/// value; neither stands for the other, which is why this takes a tuple rather
+/// than an `Option<&PyAny>` that would have to encode two facts in one field (see
+/// `filter` in `lib.rs`, and the measurement that forced it). So `{{ x|f }}`
+/// reaches a body as `None` — Django's `arg is None` question about the
+/// *parameter* — and `{{ x|f:price }}` with `price = None` reaches it as
+/// `Some(Value::None)`, the call `func(obj, None)`.
+///
 /// **The two `is_safe` questions are different questions, which is why there are
 /// two.** `was_safe` is `base.py:816`'s `isinstance(obj, SafeData)`, and `obj`
 /// still holds the pre-filter value there because the result went to a separate
@@ -1350,7 +1362,7 @@ pub fn run_filter(
     py: Python<'_>,
     name: &str,
     value: &Bound<'_, PyAny>,
-    arg: Option<&Bound<'_, PyAny>>,
+    args: &Bound<'_, PyTuple>,
     autoescape: bool,
     use_tz: bool,
 ) -> PyResult<Py<PyAny>> {
@@ -1358,12 +1370,20 @@ pub fn run_filter(
         .ok_or_else(|| PyKeyError::new_err(format!("`{name}` is not a built-in filter")))?;
     let host = PyFilterHost::new(py);
     let mut current = host.classify(value)?;
-    // A Python `None` argument is `Option::None` and not `Value::None`: Django
-    // has one object for "no argument" and "the argument `None`", and every
-    // filter body that tests `arg is None` is testing this same question.
-    let argument = match arg {
-        Some(object) if !object.is_none() => Some(host.classify(object)?),
-        _ => None,
+    // `arg_vals` (`base.py:804-809`), length 0 or 1 — the list Django spreads
+    // into the call at `:815`. **The length is the argument's presence and the
+    // element is its value; neither stands for the other.** A Python `None`
+    // element is `Some(Value::None)`, the argument `None`, which is what
+    // `{{ x|floatformat:price }}` with `price = None` hands the body — an
+    // `int(None)` `TypeError` in Django, and until this an answer from us.
+    let argument = match args.len() {
+        0 => None,
+        1 => Some(host.classify(&args.get_item(0)?)?),
+        n => {
+            return Err(PyTypeError::new_err(format!(
+                "`{name}` was given {n} arguments; a filter takes at most one"
+            )))
+        }
     };
     if entry.flags.expects_localtime {
         current = host

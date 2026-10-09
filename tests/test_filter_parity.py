@@ -75,7 +75,7 @@ def implemented_filters() -> set[str]:
     stubs = set()
     for name in sorted(all_names):
         try:
-            _native.filter(name, None)
+            _native.filter(name, None, ())
         except _native.UnimplementedTag as error:
             if f"'{name}'" not in str(error):
                 raise AssertionError(
@@ -95,16 +95,23 @@ def implemented_filters() -> set[str]:
 
 
 def case_arg(case):
-    """The Python object the row's argument **is**, or `None` for no argument.
+    """The Python object the row's argument **is**, or `NO_ARG` for none.
 
     The value half of [`arg_token`], and the one the Rust side is handed: our
     `_native.filter` takes resolved values, so a variable argument is just its
     object. Kept beside the token half so the two cannot disagree about which key
     a row used.
+
+    `probe.NO_ARG` and not `None`, because `None` is a legal argument: a row
+    declaring `"arg": None` means `{{ x|f:None }}`, which is `func(obj, None)` in
+    Django and a different call from `func(obj)` — `floatformat` raises
+    `int(None)`'s `TypeError` on it, where the bare form answers `'6666.7'`.
     """
     if "arg_variable" in case:
         return case["arg_variable"]
-    return case.get("arg")
+    if "arg" in case:
+        return case["arg"]
+    return probe.NO_ARG
 
 
 def arg_token(case):
@@ -139,7 +146,7 @@ def arg_token(case):
         return "argvar", {"argvar": value}
     if "arg" in case:
         return probe.template_literal(case["arg"]), {}
-    return None, {}
+    return probe.NO_ARG, {}
 
 
 class FilterParityTests(unittest.TestCase):
@@ -293,7 +300,8 @@ class FilterParityTests(unittest.TestCase):
                 given, _ = arg_token(case)
                 self.assertEqual(
                     expression.token,
-                    f"x|{case['filter']}" + ("" if given is None else f":{given}"),
+                    f"x|{case['filter']}"
+                    + ("" if given is probe.NO_ARG else f":{given}"),
                 )
 
     def assert_raises_same(self, case, side, call):

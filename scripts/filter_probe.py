@@ -73,6 +73,16 @@ from django.utils.safestring import SafeData, mark_safe  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 
+#: "This row's template carries **no** argument", as a value the corpus can pass.
+#:
+#: A sentinel rather than `None`, because `None` is a legal filter argument:
+#: Django's loop builds `arg_vals` (`base.py:804-809`) and spreads it at `:815`,
+#: so `{{ x|f }}` is `func(obj)` and `{{ x|f:None }}` is `func(obj, None)` — two
+#: different calls. `_native.filter` takes that list as a tuple for the same
+#: reason (see `filter` in `lib.rs`), and this is the value the probe's callers
+#: use to say "pass `()`" without spelling a tuple at every call site.
+NO_ARG = object()
+
 
 def ensure_settings() -> None:
     """Configure minimal settings, once, and only if nothing has yet.
@@ -182,7 +192,7 @@ def context_for(value, context_kwargs: dict | None = None, extra: dict | None = 
 def django_answer(
     name: str,
     value,
-    given: str | None,
+    given,
     context_kwargs: dict | None = None,
     extra: dict | None = None,
 ):
@@ -204,15 +214,19 @@ def django_answer(
     reads `autoescape` and `use_tz` off it and the Rust side must be given the
     same two values.
 
-    **`given` is template text, and for a variable argument it is a bare name.**
-    `template_literal` can render only a `str`, number, `bool` or `None` as a
-    *constant*, and Django has no list or object literal in a filter argument —
-    so an argument of any other shape has to be written as a name and supplied
-    through `extra`. That is the same distinction `filter_re` makes, and it is
-    load-bearing on the way back: a name is a `var_arg`, so `resolve` hands it
-    over **unmarked**, where a quoted constant is `mark_safe`d
-    (`base.py:788-792`). A row that wanted `mark_safe([1])` has no template that
-    produces it.
+    **`given` is template text, and `NO_ARG` is the absence of one.** The token is
+    `x|f` for `NO_ARG` and `x|f:<given>` otherwise, so an explicit `None` is the
+    text `"None"` and not the sentinel — the template spells it, and the two are
+    different calls in Django.
+
+    **A variable argument is a bare name.** `template_literal` can render only a
+    `str`, number, `bool` or `None` as a *constant*, and Django has no list or
+    object literal in a filter argument — so an argument of any other shape has to
+    be written as a name and supplied through `extra`. That is the same
+    distinction `filter_re` makes, and it is load-bearing on the way back: a name
+    is a `var_arg`, so `resolve` hands it over **unmarked**, where a quoted
+    constant is `mark_safe`d (`base.py:788-792`). A row that wanted
+    `mark_safe([1])` has no template that produces it.
     """
     engine = Engine()
     parser = Parser(
@@ -220,7 +234,7 @@ def django_answer(
         libraries=engine.template_libraries,
         builtins=engine.template_builtins,
     )
-    token = f"x|{name}" if given is None else f"x|{name}:{given}"
+    token = f"x|{name}" if given is NO_ARG else f"x|{name}:{given}"
     expression = FilterExpression(token, parser)
     context = context_for(value, context_kwargs, extra)
     return expression.resolve(context), expression, context
@@ -234,11 +248,24 @@ def rust_answer(name: str, value, arg, context):
     one into the other is the caller's half by design (Task 3: "arg values are
     resolved by the caller and passed in").
 
-    **Which of those two things happens depends on the argument's shape, and that
-    is measured rather than stylistic.** `resolve` (`base.py:800-806`)
-    `mark_safe`s an argument only when it holds it as a *constant*
-    (`lookup=False`), which a token can only be by being **quoted**; a bare
-    number, name, `None` or `True` is a `var_arg` resolved by `Variable` and
+    **`arg` is `NO_ARG` for a row with no argument and the object itself
+    otherwise, and `None` is the object itself.** That is not a convenience: it
+    is the same distinction Django's `arg_vals` list carries by its *length*, and
+    the reason `_native.filter` takes a tuple. `{{ x|floatformat:price }}` with
+    `price = None` is `func(obj, None)` in Django — an `int(None)` `TypeError` —
+    and collapsing it to `func(obj)` would answer where Django raises — measured
+    on the corpus row's own value, the bare token on `6666.6666` is `'6666.7'`,
+    because the collapsed call takes `floatformat`'s default `arg=-1`.
+    Measured on the pinned tree, on the landed filters that take an argument:
+    three of them (`floatformat`, `pluralize`, `unordered_list`) answered where
+    Django raises, and the rest agreed only because their bodies happened to read
+    the absent argument as `None`.
+
+    **Which of `mark_safe` and "hand it over bare" happens depends on the
+    argument's shape, and that is measured rather than stylistic.** `resolve`
+    (`base.py:800-806`) `mark_safe`s an argument only when it holds it as a
+    *constant* (`lookup=False`), which a token can only be by being **quoted**; a
+    bare number, name, `None` or `True` is a `var_arg` resolved by `Variable` and
     handed over unmarked. Measured on the pinned 6.0.9, same filter throughout:
 
         x|ljust:"5"   -> SafeString('5')     (constant, and so mark_safe'd)
@@ -255,20 +282,15 @@ def rust_answer(name: str, value, arg, context):
     through any body that reads its argument's *type*: prepared as `mark_safe(5)`,
     our `cut` answers `'abc'` where Django raises `TypeError: replace() argument
     1 must be str, not int`; prepared as `5` it raises the same thing.
-
-    `None` keeps its meaning of "no argument", and Django's body sees `None` for
-    both `x|f` and `x|f:None` — the first never reaches a body, `base.py:819`'s
-    arity check having raised — so the two are the same input here as they are
-    there, and a row asks for one by declaring `None`.
     """
-    if arg is None:
-        resolved_arg = None
+    if arg is NO_ARG:
+        resolved_args = ()
     elif isinstance(arg, str):
-        resolved_arg = mark_safe(arg)
+        resolved_args = (mark_safe(arg),)
     else:
-        resolved_arg = arg
+        resolved_args = (arg,)
     return _native.filter(
-        name, value, resolved_arg, context.autoescape, effective_use_tz(context)
+        name, value, resolved_args, context.autoescape, effective_use_tz(context)
     )
 
 
@@ -299,14 +321,18 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         value = ast.literal_eval(args.value)
-        arg = None if args.arg is None else ast.literal_eval(args.arg)
+        # Presence on the command line is the argument's presence — **omitting it
+        # is `{{ x|f }}` and passing `None` is `{{ x|f:None }}`**, the two
+        # different calls `arg_vals` distinguishes by its length. Keying on the
+        # *value* would have made the second unreachable from this script.
+        arg = NO_ARG if args.arg is None else ast.literal_eval(args.arg)
     except (ValueError, SyntaxError) as error:
         print(f"filter_probe: not a Python literal: {error}", file=sys.stderr)
         return 2
 
     try:
         django_result, expression, context = django_answer(
-            args.filter, value, args.arg
+            args.filter, value, NO_ARG if args.arg is None else args.arg
         )
     except TemplateSyntaxError as error:
         # Three different mistakes reach here — a name that is not a filter, a

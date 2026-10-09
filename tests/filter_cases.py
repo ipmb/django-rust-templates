@@ -15,10 +15,20 @@ criterion.** Two reasons, and neither is redundancy:
   whether the result is a `SafeString` — a difference that shows up only later,
   as an escaping decision, in a test that then looks like it is about escaping.
 
-**`arg` is absent when the filter takes none** rather than written as `None`,
-because the two are different inputs: an explicit `None` argument would make the
-token `x|default:None`, which Django resolves as a `None` constant. Rows are
-declared with the keys they need; the harness uses `.get("arg")`.
+**An absent `arg` is the call `func(obj)` and `"arg": None` is the call
+`func(obj, None)`** — two different calls, not two spellings of one, because
+Django builds `arg_vals` (`base.py:804-809`) and spreads it (`:813`/`:815`), and
+the list's *length* is the distinction. So the key's presence is the whole
+signal, which is why the harness reads it through `tests/test_filter_parity.py`'s
+`case_arg` — `case["arg"]` when the key is there, `NO_ARG` when it is not —
+rather than `.get("arg")`, which collapsed the two and scored a raise as an
+answer. Measured on the pinned tree, **three** of the 23 landed filters that take
+an argument answered where Django raises: `floatformat` and `pluralize`, whose
+bodies were handed the absent-argument value in place of the argument, and
+`unordered_list`, whose raise is a different artefact entirely (`base.py:813`;
+see [`ERROR_CASES`]). The two tokens are `x|f` and `x|f:None`, and
+`scripts/filter_probe.py` takes the choice from the command line the same way —
+omitting the argument is the first, passing the literal `None` the second.
 
 **An `arg` that is not a `str` is a bare token and arrives unmarked**, which is
 a different input from the same text quoted. Measured on the pinned 6.0.9:
@@ -2935,6 +2945,22 @@ CASES: list[dict] = [
 # *propagation* (the class alone), where a message synthesised in Rust is checked
 # only here — the module doc's rule. Deleting a propagation test because a row
 # covers the same input would trade a check an agent can run for one it cannot.
+#
+# **Absent by decision: any argument at all on the five `needs_autoescape` filters
+# whose own second parameter is named `autoescape`** — `linebreaks`,
+# `linebreaksbr`, `linenumbers`, `unordered_list`, `urlize`. Django's loop calls
+# `func(obj, autoescape=..., *arg_vals)` (`base.py:813`), so the positional
+# argument binds to `autoescape` as well and **every** such token raises
+# `TypeError: <py_func>() got multiple values for argument 'autoescape'`
+# (measured; `<py_func>` is `linebreaks_filter` for `linebreaks` and the filter
+# name for the other four). `_native.filter` takes `autoescape` as a value, so it
+# has no keyword to collide with, and the message needs the *callable's* Python
+# name, which a name-keyed seam does not have. A row here would therefore have to
+# pin a divergence rather than a parity. The behaviour is not lost where it is
+# observable: it is CPython's binding of the *call* and not a body's decision, so
+# it belongs to whoever makes the call, and M9 inherits it exactly when the shim
+# exposes these filters as Python functions carrying Django's own signatures. The
+# full statement is on `filter` in `crates/template-py/src/lib.rs`.
 ERROR_CASES: list[dict] = [
     # --- cut: `str.replace`'s argument refusal, which no host performs -------
     {
@@ -2953,9 +2979,17 @@ ERROR_CASES: list[dict] = [
         # `{{ x|cut:None }}` — reachable where `{{ x|cut }}` is not: the arity
         # check (`base.py:819`) turns a *missing* argument into a
         # `TemplateSyntaxError` before any body runs, so this token is the only
-        # way a body sees `None` here. The FFI hands the body `Option::None` for
-        # it, the same value it uses for a missing argument, which is exactly why
-        # the reachable case is the one worth pinning.
+        # way a body sees `None` here.
+        #
+        # **The FFI used to hand the body `Option::None` for this, the same value
+        # it used for a missing argument, and this comment used to say that was
+        # why the reachable case was worth pinning.** It was the mis-generalization
+        # the shape invites: `cut`'s body raises the same `TypeError` either way,
+        # so the row passed and the conflation was invisible *here*. On
+        # `floatformat` it was not — `int(None)` raises where the bare token
+        # answers — and that is the row that forced the split. The FFI now takes
+        # `arg_vals` as a tuple of length 0 or 1, so this row and
+        # `floatformat/none-argument` pin the two halves of one distinction.
         #
         # The message says **`None`**, not `NoneType`: `Value::None.type_name()`
         # would put the wrong word in it, and nothing else in M4 would notice.
@@ -3061,6 +3095,35 @@ ERROR_CASES: list[dict] = [
         "arg": "",
         "raises": "IndexError",
         "message": "string index out of range",
+    },
+    {
+        # `{{ x|floatformat:None }}` — `int(arg)` at `:161`, where the bare
+        # `{{ x|floatformat }}` never gets: its default is `arg=-1`, so the token
+        # without an argument is not this call. **This row is the one that forced
+        # the FFI's argument list to be a list.** Until it was, `_native.filter`
+        # took an `Option` and a Python `None` argument became "no argument", so
+        # this row answered `'6666.7'` where Django raises — an accident a user
+        # reaches by writing `{{ price|floatformat:places }}` with `places = None`.
+        #
+        # The message names `NoneType` and not `None`, which is the opposite of
+        # `cut/none-argument` above and the reason both rows exist: `str.replace`
+        # names the object it was handed, `int()` names its type. Both come from
+        # CPython, so both are propagation claims by the module doc's rule — and
+        # `floatformat.rs`'s `a_parse_refusal_escapes` is that propagation test,
+        # for exactly this seam. **Nothing a body test can add here would be more
+        # than a restatement**: `to_int` is called on both branches, only with a
+        # different `Value`, and `TestFilterHost` records the operation and not
+        # its argument. The distinction this row carries is the FFI's, and this is
+        # the only instrument on it.
+        "name": "floatformat/none-argument",
+        "filter": "floatformat",
+        "value": 6666.6666,
+        "arg": None,
+        "raises": "TypeError",
+        "message": (
+            "int() argument must be a string, a bytes-like object or a real "
+            "number, not 'NoneType'"
+        ),
     },
     {
         # `int(inf)` raises `OverflowError`, which is **not** in the `except`
