@@ -496,10 +496,11 @@ pub trait FilterHost {
     /// [`FilterHost::to_int`] is where `int("abc")`'s `ValueError` and
     /// `int(None)`'s `TypeError` come from, and this seam is handed an int or
     /// `None` and nothing else. `None` is `urlize`'s own call site
-    /// (`:383`, `trim_url_limit` defaulted), not a spelling of 0.
+    /// (`defaultfilters.py:386`, `trim_url_limit` defaulted), not a spelling of 0.
     ///
     /// `nofollow=True` is not a parameter for the same reason `trim_url_limit`
-    /// has no default here: both call sites hardcode it (`:383`, `:395`), so
+    /// has no default here: both call sites hardcode it
+    /// (`defaultfilters.py:386`, `defaultfilters.py:399`), so
     /// carrying it would be carrying a constant.
     fn urlize(&self, text: &str, limit: Option<&IntValue>, autoescape: bool) -> String;
     /// `Truncator.chars` / `.words` (`text.py:193-261`), **whole**. Delegated
