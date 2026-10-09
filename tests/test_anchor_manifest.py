@@ -436,6 +436,18 @@ class AnchorManifestTests(unittest.TestCase):
             "naming it will resolve to ours: give it an explicit path in the "
             "manifest and drop it from OUR_OWN",
         )
+        # The control: this `rglob` demonstrably finds a file that is there, so
+        # the empty `shadows` above is the checkout's answer and not a walk that
+        # returned nothing. It is the same call with the same filter, over a
+        # basename known to exist.
+        self.assertTrue(
+            [
+                p
+                for p in DJANGO_CHECKOUT.rglob("base.py")
+                if p.is_file() and "__pycache__" not in p.parts
+            ],
+            "rglob found no base.py under .django/, so the walk above is vacuous",
+        )
 
     def test_a_cited_dependency_version_is_the_one_the_lockfile_pins(self):
         """The one citation that named a file **not in this tree**, replaced by
@@ -477,7 +489,16 @@ class AnchorManifestTests(unittest.TestCase):
         entry in the same commit; this is what says so.
         """
         cited_in_tree = set()
-        for _path, text in anchor_manifest.scan_tree():
+        # The control: the walk the subtraction reads has a non-empty result, so
+        # an all-empty reading is the tree's and not the walk's. `scan_tree` is a
+        # generator — truth-testing it directly would pass on an empty tree, and
+        # the row would then assert that nothing is missing from nothing.
+        walked = list(anchor_manifest.scan_tree())
+        self.assertTrue(
+            walked,
+            "scan_tree() walked no files, so the subtraction below is vacuous",
+        )
+        for _path, text in walked:
             for match in anchor_manifest.ANCHOR_RE.finditer(text):
                 cited_in_tree.add(match.group(0).strip("`"))
         self.assertEqual(

@@ -1241,10 +1241,40 @@ class RustFilterRegistryTests(unittest.TestCase):
         §D5's `FilterFlags` has three fields because Django's filters set three;
         these two are tag-side attributes, and asserting their absence is what
         stops someone adding them to `FilterFlags` "for symmetry".
+
+        The control below is **instrument-level only**, and the row is recorded
+        as residue rather than as closed for that reason
+        (`.review/m15-recon.md` §5.4). Both named flags are on **0 of the 57**
+        builtin filters at 6.0.9 — every carrier in the checkout is model-side,
+        an enum, a related descriptor or a manager method, and none of them is
+        reached by `isinstance`-ing a filter — so no mutation can make this row
+        go red, and a fabricated object carrying the flag would measure
+        `hasattr`'s truth table rather than this tree.
         """
+        # The control, in two halves, because the row's claim can be vacuous two
+        # ways.
+        #
+        # (1) Same attribute *family*. `do_not_call_in_templates` and
+        #     `alters_data` are on none of the 57 builtin filters at 6.0.9, so
+        #     the positive this row would want cannot exist. `is_safe` can: it is
+        #     on 55 of the 57 (the row above pins which two lack it). That is the
+        #     flag the instrument is shown to see, and without it both absences
+        #     below are satisfied by a `hasattr` that never returns True.
+        # (2) Same object. Every entry is a function, so the absences are the
+        #     registry's answer and not a loop handed something with no
+        #     attributes at all.
+        self.assertTrue(
+            any(
+                hasattr(defaultfilters.register.filters[n], "is_safe")
+                for n in REGISTERED
+            ),
+            "no registry entry carries `is_safe`, so this instrument cannot see "
+            "a flag at all",
+        )
         for name in sorted(REGISTERED):
             registered = defaultfilters.register.filters[name]
             with self.subTest(name=name):
+                self.assertTrue(hasattr(registered, "__name__"))
                 self.assertFalse(hasattr(registered, "do_not_call_in_templates"))
                 self.assertFalse(hasattr(registered, "alters_data"))
 

@@ -96,6 +96,13 @@ class CaseMappingParityTests(unittest.TestCase):
         # Task 3's derived delegate set names both of them, and
         # `FilterHost::str_lower` is the only route.
         self.assertFalse(hasattr(_native, "python_lower"))
+        # The control, and it is the sibling accessor rather than a fabricated
+        # one: `_native` is a module built in Rust, so a `hasattr` against it can
+        # be answered `False` by the module failing to expose anything at all.
+        # `python_upper` is the accessor the rest of this file calls, so it says
+        # the instrument reaches the module and that the absence above is the
+        # module's answer.
+        self.assertTrue(hasattr(_native, "python_upper"))
 
 
 if __name__ == "__main__":

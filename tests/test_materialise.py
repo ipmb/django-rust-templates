@@ -1219,6 +1219,19 @@ class StaticEmitterRegistryTests(unittest.TestCase):
     def test_every_tag_emitted_class_is_materialisable(self):
         missing = tag_emitted_class_names() - set(materialiser.NODE_CLASSES)
         self.assertEqual(missing, set(), f"NODE_CLASSES is missing {sorted(missing)}")
+        # The control: the minuend above is non-empty, so `missing` being empty is
+        # the registries' answer rather than an empty left-hand side. Both sides
+        # are asserted against a floor rather than a count, because the count
+        # moves with every tag the Rust tree grows.
+        self.assertTrue(
+            tag_emitted_class_names(),
+            "no class names were read out of the Rust emitters, so the "
+            "subtraction above is vacuous",
+        )
+        self.assertTrue(
+            materialiser.NODE_CLASSES,
+            "NODE_CLASSES is empty, so the subtraction above is vacuous",
+        )
 
     def test_every_node_class_is_emitted_somewhere(self):
         dead = (
@@ -1227,6 +1240,28 @@ class StaticEmitterRegistryTests(unittest.TestCase):
             - CORE_EMITTED_CLASSES
         )
         self.assertEqual(dead, set(), f"unreachable NODE_CLASSES entries: {sorted(dead)}")
+        # The control: the row's own subtraction, with one fabricated name added
+        # to the minuend, so "empty" is shown to be a measurement of this
+        # population and not of an empty one.
+        #
+        # The parentheses are load-bearing: `|` binds *looser* than `-` in Python,
+        # so `A | {f} - B - C` parses as `A | ({f} - B - C)` — measured, by
+        # giving `A` and `B` an element in common and watching it survive, which
+        # is what only that grouping predicts. What the wrong grouping breaks is
+        # not `f` (`f` is dropped by both forms once `f ∈ B ∪ C`) but `A`: it
+        # leaves the *union's left operand* outside the two subtractions, so the
+        # row silently stops asserting its own `A - B - C`. Parenthesise to
+        # mirror the row.
+        #
+        # The name follows the `unregistered_` rule the tag inventory uses, so a
+        # class the Rust tree later adds cannot overtake it.
+        fabricated = "unregistered_m15_dead_class"
+        dead_with_fabricated = (
+            (set(materialiser.NODE_CLASSES) | {fabricated})
+            - tag_emitted_class_names()
+            - CORE_EMITTED_CLASSES
+        )
+        self.assertIn(fabricated, dead_with_fabricated)
 
 
 if __name__ == "__main__":
