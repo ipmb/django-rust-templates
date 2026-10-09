@@ -97,10 +97,10 @@ pub fn parse_variable(raw: &str) -> Result<VariableDesc, Error> {
         match unescape_string_literal(&text) {
             Some(value) => literal = Some(AttrValue::SafeStr(value)),
             None => {
-                // Django reads `var[0]` on the next line and raises
-                // `IndexError` for an empty name. That is unreachable from a
-                // template (see the module doc), so it is an `Internal`
-                // invariant violation rather than a claim about the template.
+                // Django reads `var[0]` (`base.py:910`) and raises `IndexError`
+                // for an empty name. That is unreachable from a template (see
+                // the module doc), so it is an `Internal` invariant violation
+                // rather than a claim about the template.
                 if text.is_empty() {
                     return Err(Error::internal(
                         "an empty variable name reached parse_variable".to_string(),

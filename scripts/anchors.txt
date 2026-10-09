@@ -76,6 +76,7 @@ base.py:823-826	django/template/base.py	823	826	plen = len(provided) + 1	-
 base.py:850-925	django/template/base.py	850	925	-	-
 base.py:898-902	django/template/base.py	898	902	-	-
 base.py:906	django/template/base.py	906	-	self.literal = mark_safe(unescape_string_literal(var))	-
+base.py:910	django/template/base.py	910	-	if VARIABLE_ATTRIBUTE_SEPARATOR + "_" in var or var[0] == "_":	-
 base.py:926-928	django/template/base.py	926	928	if self.lookups is not None	-
 base.py:932-939	django/template/base.py	932	939	gettext_lazy(msgid)	-
 base.py:959-1029	django/template/base.py	959	1029	-	-
