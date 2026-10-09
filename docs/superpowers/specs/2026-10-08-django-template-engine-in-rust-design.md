@@ -737,10 +737,30 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   classes" would be a promise this milestone split cannot keep.
   Do not measure this set with `Node.__subclasses__()`: that walks *import
   state*, and it moves as modules load (6 with only `base` imported, 42 after
-  `django.setup()`, then 45/46/47 as the templatetag modules follow). Source it
-  from the files, or better, assert the closed obligation instead — every
-  `class_name` the Rust emitter can produce resolves. That is what
-  `tests/test_materialise.py` pins.
+  `django.setup()`, then 45/46/47 as the templatetag modules follow). The 32
+  above is that walk's answer *once the five modules are imported*, and a source
+  scan gives a different answer again depending on what it counts: 32 is the
+  transitive closure, while a scan for a direct `class X(Node)` base finds
+  **29** — the difference being `InclusionNode`, `SimpleNode` and
+  `SimpleBlockNode`, which extend another node class rather than `Node`. Quote a
+  number from this bullet only with its definition attached; this is the
+  fourth time in this project that two right answers to two unstated questions
+  have collided.
+  What matters more than the count: of the 47, only **12** are observable to
+  Django's own suite — the ones `tests/template_tests` imports by name
+  (`BlockNode`, `BlockTranslateNode`, `ExtendsNode`, `ForNode`, `IfNode`,
+  `IncludeNode`, `LocalizeNode`, `StaticNode`, `TextNode`, `URLNode`,
+  `VariableNode`, `WithNode`). A rename of any of those fails at import, loudly,
+  before an assertion runs; the other 35 are Django-internal and no test
+  observes them. So a standing assertion over the inventory would carry a
+  deferred list that rots in order to guard classes that are mostly not
+  contract.
+  Instead: **re-run the per-module file scan as a diff when the Django pin
+  moves**, as a pin-bump checklist item. That catches the case that can actually
+  change — upstream adding or renaming a class — at the moment it can change. A
+  stale deferred list reads as coverage and is worse than no list.
+  And assert the closed obligation instead — every `class_name` the Rust emitter
+  can produce resolves. That is what `tests/test_materialise.py` pins.
 
 - **§5.5's render path** — `NodeList.render`/`Node.render_annotated` kept
   verbatim, shadow nodes renderable; M9 gate.
