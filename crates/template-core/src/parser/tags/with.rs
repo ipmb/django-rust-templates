@@ -2,24 +2,26 @@
 //!
 //! # Both messages interpolate through Python's `repr`
 //!
-//! `"%r expected at least one variable assignment" % bits[0]` (`:1678-1680`) and
+//! `"%r expected at least one variable assignment" % bits[0]`
+//! (`defaulttags.py:1678-1680`) and
 //! `"%r received an invalid token: %r" % (bits[0], remaining_bits[0])`
-//! (`:1682-1684`). The second one's *second* value is the leftover bit — an
-//! arbitrary token from the template — so the escaping rules are observable:
-//! measured on the pinned tree, `{% with a=1 foo<U+00AD>bar %}` reports
-//! `'with' received an invalid token: 'foo\xadbar'`. Rust's `char::is_control`
-//! covers Cc only, so this goes through [`Parser::py_repr`], which the shell
-//! implements with Python's own `repr` ([`Host::repr`]).
+//! (`defaulttags.py:1682-1684`). The second one's *second* value is the leftover
+//! bit — an arbitrary token from the template — so the escaping rules are
+//! observable: measured on the pinned tree, `{% with a=1 foo<U+00AD>bar %}`
+//! reports `'with' received an invalid token: 'foo\xadbar'`. Rust's
+//! `char::is_control` covers Cc only, so this goes through [`Parser::py_repr`],
+//! which the shell implements with Python's own `repr` ([`Host::repr`]).
 //!
 //! # The modern form is the kwargs, and the legacy form is not dead
 //!
 //! `WithNode(var, name, nodelist, extra_context=None)` still takes the two
-//! legacy positionals, and `:1687` passes **`None, None`** for them — the values
-//! live in `extra_context`, built by `token_kwargs(…, support_legacy=True)`
-//! (`:1676`). `support_legacy` is what makes `{% with a as b %}` work at all, so
-//! a port that read `support_legacy=False` would reject a form the docs call
-//! supported, and a port that passed the pair positionally would build a node
-//! whose `extra_context` is empty.
+//! legacy positionals, and `defaulttags.py:1687` passes **`None, None`** for
+//! them — the values live in `extra_context`, built by
+//! `token_kwargs(…, support_legacy=True)` (`defaulttags.py:1676`).
+//! `support_legacy` is what makes `{% with a as b %}` work at all, so a port
+//! that read `support_legacy=False` would reject a form the docs call supported,
+//! and a port that passed the pair positionally would build a node whose
+//! `extra_context` is empty.
 //!
 //! # The order of the two checks
 //!
@@ -71,9 +73,10 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
     let nodelist = parser.parse(&["endwith"])?;
     parser.delete_first_token();
     Ok(NodeDesc::with_nodelist("WithNode", "nodelist", nodelist)
-        // Django's two positionals are literally `None` (`:1687`); the data is
-        // in `extra_context`. They are emitted rather than omitted so the
-        // descriptor names every parameter `WithNode.__init__` takes.
+        // Django's two positionals are literally `None`
+        // (`defaulttags.py:1687`); the data is in `extra_context`. They are
+        // emitted rather than omitted so the descriptor names every parameter
+        // `WithNode.__init__` takes.
         .attr("var", AttrValue::None)
         .attr("name", AttrValue::None)
         .attr("extra_context", AttrValue::Map(extra_context)))

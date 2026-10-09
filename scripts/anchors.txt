@@ -380,8 +380,10 @@ defaulttags.py:1584	django/template/defaulttags.py	1584	-	return URLNode(viewnam
 defaulttags.py:1610-1650	django/template/defaulttags.py	1610	1650	parser.compile_filter(max_width)	-
 defaulttags.py:1654-1687	django/template/defaulttags.py	1654	1687	"%r expected at least one variable assignment" % bits[0]	-
 defaulttags.py:1676	django/template/defaulttags.py	1676	-	support_legacy=True	-
+defaulttags.py:1678-1680	django/template/defaulttags.py	1678	1680	"%r expected at least one variable assignment"	-
 defaulttags.py:1682-1684	django/template/defaulttags.py	1682	1684	"%r received an invalid token: %r"	-
 defaulttags.py:1683	django/template/defaulttags.py	1683	-	remaining_bits[0]	-
+defaulttags.py:1687	django/template/defaulttags.py	1687	-	return WithNode(None, None, nodelist, extra_context=extra_context)	-
 engine.py:15-16	django/template/engine.py	15	16	filters	-
 engine.py:63	django/template/engine.py	63	-	self.template_builtins = self.get_template_builtins(self.builtins)	-
 engine.py:194	django/template/engine.py	194	-	-	-
