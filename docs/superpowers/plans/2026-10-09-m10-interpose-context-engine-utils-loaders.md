@@ -2386,6 +2386,26 @@ recorded here rather than left as an absent paragraph.
 
 M10 does **not** edit §10.1's sentence or §10.3's M14 row: both say the end state is `unshimmed()` empty, and the recon's §2 measured that no row reaches zero without interposing glue §6's vendoring policy exists to refuse (two names: `autoreload`, `context_processors`). The report to the user states the question and the recommendation — that the target become the *set* `UNDECIDED` with a reason per name, which is what `tests/milestone_ownership.py` now expresses and what `tests/test_milestone_ownership.py` asserts — and leaves the decision to them, because changing what §2's acceptance criterion means is theirs and not a milestone's.
 
+**The reason is not politeness, and the report says so** (the reviewer's
+addition). §2 is what the whole project is measured against; editing it to match
+what the implementation can reach is the criterion drifting toward the work, and
+the drift is invisible afterwards because the new text reads as settled. An
+acceptance criterion is the user's to move.
+
+**And each option is stated with its cost**, because a target stated without one
+gets chosen by whichever is easier to say. The two options differ in exactly one
+place:
+
+* `unshimmed()` **empty** — the criterion as written. Cost: §6's vendoring policy
+  has to move, because the only way to reach zero is to interpose
+  `autoreload` (two signal receivers and a directory walk, with no template
+  machinery of ours to get right and nothing for a test to falsify) and
+  `context_processors` (which does have behaviour, so it is a real candidate
+  rather than a leaf). Both are glue.
+* `unshimmed()` **== the `UNDECIDED` set** — the criterion restated as a set with
+  a reason per name. Cost: §2's acceptance criterion changes meaning, which is
+  the user's decision and not a milestone's.
+
 ---
 
 ## Self-Review
