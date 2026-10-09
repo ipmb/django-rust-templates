@@ -468,3 +468,103 @@ guard checks what it was told to check.
 That pass (`93bc8ba`) named seven anchors, all correct, and stranded nothing.
 It is the first batch where the naming read found no error at all, after
 `url.rs`'s four and `for.rs`'s eight.
+
+## The fifth detector: a span that leaves its definition
+
+The four above all wait for a file to *finish* (the stranded list) or read its
+prose (the naming read) or look at one line (the blank-end signal). The
+reviewer's rule is **leading** — it does not wait for anything, and it reads no
+prose. Stated verbatim:
+
+> The signature is a span that leaves its definition. `ast.parse` the Django
+> file, map every `FunctionDef`/`ClassDef` range, and flag any anchor whose
+> start and end lie in different definitions.
+
+with two exemptions, both of which the reviewer supplied because the unfiltered
+rule is useless without them:
+
+- **the end's definition is nested inside the start's** — not a hit. This is the
+  whole-regex, whole-class, whole-`__init__` shape the project deliberately
+  cites: `FilterExpression`→`__init__`, `Variable`→`resolve`,
+  `stringfilter`→`_dec`, `_property_resolver`→`resolve`.
+- **the end is that definition's last line** — not a hit. A span that
+  deliberately covers several definitions ends *on* one, never *inside* one;
+  this is what keeps `defaultfilters.py:417-438` (ending on `center`'s last
+  line) out.
+
+It is about twenty lines of `ast` and it does not guess. Its blind spots are
+named, not implied: single-line anchors, bare `` `N-M` `` spans with no colon
+(the fourth blind spot above), and — the one that mattered here — a span that
+over-runs *inside a single definition*, which no definition-comparison can see.
+
+**Measured, not accepted.** Run independently against `scripts/anchors.txt`,
+the counts depend on one definition, and it is worth naming because the two
+numbers in this paragraph are otherwise "two right answers to two questions":
+
+| "a definition" means | unfiltered | hits |
+| --- | --- | --- |
+| any `def`, methods included | 15 | 3 |
+| module-level `def`/`class` only | 6 | 3 |
+
+The reviewer reported 7 and 2. Their two are both in the three, so the rule is
+sound and their reading of the two spans is right; the divergence is the same
+class of disagreement this whole project keeps producing, and the third hit is
+the reason to spend a sentence on it.
+
+The three, each read against `.django/` @ 6.0.9 before being believed:
+
+| anchor | cited as | measured | corrected to |
+| --- | --- | --- | --- |
+| `defaulttags.py:1099-1105` | `do_load` "treats every bit after the command as a library name when there is no `from`" | the span is `return subset`, two blanks, `@register.tag`, `def load(parser, token):`, one docstring line | `defaulttags.py:1126-1130` — the `else` branch |
+| `library.py:392-480` | "`parse_bits` … where a `simple_tag`'s arguments are bound" | *starts* on `varargs,` in the signature, *ends* on `try:` in `import_library`; `parse_bits` is 388-473 and `return args, kwargs` (473) is never reached | `library.py:388-473` |
+| `html.py:210-232` | "striptags (`strip_tags`, …)" | `strip_tags` is 210-229; 232 is the **decorator** of `strip_spaces_between_tags` | `html.py:210-229` |
+
+The third is why the counts differ, and it is a real defect rather than a
+metric artifact. `strip_spaces_between_tags` *is* 232-235 under a
+decorator-inclusive start, so 232 lies inside a definition and is not that
+definition's last line — a hit by the rule as stated. But if you map
+`child.lineno` and ignore decorators, 232 belongs to no definition at all and
+the anchor falls out of the run. So the exemptions are not quite complete: the
+mirror of "the end is its definition's last line" is **"the end is the next
+definition's first line"**, and 232 is exactly that. Either fix the mapping to
+include decorators (as here) or exempt the first line; do one, not neither.
+
+**The fourth hit is the read's, not the rule's**, and it is the evidence that
+the rule is necessary but not sufficient. The same comment block cites
+`defaulttags.py:1086-1095` for "The *other* raise site … and it is a different
+sentence". The whole span lies inside `load_from_library`, so every exemption
+and every comparison passes it — and it is wrong: it opens five lines early, on
+the subset-building lookup, and ends on `name,`, **cutting the message in
+half** (`label,` is 1096, the closing `)` is 1098). The raise statement is
+1092-1098. A definition-comparison cannot see a span that over-runs within one
+definition, and this is that shape.
+
+So the fifth detector joins the list, and so does its limit. Five detectors now,
+and four were discovered rather than designed: the stranded list, the naming
+read, the blank-end signal, and this one were all found while working; only the
+manifest and its `--check` were planned. Corrected in `fd8759f` — four
+replacements, all the same width as what they replaced, so nothing rewrapped,
+and the first correction whose repair was a *reuse* of an existing neighbour
+rather than a new row.
+
+## Three notes from the review that outlive their findings
+
+- **A withdrawn finding, and its cause.** The reviewer briefly reported
+  `defaulttags.py:1060-1063` and withdrew it once measured: the anchor is
+  `base.py:1060-1063`, and they took the filename from *my* message, which had
+  written `defaulttags.py:1060-1063` and `1400-1401` side by side — the second
+  `defaulttags.py`. So the miscitation came from the sender, and it is the exact
+  class this sweep exists to remove: two files under one filename. Worth the
+  paragraph in the write-up, because it is the sweep's own failure mode
+  occurring in the conversation *about* the sweep.
+- **An internal disagreement between two citations of one line is itself a
+  signature, and it is checkable.** Found in `ifchanged.rs`, whose two
+  citations of Django's `nodelist_false = NodeList()` gave it as `` `:1057-1058` ``
+  and `` `:1058` ``, disagreeing with each other — and both were wrong; the line
+  is 1060. Mechanically: two rows whose snippets are the same text at different
+  line numbers. It is a candidate sixth detector, and it is cheap. It is *not*
+  adopted here, and it is recorded as a candidate rather than quietly run.
+- **Publish the denominator with the ratio.** "28 rows / 12 wrong" is only a
+  fact when the 28 is the row count that entered the stranded list and the 12
+  is the number of those whose spans were wrong. A ratio without its base is
+  the same mistake as a count without its metric.
