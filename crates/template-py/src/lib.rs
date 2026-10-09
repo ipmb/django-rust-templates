@@ -6,7 +6,7 @@
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyStopIteration};
 use pyo3::prelude::*;
-use pyo3::types::PyTuple;
+use pyo3::types::{PyDict, PyList, PyTuple};
 
 // Aliased to keep the call site readable: `CoreLexer` names the crate's lexer,
 // as opposed to anything Python-side that might later be called a lexer.
@@ -164,6 +164,34 @@ impl SafeStr {
     }
 }
 
+/// A position in the enclosing node's own nodelists — `AttrValue::NodeListRef`.
+///
+/// Its own type rather than a bare `int`, and the reason is an ambiguity that
+/// would be silent: `AttrValue::Int` arrives in Python as an `int` too, so a
+/// materialiser dispatching on `isinstance(value, int)` could not tell an
+/// integer attribute from a nodelist reference. The failure mode is a node
+/// handed a *wrong* nodelist, which no shallow test notices. `NodeRef` and
+/// `SafeStr` exist for the same reason.
+#[pyclass(frozen)]
+#[derive(Debug)]
+pub struct NodeListRef {
+    /// The index into the enclosing `NodeDesc.nodelists`, in descriptor order.
+    #[pyo3(get)]
+    pub index: usize,
+}
+
+#[pymethods]
+impl NodeListRef {
+    #[new]
+    fn new(index: usize) -> Self {
+        Self { index }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("<NodeListRef {}>", self.index)
+    }
+}
+
 create_exception!(
     _native,
     ParseError,
@@ -234,6 +262,30 @@ fn attr_value_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
         }
         AttrValue::None => py.None(),
         AttrValue::Ref(r) => Py::new(py, NodeRef::new(r.0))?.into_any(),
+        AttrValue::Variable(v) => variable_desc_to_py(py, v)?,
+        AttrValue::List(items) => {
+            let items: Vec<Py<PyAny>> = items
+                .iter()
+                .map(|item| attr_value_to_py(py, item))
+                .collect::<PyResult<_>>()?;
+            PyList::new(py, items)?.into_any().unbind()
+        }
+        AttrValue::Map(entries) => {
+            // A real `dict`, not a list of pairs. Python's dict has kept
+            // insertion order since 3.7, so a list would buy nothing and lose
+            // something: measured against `token_kwargs` (`base.py:1196`), which
+            // assigns `kwargs[key] = …`, a repeated key **keeps its first
+            // position and takes the last value** — which `set_item` reproduces
+            // exactly and `dict(pairs)` would too, while a list handed to
+            // `context.new()` would not. Built here rather than in the shell so
+            // the shell's decoder stays a decoder.
+            let mapping = PyDict::new(py);
+            for (name, value) in entries {
+                mapping.set_item(name, attr_value_to_py(py, value)?)?;
+            }
+            mapping.into_any().unbind()
+        }
+        AttrValue::NodeListRef(index) => Py::new(py, NodeListRef::new(*index))?.into_any(),
     })
 }
 
@@ -464,6 +516,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(parse_variable, m)?)?;
     m.add_class::<NodeRef>()?;
+    m.add_class::<NodeListRef>()?;
     m.add_class::<SafeStr>()?;
     m.add_class::<Variable>()?;
     m.add("ParseError", m.py().get_type::<ParseError>())?;

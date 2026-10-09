@@ -199,6 +199,159 @@ class MaterialiseTests(unittest.TestCase):
         with self.assertRaises(LookupError):
             materialiser.materialise_node(desc)
 
+    def test_a_nodelist_ref_resolves_because_children_are_built_first(self):
+        # The claim `AttrValue::NodeListRef` rests on: a node's attributes are
+        # decoded *after* its child nodelists are materialised, so the index is
+        # populated by the time it is read. If `materialise_node` ever reorders
+        # — constructing the parent before the children — this fails loudly
+        # rather than silently resolving a nodelist that is not there yet.
+        #
+        # The shape of that failure is pinned rather than described:
+        # `test_a_nodelist_ref_out_of_range_is_loud` is the same call with an
+        # index nothing can satisfy, so a reordering turns this test into that
+        # one's `LookupError` rather than into a quiet wrong answer.
+        class RefToListNode(Node):
+            def __init__(self, child, nodelist=None):
+                self.child = child
+                self.nodelist = nodelist
+
+        self._register("RefToListNode", RefToListNode)
+
+        desc = (
+            "RefToListNode",
+            (("child", _native.NodeListRef(0)),),
+            (("nodelist", ([text_desc("a")], False)),),
+            None,
+        )
+        node = materialiser.materialise_node(desc)
+        self.assertIsInstance(node.child, NodeList)
+        self.assertEqual(len(node.child), 1)
+        self.assertIsInstance(node.child[0], TextNode)
+
+    def test_a_reference_resolves_to_the_nodelist_at_its_index(self):
+        # Not just "a nodelist": the *right* one. With one nodelist every index
+        # bug resolves to something, so this needs two.
+        class TwoChildNode(Node):
+            def __init__(self, first, second, nodelist=None, other=None):
+                self.first = first
+                self.second = second
+                self.nodelist = nodelist
+                self.other = other
+
+        self._register("TwoChildNode", TwoChildNode)
+
+        desc = (
+            "TwoChildNode",
+            (("first", _native.NodeListRef(1)), ("second", _native.NodeListRef(0))),
+            (
+                ("nodelist", ([text_desc("a")], False)),
+                ("other", ([text_desc("b")], False)),
+            ),
+            None,
+        )
+        node = materialiser.materialise_node(desc)
+        self.assertEqual(node.first[0].s, "b", "index 1 is the second nodelist")
+        self.assertEqual(node.second[0].s, "a", "index 0 is the first nodelist")
+        # A named nodelist is both a keyword argument *and* referenceable by
+        # position; the two views must agree, or the ref is resolving elsewhere.
+        self.assertIs(node.nodelist, node.second)
+        self.assertIs(node.other, node.first)
+
+    def test_a_positional_only_nodelist_is_reachable_but_not_a_kwarg(self):
+        # `IfNode.__init__` takes exactly one parameter, `conditions_nodelists`,
+        # and holds its branch nodelists inside that list — `nodelist` is a
+        # computed property returning `NodeList(self)`. So a branch nodelist
+        # cannot be passed by keyword, and the descriptor names it with the empty
+        # string. `PairNode.__init__` here accepts only `pairs`, so a materialiser
+        # that passed the child anyway would raise `TypeError` rather than pass.
+        class PairNode(Node):
+            def __init__(self, pairs):
+                self.pairs = pairs
+
+        self._register("PairNode", PairNode)
+
+        desc = (
+            "PairNode",
+            (("pairs", [[None, _native.NodeListRef(0)]]),),
+            (("", ([text_desc("a")], False)),),
+            None,
+        )
+        node = materialiser.materialise_node(desc)
+        condition, nodelist = node.pairs[0]
+        self.assertIsNone(condition)
+        self.assertIsInstance(nodelist, NodeList)
+        self.assertEqual(len(nodelist), 1)
+
+    def test_an_integer_attribute_is_not_a_nodelist_reference(self):
+        # The ambiguity the `NodeListRef` pyclass exists to remove. Both arrive in
+        # Python as an `int` in an earlier design, so a materialiser dispatching
+        # on `isinstance(value, int)` would resolve an integer attribute against
+        # the node's nodelists and hand back the wrong object. The negative half
+        # is the half that matters, hence a nodelist sitting right beside it.
+        class CountNode(Node):
+            def __init__(self, count, nodelist=None):
+                self.count = count
+                self.nodelist = nodelist
+
+        self._register("CountNode", CountNode)
+
+        desc = (
+            "CountNode",
+            (("count", 3),),
+            (("nodelist", ([text_desc("a")], False)),),
+            None,
+        )
+        node = materialiser.materialise_node(desc)
+        self.assertIsInstance(node.count, int)
+        self.assertNotIsInstance(node.count, NodeList)
+        self.assertEqual(node.count, 3)
+        self.assertIsInstance(node.nodelist, NodeList, "the nodelist still arrived")
+
+    def test_a_nodelist_ref_out_of_range_is_loud(self):
+        class RefToListNode(Node):
+            def __init__(self, child, nodelist=None):
+                self.child = child
+                self.nodelist = nodelist
+
+        self._register("RefToListNode", RefToListNode)
+
+        desc = (
+            "RefToListNode",
+            (("child", _native.NodeListRef(4)),),
+            (("nodelist", ([], False)),),
+            None,
+        )
+        with self.assertRaises(LookupError) as caught:
+            materialiser.materialise_node(desc)
+        self.assertIn("out of range", str(caught.exception))
+
+    def test_a_nodelist_ref_without_the_enclosing_node_is_loud(self):
+        # `_decode_value` reached directly — a filter argument, say — has no
+        # enclosing node and so nothing to resolve against. Loud rather than
+        # `None`, which is the shape the `resolve_ref` arm already uses.
+        with self.assertRaises(LookupError) as caught:
+            materialiser._decode_value(_native.NodeListRef(0))
+        self.assertIn("nodelists", str(caught.exception))
+
+    def test_a_list_decodes_its_elements_rather_than_returning_them(self):
+        # The Rust side converts the whole tree eagerly, so a `SafeStr` inside a
+        # container arrives as a `SafeStr` and still needs `mark_safe`; a list
+        # returned as-is would escape the content when the node renders.
+        decoded = materialiser._decode_value(
+            [_native.SafeStr("<b>"), [1, _native.SafeStr("x")]]
+        )
+        self.assertIsInstance(decoded[0], SafeString)
+        self.assertIsInstance(decoded[1][1], SafeString)
+
+    def test_a_map_decodes_its_values_and_stays_a_dict(self):
+        # `AttrValue::Map` becomes a real `dict` on the Rust side, because
+        # `token_kwargs` does `kwargs[key] = …` and every consumer wants a
+        # mapping. Only the values need decoding here.
+        decoded = materialiser._decode_value({"a": _native.SafeStr("<b>"), "b": 2})
+        self.assertIsInstance(decoded, dict)
+        self.assertIsInstance(decoded["a"], SafeString)
+        self.assertEqual(decoded["b"], 2)
+
 
 class ParseToMaterialiseTests(unittest.TestCase):
     """`_native.parse` and the materialiser together, on real M2 templates."""

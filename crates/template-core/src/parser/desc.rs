@@ -89,6 +89,53 @@ pub enum AttrValue {
     None,
     /// A host-owned value, held by handle. See [`NodeRef`].
     Ref(NodeRef),
+    /// A `Variable` — a `FilterExpression` argument, or a `{% with %}` target.
+    ///
+    /// Nested rather than flattened because `Variable` is itself a parsed thing
+    /// with four slots, and a flattened form would have to be reassembled in the
+    /// materialiser — which is the re-parsing §5.5 forbids.
+    ///
+    /// **Boxed, and the box is load-bearing.** `VariableDesc.literal` is itself
+    /// an `Option<AttrValue>`, so the two types are mutually recursive and an
+    /// unboxed variant is an infinitely sized type. Boxed here rather than on
+    /// `literal` because this is the rarer shape: every `Variable` has a
+    /// `literal` slot and only a filter argument or a `{% with %}` target is a
+    /// `Variable` at all.
+    Variable(Box<VariableDesc>),
+    /// A list of values — `IfNode.conditions_nodelists`, `ForNode.loopvars`,
+    /// `FilterExpression`'s filter arguments.
+    ///
+    /// A nodelist inside one is [`AttrValue::NodeListRef`], never inlined; see
+    /// that variant.
+    List(Vec<AttrValue>),
+    /// A `token_kwargs` result — `WithNode.extra_context`,
+    /// `IncludeNode.extra_context`, `parse_bits`' kwargs.
+    ///
+    /// A `Vec` of pairs rather than a map type, so the descriptor keeps the order
+    /// `token_kwargs` produced and the **materialiser** decides what Python
+    /// object it becomes. There is exactly one place that decision is made and
+    /// the repeated-key case is why: `token_kwargs` does `kwargs[key] = …`
+    /// (`base.py:1196`), so a repeated key keeps its first position and takes the
+    /// last value, and only `dict(pairs)` reproduces that.
+    Map(Vec<(String, AttrValue)>),
+    /// A position in this node's own `NodeDesc.nodelists`.
+    ///
+    /// `IfNode.conditions_nodelists` is a list of `(condition, nodelist)` pairs,
+    /// and the nodelist half must be a **real Python `NodeList`** held inside the
+    /// pairs: `IfNode` does not override `child_nodelists` (it inherits
+    /// `('nodelist',)` from `Node`) while `nodelist` is a computed property
+    /// returning `NodeList(self)`, so `get_nodes_by_type` reaches an `IfNode`'s
+    /// children only through the pairs. Inlining a `NodeListDesc` would build a
+    /// second, identity-different tree.
+    ///
+    /// **It crosses the wire as its own type, not as a bare `int`.** An earlier
+    /// draft of the plan had `_decode_value` recognise `isinstance(value, int)`
+    /// — which cannot work, because [`AttrValue::Int`] is *also* a Python `int`
+    /// and no node with both an integer attribute and a nodelist reference could
+    /// be materialised. The two would be indistinguishable and the failure would
+    /// be a silently wrong nodelist, so the FFI has a `NodeListRef` pyclass in
+    /// the same style as `NodeRef` and `SafeStr`.
+    NodeListRef(usize),
 }
 
 /// A `Variable` as it crosses the wire (`django.template.base.Variable`).
@@ -280,5 +327,81 @@ mod tests {
             vec![("nodelist".to_string(), NodeListDesc::default())],
         );
         assert!(node.attrs.is_empty());
+    }
+
+    #[test]
+    fn containers_keep_insertion_order_and_nest() {
+        let value = AttrValue::List(vec![
+            AttrValue::Int(1),
+            AttrValue::List(vec![AttrValue::Str("x".to_string())]),
+        ]);
+        let AttrValue::List(outer) = &value else {
+            unreachable!()
+        };
+        assert_eq!(outer.len(), 2);
+        assert!(matches!(outer[0], AttrValue::Int(1)));
+
+        let mapping = AttrValue::Map(vec![("a".to_string(), AttrValue::Bool(true))]);
+        let AttrValue::Map(entries) = &mapping else {
+            unreachable!()
+        };
+        assert_eq!(entries[0].0, "a");
+    }
+
+    #[test]
+    fn a_nodelist_ref_is_an_index_and_not_a_copy() {
+        // The whole point of the variant: the nodelist stays in
+        // `NodeDesc.nodelists`, where `materialise_node` already builds
+        // children, and the attribute carries a position. A `NodeListDesc`
+        // inline would duplicate the subtree and break identity.
+        let node = NodeDesc::new("IfNode").attr(
+            "conditions_nodelists",
+            AttrValue::List(vec![AttrValue::List(vec![
+                AttrValue::None,
+                AttrValue::NodeListRef(0),
+            ])]),
+        );
+        assert!(
+            node.nodelists.is_empty(),
+            "the ref must not inline a nodelist"
+        );
+    }
+
+    #[test]
+    fn a_positional_only_nodelist_is_named_with_the_empty_string() {
+        // `IfNode.__init__` takes exactly one parameter, `conditions_nodelists`,
+        // and holds its child nodelists *inside* that list — `nodelist` is a
+        // computed property returning `NodeList(self)` and there is no
+        // `nodelist` parameter to pass one to. So the branch nodelists cannot be
+        // kwargs, and the empty name is how a descriptor says "positional only".
+        // The materialiser reads this; see `test_materialise.py`'s
+        // `test_a_positional_only_nodelist_is_reachable_but_not_a_kwarg`.
+        let node = NodeDesc::new("IfNode")
+            .nodelist("", NodeListDesc::default())
+            .nodelist("", NodeListDesc::default());
+        assert_eq!(node.nodelists.len(), 2);
+        assert!(node.nodelists.iter().all(|(name, _)| name.is_empty()));
+    }
+
+    #[test]
+    fn a_map_keeps_a_repeated_key_as_two_entries() {
+        // `token_kwargs` does `kwargs[key] = …` (`base.py:1196`), so a repeated
+        // key keeps its *first position* and takes the *last value*. Rust keeps
+        // both entries and in order; the collapsing is the FFI's, one
+        // `PyDict::set_item` per entry, which is where Django's own behaviour
+        // falls out for free rather than needing a rule. Asserted here because
+        // a descriptor that dropped the earlier entry would make the position
+        // wrong and no Python-side test could see the difference.
+        let mapping = AttrValue::Map(vec![
+            ("a".to_string(), AttrValue::Int(1)),
+            ("b".to_string(), AttrValue::Int(2)),
+            ("a".to_string(), AttrValue::Int(3)),
+        ]);
+        let AttrValue::Map(entries) = &mapping else {
+            unreachable!()
+        };
+        assert_eq!(entries.len(), 3, "both `a` entries survive Rust");
+        assert_eq!(entries[0].0, "a");
+        assert_eq!(entries[2].0, "a");
     }
 }
