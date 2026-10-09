@@ -91,7 +91,7 @@ return func is not self._django_tags.get(command)
 with `_rust_owned = set(_native.builtin_tag_names_including_stubs()) - set(
 _native.builtin_tag_stub_names())` — **25 names** — and
 `_django_tags = {**defaulttags.register.tags, **loader_tags.register.tags}`
-(`host.py:93`).
+(`host.py:89`).
 
 So ownership is decided by **name**, with one escape hatch: if the parser's
 callable for a Rust-owned name is no longer Django's own, something rebound it
@@ -305,7 +305,7 @@ lazily, on `{% load %}` — `django.template.engine.Engine.default_builtins`
 none of them — so in the accepted configuration they always run after install
 and there is no live stale-capture path. But **our `_impl/templatetags/*.py` will
 import from `django.template` too**, and the moment they are `_served` they fall
-out of `_stale_captures()`'s sweep (`_shim.py:322-323` skips served modules).
+out of `_stale_captures()`'s sweep (`_shim.py:326` skips served modules).
 That is correct — a module we serve is not a *capture* — but it means the module
 whose captures would go stale is no longer watched, and the watch has to be
 re-established for the new name by whatever asserts the five are ours.
