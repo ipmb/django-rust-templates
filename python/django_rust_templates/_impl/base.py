@@ -70,6 +70,7 @@ from django.utils.timezone import template_localtime
 from django.utils.translation import gettext_lazy, pgettext_lazy
 
 from .exceptions import TemplateSyntaxError
+from django_rust_templates import _native
 
 # template syntax constants
 FILTER_SEPARATOR = "|"
@@ -819,7 +820,6 @@ class FilterExpression:
             # running them here as well would apply `@stringfilter`'s coercion
             # and `mark_safe` twice. Decided by handle identity, so a
             # `{% load %}`ed filter that merely shares a name keeps this arm.
-            from django_rust_templates import _native
             from django_rust_templates.host import (
                 django_own_filters,
                 effective_autoescape,
@@ -1030,8 +1030,6 @@ class Variable:
         # Reached only when `self.lookups is not None` (see `resolve`), so the
         # literal and translate branches of `Variable.resolve` — which stay
         # Python, one frame out — are not duplicated by this call.
-        from django_rust_templates import _native
-
         return _native.resolve(".".join(self.lookups), context)
 
 

@@ -814,7 +814,7 @@ django/utils/translation/__init__.py:279	django/utils/translation/__init__.py	27
 django/utils/translation/__init__.py:280	django/utils/translation/__init__.py	280	-	raise KeyError("Unknown language code %s." % lang_code)	-
 django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	290	-	info["name_translated"] = gettext_lazy(info["name"])	-
 python/django_rust_templates/_impl/base.py:829	python/django_rust_templates/_impl/base.py	829	-	django_own_filters().get(func)	-
-python/django_rust_templates/_impl/base.py:1161	python/django_rust_templates/_impl/base.py	1161	-	-	-
+python/django_rust_templates/_impl/base.py:1161	python/django_rust_templates/_impl/base.py	1161	-	render_value_in_context(output, context)	-
 python/django_rust_templates/_impl/parser.py:181	python/django_rust_templates/_impl/parser.py	181	-	"BlockTranslateNode": BlockTranslateNode,	-
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
 python/django_rust_templates/_impl/parser.py:568	python/django_rust_templates/_impl/parser.py	568	-	-	-

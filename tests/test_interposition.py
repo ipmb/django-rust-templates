@@ -306,11 +306,13 @@ class InterpositionTests(unittest.TestCase):
         differing = [op for op in opcodes if op[0] != "equal"]
 
         # The structure, which is what the guard reads: six edits — the marker
-        # and its blank line as one pure insertion of ours, then two pairs for
+        # and its blank line as one pure insertion of ours, then M16's
+        # module-level `_native` import as a second, then two pairs for
         # `compile_nodelist`'s delegation, then M11 Task 2's filter seam as a
-        # second pure insertion, then two more for `Variable._resolve_lookup`'s.
-        # Asserted here too because a re-alignment that merged two edits into
-        # one would move `equal` in a way this row could not explain on its own.
+        # third pure insertion, then one replacement for
+        # `Variable._resolve_lookup`'s. Asserted here too because a
+        # re-alignment that merged two edits into one would move `equal` in a
+        # way this row could not explain on its own.
         #
         # Five rather than three since M9's Task 5, and the pair that grew is
         # the one worth reading: `difflib` splits the resolver's single
@@ -321,7 +323,7 @@ class InterpositionTests(unittest.TestCase):
         # edit merged them and the declaration stopped describing the diff.
         #
         # **Six rather than five since M11 Task 2, and the sixth is a `delete`.**
-        # That is the filter seam: ours 815-847 — a comment block, two imports,
+        # That is the filter seam: ours 816-847 — a comment block, one import,
         # the identity test, the call and its `continue` — against none of
         # upstream's, because the arm *replaces* `resolve`'s loop body with a
         # call rather than wrapping it. `difflib` names a run that only one side
@@ -330,24 +332,42 @@ class InterpositionTests(unittest.TestCase):
         # an arm that had been written as a *rewrite* of the loop would show up
         # as a `replace` here and as a declared region with two spans.
         #
-        # **The run is 33 lines and 17 of them are executable, and the two
+        # **The run is 32 lines and 16 of them are executable, and the two
         # numbers are both in this file and `check_transcriptions.py` because
         # this seam has already been miscounted three ways.** `difflib` counts
         # lines in the run; `executable_lines` counts the lines of it that hold a
-        # statement, and a parenthesised `import` contributes six of the
-        # seventeen. Neither is the other's denominator. Hoisting those imports
+        # statement, and a parenthesised `import` contributes five of the
+        # sixteen. Neither is the other's denominator. Hoisting those imports
         # above the `for` — tried and reverted — would have split this one
         # `delete` into two, with upstream's verbatim `arg_vals` loop equal in
         # place between them, which is why the shape of this list is worth
         # asserting rather than deriving.
+        #
+        # **M16 moved the shape, deliberately, and this row is why the move was
+        # measured rather than noticed.** Hoisting `from django_rust_templates
+        # import _native` from the two seam bodies to module scope (worth ~50us
+        # a render — see `.review/m16-record.md`) rewrote the list in three ways
+        # at once: a new `delete` at ours 73 (one line added at module scope,
+        # none upstream), the filter seam's `delete` shrinking from ours 815-847
+        # to 816-847 and from 17 executable lines to 16, and — the one worth
+        # reading — a **merge**. The in-function import plus the blank line after
+        # it were what had kept the resolver's two hunks apart; removing them let
+        # `difflib` extend the single replacement to upstream's `return current`
+        # tail. So our differing lines went 93 -> 92 while upstream's went 86 ->
+        # 87, and the matched count is each side's length less its differing
+        # lines, which agrees: 1214-93 = 1121 becomes 1212-92 = 1120, and
+        # 1207-87 = 1120. **The equal count falls by one, and it is not the net
+        # of the edit** (which is -2 on our side): it falls because upstream's
+        # blank line 1022 — which `difflib` had paired with one of our blank
+        # lines — now sits inside the replaced run instead of being matched.
         self.assertEqual(
             [op[0] for op in differing],
-            ["delete", "replace", "replace", "delete", "replace", "replace"],
+            ["delete", "delete", "replace", "replace", "delete", "replace"],
         )
 
         self.assertEqual(
             equal,
-            1121,
+            1120,
             "the number of lines this transcription shares with upstream, in "
             "place, has moved; if that was a delegation, re-pin it here and "
             "declare the region in scripts/check_transcriptions.py",

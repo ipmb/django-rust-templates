@@ -31,6 +31,9 @@ is the one fact the whole predicate rests on: with
 
 from __future__ import annotations
 
+import importlib
+import sys
+
 from django.template import defaultfilters as _defaultfilters
 from django.template import defaulttags as _defaulttags
 from django.template import loader_tags as _loader_tags
@@ -73,12 +76,36 @@ def _library_tag_tables():
     ``ShellHost`` — constructed by the parser, so after ``install()`` on every
     path the package supports — keeps the two universes apart instead of relying
     on the guard.
-    """
-    import importlib
 
-    return tuple(
-        importlib.import_module(name).register.tags for name in _LIBRARY_TAG_MODULES
-    )
+    **The read is still fresh per call; only ``importlib``'s machinery is
+    skipped.** Both tables are read on the hot path — `django_own_tags` once per
+    tag, `django_own_filters` once per filter *application* — and
+    ``importlib.import_module`` costs **0.275 us** against **0.046 us** for the
+    ``sys.modules`` lookup it ends in, a **6x** difference (`scripts/bench.py
+    --count`'s census names the call sites; both figures are re-run by
+    `.review/m16-measurements/m16_measure_library_tables.py`, which prints them
+    with the tree it read). ``sys.modules.get`` returns the module that is
+    *currently* registered, exactly as ``import_module`` would, so a re-executed
+    library is still seen — that is the identity property `django_own_filters`
+    depends on — and only the first call pays the import.
+    """
+    return tuple(_library_module(name).register.tags for name in _LIBRARY_TAG_MODULES)
+
+
+def _library_module(name):
+    """The library module named ``name``, importing it if this is the first ask.
+
+    A `sys.modules` lookup rather than ``importlib.import_module``: the latter is
+    ~6x slower (0.275 us vs 0.046 us, re-run by
+    `.review/m16-measurements/m16_measure_library_tables.py`) and reaches the same object, since
+    the import system has already put it in ``sys.modules`` on every call but the
+    first. The lazy-import property is kept by the ``None`` branch, so the
+    deferral [`_library_tag_tables`] documents still holds.
+    """
+    module = sys.modules.get(name)
+    if module is None:
+        module = importlib.import_module(name)
+    return module
 
 
 def _library_filter_tables():
@@ -94,10 +121,8 @@ def _library_filter_tables():
     is the five libraries M12 interposes and a sixth library's filters should not
     have to remember to be added in two places.
     """
-    import importlib
-
     return tuple(
-        importlib.import_module(name).register.filters for name in _LIBRARY_TAG_MODULES
+        _library_module(name).register.filters for name in _LIBRARY_TAG_MODULES
     )
 
 

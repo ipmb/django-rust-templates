@@ -192,7 +192,11 @@ class DescriptorCountingTests(unittest.TestCase):
 
         base_defs = definitions(base)
         self.assertEqual(base_defs["FilterExpression.args_check"], (860, 877))
-        self.assertEqual(base_defs["Origin.loader_name"][0], 134)
+        # 135, not 134: M16's module-level `_native` import is one line above
+        # this `def`, and `args_check` on the line above is unmoved because the
+        # line it gained there is cancelled by the one `resolve` lost. Both
+        # numbers are re-measured, not shifted by arithmetic.
+        self.assertEqual(base_defs["Origin.loader_name"][0], 135)
         self.assertIsNone(base_defs.get("TokenType.__new__"))
 
         for label in ("Context.bind_template", "RenderContext.push_state"):

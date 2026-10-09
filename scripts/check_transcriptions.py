@@ -82,25 +82,45 @@ MARKER_WINDOW = 4
 # re-runs the instrument and fails if the two disagree. A pinned table with a
 # live re-measurement behind it is the same shape as the module meter.
 #
-# 29 functions, spanning 116-1214 in a file of 1214 lines — nearly the whole
+# 30 functions, spanning 117-1212 in a file of 1212 lines — nearly the whole
 # file, which is the finding.
 # A guard that checked only the named target's own lines would miss a region
-# declared in any of the other 28.
+# declared in any of the other 29.
+#
+# **The 29 above was already stale when M16 arrived, and the correction is
+# `git show`, not a recount.** `24bed0f` (M13's "Rust compiles `{% partialdef
+# %}`, and no built-in tag is a stub") added the thirtieth entry —
+# `PartialTemplate.__init__`, a *real* addition to the compared path and not a
+# shift: with the partial's body compiled by Rust the harness now builds the
+# node it hands back — and left the sentence at 29, so `b5cc50f`'s
+# pin=29/sentence=29 became pin=30/sentence=29 and stayed that way for ten
+# commits. Nothing failed, because the sentence is prose and the pin is the
+# assertion; the row that could have caught it
+# (`test_the_compared_path_is_the_measured_one`) compares the pin to the
+# instrument and never reads this paragraph. Recorded rather than silently
+# repaired because it is the same class of defect the M15 record files: a number
+# whose carrier moved under it, found here while re-deriving the numbers M16
+# does move.
 #
 # **These are the transcription's line numbers, so an insertion moves them, and
-# M11 Task 2's is why ten of them are not what M10 pinned.** That commit
-# (`679e315`) inserted thirty-three lines into `FilterExpression.resolve` — the
-# region `DECLARED` records below as `(815, 847)`, of which the routing arm is
-# nineteen and the comment and lazy imports above it the other fourteen — which
-# shifts every function below it by thirty-three: `args_check` 827-844 → 860-877
-# through `token_kwargs` 1137-1181 → 1170-1214. Re-measured with the
-# instrument rather than computed, because the instrument is the evidence; the
-# shift is arithmetic anyone can check, and the *set* of functions is the part
-# that could have moved for a real reason (the routing arm is on `resolve`'s own
-# lines, and `resolve` is not in this table — the parse harness never renders).
-# The arithmetic was wrong here once, in the direction this block exists to warn
-# about: it counted the region someone had named (the arm, nineteen lines)
-# rather than what the commit did (thirty-three), and the pin was right
+# M16's is why thirty of them are not what `13f9b08` pinned.** The module-level
+# `_native` import adds one line at 73 and the two in-function imports remove
+# one inside `FilterExpression.resolve` and two inside `Variable._resolve_lookup`,
+# so the shift is three-valued rather than uniform: **+1** for the nineteen
+# functions above `resolve` (`Origin.__init__` 116-119 → 117-120 through
+# `FilterExpression.__init__` 744-788 → 745-789), **0** for the four between
+# `resolve` and `_resolve_lookup` (`args_check` 860-877 → 860-877 — the removal
+# cancels the insertion — through `Variable.resolve` 962-978 → 962-978), and
+# **-2** for the seven below it (`Node.get_nodes_by_type` 1077-1089 → 1075-1087
+# through `token_kwargs` 1170-1214 → 1168-1212). Re-measured with the instrument
+# rather than computed, because the instrument is the evidence; the shift is
+# arithmetic anyone can check, and the *set* of functions is the part that could
+# have moved for a real reason (the routing arm is on `resolve`'s own lines, and
+# `resolve` is not in this table — the parse harness never renders).
+#
+# The arithmetic was wrong here once before, in the direction this block exists
+# to warn about: it counted the region someone had named (M11's arm, nineteen
+# lines) rather than what that commit did (thirty-three), and the pin was right
 # throughout. A shift belongs to the commit, not to the block you have in mind;
 # `git show <commit> -- <file> | grep '^@@'` is the measurement.
 # The stale pin did not fail quietly: clause (4) read the old `args_check` span
@@ -123,36 +143,36 @@ COMPARED_PATH = {
     # regions unchecked with everything green.
     "__init__.py": [],
     "base.py": [
-        (116, 119, "Origin.__init__"),
-        (306, 313, "PartialTemplate.__init__"),
-        (364, 386, "Token.__init__"),
-        (395, 408, "Token.split_contents"),
-        (412, 414, "Lexer.__init__"),
-        (423, 435, "Lexer.tokenize"),
-        (437, 469, "Lexer.create_token"),
-        (507, 529, "Parser.__init__"),
-        (534, 596, "Parser.parse"),
-        (598, 603, "Parser.skip_past"),
-        (605, 622, "Parser.extend_nodelist"),
-        (624, 635, "Parser.error"),
-        (637, 653, "Parser.invalid_block_tag"),
-        (664, 665, "Parser.next_token"),
-        (667, 668, "Parser.prepend_token"),
-        (670, 671, "Parser.delete_first_token"),
-        (673, 675, "Parser.add_library"),
-        (677, 681, "Parser.compile_filter"),
-        (683, 687, "Parser.find_filter"),
-        (744, 788, "FilterExpression.__init__"),
+        (117, 120, "Origin.__init__"),
+        (307, 314, "PartialTemplate.__init__"),
+        (365, 387, "Token.__init__"),
+        (396, 409, "Token.split_contents"),
+        (413, 415, "Lexer.__init__"),
+        (424, 436, "Lexer.tokenize"),
+        (438, 470, "Lexer.create_token"),
+        (508, 530, "Parser.__init__"),
+        (535, 597, "Parser.parse"),
+        (599, 604, "Parser.skip_past"),
+        (606, 623, "Parser.extend_nodelist"),
+        (625, 636, "Parser.error"),
+        (638, 654, "Parser.invalid_block_tag"),
+        (665, 666, "Parser.next_token"),
+        (668, 669, "Parser.prepend_token"),
+        (671, 672, "Parser.delete_first_token"),
+        (674, 676, "Parser.add_library"),
+        (678, 682, "Parser.compile_filter"),
+        (684, 688, "Parser.find_filter"),
+        (745, 789, "FilterExpression.__init__"),
         (860, 877, "FilterExpression.args_check"),
         (909, 960, "Variable.__init__"),
         (962, 978, "Variable.resolve"),
-        (1077, 1089, "Node.get_nodes_by_type"),
-        (1097, 1098, "NodeList.render"),
-        (1100, 1105, "NodeList.get_nodes_by_type"),
-        (1111, 1112, "TextNode.__init__"),
-        (1120, 1127, "TextNode.render_annotated"),
-        (1149, 1150, "VariableNode.__init__"),
-        (1170, 1214, "token_kwargs"),
+        (1075, 1087, "Node.get_nodes_by_type"),
+        (1095, 1096, "NodeList.render"),
+        (1098, 1103, "NodeList.get_nodes_by_type"),
+        (1109, 1110, "TextNode.__init__"),
+        (1118, 1125, "TextNode.render_annotated"),
+        (1147, 1148, "VariableNode.__init__"),
+        (1168, 1212, "token_kwargs"),
     ],
     # 8 functions, spans 56-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
@@ -577,6 +597,28 @@ DECLARED = {
             # list of statements: two of our lines against none of upstream's,
             # and what moved is the marker.
             ((2, 3), None, "# TRANSCRIBED: django/template/base.py (Django 6.0.9)"),
+            # M16's module-level `_native` binding, ours only — a pure
+            # insertion, `None` upstream. **This region is the one that changes
+            # this file's diff shape on purpose, and the reason is the
+            # measurement, not a style preference.** Before M16 the two seam
+            # functions each carried `from django_rust_templates import _native`
+            # *inside the function body*, so the import ran once per
+            # `FilterExpression.resolve` and once per `Variable._resolve_lookup`
+            # — 201 times for the benchmark's 50-row page, at ~0.25µs a call.
+            # Hoisting it here removes all 201 and is worth **~50µs per render**
+            # (1691 → 1641µs, `.review/m16-measurements/`). That is exactly the
+            # `sys.modules` hit the M11 region's own note refused to pay a
+            # region *split* for, and the distinction the note turns on survives
+            # here: M11's move was *within* the function, saving `(n-1)` hits
+            # for an `n`-filter expression and so nothing at all for the common
+            # one-filter case, while this one is 201 per render and is the
+            # standard placement rather than a rearrangement. The cost is
+            # recorded so it is not discovered as a surprise: the two
+            # `_resolve_lookup` regions below merge into one, the
+            # `FilterExpression` region loses its first line, and every span
+            # from here down shifts by one — the region count is unchanged at
+            # six, which is the number the note says is the review surface.
+            ((73, 73), None, "from django_rust_templates import _native"),
             # M9's parse seam: `Template.compile_nodelist` delegates to Rust.
             # Upstream's lexer construction and `Parser(...)` call are gone, and
             # in their place is a comment block plus the import that reaches the
@@ -594,12 +636,12 @@ DECLARED = {
             # `COMPARED_PATH` and why that absence is a measurement rather than
             # an oversight.
             (
-                (187, 201),
+                (188, 202),
                 (185, 196),
                 "from django_rust_templates.render import parse_template",
             ),
             (
-                (204, 206),
+                (205, 207),
                 (199, 201),
                 "parsed = parse_template(self.source, self.engine, self.origin)\n"
                 "self.extra_data = parsed.extra_data\n"
@@ -609,21 +651,23 @@ DECLARED = {
             # `self.filters` gains one branch, and it is a **pure insertion** —
             # upstream has no counterpart on these lines, hence `None` on the
             # upstream side and a snippet that names statements rather than
-            # pairing them. Seventeen executable lines in the one region below:
+            # pairing them. Sixteen executable lines in the one region below:
             # the import that reaches the shell, the identity test against the
             # built-in registry, the two flag reads, the call with its five
-            # arguments, and the `continue`. Seventeen rather than the eleven
-            # this note first claimed, because `executable_lines` counts a
-            # parenthesised `import`'s continuation lines: the six-line import
-            # is one statement and six lines, and only the second granularity is
-            # what the guard compares.
+            # arguments, and the `continue`. Sixteen rather than the fifteen a
+            # statement count gives, because `executable_lines` counts a
+            # parenthesised `import`'s continuation lines: the five-line import
+            # is one statement and five lines, and only the second granularity
+            # is what the guard compares. (This was seventeen before M16 moved
+            # the first line — `from django_rust_templates import _native` — to
+            # the module-level region above; see that region's note.)
             #
             # **One region, and that is a decision rather than a coincidence.**
-            # The imports sat inside the loop above the identity test; a
-            # reviewer's NIT moved them above the `for` — once per `resolve`
+            # The `host` import sat inside the loop above the identity test; a
+            # reviewer's NIT moved it above the `for` — once per `resolve`
             # instead of once per filter, which no test can observe — and that
             # split this region in two, because upstream's verbatim `arg_vals`
-            # loop (ours 809-814, equal in place) then sits between the imports
+            # loop (ours 810-815, equal in place) then sits between the import
             # and the branch, and equal lines are what makes `difflib` see two
             # differing regions rather than one. Reverted on the reviewer's own
             # measurement of the cost: a declared region is the diff a reader
@@ -672,9 +716,8 @@ DECLARED = {
             # `test_filter_parity.py::test_the_comparison_target_is_not_rust_owned`
             # is what watches *that*.
             (
-                (815, 847),
+                (816, 847),
                 None,
-                "from django_rust_templates import _native\n"
                 "from django_rust_templates.host import (\n"
                 "django_own_filters,\n"
                 "effective_autoescape,\n"
@@ -699,14 +742,24 @@ DECLARED = {
             # what is gone is the loop over `self.lookups`, the three arms, and
             # the handler that decided between substituting and re-raising.
             #
-            # Two regions rather than one for the same reason `compile_nodelist`
-            # has two: `difflib` pairs our comment block against upstream's loop
-            # (one opcode) and our `return` against upstream's `if
-            # getattr(e, "silent_variable_failure", …)` tail (another). The
-            # second region's upstream span is the handler's body, which is
-            # where the alignment landed rather than where the code moved to —
-            # stating that here because a reader comparing the two spans will
-            # otherwise assume the pairing is meaningful.
+            # **One region, where M9 declared two, and M16 is why.** `difflib`
+            # used to pair our comment block against upstream's loop (one
+            # opcode) and our `return` against upstream's `if getattr(e,
+            # "silent_variable_failure", …)` tail (another), with one equal
+            # blank line between them keeping the two hunks apart. M16 removed
+            # the in-function `from django_rust_templates import _native` and
+            # the blank line that followed it, so the two hunks now abut and
+            # `difflib` reports them as one — our 995-1033 against upstream's
+            # 957-1028, the whole body replaced by a comment block and a call.
+            # That is a *merge* rather than a split, so it is the direction the
+            # M11 note calls a tax reduction rather than a tax; and the region
+            # count is unchanged (two `compile_nodelist`, the marker, the
+            # module-level import, this file's filter seam, and this one = six).
+            # The upstream span now reaches 1028 because it carries the
+            # handler's body *and* the `return current` tail, which is where the
+            # alignment landed rather than where the code moved to — stated
+            # because a reader comparing the two spans will otherwise assume the
+            # pairing is meaningful.
             #
             # **This is the second declared region that is the Rust-vs-Rust
             # hazard the guard exists to refuse, and unlike `compile_nodelist`
@@ -737,12 +790,7 @@ DECLARED = {
             # value) is what makes the alternative live rather than closed.
             (
                 (995, 1033),
-                (957, 1021),
-                "from django_rust_templates import _native",
-            ),
-            (
-                (1035, 1035),
-                (1023, 1028),
+                (957, 1028),
                 'return _native.resolve(".".join(self.lookups), context)',
             ),
         ],
