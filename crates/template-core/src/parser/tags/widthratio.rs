@@ -2,11 +2,11 @@
 //!
 //! # All three arguments are `compile_filter`ed, including the width
 //!
-//! `parser.compile_filter(max_width)` (`:1649`), not `int(max_width)`. So
+//! `parser.compile_filter(max_width)` (`:1648`), not `int(max_width)`. So
 //! `{% widthratio a b 100|add:1 %}` parses, and the number 100 is a *runtime*
 //! value like the other two — `WidthRatioNode.render` does the `int()` at
 //! render time and raises `TemplateSyntaxError("widthratio final argument must
-//! be a number")` there (`:543-545`), which is why nothing here validates it.
+//! be a number")` there (`:541-548`), which is why nothing here validates it.
 //!
 //! # Arity is exact, and the `else` is the surprising branch
 //!
@@ -32,7 +32,7 @@ use crate::token::Token;
 
 pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error> {
     // `bits[0]` is the tag name and is never compiled; Django unpacks it into
-    // an unused `tag` both times (`:1647-1648`).
+    // an unused `tag` both times (`:1634-1637`).
     let bits = split_contents(token)?;
 
     let asvar = match bits.len() {
