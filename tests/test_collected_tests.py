@@ -336,7 +336,17 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # no tag only one side compiles now) and became "the Rust *route* is not taken" —
 # which is why it is the one change here that had to replace two rows with two
 # rows rather than rename one. So 449 + 12 - 4 = 457.
-PINNED = 457
+# 457 → 462 is M14 Task 1, **five** rows and one new file:
+# `tests/test_acceptance_preflight.py` drives `engine_fallbacks()` with a
+# fabricated meter. The pre-flight's only other exercise is a healthy run, and a
+# guard observed green is a guard that might be a no-op. Four rows walk the
+# fabricated meter through the two scopes (empty reports nothing, one scope, the
+# other scope, both); the fifth, `test_the_fabricated_names_are_not_real_modules`,
+# is the control that says the fabricated name is drawn from the meter's own
+# population and lies outside it — so the other four cannot be overtaken by a
+# later milestone that registers the name for real. Discovery agrees exactly:
+# 457 + 5 = 462, and there is no rename in this delta.
+PINNED = 462
 
 
 def collected() -> unittest.TestSuite:

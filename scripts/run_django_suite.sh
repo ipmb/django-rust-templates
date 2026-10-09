@@ -32,37 +32,17 @@ fi
 # root, so the working directory and PYTHONPATH differ.
 export PYTHONPATH="$HERE/shimpath:$CHECKOUT:${PYTHONPATH:-}"
 
-# Pre-flight: prove the shim is actually installed before spending a suite run on
-# it. This runs the same interpreter with the same PYTHONPATH, in a subprocess,
-# and asserts that a module we provide resolved to our file rather than Django's.
-# Without it, a mistyped path or an unsynced venv yields a green suite that
-# proves nothing about our code.
+# Pre-flight: prove the engine is installed and complete before spending a suite
+# run on it. This runs the same interpreter with the same PYTHONPATH, in a
+# subprocess. Without it, a mistyped path or an unsynced venv yields a green suite
+# that proves nothing about our code — and since M14 it also refuses when the meter
+# is non-empty in either scope, because "full suite green with no fallback" is the
+# acceptance criterion and a printed number is not a refusal. See
+# `scripts/assert_engine_installed.py`; its correctness is dated to the engine
+# being complete.
 if [ "${DJANGO_RUST_TEMPLATES:-1}" = "1" ]; then
   echo "verifying the Rust engine is installed..." >&2
-  "$PROJECT_ROOT/.venv/bin/python" - <<'PY'
-import sys
-
-import django.template.exceptions
-
-from django_rust_templates import _shim
-
-if not _shim.installed():
-    sys.exit("shim is not installed; refusing to run the suite")
-
-module_file = django.template.exceptions.__file__ or ""
-if "_impl" not in module_file:
-    sys.exit(
-        f"django.template.exceptions resolved to {module_file}, "
-        "not to our implementation; refusing to run the suite"
-    )
-
-print(
-    f"engine installed; {len(_shim.unshimmed())} engine module(s) still served by "
-    f"Django ({len(_shim.NOT_THE_ENGINE)} more of django.template are declared "
-    "not the engine)",
-    file=sys.stderr,
-)
-PY
+  "$PROJECT_ROOT/.venv/bin/python" "$HERE/assert_engine_installed.py"
 fi
 
 cd "$CHECKOUT/tests"

@@ -31,8 +31,9 @@ The input classes / failure modes M14's own change introduces, each owned by the
 1. **A healthy run must not be refused.** The guard's whole risk is a false positive: if it fires when both scopes are empty, the project has no acceptance path. The positive control is the real run itself (Task 1 Step 6), and the negative control (Task 1 Step 4) is drawn from the same population — a fabricated meter with a name in it. → **Task 1**.
 2. **`DJANGO_RUST_TEMPLATES=0` must still bypass the guard.** The runner is used deliberately against stock Django to prove a failure is Django's and not ours; the pre-flight is inside `if [ "${DJANGO_RUST_TEMPLATES:-1}" = "1" ]` and the extraction must keep it there. A guard that fired on the stock-Django comparison run would make the one debugging tool unusable. → **Task 1**.
 3. **The second scope must be consulted, not respelled.** The runner's pre-flight today calls `_shim.unshimmed()` with no argument (the default `django.template`). The fix iterates `_shim.NAMESPACES` (`_shim.py:98`, `= tuple(NAMESPACE_ROOTS)`) rather than naming `"django.templatetags"` again, so the checked population cannot drift from the meter's — the drift this tree has hit three times (D3′, the vacuity reasons, M10's `origin`). → **Task 1**.
-4. **The file-level claim and the runtime claim stay distinct in the message.** `unshimmed()` compares source trees, not resolved imports (`_shim.py:777-779`), so a non-empty meter means "a name Django defines has no same-named file in `_impl`" — the runtime half is the existing `exceptions`-resolves-to-`_impl` check, which stays. The record must not let "no fallback" stand for the conjunction unstated. → **Task 2**.
-5. **A version bump adding `django/template/*.py` is the failure the guard exists for.** It is not testable by making the pin do that, but it is worth a row that the guard's population is `django_modules(scope) - ours - NOT_THE_ENGINE`, so a new upstream module arrives in the meter rather than silently outside it. → **Task 1** (asserted against `_shim.django_modules`, the same call the meter makes).
+4. **The file-level claim and the runtime claim stay distinct in the message.** `unshimmed()` compares source trees, not resolved imports (`_shim.py:777-779`), so a non-empty meter means "a name Django defines has no same-named file in `_impl`". Before M14 the runtime half was **one** module (`django.template.exceptions`); the extraction makes it **total** — every engine module Django defines is imported and asserted to resolve under `_impl`, measured at 21 modules (16 under `django.template`, 5 under `django.templatetags`) importing cleanly with settings unconfigured. The import is safe here because the *pre-flight* has no side-effect-free constraint — that constraint belongs to `unshimmed()`, which a caller may reach for anywhere. What the total check still does **not** establish is *behaviour*: it proves each module's file is ours, not that the file is right — that is the suite's job. The record must state the conjunction exactly. → **Task 1**, **Task 2** (Review Focus 4's row).
+5. **The guard's correctness is dated to the engine being complete.** A pre-flight refusing on a non-empty meter would have blocked every suite run through M10–M13, when the meter was non-empty by design. It is correct *now* because the engine is done, and it will refuse on the first commit of any future milestone that interposes a new engine module. That is the guard's intent, but it must be **recorded as a condition** so the first person to hit it is not left to guess whether it is a bug — the dated-verdict rule, applied to a guard. → **Task 1** (the script's docstring and its refusal message both say so).
+6. **A version bump adding `django/template/*.py` is the failure the guard exists for.** Not testable by making the pin do that, but the guard's population is `django_modules(scope) - ours - NOT_THE_ENGINE`, so a new upstream module arrives in the meter (and in the total runtime check) rather than silently outside it. → **Task 1** (asserted against `_shim.django_modules`, the same call the meter makes).
 
 ---
 
@@ -40,7 +41,7 @@ The input classes / failure modes M14's own change introduces, each owned by the
 
 | file | change | responsibility |
 |---|---|---|
-| `scripts/assert_engine_installed.py` | **create** | The runner's pre-flight, extracted so it can be tested: install check, the `exceptions`-resolves-to-`_impl` runtime check, and the new both-scopes empty-meter refusal. Exposes a pure `engine_fallbacks(unshimmed, scopes)` for the test to drive with a fabricated meter. |
+| `scripts/assert_engine_installed.py` | **create** | The runner's pre-flight, extracted so it can be tested: install check, a **total** runtime check (every engine module imported and asserted to resolve under `_impl`), and the new both-scopes empty-meter refusal. Exposes a pure `engine_fallbacks(unshimmed, scopes)` for the test to drive with a fabricated meter. |
 | `scripts/run_django_suite.sh` | modify | The heredoc pre-flight is replaced by a call to the new script, still inside the `DJANGO_RUST_TEMPLATES=1` branch. |
 | `tests/test_acceptance_preflight.py` | **create** | The negative control: a fabricated non-empty meter in each scope drives `engine_fallbacks` and the refusal; an empty meter passes; the population is `django_modules(scope) - ours - NOT_THE_ENGINE`. |
 | `docs/feature-checklist.html` | modify | Pete's status page: M14 row, both meter scopes, re-stamped date. |
@@ -58,8 +59,9 @@ The input classes / failure modes M14's own change introduces, each owned by the
 
 **Interfaces:**
 - Produces: `scripts/assert_engine_installed.py` with
-  - `engine_fallbacks(unshimmed: Callable[[str], list[str]], scopes: Iterable[str]) -> dict[str, list[str]]` — the pure check: `{scope: names}` for every scope whose `unshimmed(scope)` is non-empty. No I/O, no imports of the shim.
-  - `main() -> int` — binds the real `_shim.unshimmed`, `_shim.NAMESPACES`, `_shim.installed()`, `_shim.NOT_THE_ENGINE`; returns `0` when every scope is empty after the runtime check, non-zero with a message on stderr otherwise. Called as `python scripts/assert_engine_installed.py` and as `if __name__ == "__main__": raise SystemExit(main())`.
+  - `engine_fallbacks(unshimmed: Callable[[str], list[str]], scopes: Iterable[str]) -> dict[str, list[str]]` — the file-level check: `{scope: names}` for every scope whose `unshimmed(scope)` is non-empty. No I/O.
+  - `runtime_fallbacks(import_module, django_modules, not_the_engine, scopes) -> dict[str, str]` — the runtime check: `{dotted: file}` for every engine module that did not resolve under `_impl`. Total over `django_modules(scope) - not_the_engine`.
+  - `main() -> int` — binds the real `_shim` functions and the two checks above; returns `0` only when both are clean, non-zero with a message on stderr otherwise. Called as `python scripts/assert_engine_installed.py` and as `if __name__ == "__main__": raise SystemExit(main())`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -72,18 +74,27 @@ control, because a guard whose only exercise is a green run is a guard that migh
 be a no-op. The fabricated meter is drawn from the same population the guard
 reads — a scope with a name in it — so "refuses" is measured against something,
 not against an empty universe.
+
+The fabricated module names carry the `unregistered_` marker the tag inventory
+uses, and a row asserts none of them exists in the real population, so the
+control cannot be overtaken by progress.
 """
 
 import unittest
 
+from django_rust_templates import _shim
+
 from scripts.assert_engine_installed import engine_fallbacks
 
 SCOPES = ("django.template", "django.templatetags")
+# A name no tree can ever contain — the `unregistered_` rule, in the module
+# namespace. `test_the_fabricated_names_are_not_real_modules` pins it.
+FABRICATED = "unregistered_m14_fabricated"
 
 
 def meter(*non_empty):
     """A stand-in for `_shim.unshimmed` with `non_empty` scopes non-empty."""
-    by_scope = {scope: [f"{scope}.left_behind"] for scope in non_empty}
+    by_scope = {scope: [f"{scope}.{FABRICATED}"] for scope in non_empty}
     return lambda scope: by_scope.get(scope, [])
 
 
@@ -94,21 +105,37 @@ class EngineFallbacksTests(unittest.TestCase):
     def test_a_name_in_the_first_scope_is_reported(self):
         self.assertEqual(
             engine_fallbacks(meter("django.template"), SCOPES),
-            {"django.template": ["django.template.left_behind"]},
+            {"django.template": [f"django.template.{FABRICATED}"]},
         )
 
     def test_a_name_in_the_second_scope_is_reported(self):
         # The scope the runner's pre-flight did not consult before M14.
         self.assertEqual(
             engine_fallbacks(meter("django.templatetags"), SCOPES),
-            {"django.templatetags": ["django.templatetags.left_behind"]},
+            {"django.templatetags": [f"django.templatetags.{FABRICATED}"]},
         )
 
     def test_both_scopes_are_reported_together(self):
-        self.assertEqual(
-            set(engine_fallbacks(meter(*SCOPES), SCOPES)),
-            set(SCOPES),
-        )
+        self.assertEqual(set(engine_fallbacks(meter(*SCOPES), SCOPES)), set(SCOPES))
+
+    def test_the_fabricated_names_are_not_real_modules(self):
+        """The control is drawn from the real population and is outside it.
+
+        `FABRICATED` must be a name no tree contains, or the control answers a
+        question about a module that might one day exist. The population is the
+        meter's own: `django_modules(scope)`, both scopes, minus `NOT_THE_ENGINE`.
+        """
+        _shim.install()
+        universe = set()
+        for scope in SCOPES:
+            universe |= {
+                f"{scope}.{name}"
+                for name in _shim.django_modules(scope) - _shim.NOT_THE_ENGINE
+            }
+        self.assertGreater(len(universe), 0, "the population the control is drawn from is empty")
+        for scope in SCOPES:
+            with self.subTest(scope=scope):
+                self.assertNotIn(f"{scope}.{FABRICATED}", universe)
 ```
 
 - [ ] **Step 2: Run it and watch it fail**
@@ -122,17 +149,25 @@ Expected: `ModuleNotFoundError: No module named 'scripts.assert_engine_installed
 """Pre-flight for the acceptance suite: the engine is installed and complete.
 
 `run_django_suite.sh` runs this before spending a suite run, and refuses to
-continue if it fails. Two failures are checked, and they are the two halves of
-"no fallback":
+continue if it fails. Two claims are checked, and together they are "no fallback":
 
-* the engine did not install, or a module we provide resolved to Django's file —
-  a **runtime** claim about the import system;
-* a name the engine owns is still served by Django — a **file-level** claim, from
-  `unshimmed()`, which compares source trees rather than resolving imports.
+* **runtime** — every module the engine owns, imported, resolves to our file
+  under `_impl`, not to Django's;
+* **file level** — `unshimmed()` is empty in both scopes, i.e. no name Django's
+  package defines lacks a same-named file in `_impl`.
 
-M14 adds the second, over **both** of the meter's scopes. Before it, the runner
-printed the meter for one scope and never refused on it, so a green run was
-consistent with a non-empty meter.
+**Correctness is dated to the engine being complete.** Refusing on a non-empty
+meter would have blocked every suite run through M10–M13, when the meter was
+non-empty by design. It is right *now* because the engine is finished — and it
+will refuse on the first commit of any future milestone that interposes a new
+engine module. That refusal is this script doing its job, not a regression; if
+you are reading this because a milestone run stopped here, the milestone is the
+thing to look at.
+
+The runtime half imports every engine module, which `unshimmed()` deliberately
+does not (it may be called anywhere, and importing can require settings). The
+pre-flight has no such constraint — it runs once, immediately before the suite,
+in the same interpreter the suite uses.
 """
 
 import sys
@@ -147,8 +182,26 @@ def engine_fallbacks(unshimmed, scopes):
     return {scope: names for scope in scopes if (names := unshimmed(scope))}
 
 
+def runtime_fallbacks(import_module, django_modules, not_the_engine, scopes):
+    """``{module: file}`` for every engine module not imported from under ``_impl``.
+
+    Total over the engine: the population is `django_modules(scope) - not_the_engine`
+    — the same call the meter makes — so a module a version bump adds to Django's
+    package is imported and checked rather than passing unseen.
+    """
+    wrong = {}
+    for scope in scopes:
+        for name in django_modules(scope) - not_the_engine:
+            dotted = f"{scope}.{name}"
+            module = import_module(dotted)
+            file = getattr(module, "__file__", "") or ""
+            if "_impl" not in file:
+                wrong[dotted] = file or "<no __file__>"
+    return wrong
+
+
 def main() -> int:
-    import django.template.exceptions
+    import importlib
 
     from django_rust_templates import _shim
 
@@ -156,11 +209,18 @@ def main() -> int:
         sys.stderr.write("shim is not installed; refusing to run the suite\n")
         return 1
 
-    module_file = django.template.exceptions.__file__ or ""
-    if "_impl" not in module_file:
+    wrong = runtime_fallbacks(
+        importlib.import_module,
+        _shim.django_modules,
+        _shim.NOT_THE_ENGINE,
+        _shim.NAMESPACES,
+    )
+    if wrong:
+        for dotted, file in sorted(wrong.items()):
+            sys.stderr.write(f"{dotted} resolved to {file}, not to our implementation\n")
         sys.stderr.write(
-            f"django.template.exceptions resolved to {module_file}, not to our "
-            "implementation; refusing to run the suite\n"
+            "refusing to run the acceptance suite: the engine is not fully "
+            "installed.\n"
         )
         return 1
 
@@ -198,7 +258,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run the test and watch it pass**
 
 Run: `scripts/run_unit_tests.sh tests.test_acceptance_preflight -v`
-Expected: 4 rows, `OK`.
+Expected: 5 rows, `OK`.
 
 - [ ] **Step 5: Point the runner at it**
 
@@ -227,18 +287,19 @@ from django_rust_templates import _shim
 _shim.install()
 from scripts import assert_engine_installed as pre
 
-real = _shim.unshimmed
-print('healthy ->', pre.engine_fallbacks(real, _shim.NAMESPACES))
+print('healthy ->', pre.engine_fallbacks(_shim.unshimmed, _shim.NAMESPACES))
 
 _shim.unshimmed = lambda scope='django.template': (
-    ['django.template.left_behind'] if scope == 'django.template' else []
+    ['django.template.unregistered_m14_fabricated']
+    if scope == 'django.template' else []
 )
 raise SystemExit(pre.main())
 "
 echo "exit=$?"
 ```
-Expected: `healthy -> {}`, then the refusal message on stderr, then `exit=1`. Paste
-both lines into the commit message.
+Expected: `healthy -> {}`, then the refusal message on stderr naming
+`django.template.unregistered_m14_fabricated`, then `exit=1`. Paste both lines into
+the commit message.
 
 - [ ] **Step 7: Run the acceptance suite and confirm it is green**
 
@@ -311,8 +372,9 @@ git commit -m "M14 close-out: the record, the spec row, and the status page"
 - **Type consistency:** `engine_fallbacks(unshimmed, scopes)` is the same signature
   in the test and the script; `NAMESPACES`/`NOT_THE_ENGINE`/`unshimmed` are the
   shim's own names.
-- **Review Focus:** each of the five lines names its task; 1–4 have rows, 5 is
-  asserted by the population row.
+- **Review Focus:** each of the six lines names its task. 1–4 and 6 have rows or
+  assertions; 5 (the dated condition) is carried by the script's docstring and its
+  refusal message, and repeated in the record.
 - **M15** ("§2 met with margin") is deliberately **not** planned here: "margin" has
   no definition in the spec yet, and defining it is M15's opening question rather
   than a dependency of M14. Flagged for the next sitting.
