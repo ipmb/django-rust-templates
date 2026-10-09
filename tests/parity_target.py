@@ -85,7 +85,11 @@ def assert_target_is_not_rust_owned(testcase, target, module_name):
     )
 
     # The compared path must be inside the part of the file that is *unchanged*.
-    _upstream, regions = guard.DECLARED[source.name]
+    # Two checks, because the first is a proxy for the second.
+    regions = guard.declared_regions(source.name)
+
+    # The target's own lines, cheap and general: it works for any module, and
+    # it is the check that has teeth before anyone has measured a module.
     first = inspect.getsourcelines(target)[1]
     last = first + len(inspect.getsourcelines(target)[0]) - 1
     covered = [
@@ -96,5 +100,30 @@ def assert_target_is_not_rust_owned(testcase, target, module_name):
         covered,
         f"{module_name} ({source.name}:{first}-{last}) is inside a declared "
         f"transcription region {covered}, so this comparison would be Rust "
+        "against Rust",
+    )
+
+    # And every line the harness *executes*, which is the real claim.
+    #
+    # The check above is a proxy and the reviewer said so: `Parser.parse` calls
+    # `extend_nodelist`, `compile_filter`, `invalid_block_tag` and every tag's
+    # compile function, so a region declared inside a helper is on the compared
+    # path while sitting outside `parse`'s own lines. The measured reach for
+    # `base.py` is 28 functions spanning lines 116-1209 — nearly the whole
+    # module — so for a transcription with a `COMPARED_PATH` entry the practical
+    # rule is that no region may be in the module body at all.
+    compared = guard.COMPARED_PATH.get(source.name, [])
+    executed = [
+        (label, first_line, last_line)
+        for first_line, last_line, label in compared
+        if any(
+            guard.overlaps(region[0], first_line, last_line) for region in regions
+        )
+    ]
+    testcase.assertEqual(
+        [],
+        executed,
+        f"{source.name}: the parity harness executes {executed}, and a declared "
+        "transcription region covers it, so this comparison would be Rust "
         "against Rust",
     )

@@ -614,10 +614,28 @@ could differ and still be right. `_impl/exceptions.py` is on the other side and
 is written fresh — restructured `__init__`, rewritten docstrings — which is the
 policy working as intended.
 
-**Transcribed files are marked as such** in a `# TRANSCRIBED FROM django/...`
-header naming the upstream path, so they are diffed against upstream on every
-Django bump rather than reviewed as original work. A transcription reviewed as
-if it were original is how a bump silently changes behaviour.
+**Transcribed files are marked as such** in a
+`# TRANSCRIBED: <upstream path> (Django <version>)` header naming the upstream
+path, so they are diffed against upstream on every Django bump rather than
+reviewed as original work. A transcription reviewed as if it were original is
+how a bump silently changes behaviour.
+
+The marker is not decoration and is not trusted as prose. `scripts/check_transcriptions.py`
+parses it and requires that the path it names is the one the file is declared
+against and the version it names is the version of the checkout — so a
+transcription taken from a different release, or pointed at the wrong upstream
+file, fails rather than passing quietly. The same script asserts three
+properties of the declaration itself:
+
+1. every differing line falls inside a declared region, and no region covers
+   nothing;
+2. a region containing executable lines declares a **snippet** naming every one
+   of them, so a widened line range cannot swallow a statement unread;
+3. no region intersects the code a parity harness *executes*. That set is
+   measured, not inferred — for `_impl/base.py` it is 28 functions spanning
+   lines 116-1209 — because the compared path runs through helpers
+   (`extend_nodelist`, `compile_filter`, every tag's compile function) that a
+   region can sit inside while looking like it is outside `Parser.parse`.
 
 ## 7. Substitution mechanism
 

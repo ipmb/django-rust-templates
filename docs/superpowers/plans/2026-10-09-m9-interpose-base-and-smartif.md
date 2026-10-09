@@ -45,8 +45,11 @@ Each line is a failure mode this milestone can ship while every count stays gree
 | `tests/test_interposition.py` | **Create.** Direct-entry rows proving each seam actually delegates (Review Focus 2). |
 | `tests/test_base_parity.py` | **Create.** Direct-entry rows for `render_value_in_context` (Review Focus 3, 4) and the render-annotation protocol (Task 6). |
 | `tests/test_shim.py` | **Modify.** The meter row moves from `assertIn("django.template.base", remaining)` to asserting the count is 23 (Task 1, at 24 first); the partial-subpackage row gains the purge `install()` no longer performs (Task 0). |
-| `tests/parity_target.py` | **Create (Task 0).** The single claim the six `*_target_is_genuinely_djangos*` rows were proxies for, restated directly: the comparison's Python side is Django's file or a gated transcription, and the compared path is outside the declared regions. |
-| `scripts/check_transcriptions.py` | **Create (Task 0).** Fails when a `_impl` transcription differs from upstream outside its declared regions, or when a declared region covers nothing. |
+| `tests/parity_target.py` | **Create (Task 0).** The single claim the six `*_target_is_genuinely_djangos*` rows were proxies for, restated directly: the comparison's Python side is Django's file or a gated transcription, and no declared region sits on the code the harness executes. |
+| `tests/compared_path.py` | **Create (Task 1 follow-up).** The instrument that measures which functions a parity harness executes: wrap every function the module defines, run the corpus through the harness entry point, report the reached spans. Wrapping the defining module is not enough — consumers' `from … import name` bindings are rebound too, or the reach set depends on import order. |
+| `scripts/check_transcriptions.py` | **Create (Task 0).** Fails when a `_impl` transcription differs from upstream outside its declared regions, when a declared region covers nothing, when a region over executable lines does not name them in a snippet, when the `# TRANSCRIBED:` marker names the wrong path or release, or when a region sits on the measured compared path (`COMPARED_PATH`). |
+| `.review/m9-measurements/m9_measure_parse_path.py` | **Create (Task 1 follow-up).** Provenance for `COMPARED_PATH`: prints the measured reach over both parity corpora, per corpus, plus the paste-ready table. |
+| `.review/m9-measurements/m9_guard_teeth.py` | **Create (Task 1 follow-up).** Runs each guard clause against a tree that should fail it, from a copy, and prints which clauses refused — so the guard's teeth are measured rather than assumed. |
 | `scripts/gen_impl_transcription.py` | **Create (Task 1).** Regenerates a transcription from the pinned tree, with `--check`; the marker is inserted after the docstring's opening `"""`, text-anchored rather than line-anchored. |
 | `scripts/check.sh` | **Modify.** Install the shim for the unit-test session (Task 0) and add the transcription guard to the fast path (Task 0). |
 
@@ -1544,3 +1547,40 @@ EOF
 **Review Focus.** 1 → Task 0's guard (it landed there, not in Task 7). 2 → Tasks 2, 3, 5's counting rows. 3 → Task 4 Step 2. 4 → Task 4 Step 2's second row. 5 → Task 5 Steps 2 and 7.
 
 **Executed-so-far.** Task 0 is done and committed at `a105469`, and executing it corrected five of its own claims — the failure count and whose failures they were, the loaders row's cause *and* remedy, a restated row that would have failed on `getsource` vs `getsourcefile`, the guard-row enumeration, and the transcription gate's schedule. Each correction is recorded in Task 0 with the measurement that produced it, on the principle this milestone keeps re-learning: the decision is usually right and the reason attached to it is usually reached for rather than measured, so the reason needs a pointer to its evidence before it is worth anything.
+
+Task 1 is done and committed at `2eedab2`. Its review produced a follow-up on
+the transcription guard, all of it measured before it was written down:
+
+- **the compared path is measured, not inferred.** `tests/parity_target.py`
+  took the compared path to be the lines of the one target the row names. The
+  measurement (`.review/m9-measurements/m9_measure_parse_path.py`, instrument in
+  `tests/compared_path.py`) finds 28 functions spanning lines 116-1209 — nearly
+  the whole module — because `Parser.parse` calls `extend_nodelist`,
+  `compile_filter`, every tag's compile function and `token_kwargs`. The spans
+  are pinned in `scripts/check_transcriptions.py`'s `COMPARED_PATH` and
+  re-measured by `tests/test_interposition.py`, the same pinned-number-plus-live-
+  instrument shape as the module meter;
+- **the instrument was import-order dependent, and that was a defect in the
+  measurement, not a finding.** The first version wrapped the defining module
+  only, so a function another module reached with `from ... import token_kwargs`
+  was called through the consumer's binding and never counted: `token_kwargs`
+  appeared in one run and vanished from the next, the only difference being
+  whether the wrapping happened before the parity module imported. The context
+  manager now rebinds consumers too;
+- **regions over executable lines must declare a snippet naming every one of
+  them.** The rule refused this milestone's own first declaration, which named
+  one of a region's three imports;
+- **the `# TRANSCRIBED:` marker is parsed** and must name this file's upstream
+  path and the checkout's own version (`pinned_version()` reads it from
+  `.django/django/__init__.py` with `ast`, importing no Django). Spec §6 has
+  been corrected: it said `# TRANSCRIBED FROM django/...`, which no file ever
+  used;
+- **a false reason was corrected.** The `__init__.py` region comment said
+  upstream "does not need" its `# NOQA isort:skip` markers because it "has no
+  linter"; the diff shows the direction is the other way — upstream *has* them
+  and the transcription strips them, exactly as spec §6 records;
+- **the guard's own ordering was wrong**, found by measuring its teeth
+  (`.review/m9-measurements/m9_guard_teeth.py`, six scenarios): the compared-path
+  clause sat after a `continue` in the snippet logic, so the most serious
+  failure available was masked by a lesser one. The teeth script is the
+  evidence; the baseline is green and all six scenarios refuse.

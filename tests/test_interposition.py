@@ -78,6 +78,63 @@ class InterpositionTests(unittest.TestCase):
         self.assertEqual(len(ours), len(theirs) + 2)
         self.assertEqual(ours[3:], theirs[1:])
 
+    def test_the_compared_path_is_the_measured_one(self):
+        """Re-measure the guard's ``COMPARED_PATH`` table and compare.
+
+        That table is what ``tests/parity_target.py`` uses to decide whether a
+        declared transcription region sits on code the parity harness executes.
+        A pinned table is only as good as the thing that notices it went stale,
+        and the failure it would hide is the worst one available: a region
+        covering the compared path makes a parity test Rust against Rust, and
+        both sides then agree no matter what Rust does.
+
+        So the measurement is run here, in the same process as the parity rows,
+        and the set of functions reached — with their spans — is asserted equal
+        to the pin. Both corpora, because they differ: the generator reaches
+        ``Parser.error`` and ``Parser.invalid_block_tag`` and the hand-written
+        corpus does not.
+
+        ``tests/compared_path.py`` holds the instrument; the measurement script
+        ``.review/m9-measurements/m9_measure_parse_path.py`` prints a wider
+        report from the same code. Measured at 28 functions spanning lines
+        116-1209, which is nearly the whole module — that is why the guard has
+        teeth at all, and why "the target's own lines" was a proxy.
+        """
+        import random
+
+        import django.template.base as base
+        import scripts.check_transcriptions as guard
+        from tests.compared_path import measure
+        from tests.parser_corpus import (
+            RANDOM_CASES,
+            RANDOM_SEED,
+            TEMPLATES,
+            random_template,
+        )
+        from tests.test_parser_parity import django_parse
+
+        rng = random.Random(RANDOM_SEED)
+        sources = list(TEMPLATES)
+        sources += [random_template(rng) for _ in range(RANDOM_CASES)]
+
+        measured = measure(base, sources, django_parse)
+        pinned = {
+            label: (first, last)
+            for first, last, label in guard.COMPARED_PATH["base.py"]
+        }
+
+        self.assertEqual(
+            sorted(measured),
+            sorted(pinned),
+            "the functions the parity harness executes have changed, so "
+            "scripts/check_transcriptions.py's COMPARED_PATH['base.py'] is "
+            "stale — regenerate it with "
+            ".review/m9-measurements/m9_measure_parse_path.py",
+        )
+        for label in sorted(pinned):
+            with self.subTest(function=label):
+                self.assertEqual(measured[label], pinned[label])
+
 
 if __name__ == "__main__":
     unittest.main()
