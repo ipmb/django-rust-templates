@@ -133,7 +133,7 @@
 //! **The seam runs between the control flow and the decimal engine, and that
 //! line is §D2's rule read literally:** "what a `decimal.Context` is set to" is
 //! not a function of the filter's arguments, and `defaultfilters.py:200` reads it —
-//! `prec = max(getcontext().prec, prec)` — three lines after `defaultfilters.py:194`'s
+//! `prec = max(getcontext().prec, prec)` — six lines after `defaultfilters.py:194`'s
 //! `Decimal(1).scaleb(-abs(p))`. The context is *observable* through the answer,
 //! not merely consulted: below `2 * (Emax + prec)` the `scaleb` silently clamps
 //! to `Decimal("0E-999999")`, so the rounding position is `999999` whatever `p`
