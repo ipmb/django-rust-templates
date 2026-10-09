@@ -2216,8 +2216,11 @@ CASES: list[dict] = [
 # and the text both cross the seam out of the real `in`/`+`/`str.split` — so
 # what those rows claim is that the seam preserved them, which is a claim about
 # `comma_bits` rather than about a string literal. The two shapes sit in one list
-# because the assertion is the same one; the module doc's rule says which of the
-# two needs a *body* test beside it, and it is neither of these.
+# because the assertion here is the same one, and they part company in the
+# *other* home the module doc's rule assigns: `cut`'s rows need no body test, and
+# the wave-2 rows do — `pluralize.rs`'s and `yesno.rs`'s
+# `a_comma_bits_refusal_escapes`, which assert the class, assert that it escapes,
+# and deliberately never touch the wording.
 #
 # Keys are `CASES`' keys with the same meanings: an **absent** `arg` means the
 # filter was written without one, `"arg": None` means the explicit `None` token
