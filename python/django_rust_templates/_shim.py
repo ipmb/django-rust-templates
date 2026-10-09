@@ -153,11 +153,84 @@ def _real_search_paths() -> list[str]:
     return paths
 
 
-def _purge() -> None:
-    """Drop cached modules so the next import goes through the finder."""
-    for name in list(sys.modules):
-        if name == TARGET or name.startswith(TARGET + "."):
-            del sys.modules[name]
+def _served(fullname: str) -> bool:
+    """Would the finder serve ``fullname`` from ``_impl``?
+
+    Asked of the filesystem rather than of the finder, because the callers run
+    while the finder is not installed. It has to answer exactly what
+    ``_ShimFinder.find_spec`` answers, or the two disagree about which
+    ``sys.modules`` entries are ours — a package we provide is an
+    ``__init__.py``, anything else a ``.py``.
+    """
+    relative = _relative_name(fullname)
+    if relative is None:
+        return False
+    base = _IMPL_DIR if not relative else _IMPL_DIR.joinpath(*relative.split("."))
+    return (base / "__init__.py").is_file() or base.with_suffix(".py").is_file()
+
+
+def _is_ours(module) -> bool:
+    """Was ``module`` executed from ``_impl``?"""
+    return str(getattr(module, "__file__", "") or "").startswith(str(_IMPL_DIR))
+
+
+# Modules we have executed, kept across install/uninstall cycles, and Django's
+# own modules we displaced for the names the finder serves.
+#
+# **This cache is a correctness requirement, not a speed one.** ``install()``
+# and ``uninstall()`` used to drop every ``django.template`` module and import
+# it again, which re-executes the file: a module that was already executed
+# yields a *new* module object with *new* class objects, while anything that
+# captured the old ones keeps holding them. Two failures, both measured in one
+# session after a single ``test_shim`` cycle:
+#
+#     render.TemplateSyntaxError is django.template.exceptions.TemplateSyntaxError
+#     -> False
+#     host.django_own_tags()["if"] is defaulttags.register.tags["if"] -> False
+#
+# The first makes `assertRaises(TemplateSyntaxError)` miss the exception
+# `render.django_exception` raises; the second makes `ShellHost.has_tag` decide
+# that `{% if %}` is a tag Django owns and hand it back to Python's `do_if`, so
+# Rust stops parsing the condition. Neither is visible in the accepted run, and
+# the reason is ordering: `run_django_suite.sh` installs once at interpreter
+# start, and `unittest discover` happens to run `test_interposition` before
+# `test_shim` because "i" sorts before "s". A row that is green because of the
+# alphabet is the failure this project keeps finding.
+#
+# So a module is executed at most once per process. Non-served modules are not
+# touched at all across a cycle, and served ones are put back from the cache.
+_our_modules: dict[str, object] = {}
+_django_modules: dict[str, object] = {}
+
+
+def _place(name: str, module) -> None:
+    """Put ``module`` in ``sys.modules[name]`` *and* on its parent package.
+
+    The second half is not optional. ``import django.template`` binds the name
+    ``django`` and the caller then reads ``django.template`` — the **attribute
+    on the parent**, which the import system sets once, when the submodule is
+    first loaded, and which a bare ``sys.modules`` assignment never touches.
+    Restoring from the cache without this leaves ``sys.modules["django.template"]``
+    ours while ``django.template`` is still Django's, and the symptom is a
+    ``test_internal_imports_are_interposed`` failure that names the file rather
+    than the mechanism. The old purge-and-reimport did not need this because the
+    re-import ran the import machinery, which set the attribute as a side effect.
+
+    Parents are placed before children by the caller's ordering, so a child's
+    parent attribute lands on the module that is already in ``sys.modules``.
+    """
+    sys.modules[name] = module
+    parent, _, leaf = name.rpartition(".")
+    if parent in sys.modules:
+        try:
+            setattr(sys.modules[parent], leaf, module)
+        except (AttributeError, TypeError):  # pragma: no cover - read-only parent
+            pass
+
+
+def _by_depth(names) -> list[str]:
+    """``names`` shortest-first, so a parent exists before its children."""
+    return sorted(names, key=lambda name: (name.count("."), name))
 
 
 def install(strict: bool = False) -> None:
@@ -171,8 +244,24 @@ def install(strict: bool = False) -> None:
 
     finder = _ShimFinder(real_paths)
     sys.meta_path.insert(0, finder)
-    _purge()
     _installed_finder = finder
+
+    # Displace only the names the finder serves. Everything else under
+    # `django.template` is Django's own code and stays exactly as it is —
+    # dropping it here is what re-executed `defaulttags` and invalidated
+    # `django_own_tags()`.
+    for name in list(sys.modules):
+        if not _served(name):
+            continue
+        module = sys.modules[name]
+        if _is_ours(module):
+            _our_modules[name] = module
+        else:
+            _django_modules[name] = module
+        del sys.modules[name]
+
+    for name in _by_depth(_our_modules):
+        _place(name, _our_modules[name])
 
     importlib.import_module(TARGET)
 
@@ -195,7 +284,17 @@ def uninstall() -> None:
             pass
         _installed_finder = None
 
-    _purge()
+    # Mirror of `install`: our served modules go back in the cache, Django's own
+    # come back out of it. The non-served modules were never removed, so they
+    # are still the objects every other module is holding.
+    for name in list(sys.modules):
+        if _served(name):
+            _our_modules[name] = sys.modules[name]
+            del sys.modules[name]
+    for name in _by_depth(_django_modules):
+        if _served(name):
+            _place(name, _django_modules[name])
+
     importlib.import_module(TARGET)
 
 

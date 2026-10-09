@@ -95,7 +95,7 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         other twenty-four modules, so a later change that handed any of them
         *back* would have gone on passing. The count is the claim each milestone
         is accepted on, so the count is what is asserted; it moves by one in the
-        same commit as each interposition (24 here, 23 once `smartif` lands).
+        same commit as each interposition (25 at M8, 24 with `base`).
         """
         _shim.install()
 
@@ -132,6 +132,50 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         self.assertEqual(exc.backend, "b")
         self.assertEqual(exc.chain, [])
 
+    def test_a_reinstall_does_not_re_execute_a_module(self):
+        """A cycle must not run a module again, or every held reference rots.
+
+        ``install``/``uninstall`` used to drop every ``django.template`` module
+        and import it again, which re-executes the file and yields new classes.
+        Anything that captured the old ones keeps holding them, and one measured
+        cycle produced two failures — neither visible in the accepted run,
+        because ``discover`` runs ``test_interposition`` before this module and
+        "i" sorts before "s":
+
+        * ``django_rust_templates.render`` holds ``TemplateSyntaxError`` at
+          module scope, so ``assertRaises(TemplateSyntaxError)`` stopped
+          catching what ``django_exception`` raises — two ``TemplateSyntaxError``
+          classes, one raised and one caught;
+        * ``host.django_own_tags()`` is frozen at import by design, and the
+          re-executed ``defaulttags`` published *new* tag callables, so
+          ``ShellHost.has_tag`` judged ``{% if %}`` to be Django's and handed it
+          back to Python's ``do_if`` — Rust silently stopped parsing the
+          condition, which is the Rust-against-Rust hazard one level down.
+
+        So the assertion is **identity of the objects a caller already holds**,
+        not a file path. The paths are checked by the rows above; this is the
+        property they cannot see, and it is why the fix caches modules rather
+        than purging them.
+        """
+        _shim.install()
+
+        import django.template.defaulttags as defaulttags
+        import django.template.exceptions as exceptions
+        import django.template.smartif as smartif
+
+        from django_rust_templates import host, render
+
+        _shim.uninstall()
+        _shim.install()
+
+        self.assertIs(sys.modules["django.template.exceptions"], exceptions)
+        self.assertIs(sys.modules["django.template.smartif"], smartif)
+        self.assertIs(sys.modules["django.template.defaulttags"], defaulttags)
+        self.assertIs(render.TemplateSyntaxError, exceptions.TemplateSyntaxError)
+        self.assertIs(
+            host.django_own_tags()["if"], defaulttags.register.tags["if"]
+        )
+
     def test_uninstall_restores_django(self):
         _shim.install()
         _shim.uninstall()
@@ -164,14 +208,14 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         expiry rather than an open-ended one, and the next person should re-pick
         it deliberately rather than by bisecting a failure.
 
-        The purge below is not incidental. The row writes a module and expects
-        the finder to see it, but ``install()`` returns early when the shim is
-        already installed (``_shim.py:166``), so ``_purge()`` never runs —
-        and a session-start install (which ``check.sh`` now does, so every test
-        module binds the same classes) means the shim *is* already installed by
-        the time this row runs. A ``django.template.loaders`` cached earlier in
-        the session then wins over the file just written, and the assertion
-        below reads ``None != 'ours'``. Measured both ways before the fix.
+        The cache-drop below is not incidental. The row writes a module and
+        expects the finder to see it, but ``install()`` returns early when the
+        shim is already installed (``_shim.py:239``), and a session-start install
+        (which ``check.sh`` now does, so every test module binds the same
+        classes) means the shim *is* already installed by the time this row
+        runs. A ``django.template.loaders`` cached earlier in the session then
+        wins over the file just written, and the assertion below reads
+        ``None != 'ours'``. Measured both ways before the fix.
         """
         package_dir = (
             PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "loaders"
