@@ -20,6 +20,16 @@ because the two are different inputs: an explicit `None` argument would make the
 token `x|default:None`, which Django resolves as a `None` constant. Rows are
 declared with the keys they need; the harness uses `.get("arg")`.
 
+**An `arg` that is not a `str` is a bare token and arrives unmarked**, which is
+a different input from the same text quoted. Measured on the pinned 6.0.9:
+`x|ljust:5` hands the filter the `int` 5, where `x|ljust:"5"` hands it
+`SafeString('5')` — a quoted argument is a *constant* and `resolve`'s loop
+`mark_safe`s it (`base.py:800-806`), while a bare one is a `var_arg` resolved by
+`Variable`. `filter_probe.rust_answer` mirrors both, so a row may declare an
+`int` and have both sides receive an `int`. It did not, until Task 5: the
+harness marked every argument, and no row could see it because every earlier
+row's argument was a string.
+
 **The `value` is a real Python object, not a literal to be parsed.** That is what
 lets a row be `mark_safe("AbC")` — and the safety rows are the point of this
 file. A textual format would have needed a second, private encoding for

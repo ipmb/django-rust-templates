@@ -1732,6 +1732,18 @@ to detect, and neither half alone would have caught it.
   `python scripts/filter_probe.py <name> <value> [<arg>]` over the group's input
   list and record the printed `(type, value)` pairs. **Do not predict a row.**
   M2 and M3 between them lost eight plan rows to predictions nobody had run.
+
+  **And for any filter wrapping a Python builtin, one row must sit at that
+  builtin's edge** — the input where it does something other than the obvious
+  thing — with the answer taken from the probe rather than inferred from the
+  builtin's name. "Test the edges" is not actionable; naming the edge is. This
+  rule exists because the project has now hit the same shape four times: a Rust
+  primitive that looks equivalent to a Python one and agrees everywhere a
+  reasonable corpus looks. Case mapping (`ß`, Final_Sigma), `\w`, `title`'s
+  `\d`, and `center`, where `str.center` is the *wrong reference* for a filter
+  that is spelled like it. Three of those four were caught by a plan bullet that
+  named the specific input; `center` was caught by measuring the filter instead
+  of the builtin whose name it shares.
 - [ ] **Step 2: Write the Rust unit tests** in each `filters/<name>.rs`'s
   `#[cfg(test)] mod tests`, using `NoFilterHost` for the pure cases and a
   `TestFilterHost` (written centrally in Task 2 Step 2, in `filters/host.rs`,
@@ -1763,6 +1775,28 @@ to detect, and neither half alone would have caught it.
 - [ ] **Step 8: Central**: `maturin develop`, paste the group's rows into
   `tests/filter_cases.py`, shrink the stub assertion in
   `tests/test_filter_inventory.py`, run `bash scripts/check.sh`, commit.
+- [ ] **Step 8.5: Mutate once, centrally, and record which rows moved.** One
+  mutation aimed at the group's riskiest behaviour — not one per body, which
+  Step 5 already does inside the module — run against the whole corpus, with the
+  **count** of rows that changed written into the commit. The output is not "the
+  guard works"; it is the number, because the number is what says whether the
+  rows are coverage or furniture. Task 4's mutation inverted the wrapper's
+  replacement half and moved **1 of 49** rows; that figure is what makes the
+  other 48's blindness a measured fact rather than a claim, and §D3 rests on it.
+
+  **§11 is why this is a step and not a nicety.** Task 4's mutation also
+  falsified a row's *docstring* — `capfirst/lazy-proxy-whose-str-is-safe` was
+  green, correct, and documented as observing something it cannot observe — and
+  nothing in a passing suite could have said so. That is this project's
+  recurring defect — the fourth instance, after the `héllo` repr case, the
+  `len(arguments) > 100` floor, and the 205 identity-compared subtests — and the
+  mutation is the only instrument that asks the question mechanically.
+
+  **The corpus compares `(type, value)` and safety as three separate assertions
+  because the mutation proved the type half load-bearing**: in Task 4's run the
+  *text* was identical in all 49 rows, so a corpus comparing `==` would have been
+  entirely green while the thing it was built to catch was inverted. That is
+  recorded here as a rule with its measurement rather than as a preference.
 
 ---
 
@@ -1913,14 +1947,29 @@ entirely the host's.
   pads by **code points** with the space character. `int(arg)` is Python's `int`,
   so `int(" 5 ")` is 5 and `int("5_0")` is 50 — `pynum` owns it, not Rust's
   `str::parse`.
-- `center` (`:431-438`) — **two different padding rules in one filter**, which is
-  the trap. It early-returns `value` when `width <= 0`, and otherwise uses
-  `f"{value:^{width}}"`, whose padding split is CPython's format-spec rule and is
-  **not** `str.center`'s. Measure both: `"ab".center(5)` and `f"{'ab':^5}"` are the
-  same today, but `str.center`'s formula carries a `marg & width & 1` term that
-  the format spec does not, and a test written from the obvious half-and-half
-  rule passes on `width=5` and fails on `width=4`. Pin at least one even and one
-  odd width.
+- `center` (`:431-438`) — `width = int(arg)` **before** the `width <= 0` early
+  return, and then `f"{value:^{width}}"`. The trap is that **`str.center` is the
+  wrong reference**: the filter uses CPython's format-spec `^`, which puts the
+  extra space on the **right** (`left = marg // 2`), where `str.center` carries a
+  `marg & width & 1` term that moves it to the left whenever `marg` and `width`
+  are both odd. Measured against the pinned 6.0.9:
+
+  | call | result | split |
+  |---|---|---|
+  | `"ab"\|center:5` | `' ab  '` | left 1, right 2 — **the filter** |
+  | `"ab".center(5)` | `'  ab '` | left 2, right 1 — `str.center` |
+  | `"ab"\|center:3` | `'ab '` | left 0, right 1 — the filter |
+  | `"ab".center(3)` | `' ab'` | left 1, right 0 — `str.center` |
+
+  An earlier revision of this bullet said the two rules were "the same today" at
+  `width=5`. They are not, and the divergence sits exactly where a test written
+  from the obvious rule is blind. **One corpus row must sit at a both-odd width**
+  — a 2-code-point value at width 5 — and the early return is pinned separately
+  (`width` 0 and negative, value unchanged), including the *order*, since
+  `int(arg)` runs before the test. Rust's `format!("{:^width$}")` was measured to
+  agree with Python's `^` on 11 inputs — nine ASCII, plus a 2-byte `é` and a
+  combining `e`+U+0301 — and to pad by **code points**; the body may use it, but
+  the row's expected answer comes from the probe, never from the builtin's name.
 - `truncatechars` (`:305-314`) / `truncatewords` (`:330-337`) — `int(arg)` in a
   `try/except ValueError` that **returns the value unchanged** (the failure is
   silent, so the test must pin the silence), then `Truncator(value).chars(length)`

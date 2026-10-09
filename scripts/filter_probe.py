@@ -162,8 +162,40 @@ def rust_answer(name: str, value, arg, context):
     `_native.filter` is handed *values*, not template text — the loop that turns
     one into the other is the caller's half by design (Task 3: "arg values are
     resolved by the caller and passed in").
+
+    **Which of those two things happens depends on the argument's shape, and that
+    is measured rather than stylistic.** `resolve` (`base.py:800-806`)
+    `mark_safe`s an argument only when it holds it as a *constant*
+    (`lookup=False`), which a token can only be by being **quoted**; a bare
+    number, name, `None` or `True` is a `var_arg` resolved by `Variable` and
+    handed over unmarked. Measured on the pinned 6.0.9, same filter throughout:
+
+        x|ljust:"5"   -> SafeString('5')     (constant, and so mark_safe'd)
+        x|ljust:5     -> int 5               (var_arg, bare)
+        x|ljust:5.0   -> float 5.0
+        x|ljust:None  -> None
+        x|ljust:True  -> True
+
+    A `str` is the one shape the corpus can declare that renders as a quoted
+    token, so it is the one shape that is a constant here; everything else is the
+    bare value. `mark_safe`ing every argument made every numeric row compare two
+    different inputs — an `int` against a `SafeString` — which is the raw-token
+    defect `tests/test_filter_parity.py` had, one layer down. It is observable
+    through any body that reads its argument's *type*: prepared as `mark_safe(5)`,
+    our `cut` answers `'abc'` where Django raises `TypeError: replace() argument
+    1 must be str, not int`; prepared as `5` it raises the same thing.
+
+    `None` keeps its meaning of "no argument", and Django's body sees `None` for
+    both `x|f` and `x|f:None` — the first never reaches a body, `base.py:819`'s
+    arity check having raised — so the two are the same input here as they are
+    there, and a row asks for one by declaring `None`.
     """
-    resolved_arg = None if arg is None else mark_safe(arg)
+    if arg is None:
+        resolved_arg = None
+    elif isinstance(arg, str):
+        resolved_arg = mark_safe(arg)
+    else:
+        resolved_arg = arg
     return _native.filter(
         name, value, resolved_arg, context.autoescape, effective_use_tz(context)
     )
