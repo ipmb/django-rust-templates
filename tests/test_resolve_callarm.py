@@ -50,6 +50,29 @@ class CallArmParityTests(_ParityTest):
         # Both sides substitute the invalid value rather than raising.
         self.assert_calls_like_django(needs_one_arg)
 
+    def test_a_callable_with_no_signature_is_substituted(self):
+        """The *other* path to `string_if_invalid`, and the one a port drops.
+
+        Django's fallback has two questions, not one: `signature()` raising
+        `ValueError` ("No signature found", `base.py:1004`) and `bind()` raising
+        `TypeError` ("Arguments *were* required", `base.py:1009`). The comment at
+        `:1009` is the one a reader remembers, so `bind()` reads as the whole
+        test and this branch goes missing. Both substitute, so a port that
+        dropped it is right on every fixture that has a signature — which is
+        all of them except this shape. `__signature__` raising is exactly what a
+        C-level callable without `__text_signature__` does.
+        """
+
+        class NoSignature:
+            @property
+            def __signature__(self):
+                raise ValueError("no signature found for builtin")
+
+            def __call__(self):
+                raise TypeError("takes no arguments")
+
+        self.assert_calls_like_django(NoSignature())
+
     def test_a_body_type_error_propagates_on_both_sides(self):
         def body_raises():
             raise TypeError("boom from the body")
