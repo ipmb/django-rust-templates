@@ -69,6 +69,16 @@ DECLARED = {
             ((56, 57), (72, 73)),
         ],
     ),
+    "base.py": (
+        "django/template/base.py",
+        [
+            # The `# TRANSCRIBED:` marker and its blank separator, ours only —
+            # a pure insertion, hence `None` on the upstream side. Tasks 2 and 5
+            # add the `compile_nodelist` and `_resolve_lookup` bodies here; at
+            # this commit the transcription delegates nothing and says so.
+            ((2, 3), None),
+        ],
+    ),
 }
 
 

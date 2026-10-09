@@ -43,6 +43,7 @@ from django.template.base import FilterExpression, Parser, Variable  # noqa: E40
 from django.utils.functional import Promise  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
+from tests.parity_target import assert_target_is_not_rust_owned  # noqa: E402
 
 # Loaded from its file for the reason `tests/test_materialise.py` spells out:
 # `_impl/__init__.py` is the shim's `django.template` and imports its own
@@ -414,14 +415,21 @@ class FilterExpressionParityTests(unittest.TestCase):
         self.assertEqual((ok, is_var, var), ("ok", False, (False, "x")))
         self.assertEqual(filters, [])
 
-    def test_the_comparison_target_is_genuinely_djangos(self):
+    def test_the_comparison_target_is_not_rust_owned(self):
+        """Restated at M9: three targets, one claim, asserted where it bites.
+
+        See `tests/parity_target.py`. The `assertNotIn("_impl", source)` this
+        replaces stopped holding the moment `base` became ours, and it was never
+        quite the claim anyway — what matters is that the code each target
+        executes is upstream's, which is asserted per target, and that includes
+        `Parser.parse` and `Variable._resolve_lookup`, the two methods M9
+        delegates to Rust. `_resolve_lookup` is Task 5's, so this row is the one
+        that will notice if its declaration is added without the comparison
+        being reconsidered.
+        """
         for target in (FilterExpression, Parser, Variable):
             with self.subTest(target=target.__name__):
-                source = inspect.getsourcefile(target)
-                self.assertNotIn("_impl", source)
-                self.assertTrue(
-                    Path(source).resolve().is_relative_to(DJANGO_CHECKOUT.resolve())
-                )
+                assert_target_is_not_rust_owned(self, target, target.__name__)
 
     def test_the_filter_names_come_from_djangos_registry(self):
         """A reverse map is only an oracle if it is injective."""

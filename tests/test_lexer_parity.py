@@ -24,6 +24,7 @@ from django.template.base import DebugLexer, Lexer, Token, TokenType  # noqa: E4
 
 from django_rust_templates import _native  # noqa: E402
 from tests.lexer_corpus import CORPUS  # noqa: E402
+from tests.parity_target import assert_target_is_not_rust_owned  # noqa: E402
 
 # Token contents for `split_contents`, kept separate from CORPUS because these
 # are tag *contents*, not whole templates.
@@ -256,20 +257,23 @@ class LexerParityTests(unittest.TestCase):
         with self.assertRaises(StopIteration):
             _native.split_contents(contents)
 
-    def test_comparison_target_is_genuinely_djangos_lexer(self):
+    def test_the_comparison_target_is_not_rust_owned(self):
         """Guard against this test silently becoming a self-comparison.
 
-        Once M9 interposes `django.template.base`, importing `Lexer` below will
-        resolve to our shell instead of Django's, and the parity test would then
-        be comparing the Rust lexer against Python that merely delegates to it —
-        passing no matter what the Rust lexer does. Fail loudly at that point so
-        the comparison is rebuilt against the real source file.
+        M9 interposed `django.template.base`, so `Lexer` now resolves to our
+        transcription rather than to Django's file — which is what the previous
+        form of this row asserted, and why it had to be restated rather than
+        deleted. The hazard it named is unchanged: a `Lexer` that merely
+        delegates to Rust would be compared against Rust and pass no matter what
+        Rust does.
+
+        `tests/parity_target.py` asserts what this row is actually for — that
+        the target is Django's file or a transcription gated against it, and
+        that `Lexer`'s own code lies outside the transcription's declared
+        differences. That last clause is what would catch a `Lexer.tokenize`
+        delegated to Rust, which is the failure this docstring describes.
         """
-        source_file = inspect.getsourcefile(Lexer)
-        self.assertTrue(
-            source_file.startswith(str(DJANGO_CHECKOUT)),
-            f"parity target is not the pinned checkout: {source_file}",
-        )
+        assert_target_is_not_rust_owned(self, Lexer, "Lexer")
 
     def test_a_lexer_error_is_not_silently_swallowed(self):
         """Both implementations must agree on error behaviour too.

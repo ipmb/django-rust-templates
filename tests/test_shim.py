@@ -87,12 +87,21 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         rendered = Template("{{ a }}", engine=engine).render(Context({"a": "ok"}))
         self.assertEqual(rendered, "ok")
 
-    def test_unshimmed_reports_progress_and_is_currently_everything(self):
+    def test_unshimmed_reports_progress(self):
+        """The meter, pinned as a number rather than a membership test.
+
+        This row used to assert ``"django.template.base" in remaining``, which
+        was true until M9 interposed it — and which told us nothing about the
+        other twenty-four modules, so a later change that handed any of them
+        *back* would have gone on passing. The count is the claim each milestone
+        is accepted on, so the count is what is asserted; it moves by one in the
+        same commit as each interposition (24 here, 23 once `smartif` lands).
+        """
         _shim.install()
 
         remaining = _shim.unshimmed()
-        self.assertTrue(remaining, "most modules should still fall back")
-        self.assertIn("django.template.base", remaining)
+        self.assertEqual(len(remaining), 24, sorted(remaining))
+        self.assertNotIn("django.template.base", remaining)
         # Ours is not in the list, because ours is the package itself.
         self.assertNotIn("django.template", remaining)
 
