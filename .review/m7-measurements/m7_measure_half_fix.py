@@ -94,6 +94,27 @@ for source, stock, ours in (plain + origin)[:8]:
     print(f"    {source!r}\n      stock {stock!r}\n      ours  {ours!r}")
 print()
 print("  So the half-fix is invisible to every message-comparing row: the error")
-print("  corpus cannot see it, and the detector is (1) — the predicate itself.")
-print("  The full suite agrees, measured: 256 tests, 3 failures, all three")
-print("  subTests of test_the_host_declines_every_name_rust_owns.")
+print("  corpus cannot see it, and the detectors are (1) — the predicate itself —")
+print("  and the wire-shape row, which reads the routing off the parse result")
+print("  without calling `has_tag` at all.")
+
+print()
+print("--- (4) the whole test suite, under the half-fix ---")
+print("  Run rather than restated: the figure below is produced here, because a")
+print("  count copied from an earlier session is the thing this script exists to")
+print("  stop. Only the gate file can move, so only it is run.")
+import unittest  # noqa: E402
+
+_loader = unittest.TestLoader()
+_suite = _loader.loadTestsFromName("tests.test_inheritance_gate")
+_stream = open("/dev/null", "w")
+_result = unittest.TextTestRunner(verbosity=0, stream=_stream).run(_suite)
+_stream.close()
+print(f"  tests/test_inheritance_gate: {_result.testsRun} run, "
+      f"{len(_result.failures) + len(_result.errors)} failed")
+for _case, _ in _result.failures + _result.errors:
+    print(f"    {_case.id()}")
+print("  Both detectors move, and nothing else in the file does. The full")
+print("  suite's figure is the same failures plus nothing: run it with")
+print("  `.venv/bin/python -m unittest discover -s tests -t . -p 'test_*.py'`")
+print("  after rebinding, as this script does.")

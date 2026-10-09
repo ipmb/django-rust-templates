@@ -61,12 +61,12 @@ token, slot)`. Pinned from Python by
 ticket is to decide the sixth element or a second channel, not to add a field.
 
 **The rule itself already ships and is already tested.** `extend_nodelist` is
-ported at `crates/template-core/src/parser/mod.rs:429-450`, and its check
-(`:435`) is Django's `if node.must_be_first and nodelist.contains_nontext`
-(`B:602`) with the message at `:436-446` reproducing `B:607-610`. It is
+ported at `crates/template-core/src/parser/mod.rs:496` (doc from `:484`), and
+its check (`:502`) is Django's `if node.must_be_first and nodelist.contains_nontext`
+(`B:602`) with the message at `:512-518` reproducing `B:606-609`. It is
 exercised by a `#[cfg(test)]` stand-in, `standin_first`
-(`crates/template-core/src/parser/tags/mod.rs:195-197`), registered under the
-test-only command `standin_first` (`:206-211`). Its doc comment states the
+(`crates/template-core/src/parser/tags/mod.rs:196-200`), registered under the
+test-only command `standin_first` (`:209-215`). Its doc comment states the
 scope exactly: "in M2 the failure is unreachable for the nine tags (none sets
 `must_be_first`) and is reached only by Task 3's stand-in."
 
@@ -333,12 +333,12 @@ measurements that bound each item:
 
 1. **Remove `_M7_OWNED`** (`host.py:48`) and the branch that reads it
    (`:118-121`). Three names.
-2. **Carry `must_be_first` across the seam.** `desc.rs:404-407` says it is not on
+2. **Carry `must_be_first` across the seam.** `desc.rs:406-407` says it is not on
    the wire; `node_desc_to_py` (`lib.rs:871-911`) builds a 5-tuple that
    `tests/test_ref_table.py:173-181` pins at length 5.
 3. **`{% extends %}`'s compile function, and its message**
-   `"{% %s %} must be the first tag in %s."` (`B:607-610`; Rust's port at
-   `parser/mod.rs:436-444`), with the origin supplied (`lib.rs:1446-1457`).
+   `"{% %s %} must be the first tag in %s."` (`B:606-609`; Rust's port at
+   `parser/mod.rs:512-518`), with the origin supplied (`lib.rs:1446-1457`).
    *Superseded:* Task 2 shipped it as `origin_template_name`, the raw attribute,
    with the repr derived in `extend_nodelist` — see the correction in §2.
 4. **The corpus entries that reach it** — `test_extends.py:188` and `:193`, whose
@@ -352,8 +352,37 @@ measurements that bound each item:
    to get wrong quietly.
 
 **What M7 does not owe:** the refusal path. `extend_nodelist`'s check ships
-(`parser/mod.rs:435`) and is exercised on both branches by `standin_first`
-(`tags/mod.rs:194-212`). M7 changes the *reason it can fire*, not the rule.
+(`parser/mod.rs:502`) and is exercised on both branches by `standin_first`
+(`tags/mod.rs:196-215`). M7 changes the *reason it can fire*, not the rule.
+
+**Correction, added 2026-10-09 (M7 close-out).** Two defects in the list above,
+and one of them is the one the plan's D2 names.
+
+*It contradicts itself.* Item 2 asks M7 to carry `must_be_first` with the node;
+item 6 asks it to write `do_block`/`do_include`/`construct_relative_path`. The
+first is Design A's prerequisite and the second is Design B's deliverable — an
+M7 that did both would have built both halves of two designs, and a reader
+following this list as a settled fact would have tried to. **Resolved in favour
+of Design B**, and item 2 was kept as a *separate* task anyway (plan Task 5),
+because it is a real M6 defect that is independent of which design wins: a
+library tag returning a `must_be_first` node is accepted today, in a position
+Django refuses, whichever side compiles `{% extends %}`.
+
+*Its spans were stale.* `desc.rs:404-407` named `nodelists` and one line of the
+`must_be_first` doc; the field and its whole doc comment are `:406-407`.
+`parser/mod.rs:436-444` and `:435` both pointed into `Parser::error` and
+`invalid_block_tag`, which moved when Task 1 added `loaded_blocks`; the message
+is `:512-518` and the check `:502`. `tags/mod.rs:194-212` began two lines above
+`standin_first` and ended two below its registration. All corrected above.
+
+**Worth keeping, because it is the third time this record has had it:** a span
+that was right when it was written and a claim that was wrong when it was
+written fail the same way, and only re-reading the tree tells them apart. The
+plan's D3 is the same defect one layer up, and measured: `:435` *was* the check
+when D3 was written, and Task 1's `loaded_blocks` moved it. The spec tracked the
+move at every commit (`435 → 471 → 489 → 502`); the plan did not, because the
+plan is a dated record and nothing scans it. A number is not made durable by
+being a correction.
 
 ---
 

@@ -547,13 +547,32 @@ returning a `must_be_first` node is accepted today, in a position Django
 refuses.
 
 **D3 — the spec's §10.4 cited `parser/mod.rs:336` for `extend_nodelist`; the
-check is at `:435`, inside the function ported at `:429`.** A vintage, not a
+check is at `:502`, inside the function ported at `:496`.** A vintage, not a
 claim. **Fixed rather than only recorded**, in `7ac772e`: the spec is a living
 document under the anchor guard now, so a number left as a vintage would be a
 number the guard re-checks forever. Found by reading the 29 unmanifested spec
 anchors against the pinned tree one at a time — the widening's first catch, and
 the second was `base.py:948-1000`, twelve lines short of `_resolve_lookup`'s
 end.
+
+**D3′ — the value D3 records is not the value that holds, and the reason is the
+shape of the mistake rather than a slipped digit.** `:435` was the check *at the
+commit that corrected it*, and it moved three more times: the spec and the
+manifest tracked it in step and neither ever went red — measured across the five
+commits, spec `435 → 471 → 489 → 489 → 502`, manifest carrying the matching
+entry at each (`7ac772e`, `1b131a0`, `fdf115b`, `156a24a`, `b8796e2`). **The spec
+is checked; this plan is not, and a number in an unscanned document reads as
+settled once it is written.** So D3 froze a moving target and D3 is what a later
+reader consults. `:502` is the true value and the one the spec already carries;
+the manifest entries are `parser/mod.rs:496` (the function) and `:502` (the
+check).
+
+**The general form, because M7 produced it twice** (here and in the recon's §6):
+*a correction is not exempt from being checked.* An entry that fixes a wrong
+number is still a number, it is written with the same confidence as the number
+it replaced, and if it lands in a document the guard does not scan, nothing will
+ever move it again. That is why Step 2's remaining work is to move these into the
+spec — a living, scanned document — rather than to leave them here.
 
 **D4 — the spec's §10.3 M7 row names `test_include_cache` as the gate, and as
 written that gate is vacuous.** The `.django/` row runs on stock Django's parser
@@ -2453,7 +2472,17 @@ What does make it restart is breaking Django's own cache — popping
 `render_context.dicts[0][self]` before every render — and that gives
 `'000000000'` on **both** engines. So the row is a *parity* instrument: it
 detects our engine disagreeing with stock about what it handed the renderer, not
-a per-render rebuild.
+a per-render rebuild. The shared input is the cache itself — `IncludeNode.render`
+keys Django's `render_context`, both engines read that one dict — so a row
+comparing the two outputs cannot see a defect in the thing they share.
+
+**That is `parity validates agreement, never correctness` in its fourth
+appearance in this project and its first in M7.** The remedy is not a better
+parity row but a non-parity row beside it, and the shape is what generalises: a
+row that observes something **the rendered output cannot**. The structural row
+below is exactly that — `2 != 1` on the materialised nodelist, where the extra
+node renders `''` and is therefore invisible to any output comparison. The next
+shared input will not be a cache, and the recipe still holds.
 
 The shipped file therefore carries a second row, and it is the one a mutation of
 ours can fail: `test_the_loop_body_holds_exactly_one_include_node` walks the
@@ -2481,15 +2510,29 @@ The three files, and why each is in: the gate file carries the counter row, the
 structural row Step 2 describes, and the wire-shape row; the manifest carries the
 two pin anchors those rows cite (`loader_tags.py:197`,
 `syntax_tests/test_include.py:371-397`); this plan carries D10 and the Task 4
-Step 8 note. **The manifest entry is not optional** — `--check --frozen` fails a
-build on a cited anchor with no entry, and it caught two wrong spans here while
-this step was being written: `test_host_tags.py:15-19` named a paragraph about
-error text where the sentence claimed the `sys.path` bootstrap
-(`tests/test_host_tags.py:32-37`), and the pin row was cited one line short, at
-`syntax_tests/test_include.py:371-396` rather than `…:371-397`, dropping the
-`self.assertEqual(output, "012345678")` that is the row's whole claim.
-Both are the class of defect the guard exists for, and neither is visible to a
-reader skimming the test.
+Step 8 note.
+
+**The two wrong spans this step found, and which half of the guard found them.**
+Both citations landed with no manifest entry, and `--check --frozen` failed
+*loudly* on that — `check` appends the failure and `continue`s
+(`scripts/check_python_anchors.py:526-529`), and the docstring at `:498-499`
+lists "an anchor with no entry needs one authored" as one of the three repairs.
+So the gap did not hide them; it forced the entries. **What convicted the wrong
+numbers was authoring those entries with a snippet**: the span's claim is checked
+against text that has to appear inside it, and `…test_include.py:371-396` cannot
+contain `self.assertEqual(output, "012345678")`, which is at `:397`. The
+`sys.path` bootstrap citation had the same shape — `test_host_tags.py:15-19`
+named a paragraph about error text where the sentence described the loop at
+`tests/test_host_tags.py:32-37`, and reading the span to quote it is what showed
+that.
+
+The distinction is worth keeping because the two halves imply different habits,
+and only one of them is a habit. "Check new citations" is a discipline nobody
+keeps. "A new entry carries a snippet" is enforced by `--check` the moment it is
+followed — and the failure mode it closes is the one this step could have walked
+into: **an unquoted entry** would have satisfied the gate with the wrong number
+intact, silently. That is D7's class, and the invariant is the one already
+adopted — never author an unquoted entry.
 
 ---
 
@@ -2542,7 +2585,7 @@ recorded in `m7-seams.md` with the date, not assumed from the README.
 §10.3's M7 row: the gate is `tests/test_inheritance_gate.py`, and
 `test_include_cache` is named as the *shape* copied rather than the suite row
 that runs. §10.4's M7 paragraph: **already done** — `parser/mod.rs:336` was
-corrected to `:435` and the spec was put under the anchor guard in the commit
+corrected to `:502` and the spec was put under the anchor guard in the commit
 before this plan's first task (`7ac772e`), so the citation is now *checked*
 rather than merely written. That is stronger than the symbol this step
 originally asked for, and it is why the step no longer asks for it: a symbol
