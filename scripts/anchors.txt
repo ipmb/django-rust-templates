@@ -341,7 +341,11 @@ defaulttags.py:1001-1004	django/template/defaulttags.py	1001	1004	condition = Te
 defaulttags.py:1007-1018	django/template/defaulttags.py	1007	1018	if token.contents == "else":	-
 defaulttags.py:1009	django/template/defaulttags.py	1009	-	conditions_nodelists.append((None, nodelist))	-
 defaulttags.py:1013-1017	django/template/defaulttags.py	1013	1017	if token.contents != "endif"	-
-defaulttags.py:1023-1073	django/template/defaulttags.py	1023	1073	-	-
+defaulttags.py:1023-1062	django/template/defaulttags.py	1023	1062	def ifchanged(parser, token):	return IfChangedNode(nodelist_true, nodelist_false, *values)
+defaulttags.py:1053	django/template/defaulttags.py	1053	-	bits = token.split_contents()	-
+defaulttags.py:1055	django/template/defaulttags.py	1055	-	token = parser.next_token()	-
+defaulttags.py:1060	django/template/defaulttags.py	1060	-	nodelist_false = NodeList()	-
+defaulttags.py:1061	django/template/defaulttags.py	1061	-	values = [parser.compile_filter(bit) for bit in bits[1:]]	-
 defaulttags.py:1065-1075	django/template/defaulttags.py	1065	1075	-	-
 defaulttags.py:1086-1095	django/template/defaulttags.py	1086	1095	-	-
 defaulttags.py:1099	django/template/defaulttags.py	1099	-	-	-

@@ -1,31 +1,32 @@
-//! `{% ifchanged %}` — `defaulttags.ifchanged` (`defaulttags.py:1023-1073`).
+//! `{% ifchanged %}` — `defaulttags.ifchanged` (`defaulttags.py:1023-1062`).
 //!
 //! # Two *named* nodelists, and the false one is an empty `NodeList`
 //!
 //! `IfChangedNode(nodelist_true, nodelist_false, *varlist)`
 //! (`defaulttags.py:262-265`) keeps both as attributes. Without an `{% else %}`,
-//! Django assigns a fresh `NodeList()` (`:1057-1058`) rather than leaving it
-//! absent, so the descriptor must emit `nodelist_false` as an **empty nodelist**
-//! — omitting it would build a node whose `nodelist_false` is missing, and the
-//! parity harness compares `vars(node)`.
+//! Django assigns a fresh `NodeList()` (`defaulttags.py:1060`) rather than
+//! leaving it absent, so the descriptor must emit `nodelist_false` as an **empty
+//! nodelist** — omitting it would build a node whose `nodelist_false` is
+//! missing, and the parity harness compares `vars(node)`.
 //!
 //! # The values are variadic, and that is a wire problem, not a naming one
 //!
-//! `values = [parser.compile_filter(bit) for bit in bits[1:]]` (`:1059`) is
-//! splatted into the constructor's `*varlist`, which Django stores as the tuple
-//! `self._varlist` (`defaulttags.py:265`). There is no keyword for it, so
-//! `cls(**kwargs)` cannot build this node — the descriptor names the attribute
-//! `_varlist` and `NODE_CLASSES["IfChangedNode"]` is a factory that splices the
-//! list back into position. `IfChangedNode` is the **only** variadic node among
-//! M5's twelve, measured by scanning each `__init__`.
+//! `values = [parser.compile_filter(bit) for bit in bits[1:]]`
+//! (`defaulttags.py:1061`) is splatted into the constructor's `*varlist`, which
+//! Django stores as the tuple `self._varlist` (`defaulttags.py:265`). There is
+//! no keyword for it, so `cls(**kwargs)` cannot build this node — the descriptor
+//! names the attribute `_varlist` and `NODE_CLASSES["IfChangedNode"]` is a
+//! factory that splices the list back into position. `IfChangedNode` is the
+//! **only** variadic node among M5's twelve, measured by scanning each
+//! `__init__`.
 //!
 //! # `parser.next_token()` reads the terminator
 //!
 //! `parser.parse(("else", "endifchanged"))` stops *before* the terminator and
-//! prepends it back (`base.py:568`), so the `next_token()` at `:1054` is what
-//! consumes it — the same shape `{% for %}` uses for its `empty` branch. Reading
-//! the terminator here rather than inside `parse` is what lets the tag tell
-//! `else` from `endifchanged`.
+//! prepends it back (`base.py:568`), so the `next_token()` at
+//! `defaulttags.py:1055` is what consumes it — the same shape `{% for %}` uses
+//! for its `empty` branch. Reading the terminator here rather than inside
+//! `parse` is what lets the tag tell `else` from `endifchanged`.
 //!
 //! No message of its own: every failure comes from `parse`/`next_token`, which
 //! M3 already pins.
@@ -37,9 +38,9 @@ use crate::parser::Parser;
 use crate::token::Token;
 
 pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error> {
-    // Django computes `bits` first (`:1052`), before the body is parsed, so a
-    // malformed tag argument would report before any nested error. There is no
-    // argument check here — `bits[1:]` may be empty.
+    // Django computes `bits` first (`defaulttags.py:1053`), before the body is
+    // parsed, so a malformed tag argument would report before any nested error.
+    // There is no argument check here — `bits[1:]` may be empty.
     let bits = split_contents(token)?;
 
     let nodelist_true = parser.parse(&["else", "endifchanged"])?;
@@ -51,7 +52,7 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
         parser.delete_first_token();
         nodelist
     } else {
-        // Django's `NodeList()` (`:1058`), not `None`.
+        // Django's `NodeList()` (`defaulttags.py:1060`), not `None`.
         NodeListDesc::default()
     };
 
