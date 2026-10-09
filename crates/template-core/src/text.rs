@@ -36,9 +36,49 @@ pub fn smart_split(text: &str) -> Vec<&str> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SplitError;
 
+/// `get_text_list(items, last_word)` (`django/utils/text.py:282`).
+///
+/// Joins with `", "` and the final item with `last_word`: `"a, b or c"`, and
+/// notably `"a or b"` for two items — with no comma. The parser's
+/// `invalid_block_tag` message is built with it and is pinned by the suite.
+///
+/// Django's version passes the separator through `gettext`; the message is
+/// already assembled in the host's language by then, and M2 has no i18n layer,
+/// so the untranslated separator is what is used here. Noted because it is a
+/// real difference, not an oversight.
+pub fn get_text_list(items: &[String], last_word: &str) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
+    if items.len() == 1 {
+        return items[0].clone();
+    }
+    format!(
+        "{} {} {}",
+        items[..items.len() - 1].join(", "),
+        last_word,
+        items[items.len() - 1],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn get_text_list_joins_with_the_last_word() {
+        fn items(names: &[&str]) -> Vec<String> {
+            names.iter().map(|name| name.to_string()).collect()
+        }
+        assert_eq!(get_text_list(&items(&[]), "or"), "");
+        assert_eq!(get_text_list(&items(&["a"]), "or"), "a");
+        // Two items take no comma: this is the case a hand-rolled join gets
+        // wrong, and it is the one `_("{% endautoescape %}{% endspaceless %}")`
+        // -style messages hit.
+        assert_eq!(get_text_list(&items(&["a", "b"]), "or"), "a or b");
+        assert_eq!(get_text_list(&items(&["a", "b", "c"]), "or"), "a, b or c");
+        assert_eq!(get_text_list(&items(&["a", "b", "c"]), "and"), "a, b and c");
+    }
 
     #[test]
     fn splits_on_whitespace() {
