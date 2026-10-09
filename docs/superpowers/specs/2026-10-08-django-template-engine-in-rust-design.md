@@ -772,6 +772,10 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   reads 7,895; the two extras are `U+0022` and `U+0027`, category `Po`, which
   diverge over *quoting* rather than printability and which this function
   handles correctly. Name the predicate or the number is not falsifiable.)
+  `is_ascii()` is the boundary because the function is exact for **all** ASCII,
+  verified by diffing it against `repr()` across all 128 code points — `\x0b`
+  and `\x7f` included — so a narrower assertion would reject inputs it gets
+  right.
   Both M2 call sites are ASCII *by construction*, which is why M2 is correct
   rather than lucky: `{% resetcycle %}`'s `args[0]` is the tag name dispatch
   matched against the registry, and `{% templatetag %}`'s list is a constant.
@@ -787,6 +791,25 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   moment either is wired up, so that is a choice someone makes rather than a
   default nobody noticed.
 
+- **Rust's `\w` is not Python's `\w`, and `filter_re` is built on it.** Python's
+  `filter_re` uses `(?P<var>[\w\.\+-]+)` and `(?P<filter_name>\w+)`
+  (`base.py:703-719`), and for `str` patterns Python's `\w` is exactly
+  `isalnum() or '_'`. Rust's `regex` `\w` is
+  `[\p{Alphabetic}\p{M}\p{Nd}\p{Pc}\p{Join_Control}]`, a different set: measured
+  over the whole code space, Rust matches **2,642** code points Python does not
+  (Mn 2,020, Mc 468, So 130, Me 13, Pc 9, Cf 2) and misses **915** that Python
+  matches (all `No`). The exact replacement is **`[\p{L}\p{N}_]`**, verified
+  byte-for-byte identical to Python's set — 142,940 code points, equal over
+  U+0000..U+10FFFF. This is M1's whitespace-table trap in a second place, and it
+  is user-visible in *both* directions against the pinned tree: `{{ ² }}`
+  renders `''` on Django (U+00B2 is `No`, a Python word character) while
+  `{{ á }}` written as `a`+U+0301 **raises** `Could not parse the remainder:
+  '́' from 'á'` (U+0301 is `Mn`, a Rust word character but not a Python one).
+  So M3 uses the explicit class with an exhaustive guard test, as `pyunicode`
+  does for whitespace. Note which spelling the two traps share: an implicit
+  escape class was correct in neither case, and the fix in both is to name the
+  set rather than trust the engine's idea of it.
+
 - **Whether the descriptor wire form needs container values is an M3 decision,
   taken before fan-out, not now.** `AttrValue` carries `Str`/`SafeStr`/`Bool`/
   `Int`/`None`/`Ref`, and the milestone claim that the format is general enough
@@ -794,15 +817,28 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   Later milestones do need them — measured against the pinned tree,
   `ForNode.loopvars` is a list of strings, `CycleNode.cyclevars` a list,
   `WithNode.extra_context` a dict — but a plain `AttrValue::List` would **not**
-  be enough, which is the reason to defer rather than to guess:
+  be enough, which is the reason to defer rather than to guess. There are three
+  independent reasons, and they are why the guess is not worth making:
   `IfNode.conditions_nodelists` is a list of `(condition, nodelist)` tuples
-  (`defaulttags.py:995-1020`), so one element of the list is a *nodelist*, and
-  nodelists live in `NodeDesc.nodelists` rather than in an attribute value.
-  Guessing a shape now buys either dead decode arms — the anti-pattern this
-  document has flagged twice — or a format reopened at M6 regardless. M3
-  decides it with `FilterExpression` (the `Ref` producer) and the M5/M6 node
+  (`defaulttags.py:995-1020`), so one element of each tuple is a *nodelist*,
+  which lives in `NodeDesc.nodelists` rather than in an attribute value;
+  `IfNode` does **not** override `child_nodelists`, so it inherits
+  `("nodelist",)` while its `nodelist` is a *computed property* —
+  `return NodeList(self)`, flattening every branch through `__iter__` — which
+  means the materialised `IfNode` must hold real Python `NodeList` objects
+  *inside the tuples* for `get_nodes_by_type` to reach its children at all; and
+  the other half of the tuple is a `smartif` AST node rather than a
+  `FilterExpression`, so what it looks like on the wire is M3's output.
+  §10.3 puts `if` in **M5**, alongside `for`, `with` and `cycle`, so the
+  container case and the `IfNode` case land in the *same* milestone: a shape
+  guessed now would be reopened at M5, not merely "later". This was a review
+  finding, and it strengthened the case for deferral rather than weakening it.
+  So M3 decides it with `FilterExpression` (the `Ref` producer) and the M5 node
   shapes both in hand, and adds the variant, its `attr_value_to_py` arm and its
-  `_decode_value` arm in one commit.
+  `_decode_value` arm in one commit. The shape to evaluate at M3 is
+  `AttrValue::NodeListRef(usize)` — an index into the `NodeDesc`'s existing
+  `nodelists`, which resolves because the materialiser already builds children
+  before parents — giving `List[Tuple[Ref|None, NodeListRef(i)]]`.
 
 - **M3 gate: a variable ahead of `{% extends %}`.** Every source in the M2
   corpus and all 400 randomised templates are variable-free outside

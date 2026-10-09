@@ -92,17 +92,34 @@ its old `héllo` test — which pinned behaviour nothing can reach and read as "
 is a general repr" to the next caller — is replaced by one that **requires** the
 assertion to fire; and §10.4 records that M5 and M7 route those two messages
 through the host's `repr` rather than widening the function.
+Round 4 checked the predicate rather than accepting it and found it right for a
+reason worth recording: the function is exact for *all 128* ASCII code points,
+`\x0b` and `\x7f` included, so the reviewer's suggested
+`is_ascii_graphic() || ' '` would have rejected inputs it gets right. Asserting
+against correct inputs is worse than asserting against the boundary. The
+residue the reviewer named is real and is not fixed by predicate choice — a
+passing assertion can still read as "generally correct" — so the bound is now
+also named at both call sites, where the next caller actually arrives.
 
 **Minor — add `AttrValue::List`/`Map` now so M5 cannot reopen the format.
 Declined as stated; deferred to M3 with the counterexample.** The need is real
 and measured — `ForNode.loopvars` is a list of strings, `CycleNode.cyclevars` a
 list, `WithNode.extra_context` a dict — but the proposed shape does not cover it.
 `IfNode.conditions_nodelists` is a list of `(condition, nodelist)` tuples
-(`defaulttags.py:995-1020`), so one element is a *nodelist*, and nodelists live in
-`NodeDesc.nodelists`, not in an attribute value. `List`/`Map` therefore would not
-prevent M6 reopening the format anyway, while adding two decode arms the emitter
-cannot produce — the anti-pattern this project has flagged twice. M3 decides it
-with `FilterExpression` and the M5/M6 shapes in hand, in one commit.
+(`defaulttags.py:995-1020`), so one element of each tuple is a *nodelist*, and
+nodelists live in `NodeDesc.nodelists`, not in an attribute value. Round 4
+strengthened this rather than weakening it: §10.3 puts `if` in **M5**, alongside
+`for`, `with` and `cycle`, so the container case and the `IfNode` case land in
+the *same* milestone — a shape guessed now is reopened at M5, not "later". And a
+third reason arrived with it: `IfNode` does not override `child_nodelists`, so it
+inherits `('nodelist',)` while `nodelist` is a computed property returning
+`NodeList(self)`, which means the materialised `IfNode` must hold real Python
+`NodeList` objects *inside* the tuples or `get_nodes_by_type` cannot reach its
+children. The half that cannot be specified yet is the condition half — a
+`smartif` AST node, not a `FilterExpression` — and that is M3's output. The shape
+to evaluate at M3 is `AttrValue::NodeListRef(usize)`, an index into the
+`NodeDesc`'s existing `nodelists`, which resolves because the materialiser
+already builds children before parents.
 
 **Minor — widen the random alphabet. Accepted, and widened further than asked.**
 The four separators do nothing on their own, because `random_text` only ever
@@ -143,9 +160,21 @@ Every test below was observed failing for its intended reason before being kept.
   comment doing the work.
 - **`random_tag_with_argument` dropped from the generator**: the reach test
   reports `0 not greater than 10 : no argument carried a Python-only separator`.
-  Worth noting *which* assertion caught it — `len(arguments) > 100` still passed,
-  because the fixed `{% autoescape on %}` block tags match the same pattern, so
-  the count is the weak assertion and the separator one is the guard.
+  The first version of that test also asserted `len(arguments) > 100`, and the
+  mutation showed it *passed anyway* — the regex matches the fixed
+  `{% autoescape on %}` block tags, so the count was never measuring the
+  generator. A floor that survives deletion of the thing it floors reads as
+  coverage and provides none, so it is deleted rather than kept as harmless. The
+  two floors that remain measure what they name, because `on` and `off` carry
+  neither a separator nor a quote.
+- **`IfNode.nodelist` is a property, not an attribute** — verified, not assumed:
+  `IfNode.child_nodelists` is `('nodelist',)` inherited from `Node` (no
+  override), and `IfNode.nodelist` returns `NodeList(self)`, flattening every
+  branch through `__iter__`. So a materialised `IfNode` must hold real Python
+  `NodeList` objects *inside* `conditions_nodelists` for `get_nodes_by_type` to
+  reach its children, and a flat list of plain values cannot carry it. This is
+  the third independent reason the wire-container decision is M3's, and it is
+  the case that makes Task 7's second traversal load-bearing.
 
 ## The plan-vs-tree defect rate — a process finding, not eight slips
 

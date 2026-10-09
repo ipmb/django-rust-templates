@@ -343,6 +343,10 @@ fn tag_now(_parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error> {
 fn tag_resetcycle(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error> {
     let args = split_contents(token)?;
     if args.len() > 2 {
+        // `args[0]` is safe to `%r` because it is the tag name dispatch matched
+        // against the registry, not text from the template — see `py_repr_str`'s
+        // bound. Anything reaching here with a non-ASCII byte trips that
+        // function's assertion rather than producing Django-incompatible output.
         return Err(Error::syntax(format!(
             "{} tag accepts at most one argument.",
             py_repr_str(&args[0]),
@@ -395,6 +399,11 @@ fn tag_templatetag(_parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, 
 
     let tag = bits[1];
     if !TEMPLATETAG_ARGUMENTS.contains(&tag) {
+        // `tag` — arbitrary template text — is *not* passed through
+        // `py_repr_str`: Django's own message interpolates it with `%s`, so this
+        // uses `{}`. The only `%r` here is `py_list_repr(&TEMPLATETAG_ARGUMENTS)`
+        // over the constant above, which is ASCII by construction and is why
+        // that function's assertion is not tripped from this path.
         return Err(Error::syntax(format!(
             "Invalid templatetag argument: '{}'. Must be one of: {}",
             tag,

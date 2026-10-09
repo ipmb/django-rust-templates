@@ -231,9 +231,18 @@ class RandomisedParityTests(unittest.TestCase):
         *text node* prove nothing; they have to land in a tag argument. Measured
         with the current seed: 400 templates, 196 containing an
         `{% autoescape %}` tag, 307 arguments, 105 of them carrying a
-        Python-only separator, 71 a quote. The bounds below are floors, not the
-        measurements, so widening the alphabet or the tag set does not have to
-        update them — but dropping the argument path silently does.
+        Python-only separator, 71 a quote, 21 empty.
+
+        There is deliberately **no** floor on the raw argument *count*. An
+        earlier version asserted `len(arguments) > 100` and it was false: the
+        regex matches the fixed `{% autoescape on %}` block tags as well, so the
+        number passed even after the argument path was deleted. A floor that
+        survives deletion of the thing it floors reads as coverage and provides
+        none. The two floors below measure what they name, because `on` and
+        `off` carry neither a separator nor a quote.
+
+        The numbers above are the evidence for those floors' headroom. Changing
+        the seed invalidates them: re-run the measurement rather than assume it.
         """
         rng = random.Random(RANDOM_SEED)
         arguments = []
@@ -242,7 +251,6 @@ class RandomisedParityTests(unittest.TestCase):
             for match in re.finditer(r"\{% autoescape (.*?) %\}", source, re.S):
                 arguments.append(match.group(1))
 
-        self.assertGreater(len(arguments), 100, "no tag arguments were generated")
         self.assertGreater(
             sum(1 for a in arguments if any(c in a for c in "\u001c\u001d\u001e\u001f")),
             10,
