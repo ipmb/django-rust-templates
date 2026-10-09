@@ -184,6 +184,7 @@ defaulttags.py:97	django/template/defaulttags.py	97	-	-	-
 defaulttags.py:106-112	django/template/defaulttags.py	106	112	-	-
 defaulttags.py:262	django/template/defaulttags.py	262	-	-	-
 defaulttags.py:265	django/template/defaulttags.py	265	-	self._varlist = varlist	-
+defaulttags.py:308-309	django/template/defaulttags.py	308	309	def __init__(self, conditions_nodelists):	self.conditions_nodelists = conditions_nodelists
 defaulttags.py:323	django/template/defaulttags.py	323	-	-	-
 defaulttags.py:323-333	django/template/defaulttags.py	323	333	for condition, nodelist in self.conditions_nodelists:	return nodelist.render(context)
 defaulttags.py:326	django/template/defaulttags.py	326	-	condition.eval(context)	-
@@ -219,7 +220,6 @@ defaulttags.py:1007-1018	django/template/defaulttags.py	1007	1018	if token.conte
 defaulttags.py:1011	django/template/defaulttags.py	1011	-	-	-
 defaulttags.py:1013-1017	django/template/defaulttags.py	1013	1017	if token.contents != "endif"	-
 defaulttags.py:1023-1073	django/template/defaulttags.py	1023	1073	-	-
-defaulttags.py:1024-1025	django/template/defaulttags.py	1024	1025	-	-
 defaulttags.py:1065-1075	django/template/defaulttags.py	1065	1075	-	-
 defaulttags.py:1086-1095	django/template/defaulttags.py	1086	1095	-	-
 defaulttags.py:1099	django/template/defaulttags.py	1099	-	-	-

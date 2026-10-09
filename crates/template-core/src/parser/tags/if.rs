@@ -41,7 +41,7 @@
 //!
 //! # `{% if %}` is the only tag whose node has *positional-only* nodelists
 //!
-//! `IfNode.__init__(self, conditions_nodelists)` (`defaulttags.py:1024-1025`) takes one
+//! `IfNode.__init__(self, conditions_nodelists)` (`defaulttags.py:308-309`) takes one
 //! argument and holds the branch bodies *inside* it, so there is no parameter a
 //! branch nodelist could be a keyword for. The descriptor therefore carries N
 //! unnamed nodelists and the branches name them by position
