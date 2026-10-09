@@ -316,3 +316,56 @@ Two naming constraints already on the books:
   `ImportError` from an `_impl/engine.py` experiment.
 - `_impl/parser.py` is named for a module Django does not have; `base.py` and
   `smartif.py` are names Django *does* have, which is the point.
+
+## 9. Interposition breaks the project's own parity harness — found by executing Task 1
+
+Measured while executing the plan's Task 1, not by reading it. With
+`_impl/base.py` present but nothing else changed:
+
+```
+python -m unittest tests.test_shim tests.test_parser_parity   → FAILED (failures=537)
+python -m unittest tests.test_parser_parity tests.test_shim   → OK
+python -m unittest tests.test_parser_parity                   → OK
+```
+
+**Import order decides the result.** Root cause: the shim loads our file under
+Django's module name, so our `Node` is a **second class object**. A test module
+that binds `Node` at import time *before* any test calls `_shim.install()` holds
+Django's; one imported after holds ours. `describe()`
+(`test_parser_parity.py:196`) dispatches on `isinstance(value, Node)`, so it falls
+through to its `repr()` arm and the assertion compares **memory addresses**:
+
+```
+-  'nodes': [<django.template.defaulttags.LoadNode object at 0x10921ee90>,
++  'nodes': [<django.template.defaulttags.LoadNode object at 0x10921efd0>,
+```
+
+Two structurally identical trees, reported as different. This is M9's central
+hazard in miniature: interposition *is* the act of creating a second class object
+for a name, and anything holding the first is silently outside the new world.
+
+Not caused by anything new: `tests/test_shim.py` has called `install()` mid-run
+since before M9, harmlessly, because `exceptions.py` was the only interposed
+module and no parity test imported it. M9 is what makes the existing leak visible.
+
+**Fix, measured.** Install the shim once at unit-test session start:
+
+```
+Ran 285 tests, FAILED (failures=7)
+```
+
+543 → 7. The seven are all guards doing their job: six `*_target_is_genuinely_djangos*`
+rows (which assert the comparison target is Django's own file — impossible once
+`base` is ours, and correct to fail) and one shim fallback row whose subject
+should have been a module that still falls back.
+
+The six restate to a stronger claim than they had: the target is our
+transcription, and the comparison is meaningful because
+`scripts/check_transcriptions.py` gates that transcription against upstream. The
+chain is **Rust ≡ our Python ≡ upstream (by diff)**. That promotes the
+transcription guard from documentation hygiene to the load-bearing premise of the
+whole parity harness — a much better reason for it to exist than the one it was
+planned with.
+
+Plan: `docs/superpowers/plans/2026-10-09-m9-interpose-base-and-smartif.md`,
+Task 0, which must land before Task 1.

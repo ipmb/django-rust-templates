@@ -50,6 +50,143 @@ Each line is a failure mode this milestone can ship while every count stays gree
 
 ---
 
+### Task 0: Make the unit-test harness shim-consistent
+
+**This lands before Task 1.** The numbering of the tasks below is unchanged, so the recon's references stay valid; this one was found by executing Task 1, not by reading it.
+
+**The defect, measured during Task 1's execution.** With `_impl/base.py` present, the project's own unit tests went from 283 green to **543 failures** — and running `test_parser_parity` alone passed. The direction test settles it:
+
+```
+python -m unittest tests.test_shim tests.test_parser_parity   → FAILED (failures=537)
+python -m unittest tests.test_parser_parity tests.test_shim   → OK
+```
+
+Import order decides the result, so the harness is order-dependent, not wrong.
+
+**Root cause.** `describe()` in `test_parser_parity.py` dispatches on `isinstance(value, Node)`. The shim loads our file under Django's module name, so our `Node` is a **second class object** distinct from Django's. A module that binds `Node` at import time *before* any test calls `_shim.install()` holds Django's; a module imported after holds ours. `isinstance` then fails across the boundary, `describe` falls through to its `repr()` fallback, and the assertion compares **memory addresses**:
+
+```
+-  'nodes': [<django.template.defaulttags.LoadNode object at 0x10921ee90>,
++  'nodes': [<django.template.defaulttags.LoadNode object at 0x10921efd0>,
+```
+
+Two structurally identical trees, reported as different. This is the central hazard of M9 in miniature: interposition is exactly the act of creating a second class object for a name, and anything holding the first is silently outside the new world.
+
+**It is not caused by Task 1's new test module.** `tests/test_shim.py` already called `_shim.install()` mid-run, before M9, and it was harmless because `exceptions.py` was the only interposed module and no parity test imported it. M9 is what makes the existing leak observable.
+
+**The fix, measured.** Install the shim once at unit-test session start, so every module binds the same classes:
+
+```
+PYTHONPATH=…/scripts/shimpath:…/.django DJANGO_RUST_TEMPLATES=1 python -m unittest discover …
+→ Ran 285 tests, FAILED (failures=7)
+```
+
+**543 → 7.** The remaining seven are all guard rows doing their job, and each is enumerated in Step 3.
+
+**Files:**
+- Modify: `scripts/check.sh` (the `python unit tests` step)
+- Modify: `tests/test_parser_parity.py`, `tests/test_lexer_parity.py`, `tests/test_parser_errors.py`, `tests/test_filter_expr_parity.py` (the guard rows)
+- Modify: `tests/test_shim.py` (`test_a_partial_subpackage_still_falls_back_for_its_siblings`)
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: a unit-test session in which `django.template.*` resolves consistently, so Tasks 1–7 can interpose modules without breaking the harness.
+
+- [ ] **Step 1: Run the unit tests the way the suite is run**
+
+In `scripts/check.sh`, change the `python unit tests` step to export the same environment `run_django_suite.sh` does. Do **not** hand-roll the paths — source them, so the two invocations cannot drift:
+
+```sh
+step "python unit tests"
+# Shimmed, like the Django suite: the shim loads our file under Django's module
+# name, so a test module that binds `Node` before `install()` holds a *different
+# class object* than one that binds it after, and `isinstance` fails across the
+# boundary — measured, as 537 order-dependent failures in the parity harness.
+# Installing at session start makes every module bind the same classes.
+DJANGO_RUST_TEMPLATES=1 PYTHONPATH="$HERE/shimpath:$PROJECT_ROOT/.django${PYTHONPATH:+:$PYTHONPATH}" \
+  "$PROJECT_ROOT/.venv/bin/python" -m unittest discover -s "$PROJECT_ROOT/tests" -t "$PROJECT_ROOT" -p 'test_*.py'
+```
+
+- [ ] **Step 2: Confirm the count drops to 7**
+
+Run: `scripts/check.sh --fast`
+Expected: `Ran 285 tests` / `FAILED (failures=7)`, and nothing else regressed.
+
+- [ ] **Step 3: Restate the guard rows — do not delete them**
+
+All six `test_*_target_is_genuinely_djangos*` rows assert that the comparison target is Django's own file, and all six are now **correctly failing**. The claim they make is still the right claim; what changed is what "Django's" can mean in-process once we interpose.
+
+The target is now our transcription, and the transcription's fidelity to upstream is what makes the comparison meaningful — so each guard is restated to assert **the target is the transcription, and the transcription is gated**:
+
+```python
+    def test_the_comparison_target_is_the_gated_transcription(self):
+        """The target is `_impl/base.py`, and that is a *stronger* claim than it looks.
+
+        Before M9 this row asserted the target was Django's own file, so that the
+        parity comparison could not silently become a self-comparison. Once `base`
+        is interposed that assertion cannot hold — Django's file is no longer what
+        `django.template.base` resolves to — and the honest replacement is not to
+        drop the guard but to name the new chain of trust:
+
+            Rust  ==  `_impl/base.py`'s Python  ==  upstream (by diff)
+
+        The middle link is this comparison. The last link is
+        `scripts/check_transcriptions.py`, which fails on any hunk of our file
+        that differs from upstream outside the declared set. Remove that gate and
+        this row is worthless, which is exactly why it is asserted here rather
+        than assumed.
+        """
+        source = inspect.getsource(Parser)
+        self.assertIn("_impl", source)
+        self.assertTrue(
+            (PROJECT_ROOT / "scripts" / "check_transcriptions.py").is_file(),
+            "the transcription gate is what makes this comparison meaningful",
+        )
+```
+
+Apply the same restatement, in its own idiom, to the five sibling rows: `test_lexer_parity.py:269`, `test_parser_errors.py:435`, `test_parser_parity.py` (ShapeTests), and the three targets in `test_filter_expr_parity.py`.
+
+- [ ] **Step 4: Fix the shim fallback row**
+
+`test_a_partial_subpackage_still_falls_back_for_its_siblings` fails because `base` no longer falls back. Read it, and change it to name a module that *does* still fall back — the row is about the shim's partial-subpackage behaviour, not about `base`, so the subject should be a module that is still Django's.
+
+- [ ] **Step 5: Verify each restated guard still has teeth**
+
+For one row, temporarily delete `scripts/check_transcriptions.py` (or rename it), re-run, and confirm the row fails. Restore. A guard that cannot fail is the thing this whole task exists to remove.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add scripts/check.sh tests/
+git commit -m "$(cat <<'EOF'
+M9: install the shim for the unit-test session
+
+Found by executing Task 1 rather than reading it: with `_impl/base.py` present the
+unit tests went 283 green -> 543 failures, and `test_parser_parity` passed when run
+alone. Direction test: test_shim then test_parser_parity is 537 failures; the
+reverse is OK.
+
+Root cause: the shim loads our file under Django's module name, so our `Node` is a
+second class object. A module binding `Node` before `install()` holds Django's and
+one binding after holds ours; `isinstance` fails across the boundary, `describe()`
+falls to its `repr()` arm, and the assertion compares memory addresses — two
+identical trees reported as different. `test_shim.py` has called `install()`
+mid-run since before M9; it was harmless while only `exceptions` was interposed.
+
+Installing at session start is measured: 543 -> 7 failures. The seven are all
+guards doing their job. Six assert the comparison target is Django's own file,
+which cannot hold once `base` is ours — restated to name the new chain, Rust ==
+the transcription == upstream, with `check_transcriptions.py` as the last link.
+That gate is now load-bearing for the whole parity harness, not just for
+documentation rot.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
 ### Task 1: The walking skeleton — `_impl/base.py` transcribed, interposition proven
 
 This is the highest-risk edit in the project: from here, every one of the 1547 tests renders through *our* `NodeList` (**964**, a lower bound — recon finding 1) and parses through *our* `Template` (1170). Do it verbatim first, delegate in Task 2. A verbatim transcription was measured to keep the whole suite green (recon finding 3), so any red after this step is an addressing/import error, not a behavioural one — which is exactly the property that makes this the right walking skeleton.
@@ -141,9 +278,11 @@ scripts/run_django_suite.sh template_tests
 
 Expected: `Ran 1547 tests in …s` / `OK (skipped=6)`. If it is red, the cause is an import or attribute addressing error in the transcription, **not** a behaviour divergence — recon finding 3 measured a verbatim copy as green. Do not start editing behaviour to fix it; find the import.
 
-- [ ] **Step 5: Write the failing row for `tests/test_shim.py:95`**
+- [ ] **Step 5: Replace the meter row with one that pins the count**
 
 The existing row asserts `django.template.base` is *still* Django's, which is now false. Replace it with one that pins the **count**, so the meter cannot drift unnoticed.
+
+**It asserts 24 here, not 23** — Task 1 interposes one of the two modules, so a row asserting 23 would leave this commit red, and every commit must pass `check.sh`. Task 3 is where it becomes 23. (This plan originally had it written red at Task 1; execution corrected it.)
 
 Modify `tests/test_shim.py`, replacing the body of `test_unshimmed_reports_progress_and_is_currently_everything`:
 
@@ -151,45 +290,50 @@ Modify `tests/test_shim.py`, replacing the body of `test_unshimmed_reports_progr
     def test_unshimmed_reports_progress(self):
         """The meter, pinned as a number rather than a membership test.
 
-        The old row asserted ``"django.template.base" in remaining``, which was
-        true until M9 interposed it. A membership test on one module told us
-        nothing about the other twenty-four, and would have gone on passing
-        through any later regression that added a module back. The count is the
-        claim the milestone is accepted on, so the count is what is asserted.
+        This row used to assert ``"django.template.base" in remaining``, which
+        was true until M9 interposed it — and which told us nothing about the
+        other twenty-four modules, so a later change that handed any of them
+        *back* would have gone on passing. The count is the claim the milestone
+        is accepted on, so the count is what is asserted; it moves by one in the
+        same commit as each interposition.
         """
         _shim.install()
 
         remaining = _shim.unshimmed()
-        self.assertEqual(len(remaining), 23, sorted(remaining))
+        self.assertEqual(len(remaining), 24, sorted(remaining))
+        self.assertNotIn("django.template.base", remaining)
         # Ours is not in the list, because ours is the package itself.
         self.assertNotIn("django.template", remaining)
 ```
 
-- [ ] **Step 6: Run the meter row to verify it fails on the wrong count**
+- [ ] **Step 6: Measure the row's teeth**
+
+A count assertion is only worth having if it can fail. Temporarily change `24` to `25`, run the row, confirm it fails with `24 != 25`, and restore with an `Edit` — never `git checkout`.
 
 Run: `.venv/bin/python -m unittest tests.test_shim.ShimTests.test_unshimmed_reports_progress -v`
-Expected: FAIL with `23 != 24` (Task 1 has interposed one of the two modules).
+Expected: FAIL with `24 != 25` before the restore; PASS after.
 
 - [ ] **Step 7: Write the direct-entry interposition rows**
 
-Create `tests/test_interposition.py`. These are the rows recon finding 3 demands: interposition is invisible to the suite, so each delegation needs a row that would fail if it were removed.
+Create `tests/test_interposition.py`. These are the rows recon finding 3 demands: interposition is invisible to the suite, so each seam needs a row that would fail if it were removed. Only Task 1's rows here — `smartif` (Task 3), `compile_nodelist` (Task 2) and the resolver (Task 5) each add theirs in their own commit, so every commit is green.
 
 ```python
 """Direct-entry evidence that the interposed modules are actually ours.
 
 The suite cannot see this. Measured (`.review/m9-recon.md` finding 3): with
-``_impl/base.py`` a byte-for-byte copy of Django's, ``unshimmed()`` reports 24,
-the whole suite is green, and the only row that notices is the meter. So a
-transcription that delegates nothing, or delegates wrongly, passes every count
-this project otherwise accepts.
+``_impl/base.py`` a byte-for-byte copy of Django's, ``unshimmed()`` reports one
+fewer module, the whole suite is green, and the only row that notices is the
+meter. So a transcription that delegates nothing, or delegates wrongly, passes
+every count this project otherwise accepts.
 
 Every row here imports the module through the shim and asserts on the file it
-resolved to, or on a Rust call it must have made.
+resolved to, or on a Rust call it must have made — the latter because a
+delegation that quietly called Django's own implementation is green too
+(finding 1a).
 """
 
 import unittest
 
-import django_rust_templates
 from django_rust_templates import _shim
 
 
@@ -203,31 +347,44 @@ class InterpositionTests(unittest.TestCase):
 
         self.assertIn("_impl", base.__file__, base.__file__)
 
-    def test_smartif_resolves_to_our_file(self):
-        # M9 Task 3 creates this; the row lands here so the interposition pair
-        # is asserted in one place.
-        import django.template.smartif as smartif
+    def test_the_node_classes_are_defined_by_our_file(self):
+        """Resolution and *identity* are different claims.
 
-        self.assertIn("_impl", smartif.__file__, smartif.__file__)
+        The module resolving to our file does not by itself mean the class a
+        render uses was defined there: a consumer that bound the name from an
+        earlier import keeps Django's object while the module is ours. So the
+        assertion is on the defining file.
 
-    def test_the_node_classes_are_ours(self):
-        """Every name a renderer touches, checked to be the interposed object.
-
-        A stale ``.so`` or a partially-installed shim can leave ``base`` ours
-        while a consumer holds Django's classes from an earlier import; asserting
-        on ``__module__`` catches the case where identity, not resolution, is wrong.
+        **Not on ``__module__``**, which reads ``django.template.base`` for our
+        classes and is *supposed* to — the shim loads our file under Django's
+        name, so that is the correct value for a drop-in replacement. The first
+        draft of this row asserted ``"_impl" in cls.__module__`` and failed on
+        all five classes for exactly that reason.
         """
+        import inspect
+
         import django.template.base as base
 
         for name in ("Template", "NodeList", "Node", "Variable", "VariableNode"):
             with self.subTest(name=name):
-                self.assertIn("_impl", getattr(base, name).__module__)
+                self.assertIn("_impl", inspect.getfile(getattr(base, name)))
 ```
 
 - [ ] **Step 8: Run the new rows**
 
 Run: `.venv/bin/python -m unittest tests.test_interposition -v`
-Expected: `test_base_resolves_to_our_file` PASS; `test_smartif_resolves_to_our_file` FAIL (Task 3 owns it); `test_the_node_classes_are_ours` PASS.
+Expected: both PASS. Then confirm the identity row has teeth by measuring the unshimmed path:
+
+```bash
+.venv/bin/python -c "
+import sys, inspect
+sys.path.insert(0, '.django')
+import django.template.base as base
+print(inspect.getfile(base.Template))
+"
+```
+
+Expected: `.django/django/template/base.py` — no `_impl`, so the row would fail. (Note: do **not** run this with `-I`, which implies `-E` and drops `PYTHONPATH`; the first attempt at this check failed with `ModuleNotFoundError: No module named 'django'` and tested nothing.)
 
 - [ ] **Step 9: Commit**
 
@@ -505,7 +662,16 @@ PY
 
 Expected: `unshimmed: 23`.
 
-- [ ] **Step 5: Run the full python unit suite (the meter row now passes)**
+- [ ] **Step 5: Move the meter row to 23, and add the `smartif` interposition row**
+
+Change `24` to `23` in `tests/test_shim.py::test_unshimmed_reports_progress`, and add to `tests/test_interposition.py`:
+
+```python
+    def test_smartif_resolves_to_our_file(self):
+        import django.template.smartif as smartif
+
+        self.assertIn("_impl", smartif.__file__, smartif.__file__)
+```
 
 Run: `.venv/bin/python -m unittest tests.test_shim tests.test_interposition -v`
 Expected: all rows PASS, including `test_unshimmed_reports_progress` (23) and `test_smartif_resolves_to_our_file`.
@@ -735,6 +901,34 @@ logger.debug(
 
 This task carries the `bit` through the Rust outcome and logs from Python, where the logger lives.
 
+**The obligation is four-part, and `exc_info` is the half that is easy to miss** (the reviewer's catch, and it would have shipped). Upstream's handler is
+
+```python
+except Exception as e:
+    template_name = getattr(context, "template_name", None) or "unknown"
+    logger.debug("Exception while resolving variable '%s' in template '%s'.",
+                 bit, template_name, exc_info=True)
+    if getattr(e, "silent_variable_failure", False):
+        current = context.template.engine.string_if_invalid
+    else:
+        raise
+```
+
+so it needs `bit`, `template_name`, the exception **object**, and `exc_info`. And `exc_info=True` resolves via `sys.exc_info()` **at call time** — which is empty outside an active `except`. M8's stash design is precisely "the exception is held, never active", so a handler that runs after the Rust call returns gets `(None, None, None)`.
+
+`logging` stores that tuple rather than `None`, so the assertion a reader reaches for passes and the one below it fails:
+
+```python
+self.assertIsNotNone(log_record.exc_info)                              # passes
+self.assertEqual(str(log_record.exc_info[1]), "Attribute does not exist.")   # fails: str(None) == 'None'
+```
+
+§D4 again, this time in the test rather than the code: the obvious assertion cannot discriminate; the one two lines down can.
+
+**The fix sidesteps the active-context requirement.** `logging` accepts an exception *instance* for `exc_info`, so the host passes `exc_info=exc` — the object the by-identity stash already holds — instead of `True`. `record.exc_info` is then `(type(exc), exc, exc.__traceback__)` and both assertions hold whatever `sys.exc_info()` says. `exc.__traceback__` may be `None` if PyO3 dropped it; `test_logging` reads only `exc_info[1]`, so that is survivable — worth knowing rather than discovering at execution.
+
+So the thing Step 5 must establish is **not** "can the binding carry the bit and the exception" — those are two plain values and a stash we already have. It is: *does the host build the record from the held instance, and does `exc_info[1]` come back as the original exception with its original `str()`?* The two `test_logging` rows answer it, and they cover both branches of `:1023-1026` — `'Attribute does not exist.'` is the `silent_variable_failure` case and `'Failed lookup for key [author] in …'` is the raising one.
+
 **Files:**
 - Modify: `crates/template-core/src/parser/resolve.rs` (`LookupOutcome::Escaped`)
 - Modify: `crates/template-py/src/lib.rs` (the resolver binding)
@@ -841,9 +1035,46 @@ Then update every `LookupOutcome::Escaped` construction (`resolve.rs:334`, `:342
 
 Update the unit tests in `resolve.rs` (`:717`, `:746`, `:763`) from `LookupOutcome::Escaped` to `LookupOutcome::Escaped { bit: … }` with the expected bit.
 
-- [ ] **Step 5: Expose it through the binding**
+- [ ] **Step 5: Expose the bit, and confirm the held exception reaches the record**
 
-In `crates/template-py/src/lib.rs`, find the `resolve` binding and make the escaping path surface the bit to the host — either as a raised exception carrying it, or as an out-parameter the host reads. Read the existing `resolve` binding's error path first; the choice must match how `CallFailure::Raised` and the `pending` slot already reach Python, since the outer handler needs the *exception object* as well as the bit.
+In `crates/template-py/src/lib.rs`, find the `resolve` binding and make the escaping path surface the bit to the host. Read the existing binding's error path first; the choice must match how `CallFailure::Raised` and the `pending` slot already reach Python, since the handler needs the *exception object* as well as the bit.
+
+Then write the row that pins the `exc_info` half, because neither of Task 5's earlier rows can see it — `test_the_failing_bit_is_passed_to_the_logger` only checks the message, and the message is right even when `exc_info` is empty:
+
+```python
+    def test_the_log_record_carries_the_exception_instance(self):
+        """`exc_info=True` cannot work here, and the obvious assertion hides that.
+
+        Upstream passes `exc_info=True`, which resolves `sys.exc_info()` **at call
+        time** and is `(None, None, None)` outside an active `except`. The stash is
+        exactly "held, not active", so the record's `exc_info` is a truthy tuple
+        of Nones: `assertIsNotNone` passes and `str(exc_info[1])` is `'None'`.
+        The host therefore passes the instance — `exc_info=exc` — and this row
+        asserts on the instance rather than on truthiness.
+        """
+        import logging
+        from django.template import Context, Engine
+
+        records = []
+
+        class Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        logger = logging.getLogger("django.template")
+        handler = Capture()
+        logger.addHandler(handler)
+        try:
+            Engine().from_string("{{ author.name }}").render(Context({}))
+        finally:
+            logger.removeHandler(handler)
+
+        record = next(r for r in records if r.exc_info is not None)
+        self.assertIsNotNone(record.exc_info[1], "exc_info held no exception")
+        self.assertIn("Failed lookup for key", str(record.exc_info[1]))
+```
+
+Run it **before** the Step 6 delegation, against a hand-written handler that passes `exc_info=True`, and confirm it fails with `str(None)`. A row asserting the instance is only worth having if the `True` form is known to break it.
 
 - [ ] **Step 6: Delegate `Variable._resolve_lookup`**
 
@@ -1012,7 +1243,89 @@ A `# TRANSCRIBED` file is faithful only while someone re-diffs it. The docstring
 - Consumes: `_impl/base.py`, `_impl/smartif.py` from Tasks 1–3.
 - Produces: a gate that fails when a transcription differs from `.django/` outside its declared hunks.
 
-- [ ] **Step 1: Write the guard**
+A transcription has **two** checkable relations, and they catch different things:
+
+| | relation | catches |
+|---|---|---|
+| generator | generator output == committed file | a hand edit to the generated file |
+| diff guard | committed file − pinned source == declared hunks | an undeclared change, whoever made it |
+
+Task 1 Step 1's generation buys the first relation, but only if the generator is a **committed script with a `--check` mode** — the `gen_python_word_ranges.py --check` pattern this repo already uses. A one-off heredoc, as Task 1 currently writes it, evaluates the first relation exactly once, in the commit that created it, and never again; a later hand edit then diverges silently, which is the failure the diff guard exists to prevent one layer up.
+
+**And the marker must be anchored to text, not to a line number** (the reviewer's second condition). Task 1 Step 1 inserts after the opening `"""`, which is text-anchored and therefore stable. Any variant that inserts *at line N* would make our file a function of Django's line numbering, so the next pin bump would change our file for a reason that is not ours — the drift class this project has spent two milestones removing, reintroduced in the one place where it would look like a legitimate regeneration.
+
+- [ ] **Step 1: Commit the generator, with `--check`**
+
+Move Task 1 Step 1's body into `scripts/gen_impl_transcription.py`, taking the module name as an argument, and give it the `--check` mode the other generators have:
+
+```python
+"""Regenerate an `_impl` transcription of a pinned `django/template` module.
+
+Two relations are checkable and this script owns the first: its output must
+equal the committed file. The second — the committed file minus the pinned
+source equals the declared hunks — belongs to `check_transcriptions.py`, and the
+two together are what make a 1207-line transcription reviewable at all: the
+surface becomes "these hunks differ", which is a statement someone can check,
+where "we rewrote `base.py`" is not.
+
+`--check` regenerates and diffs, like `gen_python_word_ranges.py`, so a
+legitimate move (a pin bump) is fixed by re-running the generator rather than by
+editing a file by hand — and a hand edit to `_impl/base.py` fails here.
+
+The marker goes immediately after the module docstring's opening `\"\"\"`: **text,
+not a line number.** Anchoring to a line would make our file a function of
+Django's line numbering, so the next pin bump would change it for a reason that
+is not ours.
+"""
+
+import argparse
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+CHECKOUT = ROOT / ".django"
+IMPL = ROOT / "python" / "django_rust_templates" / "_impl"
+
+MODULES = {"base": "django/template/base.py", "smartif": "django/template/smartif.py"}
+
+
+def render(name: str) -> str:
+    upstream = CHECKOUT / MODULES[name]
+    source = upstream.read_text()
+    marker = f"# TRANSCRIBED: {MODULES[name]} (Django 6.0.9)\n"
+    assert source.startswith('"""\n'), "docstring shape changed; fix the insertion point"
+    return '"""\n' + marker + "\n" + source[4:]
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--check", action="store_true")
+    ap.add_argument("module", nargs="*", default=sorted(MODULES))
+    args = ap.parse_args()
+
+    failures = 0
+    for name in args.module:
+        want = render(name)
+        path = IMPL / f"{name}.py"
+        if args.check:
+            got = path.read_text() if path.is_file() else ""
+            if got != want:
+                failures += 1
+                print(f"{name}.py is not what the generator produces "
+                      f"(run: scripts/gen_impl_transcription.py {name})")
+            else:
+                print(f"{name}.py matches the generator")
+        else:
+            path.write_text(want)
+            print(f"wrote {path.relative_to(ROOT)} ({len(want.splitlines())} lines)")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+- [ ] **Step 2: Write the diff guard**
 
 Create `scripts/check_transcriptions.py`:
 
@@ -1095,7 +1408,7 @@ if failures:
     sys.exit(f"{failures} transcription(s) failed")
 ```
 
-- [ ] **Step 2: Measure the red state before trusting it**
+- [ ] **Step 3: Measure the red state before trusting it**
 
 Deliberately edit a line in `_impl/smartif.py` that is not the marker (e.g. change a docstring word), run `scripts/check_transcriptions.py`, and confirm it prints an `undeclared` row and exits non-zero. Restore with an `Edit`.
 
@@ -1103,7 +1416,7 @@ Then delete a declared row (remove the marker line from `DECLARED["smartif.py"]`
 
 Both red states, measured — a guard whose failure has been observed is the standard this project holds gates to.
 
-- [ ] **Step 3: Wire it into `check.sh`'s fast path**
+- [ ] **Step 4: Wire it into `check.sh`'s fast path**
 
 In `scripts/check.sh`, after `step "suite counts carry their provenance"`:
 
@@ -1116,26 +1429,26 @@ step "transcriptions differ from upstream only where declared"
 "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_transcriptions.py"
 ```
 
-- [ ] **Step 4: Fill in the declared hunks with the real spans**
+- [ ] **Step 5: Fill in the declared hunks with the real spans**
 
 Run `scripts/check_transcriptions.py` and copy the *actual* differing rows for `base.py` into `DECLARED`, each with a comment naming the edit. Expect: the marker line, plus the `compile_nodelist` body and the `_resolve_lookup` body from Tasks 2 and 5. Every other line must be identical to upstream — that is the whole point.
 
-- [ ] **Step 5: Run the full check**
+- [ ] **Step 6: Run the full check**
 
 Run: `scripts/check.sh`
 Expected: `all checks passed`, including the new step, and `Ran 1547 tests in …s` / `OK (skipped=6)` from `scripts/run_django_suite.sh template_tests`.
 
-- [ ] **Step 6: Move the acceptance label off its M9 caveat**
+- [ ] **Step 7: Move the acceptance label off its M9 caveat**
 
 `scripts/check.sh:72-77` currently reads "Not '(rust engine)' until M9 interposes `base` — measured 2026-10-09, this suite calls `_native` zero times". Re-measure that claim now: with Tasks 2, 3 and 5 landed, the suite *does* call `_native`. Update the comment to say what is now true, and re-run `.review/m9-measurements/m9_measure_render_blast_radius.py` (it prints the pre-flight NOTE if `base` is not ours) to confirm the seams are live.
 
 Do not change the step's *label* to "(rust engine)" unless the measurement supports it for the whole suite — M10's `engine.py` is still Django's, so some paths may still be stock.
 
-- [ ] **Step 7: Update the spec's M9 row and close it**
+- [ ] **Step 8: Update the spec's M9 row and close it**
 
 In `docs/superpowers/specs/2026-10-07-django-template-engine-in-rust-design.md`, §10.3's M9 row and §10.4: record the closing commit, the meter at **23**, the three seams with their measured sizes (parse 1170, render 964, resolve), and the two things M9 proved but did not implement (§5.5's interior-subtree rendering, deferred; `render_value_in_context`'s equivalence result from Task 4).
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add scripts/check_transcriptions.py scripts/check.sh docs/superpowers/specs/2026-10-07-django-template-engine-in-rust-design.md
