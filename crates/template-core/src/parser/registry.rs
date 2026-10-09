@@ -286,17 +286,10 @@ mod tests {
         // **It moves once per task, not once per milestone**, which is the
         // smaller thing the same argument buys: the fan-out tasks land their
         // tags one group at a time, and a literal left at fifteen until the end
-        // would fail every commit in between. Nine of the eleven have landed —
-        // `filter`, `firstof`, `for`, `ifchanged`, `lorem`, `regroup`, `url`,
-        // `widthratio` and `with` — so those nine are gone from the list.
-        let stubs = [
-            "cycle",
-            "if",
-            "load",
-            "partial",
-            "partialdef",
-            "querystring",
-        ];
+        // would fail every commit in between. Ten of the eleven have landed —
+        // `cycle`, `filter`, `firstof`, `for`, `ifchanged`, `lorem`, `regroup`,
+        // `url`, `widthratio` and `with` — so those ten are gone from the list.
+        let stubs = ["if", "load", "partial", "partialdef", "querystring"];
         assert_eq!(
             builtin_tag_stubs(),
             stubs,
@@ -308,12 +301,13 @@ mod tests {
         }
         // The *implemented* names, which is the other half of the same pin:
         // every table entry is either here or in `stubs`, and the two halves
-        // move in opposite directions as M5 lands. The nine are M2's; the nine
+        // move in opposite directions as M5 lands. The nine are M2's; the ten
         // after them have landed across M5's tasks.
         let mut expected: Vec<&str> = [
             "autoescape",
             "comment",
             "csrf_token",
+            "cycle",
             "debug",
             "filter",
             "firstof",

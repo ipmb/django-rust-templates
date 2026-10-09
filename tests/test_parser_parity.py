@@ -337,7 +337,12 @@ class CorpusParityTests(unittest.TestCase):
         # land until M5's Task 6. So the row arrives with that task's corpus, and
         # this set shrinks to empty there — a second pin that has to move, for the
         # same reason the Rust one does.
-        deferred = {"resetcycle"}
+        # `resetcycle`'s exemption is *empty* as of M5's Task 6, and that is the
+        # pin moving rather than the test weakening: `{% cycle 'a' 'b' as c
+        # %}{% resetcycle %}` is the first template in which `resetcycle` has a
+        # success path at all, because every earlier one raised "No cycles in
+        # template." (Task 1 declared the exemption; this is where it empties.)
+        deferred = set()
         self.assertEqual(
             missing, deferred, f"corpus gaps that are not the declared exemption: "
             f"{sorted(missing - deferred)}; "

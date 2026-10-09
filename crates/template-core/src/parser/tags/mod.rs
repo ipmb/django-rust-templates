@@ -229,6 +229,7 @@ pub(crate) mod support {
     use crate::parser::host::NoHost;
     use crate::parser::Parser;
     use crate::parser::TEXT_NODE;
+    use crate::token::Token;
 
     /// Parse `source` with no host, and return its single top-level node.
     pub(crate) fn compile(source: &str) -> NodeDesc {
@@ -279,6 +280,46 @@ pub(crate) mod support {
             }
         }
         out
+    }
+
+    /// A host that hands out a **fresh slot index per call**.
+    ///
+    /// [`NoHost`] answers `0` to every `alloc_slot`, which is right for a host
+    /// with no table and wrong for any test that has to see the table's
+    /// *sequence*: under `NoHost`, "two `{% cycle %}` definitions reserve two
+    /// slots" and "two definitions collide on one slot" produce the same
+    /// descriptors. `Cell` rather than `&mut self` because [`Host::alloc_slot`]
+    /// takes `&self` — the real host keeps its table behind interior mutability
+    /// for the same reason.
+    #[derive(Default)]
+    pub(crate) struct CountingHost {
+        next: std::cell::Cell<usize>,
+    }
+
+    impl crate::parser::host::Host for CountingHost {
+        fn has_tag(&self, _command: &str) -> bool {
+            false
+        }
+
+        fn call_tag(&self, _command: &str, _token: &Token) -> Result<NodeDesc, Error> {
+            unreachable!("CountingHost::call_tag is never reached: has_tag returns false")
+        }
+
+        fn alloc_slot(&self) -> usize {
+            let slot = self.next.get();
+            self.next.set(slot + 1);
+            slot
+        }
+    }
+
+    /// Parse `source` against `host`, returning the whole top-level nodelist.
+    ///
+    /// [`compile`] asserts a single node because most tag tests are about one
+    /// tag; this one does not, because the tests that need a counting host are
+    /// exactly the tests whose point is a *relationship between two* nodes.
+    pub(crate) fn parse_with(source: &str, host: &dyn crate::parser::host::Host) -> NodeListDesc {
+        let mut parser = Parser::new(Lexer::new(source).tokenize(), host);
+        parser.parse(&[]).expect("expected a successful parse")
     }
 }
 

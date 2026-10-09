@@ -50,6 +50,13 @@ shape — ``_native.parse`` returning the table, and a node descriptor carrying
 its slot as a fifth element.
 """
 
+# Task 6 landed `cycle.rs` and registered `CycleNode` in `NODE_CLASSES`, so the
+# hand-built descriptors above are now checked against what the tag really
+# writes: `ParsedCycleTests` parses the sources end to end. The module docstring
+# above is kept in its original tense because it records *why* the hand-built
+# half exists, and those tests still carry the empty-slot and
+# token-overwriting cases a parsed template cannot produce.
+
 import importlib.util
 import sys
 import unittest
@@ -179,11 +186,6 @@ class WireShapeTests(unittest.TestCase):
 class CycleIdentityTests(unittest.TestCase):
     """The slot's rule: if the table holds it, hand back what is there."""
 
-    def setUp(self):
-        # Task 6's to register for real. See the module docstring.
-        materialiser.NODE_CLASSES["CycleNode"] = CycleNode
-        self.addCleanup(materialiser.NODE_CLASSES.pop, "CycleNode")
-
     def test_a_reused_named_cycle_materialises_one_object(self):
         nodelist, refs = materialise(
             [cycle_definition(0), cycle_reference(0)], slots=1
@@ -235,6 +237,76 @@ class CycleIdentityTests(unittest.TestCase):
         with self.assertRaises(LookupError) as caught:
             materialise([resetcycle(0)], slots=1)
         self.assertIn("slot", str(caught.exception))
+
+
+class ParsedCycleTests(unittest.TestCase):
+    """Task 6's end-to-end half: `cycle.rs` writes the descriptors above.
+
+    Every source here goes through `_native.parse` and the real materialiser, so
+    a slot that `cycle.rs` reserved but filled wrongly shows up as a wrong
+    *object*, not a wrong descriptor.
+    """
+
+    def ours(self, source):
+        return materialiser.materialise(_native.parse(source), parser=parser())
+
+    def theirs(self, source):
+        return Engine().from_string(source).nodelist
+
+    def test_a_named_cycle_and_its_mentions_are_one_object(self):
+        source = "{% cycle 'a' 'b' as c %}{% cycle c %}{% resetcycle c %}"
+        ours = self.ours(source)
+        theirs = self.theirs(source)
+
+        self.assertIs(ours[0], ours[1], "the mention returns the definition's node")
+        self.assertIs(ours[2].node, ours[0], "resetcycle targets that same object")
+
+        # And the identity Django produces is the identity we produce — the
+        # claim the hand-built tests above cannot make, because they choose the
+        # slots themselves.
+        self.assertIs(theirs[0], theirs[1])
+        self.assertIs(theirs[2].node, theirs[0])
+        self.assertEqual(
+            [n.variable_name for n in ours[:2]], [n.variable_name for n in theirs[:2]]
+        )
+
+    def test_a_mention_does_not_retarget_bare_resetcycle(self):
+        # `cycle.rs` returns early for the `len(args) == 2` form, so
+        # `last_cycle_node` still points at the last *definition*. Measured on
+        # the pinned tree: this template's `{% resetcycle %}` targets `f`.
+        source = "{% cycle a b as c %}{% cycle d e as f %}{% cycle c %}{% resetcycle %}"
+        ours = self.ours(source)
+        theirs = self.theirs(source)
+        self.assertIsNot(ours[0], ours[1])
+        self.assertIs(ours[2], ours[0])
+        self.assertIs(ours[3].node, ours[1], "targets f, the last definition")
+        self.assertEqual(ours[3].node.variable_name, theirs[3].node.variable_name)
+
+    def test_the_two_anonymous_forms_are_their_own_nodes(self):
+        source = "{% cycle 'a' 'b' %}{% cycle 'c' 'd' %}"
+        ours = self.ours(source)
+        self.assertIsNot(ours[0], ours[1])
+        self.assertIsNone(ours[0].variable_name)
+        self.assertFalse(ours[1].silent)
+        self.assertEqual(
+            [expression.token for expression in ours[1].cyclevars],
+            [expression.token for expression in self.theirs(source)[1].cyclevars],
+        )
+
+    def test_silent_is_read_off_the_parsed_node(self):
+        ours = self.ours("{% cycle 'a' 'b' as c silent %}")
+        self.assertTrue(ours[0].silent)
+        self.assertEqual(ours[0].variable_name, "c")
+
+    def test_a_cycle_inside_a_loop_is_a_child_node(self):
+        source = "{% for x in y %}{% cycle 'a' 'b' %}{% endfor %}"
+        ours = self.ours(source)
+        theirs = self.theirs(source)
+        self.assertIsInstance(ours[0].nodelist_loop[0], CycleNode)
+        self.assertEqual(
+            type(ours[0].nodelist_loop[0]).__name__,
+            type(theirs[0].nodelist_loop[0]).__name__,
+        )
 
 
 if __name__ == "__main__":

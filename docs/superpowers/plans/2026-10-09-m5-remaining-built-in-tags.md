@@ -1945,9 +1945,48 @@ path at all, because every other one raises `"No cycles in template."`. Task 1
 declared the pin; this is where it moves, and leaving it would keep a finished
 tag reported as an unfinished one.
 
+**Four corrections to the draft, every one of them found by running it.**
+
+*1. `resetcycle.rs` was already done — by Task 2, not by this one.* The draft's
+Files list has this task changing its three messages **and** its wire form from
+`AttrValue::Ref` to `AttrValue::NodeSlot`, and rewriting `parser/mod.rs`'s
+`last_cycle_node`/`named_cycle_nodes` from `Option<NodeRef>` to slot indices.
+All of that landed in `56df62a` ("the per-parse table and NodeSlot"), together
+with `Parser::alloc_slot`. What is left here is the corpus rows — which are new,
+and which is why the three messages were still broken-and-restored in this task
+to see each row fail once.
+
+*2. The `'Only silent'` error row in the draft is wrong, and wrong in the
+interesting direction.* The draft has
+`('{% cycle "a" "b" c as nope %}', "Only 'silent' flag is allowed after cycle's
+name, not 'nope'.")`. Measured on the pinned tree, that template **succeeds**:
+`args[-3]` is `c`, not `as`, so `args[-2] == "as"` selects the *non-silent* `as`
+form, and it compiles a `CycleNode` named `nope` with values `['"a"', '"b"', 'c']`.
+The branch needs `args[-3] == "as"` **and** `args[-1] != "silent"`, which is
+`{% cycle a b as c d %}` → `… not 'd'.`. Both cases are now corpus rows, one
+error and one success.
+
+*3. `len(args) > 4` is the guard that makes two shapes surprising, and both are
+pinned.* `{% cycle a as b %}` has four bits, so it never enters the `as` branches
+at all: it is an anonymous three-value cycle whose middle value is the literal
+`as`. And `{% cycle a b as silent %}` has `args[-3] == "b"`, so it is the
+*non-silent* `as` form named `silent` — not the silent flag. Both measured; both
+are success rows, because the plan's prose ("`as` consumes two bits") is true but
+does not by itself tell you which of these is which.
+
+*4. Restoring a broken literal is not enough — the extension must be rebuilt
+before the next run.* The break-each-message probe restores the source after
+each case; the run after the last case therefore executed a stale
+`maturin develop` build and `./scripts/check.sh` reported
+`'No cycles in TEMPLATE.' != 'No cycles in template.'` on `{% resetcycle %}`,
+which was neither a real red nor one of the declared Task-1 reds. The probe now
+belongs with the rebuild **after** the restore, and a red whose message matches
+one of the mutations just applied is a stale build until proven otherwise.
+
 ```bash
 git add crates/template-core/src/parser/tags/cycle.rs \
-        crates/template-core/src/parser/tags/resetcycle.rs \
+        crates/template-core/src/parser/tags/mod.rs \
+        crates/template-core/src/parser/registry.rs \
         tests/parser_corpus.py tests/parser_error_corpus.py tests/test_ref_table.py \
         tests/test_parser_parity.py
 git commit -m "tags: cycle's five shapes, and the one object they must all share"

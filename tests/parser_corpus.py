@@ -175,6 +175,25 @@ TEMPLATES = [
     # Where the tag is meant to be used, and the only place its state is
     # interesting at render time.
     "{% for x in y %}{% ifchanged %}{{ x }}{% endifchanged %}{% endfor %}",
+    # --- cycle: the five shapes, and the identity they share ----------------
+    "{% cycle 'a' 'b' %}",
+    "{% cycle 'a' 'b' 'b' %}",
+    "{% cycle 'a' 'b' as c %}",
+    "{% cycle 'a' 'b' as c silent %}",
+    # A name reference: the same node again, which is why `describe` cannot be
+    # a tree comparison here — both positions must be the *one* object.
+    "{% cycle 'a' 'b' as c %}{% cycle c %}",
+    # `cycle` is what gives `resetcycle` a success path, so these two rows are
+    # also what empties `test_parser_parity`'s `deferred` set.
+    "{% cycle 'a' 'b' as c %}{% resetcycle %}",
+    "{% cycle 'a' 'b' as c %}{% resetcycle c %}",
+    "{% for x in y %}{% cycle 'a' 'b' %}{% endfor %}",
+    # Four bits is the *anonymous* form even with an `as` in it: `{% cycle a as
+    # b %}` compiles three values and `as` is the middle one. Measured.
+    "{% cycle a as b %}",
+    # `args[-3]` is `b`, so this is the non-silent `as` form named `silent` —
+    # not the silent flag. Measured.
+    "{% cycle a b as silent %}",
     # --- variables, and the `contains_nontext` they set ---------------------
     # M3's half of §10.4's ordering gate. `{{ … }}` is what sets
     # `contains_nontext` — measured: `text{% extends %}` is legal and

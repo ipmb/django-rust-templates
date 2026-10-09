@@ -220,6 +220,29 @@ ERRORS = [
         "{% for a|b in y %}{% endfor %}",
         "'for' tag received an invalid argument: for a|b in y",
     ),
+    # --- cycle --------------------------------------------------------------
+    ("{% cycle %}", "'cycle' tag requires at least two arguments"),
+    # No `as` form has run, so the registry itself is absent — the first of the
+    # two unknown-name messages, and the one with **no** trailing period.
+    ("{% cycle foo %}", "No named cycles in template. 'foo' is not defined"),
+    ('{% cycle "a" "b" as c %}{% cycle c2 %}', "Named cycle 'c2' does not exist"),
+    # `args[-3]` must be the `as` for this branch to be reachable: the plan's
+    # draft used `{% cycle "a" "b" c as nope %}`, which is the *other* `as` form
+    # and succeeds with the name `nope`. Measured on the pinned tree.
+    (
+        "{% cycle a b as c d %}",
+        "Only 'silent' flag is allowed after cycle's name, not 'd'.",
+    ),
+    # --- resetcycle ---------------------------------------------------------
+    # All three are Django's, and were landed with Task 2's wire-form change;
+    # the rows arrive here because these are the first templates in which
+    # `{% cycle %}` exists to make the last two reachable at all.
+    ("{% resetcycle a b %}", "'resetcycle' tag accepts at most one argument."),
+    (
+        "{% resetcycle nope %}{% cycle 'x' 'y' %}",
+        "Named cycle 'nope' does not exist.",
+    ),
+    ("{% resetcycle %}", "No cycles in template."),
     # --- ifchanged ----------------------------------------------------------
     # Not a check in the tag: `parse(("else", "endifchanged"))` stops at the
     # first `else`, and the second one then fails to terminate the body's
