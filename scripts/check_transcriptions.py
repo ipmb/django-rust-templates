@@ -135,16 +135,16 @@ COMPARED_PATH = {
         (677, 681, "Parser.compile_filter"),
         (683, 687, "Parser.find_filter"),
         (744, 788, "FilterExpression.__init__"),
-        (871, 888, "FilterExpression.args_check"),
-        (920, 971, "Variable.__init__"),
-        (973, 989, "Variable.resolve"),
-        (1088, 1100, "Node.get_nodes_by_type"),
-        (1108, 1109, "NodeList.render"),
-        (1111, 1116, "NodeList.get_nodes_by_type"),
-        (1122, 1123, "TextNode.__init__"),
-        (1131, 1138, "TextNode.render_annotated"),
-        (1160, 1161, "VariableNode.__init__"),
-        (1181, 1225, "token_kwargs"),
+        (860, 877, "FilterExpression.args_check"),
+        (909, 960, "Variable.__init__"),
+        (962, 978, "Variable.resolve"),
+        (1077, 1089, "Node.get_nodes_by_type"),
+        (1097, 1098, "NodeList.render"),
+        (1100, 1105, "NodeList.get_nodes_by_type"),
+        (1111, 1112, "TextNode.__init__"),
+        (1120, 1127, "TextNode.render_annotated"),
+        (1149, 1150, "VariableNode.__init__"),
+        (1170, 1214, "token_kwargs"),
     ],
     # 8 functions, spans 56-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
@@ -468,25 +468,30 @@ DECLARED = {
             # `self.filters` gains one branch, and it is a **pure insertion** —
             # upstream has no counterpart on these lines, hence `None` on the
             # upstream side and a snippet that names statements rather than
-            # pairing them. Seventeen executable lines across the two regions
-            # below: the two imports that reach the shell in the first, and in
-            # the second the identity test against the built-in registry, the
-            # two flag reads, the call with its five arguments, and the
-            # `continue`.
+            # pairing them. Seventeen executable lines in the one region below:
+            # the import that reaches the shell, the identity test against the
+            # built-in registry, the two flag reads, the call with its five
+            # arguments, and the `continue`. Seventeen rather than the eleven
+            # this note first claimed, because `executable_lines` counts a
+            # parenthesised `import`'s continuation lines: the six-line import
+            # is one statement and six lines, and only the second granularity is
+            # what the guard compares.
             #
-            # **Two regions rather than one, and the `arg_vals` loop between
-            # them is why.** The imports used to sit inside the loop, directly
-            # above the identity test, so `difflib` paired the whole block
-            # against upstream's nothing as a single opcode. Hoisting them above
-            # the `for` — a reviewer's NIT, six statements once per `resolve`
-            # instead of once per filter, which no test can observe — left
-            # upstream's verbatim `arg_vals` loop (ours 820-826, equal in place)
-            # between the imports and the branch, and equal lines are what makes
-            # the diff see two differing regions rather than one. The second
-            # region's span is therefore the branch, not the seam, and a reader
-            # comparing the two spans to upstream's emptiness would otherwise
-            # read the pairing as meaningful — the same note `_resolve_lookup`'s
-            # two regions carry below.
+            # **One region, and that is a decision rather than a coincidence.**
+            # The imports sat inside the loop above the identity test; a
+            # reviewer's NIT moved them above the `for` — once per `resolve`
+            # instead of once per filter, which no test can observe — and that
+            # split this region in two, because upstream's verbatim `arg_vals`
+            # loop (ours 809-814, equal in place) then sits between the imports
+            # and the branch, and equal lines are what makes `difflib` see two
+            # differing regions rather than one. Reverted on the reviewer's own
+            # measurement of the cost: a declared region is the diff a reader
+            # diffs against upstream on every Django bump, so **two regions where
+            # one would do is a permanent tax on every future bump**, paid for a
+            # `sys.modules` hit. In this tree a NIT that changes a transcription's
+            # diff shape is not a NIT — the region count is part of the review
+            # surface. The code comment above the import says the same in three
+            # lines, where someone reading the file will meet it.
             #
             # **That `continue` is the design, not a shortcut.** The arm
             # *replaces* the loop body below rather than wrapping it, because
@@ -526,18 +531,14 @@ DECLARED = {
             # `test_filter_parity.py::test_the_comparison_target_is_not_rust_owned`
             # is what watches *that*.
             (
-                (808, 819),
+                (815, 847),
                 None,
                 "from django_rust_templates import _native\n"
                 "from django_rust_templates.host import (\n"
                 "django_own_filters,\n"
                 "effective_autoescape,\n"
                 "effective_use_tz,\n"
-                ")",
-            ),
-            (
-                (827, 858),
-                None,
+                ")\n"
                 "if (builtin_name := django_own_filters().get(func)) is not None:\n"
                 "use_tz = effective_use_tz(context, func)\n"
                 "autoescape = effective_autoescape(context, func)\n"
@@ -594,12 +595,12 @@ DECLARED = {
             # not — a non-raising signature carries the bit on an ordinary return
             # value) is what makes the alternative live rather than closed.
             (
-                (1006, 1044),
+                (995, 1033),
                 (957, 1021),
                 "from django_rust_templates import _native",
             ),
             (
-                (1046, 1046),
+                (1035, 1035),
                 (1023, 1028),
                 'return _native.resolve(".".join(self.lookups), context)',
             ),

@@ -305,10 +305,10 @@ class InterpositionTests(unittest.TestCase):
         equal = sum(i2 - i1 for tag, i1, i2, _j1, _j2 in opcodes if tag == "equal")
         differing = [op for op in opcodes if op[0] != "equal"]
 
-        # The structure, which is what the guard reads: seven edits — the marker
+        # The structure, which is what the guard reads: six edits — the marker
         # and its blank line as one pure insertion of ours, then two pairs for
-        # `compile_nodelist`'s delegation, then M11 Task 2's filter seam as two
-        # pure insertions, then two more for `Variable._resolve_lookup`'s.
+        # `compile_nodelist`'s delegation, then M11 Task 2's filter seam as a
+        # second pure insertion, then two more for `Variable._resolve_lookup`'s.
         # Asserted here too because a re-alignment that merged two edits into
         # one would move `equal` in a way this row could not explain on its own.
         #
@@ -320,27 +320,29 @@ class InterpositionTests(unittest.TestCase):
         # is satisfied either way; this row is what would notice if a future
         # edit merged them and the declaration stopped describing the diff.
         #
-        # **Seven rather than five since M11 Task 2, and what it added is a
-        # pair of `delete`s.** That pair is the filter seam: seventeen lines of
-        # ours — a comment block, two imports, the identity test, the call and
-        # its `continue`, with upstream's `arg_vals` loop sitting untouched
-        # between them — against none of upstream's, because the arm *replaces*
-        # `resolve`'s loop body with a call rather than wrapping it. `difflib`
-        # names a run that only one side has `delete` when it is ours and
-        # `insert` when it is theirs, so the shape of this list is also the
-        # check that the seam stayed an insertion: an arm that had been written
-        # as a *rewrite* of the loop would show up as a `replace` here and as a
-        # declared region with two spans.
+        # **Six rather than five since M11 Task 2, and the sixth is a `delete`.**
+        # That is the filter seam: ours 815-847 — a comment block, two imports,
+        # the identity test, the call and its `continue` — against none of
+        # upstream's, because the arm *replaces* `resolve`'s loop body with a
+        # call rather than wrapping it. `difflib` names a run that only one side
+        # has `delete` when it is ours and `insert` when it is theirs, so the
+        # shape of this list is also the check that the seam stayed an insertion:
+        # an arm that had been written as a *rewrite* of the loop would show up
+        # as a `replace` here and as a declared region with two spans.
         #
-        # Two `delete`s rather than one because the seam's six import statements
-        # are hoisted above the `for` — a reviewer's NIT, and the reason the
-        # declaration in `check_transcriptions.py` had to become two regions in
-        # this same commit. Upstream's verbatim `arg_vals` loop then sits
-        # between the imports and the branch, and `difflib` can only see a
-        # differing region on each side of equal lines.
+        # **The run is 33 lines and 17 of them are executable, and the two
+        # numbers are both in this file and `check_transcriptions.py` because
+        # this seam has already been miscounted three ways.** `difflib` counts
+        # lines in the run; `executable_lines` counts the lines of it that hold a
+        # statement, and a parenthesised `import` contributes six of the
+        # seventeen. Neither is the other's denominator. Hoisting those imports
+        # above the `for` — tried and reverted — would have split this one
+        # `delete` into two, with upstream's verbatim `arg_vals` loop equal in
+        # place between them, which is why the shape of this list is worth
+        # asserting rather than deriving.
         self.assertEqual(
             [op[0] for op in differing],
-            ["delete", "replace", "replace", "delete", "delete", "replace", "replace"],
+            ["delete", "replace", "replace", "delete", "replace", "replace"],
         )
 
         self.assertEqual(

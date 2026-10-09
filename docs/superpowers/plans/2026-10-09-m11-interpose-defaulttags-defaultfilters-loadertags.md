@@ -682,12 +682,26 @@ falsification is that passing them as call arguments would let the FFI's argumen
 order decide which name `date` blames. The row that tests it
 (`test_a_dict_context_is_read_only_where_upstream_reads_it`) was reworded to
 match. (3) The reviewer's NIT — hoist the six imports out of the per-filter loop
-— is in, and it cost more than a NIT usually does: it left upstream's verbatim
-`arg_vals` loop between the imports and the arm, which split
-`DECLARED["base.py"]`'s filter seam into two regions, shifted every
-`COMPARED_PATH["base.py"]` span below it by 11 lines (re-measured with
-`m9_measure_parse_path.py`, not by adding 11), moved three hardcoded spans in
-`test_compared_path_instrument.py`, and turned
+— was implemented, measured, and then **reverted at the review round, by the
+reviewer who proposed it**. What the exchange is worth keeping is the
+measurement, because the cost was invisible from the request and obvious in the
+diff: hoisting left upstream's verbatim `arg_vals` loop between the imports and
+the arm, which split `DECLARED["base.py"]`'s filter seam into two regions,
+shifted every `COMPARED_PATH["base.py"]` span below it by 11 lines
+(re-measured with `m9_measure_parse_path.py`, not by adding 11), moved three
+hardcoded spans in `test_compared_path_instrument.py`, and turned
 `test_the_transcription_is_the_pinned_source`'s opcode list from six edits into
-seven. Recorded because the next person to hoist a line in a declared region
-should expect all five of those.**
+seven. The reviewer's verdict, and it is the rule this milestone hands the next
+one: **in this tree a NIT that changes a transcription's diff shape is not a
+NIT**, because the declared region is the diff a reader re-diffs against
+upstream on every Django bump, and two regions where one would do is a permanent
+tax on every future bump — paid, here, for a `sys.modules` hit that no test can
+observe. The revert is three things and no more: the imports back inside the
+loop above the identity test, the declaration back to one region `(815, 847)`
+with the `_resolve_lookup` spans back to `(995, 1033)`/`(1035, 1035)`, and the
+two test files back to their pre-hoist numbers — `test_compared_path_instrument.py`
+is byte-identical to the commit before Task 3 again. (2) survives the revert
+untouched, and the comment that replaced "upstream's order" was rewritten to the
+same length so that the revert shifts nothing: the seam's 33-line `delete` run
+and its 17 executable lines are both recorded, because that run had by then been
+miscounted three ways.**
