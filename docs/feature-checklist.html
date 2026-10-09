@@ -609,6 +609,30 @@
       the priority throughout, and the measurement is published here rather than only the
       number that would flatter it.
     </p>
+    <p class="sub" style="margin-top:16px">
+      <b>It installs, and it refuses a Django it was not built for.</b> <code>pip install</code>
+      from a clone or a git URL builds the extension and substitutes itself for
+      <code>django.template</code>; the wheel declares <code>Django&gt;=6.0,&lt;6.1</code>, and
+      <code>install()</code> refuses anything outside 6.0.x. Two measured outcomes are what the
+      refusal is for, and neither is visible from inside this repository, where every check runs
+      against the pinned checkout: against Django 6.1.2 the engine used to install cleanly,
+      report an empty meter and render — <i>every gate above would have said green</i> — and
+      against 5.2.7 it died with an <code>ImportError</code> that named Django. Both halves are
+      checked in a real virtualenv by <code>scripts/check_packaging.sh</code>, which also installs
+      the wheel with no Django present to prove the error is ours, and builds the source tree the
+      way <code>pip install .</code> does. <b>Switching it on is two lines before
+      <code>django.setup()</code> runs, in whatever process starts Django</b> — usually the top of
+      <code>manage.py</code>, <code>wsgi.py</code> and <code>asgi.py</code>, or a
+      <code>sitecustomize.py</code> on <code>PYTHONPATH</code> where there is no entry point to
+      edit — and never in <code>settings.py</code>, because <code>django.setup()</code> imports
+      <code>django.urls</code>, and so all of <code>django.template</code>, before it first reads
+      the settings module; a settings module therefore runs strictly too late, and
+      <code>AppConfig.ready()</code> later still. Both routes are asserted, not just documented:
+      the packaging check runs a real <code>manage.py</code> and a real <code>django-admin</code>,
+      and confirms the settings-module route is refused. No wheel is published yet,
+      so a source install needs a Rust toolchain; the port is also <i>slower</i> than the thing it
+      replaces, which is the work in front of it.
+    </p>
   </section>
 
   <footer>

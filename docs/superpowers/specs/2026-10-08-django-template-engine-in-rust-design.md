@@ -98,6 +98,84 @@ Any *new* skip appearing later is a regression, and is treated as a failure.
 | Python | 3.14 (matches the machine's `mise`-managed 3.14.4) |
 | Rust | stable |
 | Binding | PyO3 + maturin |
+| Distribution | `pip install` from a path or a git URL — no wheel is published |
+| Django range | `Django>=6.0,<6.1`, declared in `pyproject.toml` and enforced by `install()` |
+| Activation | before `django.setup()` runs, in whatever process starts Django — an entry point, or a `sitecustomize.py` on `PYTHONPATH` where no entry point exists to edit |
+| pip config | `PIP_CONFIG_FILE=/dev/null` from `env.sh`; the packaging gate also runs every `pip` `--isolated`, for the environment-variable channel `env.sh` cannot close |
+
+**The Django range is a claim about evidence, and it is enforced twice because a
+resolver can be bypassed.** The engine reproduces one Django's behaviour, and
+every gate in this document runs against that checkout, so none of them can
+speak about any other version. Measured on wheels in a clean venv *before* the
+guard existed: against Django 6.1.2 the engine installed, reported an empty
+`unshimmed()` and rendered a page — every gate green, on a transcription taken
+from a different version; against 5.2.7 it died with an `ImportError` that named
+Django for a problem in this package. The declared range is therefore the first
+line of defence — `pip` refuses to pair the wheel with a 6.1 Django, which
+`scripts/check_packaging.sh` asserts — and `install()` refuses anything outside
+6.0.x for the installs that defeated the resolver, which is the same script's
+other case. `install(allow_django_mismatch=True)` is the door, for deliberately
+testing a transcription against a Django it was not taken from. Python's floor
+is `>=3.12`, Django 6.0's own; only 3.14.4 has actually been run, and the README
+says so rather than letting the metadata imply otherwise.
+
+**Where the activation is written is load-bearing, and the two places a reader
+reaches for first are both too late by construction — not by a line or two.** The
+substitution is a meta-path finder keyed on module names, so it can serve only a
+module that has not yet been imported: a module that already took a binding from
+Django keeps the one it took, and no later call can rebind a
+`from django.template import X` that has already run. That makes the *site*
+matter, and the ordering is not close. `django.setup()` imports `django.urls` on
+its third line and `django.urls` imports every module under `django.template`;
+the settings module is first read on the line after that, and `AppConfig.ready()`
+runs later still, inside `apps.populate()`. A settings module therefore executes
+strictly after the imports it would need to precede. This was written down the
+other way round first — the README said to activate from `settings.py`, and the
+package docstring offered `AppConfig.ready()` as an alternative — and neither
+was checkable by anything in the tree, because the packaging case drove
+`settings.configure()` in a bare script and so had no settings module to be too
+late in. Both now say entry point, and both halves are asserted:
+`scripts/check_packaging.sh` case 1 runs a real `manage.py` against a real
+settings module, and case 1b asserts that the settings-module route the README
+warns against is still refused.
+
+**The rule is about the moment, not about a file, and the README states it that
+way.** `manage.py`, `wsgi.py` and `asgi.py` are where it usually lands in a
+project `django-admin startproject` wrote; they are not the rule, and a reader
+whose case is not on the list should not conclude the rule does not apply to
+them. It does not reach `django-admin` driven by `DJANGO_SETTINGS_MODULE` with no
+project file to edit, a `pytest-django` plugin that calls `django.setup()` itself,
+a Celery worker whose `proj/celery.py` triggers setup, or a library that does
+setup on import. The general answer is a `sitecustomize.py` on `PYTHONPATH`,
+which `site` imports during interpreter start-up, before any entry point exists
+— the route this repository's own harness has always taken, and the reason the
+harness never had to edit a `manage.py`. Case 5 measures it against the installed
+wheel, with a control that drops the one directory and must come out as stock
+Django.
+
+**The packaging gate isolates pip from the environment, and the reason is
+narrow.** This project does pin pip's *configuration*: `scripts/env.sh` exports
+`PIP_CONFIG_FILE=/dev/null`, with a comment naming the setting in this machine's
+global `pip.conf` that makes every pip invocation abort with an ISO 8601 parse
+error, and every script here sources it — `check_packaging.sh` included. That
+closes the config-file channel and leaves the environment-variable channel open,
+which is what `--isolated`, now on every pip in `check_packaging.sh`, adds: it
+ignores `PIP_*` variables as well as config files. Measured, with
+`PIP_CONFIG_FILE` set exactly as `env.sh` sets it and `PIP_TARGET` exported, the
+venv received no Django and the target directory received it instead — a failure
+every case in the script would have reported as a defect in this package. The
+subject of the gate is what a *stranger's* `pip install` produces, and a stranger
+has whatever their shell exports.
+
+**The first version of that paragraph was wrong in two ways, and both were
+load-bearing.** It said the cases passed only because `--no-index` never consults
+an index, and that this project pins pip nowhere. Neither held: the global config
+is rejected while pip *parses* it, before any index decision is reached, so
+`--no-index` could not have sidestepped it; and `env.sh` had pinned it all along.
+Both were an absence asserted without the one search that would have falsified it
+— `grep PIP_CONFIG_FILE scripts/` — which is the cheapest check available in this
+document and the one that was skipped. The flag is kept, on the measurement above
+rather than on the story.
 
 Django 6.0 requires Python 3.12+, so 3.14 is in support. `tests/template_tests/`
 runs under Django's own `runtests.py` (unittest-based, not pytest).
