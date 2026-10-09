@@ -15,6 +15,25 @@
 //! directions — while `[\p{Alphabetic}\p{Nd}\p{Nl}\p{No}_]` is not (1,495 too
 //! many), which is why it is `\p{L}\p{N}` and not the `Alphabetic` spelling.
 //!
+//! **Which of those numbers are executable, and which are inherited.** The 771
+//! ranges / 142,940 code points are pinned by a test and by a committed data
+//! file, and the two divergences are pinned by name. The aggregates for *Rust's*
+//! `\w` and for the rejected `Alphabetic` spelling are **inherited from the
+//! task's measurement, not re-derived in this tree**, and deliberately: the
+//! engine never compiles a bare `\w`, so a `regex-syntax` UCD move must fire the
+//! candidate guard once, not twice, and pinning a second aggregate would be a
+//! second alarm for the same event. What *is* pinned about the rejected spelling
+//! is the thing a future edit would break — see
+//! `the_alphabetic_spelling_is_rejected_so_it_cannot_be_simplified_into`, which
+//! exists against a **code change** rather than against drift.
+//!
+//! **What these constants are *not*.** Nothing here compiles them into a working
+//! `filter_re`. The Rust tests pin the *class*; `tests/test_pyregex_parity.py`
+//! pins the table and the two splice *shapes*. "These constants are verified"
+//! and "a pattern built from these constants is verified" are different claims,
+//! and only the first is true here — `filter_re` is Task 3's, and it is where a
+//! spliced pattern first has to *work*.
+//!
 //! The divergence is user-visible in both directions, measured on the pinned
 //! checkout: `{{ ² }}` (U+00B2, `No`) renders `''` on Django but is not a Rust
 //! `\w` character, and `{{ á }}` built from `a` + U+0301 (`Mn`) parses on Rust
@@ -144,6 +163,30 @@ mod tests {
         )
     }
 
+    /// The number of code points two range lists cover.
+    fn total_codepoints(ranges: &[WordRange]) -> u64 {
+        ranges.iter().map(|(lo, hi)| u64::from(hi - lo + 1)).sum()
+    }
+
+    /// Whether every code point of `inner` is also in `outer`. Both canonical:
+    /// ascending, disjoint, non-adjacent.
+    ///
+    /// A cursor walk rather than two sets — 1.1M `u32`s per side is a lot of
+    /// allocation to answer a question the ranges already answer.
+    fn ranges_subset(inner: &[WordRange], outer: &[WordRange]) -> bool {
+        let mut cursor = 0usize;
+        for &(lo, hi) in inner {
+            while cursor < outer.len() && outer[cursor].1 < lo {
+                cursor += 1;
+            }
+            match outer.get(cursor) {
+                Some(&(olo, ohi)) if olo <= lo && hi <= ohi => {}
+                _ => return false,
+            }
+        }
+        true
+    }
+
     #[test]
     fn the_embedded_table_is_pythons_measured_word_set() {
         let ranges = python_word_ranges();
@@ -175,6 +218,105 @@ mod tests {
                 first_diff(&got, &expected),
             );
         }
+    }
+
+    #[test]
+    fn the_two_spellings_are_the_same_set_in_different_positions() {
+        // **This replaces a test that probed five inputs.** The old test asserted
+        // that splicing the standalone form inside a class matches the same code
+        // points, to show that no behavioural probe can see the mistake. That is
+        // true but it is not an empirical fact — nested classes are a documented
+        // `regex-syntax` guarantee (`[[a][b]]` is union, and `&&`/`--` are part of
+        // the same documented syntax) — so the probe could never have failed, for
+        // any number of probes. A test that cannot fail is not a guard. It is
+        // replaced by structure, which is the thing that actually differs:
+        let standalone = PYTHON_WORD_STANDALONE;
+        let in_class = PYTHON_WORD_IN_CLASS;
+
+        assert!(
+            standalone.starts_with('[') && standalone.ends_with(']'),
+            "the standalone form must be a complete atom, brackets included: {standalone:?}"
+        );
+        assert!(
+            !in_class.contains('[') && !in_class.contains(']'),
+            "the in-class form must be bare contents, safe to splice inside a \
+             caller's `[...]`: {in_class:?}"
+        );
+        // The set is the same; only the position differs. Asserting this and not
+        // just the bracket shape catches the edit that changes one constant and
+        // forgets the other — which the shape assertions alone would not.
+        assert_eq!(
+            format!("[{in_class}]"),
+            standalone,
+            "the two constants must describe the same set; only their position may differ"
+        );
+    }
+
+    #[test]
+    fn the_in_class_form_used_standalone_is_loudly_wrong() {
+        // The other misuse, made executable. `\p{L}\p{N}_` read as a whole atom is
+        // *concatenation*, not a union: `+` binds to `_` alone, so it means
+        // exactly one letter, exactly one number, then one or more underscores.
+        // That rejects `upper` and every real variable name, which is the safe
+        // direction to get wrong — but it was only ever asserted in a doc comment
+        // and in a reviewer's message, which is why it is a test now.
+        let misused = Regex::new(&format!(r"\A{PYTHON_WORD_IN_CLASS}+\z")).unwrap();
+        assert!(
+            misused.is_match("a1_"),
+            "one letter, one number, then underscores"
+        );
+        assert!(misused.is_match("a1___"));
+        assert!(
+            !misused.is_match("upper"),
+            "the loud failure: every variable name"
+        );
+        assert!(!misused.is_match("a_1"));
+        assert!(!misused.is_match("ab1_"));
+
+        // The correct spelling of the same position, for contrast.
+        let correct = Regex::new(&format!(r"\A[{PYTHON_WORD_IN_CLASS}]+\z")).unwrap();
+        for probe in ["upper", "a_1", "ab1_", "a1_"] {
+            assert!(correct.is_match(probe), "{probe:?}");
+        }
+    }
+
+    #[test]
+    fn the_alphabetic_spelling_is_rejected_so_it_cannot_be_simplified_into() {
+        // A guard against a **code change**, not against UCD drift. Under drift
+        // this fails no more usefully than the aggregate counts would; its value
+        // is that it is the test that fires when someone later "simplifies"
+        // `[\p{L}\p{N}_]` to `[\p{Alphabetic}\p{Nd}\p{Nl}\p{No}_]` because it
+        // reads more semantically. That edit is plausible, silent otherwise, and
+        // over-accepts by well over a thousand code points.
+        let expected = python_word_ranges();
+        let wrong = compiled_ranges(r"\A[\p{Alphabetic}\p{Nd}\p{Nl}\p{No}_]\z");
+        assert!(
+            wrong != expected,
+            "the `Alphabetic` spelling must not be equal to Python's \\w — if it \
+             is, this guard has stopped guarding and the constant's doc needs \
+             re-measuring"
+        );
+        // *How* it is wrong matters: it is a strict superset, so the failure mode
+        // is over-acceptance (a template Django rejects compiles here) rather
+        // than a different set.
+        assert!(
+            ranges_subset(&expected, &wrong),
+            "the `Alphabetic` spelling should accept everything Python's \\w does"
+        );
+        // And the helper is not vacuously true — the relation is strict, so it
+        // must not hold in the other direction. Without this, a `ranges_subset`
+        // that returned `true` unconditionally would make the assertion above
+        // decorative.
+        assert!(
+            !ranges_subset(&wrong, &expected),
+            "`ranges_subset` returned true both ways, so it cannot tell a \
+             superset from an equal set"
+        );
+        let extra = total_codepoints(&wrong) - total_codepoints(&expected);
+        assert!(
+            extra > 0,
+            "a strict superset, so it has code points of its own"
+        );
     }
 
     #[test]
@@ -234,24 +376,5 @@ mod tests {
         let (label, atom) = lines[1].split_once(' ').expect("labelled fixture line");
         assert_eq!(label, "var_chars");
         assert_eq!(atom, format!(r"[{PYTHON_WORD_IN_CLASS}\.\+-]+"));
-    }
-
-    #[test]
-    fn the_other_splice_would_be_silent() {
-        // Why the assertion above is on the *source*. Splicing the standalone
-        // form inside a class is accepted by `regex` and matches the same code
-        // points, so only the string comparison can see it.
-        let wrong_source = format!(r"\A[{PYTHON_WORD_STANDALONE}\.\+-]+\z");
-        let right_source = format!(r"\A[{PYTHON_WORD_IN_CLASS}\.\+-]+\z");
-        assert_ne!(wrong_source, right_source);
-        let wrong = Regex::new(&wrong_source).expect("regex accepts nested classes");
-        let right = Regex::new(&right_source).unwrap();
-        for probe in ["upper", "a.b", "x-y", "\u{00b2}", "a\u{0301}"] {
-            assert_eq!(
-                wrong.is_match(probe),
-                right.is_match(probe),
-                "the wrong splice differs on {probe:?}",
-            );
-        }
     }
 }

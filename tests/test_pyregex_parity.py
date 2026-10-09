@@ -66,14 +66,24 @@ class WordTableTests(unittest.TestCase):
         )
 
     def test_the_measured_counts(self):
+        # These two counts *are* the measurement, and they are the whole pin:
+        # they fire exactly when the table moves, whatever CPython calls its
+        # Unicode database. Deliberately *not* an assertion on
+        # `unicodedata.unidata_version`, which is a proxy for the question and is
+        # wrong in both directions — a CPython upgrade shipping a new UCD that
+        # does not touch the word table would raise a false alarm, while a
+        # backport that fixed the table without bumping the version string would
+        # give false silence. The version travels in the failure message as
+        # diagnostics instead, where it costs nothing.
         ranges = committed_ranges()
-        self.assertEqual(len(ranges), 771, "range count")
+        total = sum(hi - lo + 1 for lo, hi in ranges)
         self.assertEqual(
-            sum(hi - lo + 1 for lo, hi in ranges), 142_940, "code point count"
+            (len(ranges), total),
+            (771, 142_940),
+            "the committed table is stale for "
+            f"unicodedata {unicodedata.unidata_version}; re-run "
+            "scripts/gen_python_word_ranges.py and record the new counts",
         )
-        # Pin what was compared, not just that something was. This fails when
-        # CPython moves UCD, which is a deliberate re-measure, not a bug.
-        self.assertEqual(unicodedata.unidata_version, "16.0.0")
 
     def test_the_table_is_canonical(self):
         ranges = committed_ranges()
