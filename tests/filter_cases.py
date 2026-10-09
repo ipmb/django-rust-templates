@@ -156,6 +156,7 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from django.utils.functional import lazy
 from django.utils.safestring import mark_safe
@@ -315,6 +316,59 @@ def case_value(case):
     if "value_factory" in case:
         return case["value_factory"]()
     return case["value"]
+
+
+def _typeerror_from_membership(value) -> str:
+    """CPython's own text for ``"-" not in value`` — **derived from the value**.
+
+    The [`ERROR_CASES`] row `language_name/non-string-value` pins Django's
+    refusal of a non-`str` language code, and *that* text is **CPython's**, not
+    Django's: Django supplies only the call site
+    (`django/utils/translation/__init__.py:279`, `if "-" not in lang_code:`),
+    whose expression this function reproduces on the row's own value.
+    CPython re-worded this refusal at **3.14** — 3.9 through 3.13 say
+    `argument of type 'int' is not iterable`, where 3.14.4 (this interpreter)
+    says `argument of type 'int' is not a container or iterable` — so a literal
+    in the row would redden on a Python upgrade for a change that is not a defect
+    in anything this project owns.
+
+    **The value is a parameter, not a literal, because the message interpolates
+    the input's type name.** `7` gives `'int'`, `7.5` gives `'float'`, and so on,
+    so a literal here would hold the row's input in two places with nothing to
+    keep them together: change the row to `7.5` and it would redden on a type
+    name for a reason unrelated to transport. The pair
+    `_LANGUAGE_NAME_NON_STRING_VALUE` / the derived text is written once and
+    used by both the row's `value` and its `message`, which is the same rule the
+    differential harness applies to `value_factory`.
+
+    (Illustrate with *values*, never class objects: `"-" not in float` and
+    `"-" not in object` interpolate `'type'`, not `'float'`/`'object'`, and
+    `"-" not in NoneType` is a `NameError` — `NoneType` is `type(None).__name__`,
+    not a name bound anywhere.)
+
+    Two adjacent line numbers, kept apart because different trees own them:
+    :279 is the `in` test that raises the `TypeError` (this function's
+    expression), and :280 is `raise KeyError("Unknown language code %s." %
+    lang_code)`, which produces the `KeyError` half. That text *is* Django's, so
+    its row freezes it literally.
+    """
+    try:
+        "-" not in value  # mirrors translation/__init__.py:279, on the row's value  # noqa: B018
+    except TypeError as error:
+        return str(error)
+    raise AssertionError(
+        f"`'-' not in {value!r}` did not raise `TypeError`; the interpreter's "
+        f"behaviour changed and this derivation must be re-measured against it"
+    )
+
+
+#: The non-string value the `language_name/non-string-value` row feeds the filter
+#: **and** the value its expected `TypeError` text is derived from — one name for
+#: both, so the input's type name in the message cannot drift from the input.
+_LANGUAGE_NAME_NON_STRING_VALUE = 7
+_LANGUAGE_NAME_NON_STRING_TYPEERROR = _typeerror_from_membership(
+    _LANGUAGE_NAME_NON_STRING_VALUE
+)
 
 
 # `lower` is `is_safe=True` and `upper` is `is_safe=False` — measured, and the
@@ -4598,6 +4652,325 @@ CASES: list[dict] = [
         "settings": {"USE_TZ": True, "TIME_ZONE": "Europe/Paris"},
         "expected": "00:30",
     },
+    # =====================================================================
+    # M12 Task 7: the nine `django.templatetags` library filters.
+    #
+    # These are the corpus's first rows whose filter comes from a **library**
+    # rather than `django.template.defaultfilters`, and they carry a `libraries`
+    # key for that reason alone: `Engine().template_libraries` is `{}`
+    # (measured), so `parser.filters` has no `language_name` until something
+    # `{% load %}`s `django.templatetags.i18n` — and a row without the key would
+    # raise `Invalid filter` on Django's side while ours answered, which is a
+    # loud failure rather than a silent one and therefore needs no `expected` to
+    # keep it honest. The key is the faithful equivalent of the `{% load i18n %}`
+    # a template would write; see `scripts/filter_probe.py`'s `load_libraries`.
+    #
+    # The nine are `ours/theirs` in one respect and `theirs` in another: the
+    # **bodies** are Rust (`crates/template-core/src/filters/{language_*,
+    # localize,unlocalize,localtime,utc,timezone}.rs`), but the three `tz` names
+    # reach the transcribed Python `do_timezone` under the seam, because M12
+    # Task 4 (`f89a9d4`) decided the tz algorithm stays Python's. That asymmetry
+    # is not visible to a parity row — both sides call the same function — which
+    # is exactly why the *bodies* carry it in prose and this comment repeats it.
+    # --- i18n: the four `language_*` filters (`i18n.py:292-310`) --------------
+    {
+        # The `["name"]` of `get_language_info`'s dict — the English name.
+        "name": "language_name/hungarian",
+        "filter": "language_name",
+        "value": "hu",
+        "libraries": ["django.templatetags.i18n"],
+    },
+    {
+        "name": "language_name/german",
+        "filter": "language_name",
+        "value": "de",
+        "libraries": ["django.templatetags.i18n"],
+    },
+    {
+        # `["name_local"]` — "Magyar", not "Hungarian". A body that answered the
+        # English name here would be green on the row above and red on this one.
+        "name": "language_name_local/hungarian",
+        "filter": "language_name_local",
+        "value": "hu",
+        "libraries": ["django.templatetags.i18n"],
+    },
+    {
+        "name": "language_bidi/ltr-hungarian",
+        "filter": "language_bidi",
+        "value": "hu",
+        "libraries": ["django.templatetags.i18n"],
+    },
+    {
+        # The `True` half. A body that hardcoded `False` would pass the row above.
+        "name": "language_bidi/rtl-arabic",
+        "filter": "language_bidi",
+        "value": "ar",
+        "libraries": ["django.templatetags.i18n"],
+    },
+    {
+        # `gettext` of the **English** name (`i18n.py:298-300`), under the
+        # default `en-us` locale where `gettext` is the identity — so this row
+        # alone cannot tell a body that asked the host from one that returned
+        # `info.name`. Its twin below is what does.
+        "name": "language_name_translated/english-locale-is-the-english-name",
+        "filter": "language_name_translated",
+        "value": "hu",
+        "libraries": ["django.templatetags.i18n"],
+    },
+    {
+        # **The row that pins the `gettext` call.** Under `LANGUAGE_CODE="de"`
+        # the English name "Hungarian" translates to "Ungarisch", so a body that
+        # returned `info.name` (or skipped the host's `gettext`) answers
+        # "Hungarian" and fails here while passing the row above. Measured on the
+        # pinned tree.
+        "name": "language_name_translated/german-locale-translates-the-name",
+        "filter": "language_name_translated",
+        "value": "hu",
+        "libraries": ["django.templatetags.i18n"],
+        "settings": {"LANGUAGE_CODE": "de"},
+        "expected": "Ungarisch",
+    },
+    # --- l10n: `localize` / `unlocalize` (`l10n.py:7-21`) ---------------------
+    #
+    # Both bodies are `str(formats.localize(value, use_l10n=<bool>))`, and the
+    # `str()` is the whole reason they are host operations rather than a shared
+    # helper: `localize` on a **lazy** or **safe** value passes the proxy through
+    # the formatter and then stringifies it, so the answer's type is the
+    # formatter's to decide and not Rust's. The safe-string row below is that
+    # seam.
+    {
+        "name": "localize/float-default-locale",
+        "filter": "localize",
+        "value": 1234.5,
+        "libraries": ["django.templatetags.l10n"],
+    },
+    {
+        "name": "localize/int-default-locale",
+        "filter": "localize",
+        "value": 1234567,
+        "libraries": ["django.templatetags.l10n"],
+    },
+    {
+        "name": "localize/bool-value",
+        "filter": "localize",
+        "value": True,
+        "libraries": ["django.templatetags.l10n"],
+    },
+    {
+        # A `SafeString` in, and a `SafeString` out — measured, both sides. The
+        # body cannot produce one by stringifying in Rust, so this row is what
+        # pins the `str()` + re-classify fusion in `PyFilterHost::localize`.
+        "name": "localize/safe-string-value",
+        "filter": "localize",
+        "value": mark_safe("123"),
+        "libraries": ["django.templatetags.l10n"],
+    },
+    {
+        # The **German** locale is what makes `localize` observable: `1234.5`
+        # localizes to `1234,5`, so a body that ignored `use_l10n=True` (or the
+        # `LANGUAGE_CODE`) answers `1234.5` and fails here.
+        "name": "localize/german-locale-uses-the-decimal-comma",
+        "filter": "localize",
+        "value": 1234.5,
+        "libraries": ["django.templatetags.l10n"],
+        "settings": {"LANGUAGE_CODE": "de"},
+        "expected": "1234,5",
+    },
+    {
+        # The mirror: `unlocalize` forces the **non**-localized form, so under
+        # the same German locale it keeps the point. A body that wired the two
+        # names to the same call would pass one of this pair and fail the other.
+        "name": "unlocalize/german-locale-keeps-the-point",
+        "filter": "unlocalize",
+        "value": 1234.5,
+        "libraries": ["django.templatetags.l10n"],
+        "settings": {"LANGUAGE_CODE": "de"},
+        "expected": "1234.5",
+    },
+    {
+        "name": "unlocalize/string-value",
+        "filter": "unlocalize",
+        "value": "1234.5",
+        "libraries": ["django.templatetags.l10n"],
+    },
+    # --- tz: `localtime` / `utc` / `timezone` (`tz.py:19-38`) -----------------
+    #
+    # **Two groups, and they exist for different reasons.** The rows below pin
+    # the three names' *good* inputs across the zone boundary; the group after
+    # them is ported from Django's own suite (see its comment).
+    {
+        # A naive datetime is made aware in the **default** time zone, then
+        # converted to the *current* one — which here is the same zone, so the
+        # wall clock is unchanged and only the `tzinfo` appears. `expected` pins
+        # the wall clock, which is what a wrong `TIME_ZONE` moves.
+        "name": "localtime/naive-value-in-the-current-zone",
+        "filter": "localtime",
+        "value": datetime(2026, 10, 8, 22, 30),
+        "libraries": ["django.templatetags.tz"],
+        "settings": {"USE_TZ": True, "TIME_ZONE": "Europe/Paris"},
+        "expected": datetime(2026, 10, 8, 22, 30, tzinfo=ZoneInfo("Europe/Paris")),
+    },
+    {
+        # An aware UTC value **converted**: 22:30Z is 00:30 the next day in
+        # Paris (CEST, +02:00). A body that returned its input unchanged answers
+        # 22:30 and fails both the comparison and the literal.
+        "name": "localtime/aware-utc-value-converts",
+        "filter": "localtime",
+        "value": datetime(2026, 10, 8, 22, 30, tzinfo=timezone.utc),
+        "libraries": ["django.templatetags.tz"],
+        "settings": {"USE_TZ": True, "TIME_ZONE": "Europe/Paris"},
+        "expected": datetime(2026, 10, 9, 0, 30, tzinfo=ZoneInfo("Europe/Paris")),
+    },
+    {
+        # `utc`'s zone is fixed (`datetime.UTC`, `tz.py:34`) and does **not**
+        # read `TIME_ZONE`; the setting is here only so the naive twin below has
+        # a zone to assume.
+        "name": "utc/aware-paris-value-converts-to-utc",
+        "filter": "utc",
+        "value": datetime(2026, 10, 8, 22, 30, tzinfo=ZoneInfo("Europe/Paris")),
+        "libraries": ["django.templatetags.tz"],
+        "settings": {"USE_TZ": True, "TIME_ZONE": "Europe/Paris"},
+        "expected": datetime(2026, 10, 8, 20, 30, tzinfo=timezone.utc),
+    },
+    {
+        # A **naive** value, assumed to be in the current zone and converted to
+        # UTC. The same input as `localtime/naive-...` above with the opposite
+        # destination, so the pair proves the two bodies reach *different* fixed
+        # zones rather than one shared conversion.
+        "name": "utc/naive-value-assumed-local-converts-to-utc",
+        "filter": "utc",
+        "value": datetime(2026, 10, 8, 22, 30),
+        "libraries": ["django.templatetags.tz"],
+        "settings": {"USE_TZ": True, "TIME_ZONE": "Europe/Paris"},
+        "expected": datetime(2026, 10, 8, 20, 30, tzinfo=timezone.utc),
+    },
+    {
+        # The one name whose zone comes from the **template** (`tz.py:37-38` is
+        # `do_timezone` registered under `timezone`). The zone name arrives as a
+        # quoted constant, so Django's loop hands it over `mark_safe`d — a
+        # `SafeString`, which is a `str` and so reaches the body's `isinstance`
+        # branch unchanged.
+        "name": "timezone/named-zone-paris",
+        "filter": "timezone",
+        "value": datetime(2026, 10, 8, 22, 30, tzinfo=timezone.utc),
+        "arg": "Europe/Paris",
+        "libraries": ["django.templatetags.tz"],
+        "settings": {"USE_TZ": True},
+    },
+    {
+        # The `"UTC"` zone *name* (a `str`), distinct from `utc`'s `datetime.UTC`
+        # *object* — the same answer through a different branch of `do_timezone`.
+        "name": "timezone/utc-zone-name",
+        "filter": "timezone",
+        "value": datetime(2026, 10, 8, 22, 30, tzinfo=ZoneInfo("Europe/Paris")),
+        "arg": "UTC",
+        "libraries": ["django.templatetags.tz"],
+        "settings": {"USE_TZ": True},
+    },
+    # **The ported half, and why a port was needed at all.** Django's own
+    # assertions for these three filters on *bad* inputs live in
+    # `.django/tests/timezones/tests.py:1051-1071`
+    # (`test_localtime_filters_do_not_raise_exceptions`, `def` at :1051,
+    # `end_lineno` :1071), under `USE_TZ=True`, and they are **two templates
+    # and not one** — a distinction that reads as one shape until the arguments
+    # are counted:
+    #
+    #     :1055  {% load tz %}{{ dt }}|{{ dt|localtime }}|{{ dt|utc }}|{{ dt|timezone:tz }}
+    #     :1060    dt=None          -> "None|||"
+    #     :1062    dt="not a date"  -> "not a date|||"
+    #     :1065  {% load tz %}{{ dt|timezone:tz }}          <- one filter, not four
+    #     :1066    dt=..., tz=None  -> ""
+    #     :1068    dt=..., tz="not a tz" -> ""   (assertion at :1071)
+    #
+    # So the four-pipe form carries the first two cases and the single-filter
+    # form the last two. That test is **not** in the
+    # acceptance suite — `scripts/run_django_suite.sh:25` is
+    # `LABELS=(template_tests)` and `scripts/check.sh` passes `template_tests`
+    # explicitly, so nothing in `scripts/` or `tests/` ever runs the `timezones`
+    # label. It is therefore not a guard we can lean on, and these four
+    # assertions are **ported here** rather than assumed: same values, same
+    # `USE_TZ=True`, same expected `""`s. The precedent is
+    # `tests/test_loader_case_sensitivity.py`, which exists because §2's upstream
+    # row is skipped on every platform we run; this one is the same remedy for a
+    # different reason — it is *unguarded* and simply outside the labels we pass,
+    # so a later reader looking for the `skipUnless` that would explain its
+    # absence will not find one.
+    #
+    # The template's bare `{{ dt }}` is not a filter and has no row; the four
+    # `""`s the *filters* produce are what is ported. `ICT` there is
+    # `timezone.get_fixed_timezone(420)`, a fixed +07:00 `tzinfo`; here it is
+    # `timezone(timedelta(hours=7))`, the same object by value, passed as a
+    # **`tzinfo`** so the row keeps upstream's shape (`tz` is a context variable
+    # there, so it is an `arg_variable` here).
+    {
+        "name": "localtime/none-value-answers-the-empty-string",
+        "filter": "localtime",
+        "value": None,
+        "libraries": ["django.templatetags.tz"],
+        "settings": {"USE_TZ": True},
+        "expected": "",
+    },
+    {
+        "name": "utc/none-value-answers-the-empty-string",
+        "filter": "utc",
+        "value": None,
+        "libraries": ["django.templatetags.tz"],
+        "settings": {"USE_TZ": True},
+        "expected": "",
+    },
+    {
+        # `{{ dt|timezone:tz }}` with `dt=None` — the `not isinstance(value,
+        # datetime)` guard (`tz.py:46-47`) answers before the argument is read.
+        "name": "timezone/none-value-with-a-zone-answers-the-empty-string",
+        "filter": "timezone",
+        "value": None,
+        "arg_variable": timezone(timedelta(hours=7)),
+        "libraries": ["django.templatetags.tz"],
+        "settings": {"USE_TZ": True},
+        "expected": "",
+    },
+    {
+        # The same guard on a `str`: `"not a date"` is not a `datetime`, so the
+        # body answers `""` **without raising** — this is the "filters must never
+        # raise exceptions" the upstream docstring names.
+        "name": "timezone/non-datetime-value-answers-the-empty-string",
+        "filter": "timezone",
+        "value": "not a date",
+        "arg_variable": timezone(timedelta(hours=7)),
+        "libraries": ["django.templatetags.tz"],
+        "settings": {"USE_TZ": True},
+        "expected": "",
+    },
+    {
+        # The **argument** is `None` (a present argument, `do_timezone(d, None)`),
+        # not an absent one: it is neither a `tzinfo` nor a `str`, so it falls to
+        # the final `else` of the `if isinstance(arg, tzinfo):` chain
+        # (`tz.py:59-67`) and answers `""`. Distinct from `{{ d|timezone }}`,
+        # which `args_check`
+        # refuses at parse time — see `timezone.rs`'s doc.
+        "name": "timezone/none-argument-answers-the-empty-string",
+        "filter": "timezone",
+        "value": datetime(2011, 9, 1, 13, 20, 30),
+        "arg": None,
+        "libraries": ["django.templatetags.tz"],
+        "settings": {"USE_TZ": True},
+        "expected": "",
+    },
+    {
+        # A `str` argument that is not a zone name: `zoneinfo.ZoneInfo("not a
+        # tz")` raises `ZoneInfoNotFoundError`, which the
+        # `except zoneinfo.ZoneInfoNotFoundError:` arm (`tz.py:64-65`) catches
+        # into `""`. The **only** branch where the body swallows a *string* the
+        # template author wrote, and so the one a `timezone` row can reach that
+        # the two rows above cannot.
+        "name": "timezone/unknown-zone-name-answers-the-empty-string",
+        "filter": "timezone",
+        "value": datetime(2011, 9, 1, 13, 20, 30),
+        "arg": "not a tz",
+        "libraries": ["django.templatetags.tz"],
+        "settings": {"USE_TZ": True},
+        "expected": "",
+    },
 ]
 
 
@@ -5280,5 +5653,104 @@ ERROR_CASES: list[dict] = [
         "value": "x",
         "raises": "AttributeError",
         "message": "'str' object has no attribute 'year'",
+    },
+    # --- M12 Task 7: the i18n four **propagate** where the tz three swallow ----
+    #
+    # **This is a regression pin on `PyFilterHost::host_error`, and the two rows
+    # are one per half of what it has to preserve.** `language_name`'s body is a
+    # single host call — `translation.get_language_info(lang_code)["name"]`
+    # (`i18n.py:294`) — and `get_language_info` refuses an unknown code with a
+    # `KeyError` and a non-string with a `TypeError`. Both must reach the
+    # template author **as themselves**, with the exact message, and they do
+    # **by construction**: `host_error` keeps the exact `PyErr` and `report()`
+    # re-raises that instance, so a body cannot wrap or re-word one. What these
+    # rows add is not a defect fixed but a pin on the two halves of that
+    # construction — the **class** (from the first) and the **message text**
+    # (from the second, which names CPython's operand type). A future edit that
+    # swapped `host_error` for a generic `Error::Message` would keep every
+    # `language_name` *good*-input row green and fail here.
+    #
+    # **The two messages come from two different trees, and they do not have the
+    # same durability — so the two rows assert them differently.**
+    #
+    # * The `KeyError`'s text is **Django's**: `django/utils/translation/__init__.py:280`
+    #   is `raise KeyError("Unknown language code %s." % lang_code)`. Pinned to
+    #   `.django/` @ **6.0.9**, so a Django bump is the only thing that moves it —
+    #   and a change in it *is* a divergence we want to catch. The row freezes the
+    #   literal.
+    # * The `TypeError`'s text is **CPython's**, not Django's: it is
+    #   character-for-character what `"-" not in 7` produces, and Django supplies
+    #   only the call site — `django/utils/translation/__init__.py:279`,
+    #   `if "-" not in lang_code:`. (Two line numbers, not one: :279 is the `in`
+    #   test that raises the `TypeError`, :280 is the `raise` that produces the
+    #   `KeyError`.)
+    #
+    #   **This half is the fragile one, because the wording is the interpreter's
+    #   and it changed one minor version ago.** Measured here:
+    #
+    #       3.9.6  3.9.21  3.10.16  3.11.9  3.12.9  3.13.7  ->  "argument of type 'int' is not iterable"
+    #       3.14.4                                             ->  "argument of type 'int' is not a container or iterable"
+    #
+    #   So its row **derives** the expectation instead of freezing it —
+    #   `_LANGUAGE_NAME_NON_STRING_TYPEERROR`, computed from the interpreter above the
+    #   list — and asserts the **class** (`"raises": "TypeError"`) as the part
+    #   that must not drift. The derivation's docstring records why, and why the
+    #   agreement is transport fidelity rather than a tautology.
+    #
+    # **The asymmetry with the tz three is the milestone's most quotable fact,
+    # and it is upstream's, not a choice we made.** `i18n.py` does not guard its
+    # four `language_*` filters at all, so their host refusal escapes; `tz.py`'s
+    # `do_timezone` is written to never raise — the bare `except Exception`
+    # (`tz.py:54-56`) and the `""` returns inside the `isinstance` chain
+    # (`tz.py:59-67`) — so `localtime`/`utc`/`timezone` answer `""` on every bad
+    # input. The four `CASES` rows ported from `timezones/tests.py` above are
+    # that swallow's pin, and there is deliberately no `ERROR_CASES` row for
+    # them. Two policies, both Django's: **the four i18n names propagate; the
+    # three tz names swallow.**
+    {
+        # The message is Django's **repr of the key**, not the key: Python's
+        # `str(KeyError("x"))` is `"'x'"`, quotes included, and the harness
+        # compares `str(caught)` as a literal — so the pinned text is what the
+        # template author actually sees, `Unknown language code zz.` with the
+        # surrounding quotes being `KeyError`'s own.
+        "name": "language_name/unknown-language-code",
+        "filter": "language_name",
+        "value": "zz",
+        "libraries": ["django.templatetags.i18n"],
+        "raises": "KeyError",
+        "message": "'Unknown language code zz.'",
+    },
+    {
+        # The other half: `get_language_info(7)` reaches the membership test with
+        # an `int` and CPython refuses it. `7` is a bare token, so the value
+        # arrives as the `int` 7 rather than the string `"7"` — and `"7"` is a
+        # legal (if unknown) *code*, a different row's input, which is why the
+        # type is named in the message.
+        #
+        # **The expected text is *derived*, not frozen** — `_LANGUAGE_NAME_NON_STRING_TYPEERROR`
+        # (and the `value` above, `_LANGUAGE_NAME_NON_STRING_VALUE`) is computed
+        # from the interpreter by `_typeerror_from_membership`, because it is
+        # CPython's wording and CPython changed it at 3.14; see that function's
+        # docstring for why a literal here would be the wrong kind of red and for
+        # why the derivation takes the *value* rather than a second literal. The
+        # class **is** frozen (`"raises": "TypeError"`), which is the half
+        # `host_error` must carry: `Error::filter_host(kind, operation, message)`
+        # transports a kind as well as a message, so a same-text error of the
+        # wrong kind would otherwise pass.
+        #
+        # **Why the agreement is not tautological, even though both strings come
+        # from this interpreter.** The two sides travel different paths: ours is
+        # raised at Django's call site *inside the engine*, stringified by
+        # `host_error`'s `str(e)` into a Rust `String`, carried over the FFI and
+        # re-raised as a Python `TypeError`; the derived one never leaves the
+        # interpreter that made it. Their agreeing is evidence of transport
+        # fidelity — the Python→Rust→Python round trip and the kind mapping —
+        # which is the whole claim of the row.
+        "name": "language_name/non-string-value",
+        "filter": "language_name",
+        "value": _LANGUAGE_NAME_NON_STRING_VALUE,
+        "libraries": ["django.templatetags.i18n"],
+        "raises": "TypeError",
+        "message": _LANGUAGE_NAME_NON_STRING_TYPEERROR,
     },
 ]

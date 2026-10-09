@@ -42,8 +42,8 @@ use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PySlice, PyString, PyT
 use std::cell::RefCell;
 
 use template_core::filters::host::{
-    DecimalParse, DecimalTuple, FilterCall, FilterHost, NestedSequence, NumberFormatArgs,
-    ParsedDecimal,
+    DecimalParse, DecimalTuple, FilterCall, FilterHost, LanguageInfo, NestedSequence,
+    NumberFormatArgs, ParsedDecimal, TimezoneSource,
 };
 use template_core::filters::value::{Value, ValueId};
 use template_core::parser::error::{Error, PyErrorKind};
@@ -1120,6 +1120,95 @@ impl FilterHost for PyFilterHost<'_> {
             formatted.extract::<String>()
         })();
         outcome.unwrap_or_else(|e| self.infallible_failure("number_format", e))
+    }
+
+    fn language_info(&self, lang_code: &Value) -> Result<LanguageInfo, Error> {
+        let py = self.py;
+        let outcome = (|| -> PyResult<LanguageInfo> {
+            // The argument crosses as the object it is, not as text: the four
+            // `language_*` filters pass their `lang_code` straight through
+            // (`i18n.py:292-310`), and `get_language_info`'s `LANG_INFO[lang_code]`
+            // would raise `TypeError` for a non-string in Python's own way.
+            let info = py
+                .import("django.utils.translation")?
+                .getattr("get_language_info")?
+                .call1((self.object(lang_code)?,))?;
+            Ok(LanguageInfo {
+                // The three keys the four filters read. `name_translated` is
+                // deliberately not one of them: `language_name_translated` runs
+                // `["name"]` through `translation.gettext` itself rather than
+                // reading that lazy key (see the Rust module's doc).
+                name: info.get_item("name")?.extract::<String>()?,
+                name_local: info.get_item("name_local")?.extract::<String>()?,
+                // `bidi` is a `bool` in `LANG_INFO`, and `language_bidi` returns
+                // it as one — not as `str(...)`.
+                bidi: info.get_item("bidi")?.extract::<bool>()?,
+            })
+        })();
+        outcome.map_err(|e| self.host_error("language_info", e))
+    }
+
+    fn localize(&self, value: &Value, use_l10n: bool) -> Result<Value, Error> {
+        let py = self.py;
+        let outcome = (|| {
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("use_l10n", use_l10n)?;
+            let localized = py
+                .import("django.utils.formats")?
+                .getattr("localize")?
+                .call((self.object(value)?,), Some(&kwargs))?;
+            // **The `str()` is the source's and it must run on this side.**
+            // `localize` returns a `str` unchanged (`formats.py:201-202`) and
+            // `str(SafeString)` is that same object, so
+            // `str(formats.localize(mark_safe("123"), use_l10n=True))` is a
+            // `SafeString`; `text_of` would flatten it to a plain `String`, and
+            // since `localize` is `is_safe=False` the loop does not re-mark it —
+            // ours would escape where Django does not. `classify` is what keeps
+            // the marker, by asking `SafeData`.
+            let text = localized.str()?;
+            self.classify(text.as_any())
+        })();
+        outcome.map_err(|e| self.host_error("localize", e))
+    }
+
+    fn do_timezone(&self, value: Value, source: TimezoneSource<'_>) -> Result<Value, Error> {
+        let py = self.py;
+        let outcome = (|| {
+            // The argument the three `tz` filters pass to the one Python body,
+            // each as its own source spells it: `localtime` passes
+            // `timezone.get_current_timezone()` (`tz.py:26`), `utc` passes the
+            // `do_timezone(value, UTC)` call (`tz.py:34`), and `timezone` is
+            // `def do_timezone(value, arg):` itself (`tz.py:38`), so the template's own argument is the value.
+            // Resolving the two fixed ones here is the same
+            // expression the two one-line filters perform, moved to the side of
+            // the seam that owns the clock (§D2) — not a re-derivation of
+            // `do_timezone`.
+            let zone = match source {
+                TimezoneSource::Current => py
+                    .import("django.utils.timezone")?
+                    .getattr("get_current_timezone")?
+                    .call0()?
+                    .unbind(),
+                TimezoneSource::Utc => py.import("datetime")?.getattr("UTC")?.unbind(),
+                // The template's argument as the object it is — a `tzinfo`, a
+                // zone name, or `None`; which of those is `do_timezone`'s to
+                // decide (`tz.py:59-67`), and the Rust body does not read it.
+                TimezoneSource::Given(argument) => match argument {
+                    Some(argument) => self.object(argument)?,
+                    None => py.None(),
+                },
+            };
+            // **The transcribed Python body, under the seam**: `django.templatetags.tz`
+            // is served from `_impl/templatetags/tz.py` by the shim, so this is
+            // the verbatim Task 4 transcription of `do_timezone`, not Django's.
+            // `ours/theirs` — the routing is Rust's, the algorithm is Python's.
+            let converted = py
+                .import("django.templatetags.tz")?
+                .getattr("do_timezone")?
+                .call1((self.object(&value)?, zone))?;
+            self.classify(&converted)
+        })();
+        outcome.map_err(|e| self.host_error("do_timezone", e))
     }
 
     fn gettext(&self, text: &str) -> String {

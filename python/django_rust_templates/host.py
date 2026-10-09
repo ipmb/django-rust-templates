@@ -79,6 +79,26 @@ def _library_tag_tables():
     )
 
 
+def _library_filter_tables():
+    """The same five libraries' `register.filters`, imported the same lazy way.
+
+    The filter half of [`_library_tag_tables`], with the same deferral and for the
+    same measured reason: the modules capture `TokenType` and `render_value_in_context`
+    out of `django.template.base`, so executing one before `install()` would leave a
+    stale-universe copy — loud under `_shim._stale_captures`, but the deferral keeps
+    the two universes apart instead of relying on the guard. `cache` and `static`
+    register no filters (measured, `register.filters` is empty in both), so this
+    tuple contributes nine callables; they are listed anyway because the *module set*
+    is the five libraries M12 interposes and a sixth library's filters should not
+    have to remember to be added in two places.
+    """
+    import importlib
+
+    return tuple(
+        importlib.import_module(name).register.filters for name in _LIBRARY_TAG_MODULES
+    )
+
+
 _DJANGO_OWN_TAGS = None
 
 # The registry objects the merge above was built from, in merge order. Kept for
@@ -207,9 +227,10 @@ def django_own_tags():
 
 _DJANGO_OWN_FILTERS = None
 
-# The registry object the map above was built from. Kept because ``None`` alone
-# cannot tell "not built yet" from "built against a registry that is no longer
-# the one in force", and the second is the failure this milestone exists to end.
+# The registry objects the map above was built from, in merge order. Kept because
+# ``None`` alone cannot tell "not built yet" from "built against a registry that is
+# no longer the one in force", and the second is the failure this milestone exists
+# to end.
 _DJANGO_OWN_FILTERS_SOURCE = None
 
 
@@ -221,12 +242,33 @@ def django_own_filters():
     is not: `_impl/parser.py` stores the `find_filter` *handle* rather than a
     name, deliberately — the name is what a `{% load %}` rebinds — so the tuple
     `resolve` walks holds a callable and nothing to look it up by. The map is
-    therefore `defaultfilters.register.filters` inverted, and the inversion is
-    faithful because it is **injective**: measured against `.django` @ 6.0.9,
-    the registry is 57 names over 57 *distinct* handles, so no name is lost and
-    no two collide. (The measurement is a row, not a comment — a Django release
-    that aliased two names to one function would otherwise pick a winner
-    silently, and Rust would run the wrong body for one of them.)
+    therefore the registries inverted, and the inversion is faithful because it
+    is **injective**: measured against `.django` @ 6.0.9, the merged table is **66**
+    names over **66** *distinct* handles — the 57 built-ins plus the five
+    libraries' 9 — so no name is lost and no two collide. (The measurement is a
+    row, not a comment — a Django release that aliased two names to one function
+    would otherwise pick a winner silently, and Rust would run the wrong body for
+    one of them.)
+
+    **Six registries merge, libraries first and `defaultfilters` last, and that
+    order is the safety property rather than a preference.** Same rule and same
+    reason as `django_own_tags`: `update` gives the last writer the name, and what
+    this table must never lose is `defaultfilters`' *own* callable for the 57
+    built-ins — were a library to register `lower`, a libraries-last merge would
+    make this table's `lower` the library's, so a `{% load %}`ed rebind of `lower`
+    would compare *equal* to it and Rust's body would run over the caller's
+    library function. Merging the libraries first resolves that hypothetical
+    collision to `defaultfilters`' callable and leaves the clause correct. The
+    collision does not exist at 6.0.9 — measured, the six registries share no name
+    — so both halves are held by `tests/test_interposition.py`: the measurement,
+    and the order that keeps the hazard from being a silent one if a future pin
+    introduces it.
+
+    **Widened by M12 Task 7, and the widening is the whole of the routing.** Before
+    it, a `language_name` handle was absent from this map, so `resolve` fell through
+    to the Python loop and called the *transcribed* body — correct behaviour, and
+    indistinguishable from routing, which is why the nine Rust bodies landed with
+    the map widened in the same commit rather than the one after.
 
     **Handle identity, not name identity, is the same decision as the tags',
     restated for the table that has no names.** Two cases the name-keyed form
@@ -243,22 +285,24 @@ def django_own_filters():
       is a faithful implementation of it. A name-keyed arm would have had to
       guess which of the two names to pass Rust.
 
-    Read once, at first use, and cached: the source is a `Library`'s registry,
+    Read once, at first use, and cached: the sources are `Library` registries,
     which `{% load %}` does not touch (`add_library` merges into the *parser*),
-    so a frozen copy and a live read differ only if something mutates
-    `defaultfilters.register` itself — the case `django_own_tags`'s import-time
-    freeze guards against for the same reason. Reading it per filter instead
-    would rebuild the 57-entry dict on every filter of every rendered variable.
+    so a frozen copy and a live read differ only if something mutates one of the
+    six `register`s itself — the case `django_own_tags`'s import-time freeze
+    guards against for the same reason. Reading it per filter instead would
+    rebuild the 66-entry dict on every filter of every rendered variable.
 
-    **Cached against the registry *object*, not against ``None``.** A cache keyed
-    on emptiness answers "already built" for a map built from a registry that no
-    longer exists, and the consequence is silent and total: re-executing
-    `defaultfilters` — a reload, or the scratch-universe instrumentation M11's
-    measurement scripts build — replaces `register.filters` with 57 fresh
-    handles, every one of which is absent from the stale map, so all 57 filters
-    fall through to the Python loop and **every test stays green**. That is
-    precisely the state M11 exists to end, arriving through the guard rather than
-    around it, so the identity of the source is part of the cache key.
+    **Cached against the registry *objects*, not against ``None``.** A cache keyed
+    on emptiness answers "already built" for a map built from registries that no
+    longer exist, and the consequence is silent and total: re-executing
+    `defaultfilters` (or one of the five libraries) — a reload, or the
+    scratch-universe instrumentation M11's measurement scripts build — replaces
+    that `register.filters` with fresh handles, every one of which is absent from
+    the stale map, so every filter from that table falls through to the Python loop
+    and **every test stays green**. That is precisely the state M11 exists to end,
+    arriving through the guard rather than around it, so the identity of *all six*
+    sources is part of the cache key — the same length-and-identity check
+    [`django_own_tags`] uses.
 
     Both halves are pinned as rows in
     `tests/test_interposition.py::FilterRoutingTests`: the map names a handle from
@@ -266,10 +310,19 @@ def django_own_filters():
     rebuild.
     """
     global _DJANGO_OWN_FILTERS, _DJANGO_OWN_FILTERS_SOURCE
-    source = _defaultfilters.register.filters
-    if _DJANGO_OWN_FILTERS is None or _DJANGO_OWN_FILTERS_SOURCE is not source:
-        _DJANGO_OWN_FILTERS = {func: name for name, func in source.items()}
-        _DJANGO_OWN_FILTERS_SOURCE = source
+    sources = (*_library_filter_tables(), _defaultfilters.register.filters)
+    cached = _DJANGO_OWN_FILTERS_SOURCE
+    if (
+        _DJANGO_OWN_FILTERS is None
+        or cached is None
+        or len(cached) != len(sources)
+        or any(old is not new for old, new in zip(cached, sources))
+    ):
+        merged = {}
+        for table in sources:
+            merged.update(table)
+        _DJANGO_OWN_FILTERS = {func: name for name, func in merged.items()}
+        _DJANGO_OWN_FILTERS_SOURCE = sources
     return _DJANGO_OWN_FILTERS
 
 

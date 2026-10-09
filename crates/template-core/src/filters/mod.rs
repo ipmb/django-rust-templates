@@ -61,12 +61,18 @@ pub mod get_digit;
 pub mod iriencode;
 pub mod join;
 pub mod json_script;
+pub mod language_bidi;
+pub mod language_name;
+pub mod language_name_local;
+pub mod language_name_translated;
 pub mod last;
 pub mod length;
 pub mod linebreaks;
 pub mod linebreaksbr;
 pub mod linenumbers;
 pub mod ljust;
+pub mod localize;
+pub mod localtime;
 pub mod lower;
 pub mod make_list;
 pub mod phone2numeric;
@@ -83,16 +89,19 @@ pub mod striptags;
 pub mod time;
 pub mod timesince;
 pub mod timeuntil;
+pub mod timezone;
 pub mod title;
 pub mod truncatechars;
 pub mod truncatechars_html;
 pub mod truncatewords;
 pub mod truncatewords_html;
+pub mod unlocalize;
 pub mod unordered_list;
 pub mod upper;
 pub mod urlencode;
 pub mod urlize;
 pub mod urlizetrunc;
+pub mod utc;
 pub mod wordcount;
 pub mod wordwrap;
 pub mod yesno;
@@ -189,7 +198,22 @@ pub struct FilterEntry {
     pub run: FilterFn,
 }
 
-/// The 57, ascending by name.
+/// The 57 built-ins plus the nine `django.templatetags` library filters, ascending
+/// by name — **66 entries in one table**, which is the whole Rust-side shape of
+/// M12 Task 7.
+///
+/// **One table, not two, and that is measured rather than assumed** (trap 7).
+/// The tag side has two (`registry.rs::REGISTRY` and `LIBRARY_REGISTRY`) because
+/// a library *tag* is not ours until `{% load %}`ed — `has_tag` compares a name
+/// against Django's callable. Filters have no such question: the Python seam is
+/// `django_own_filters().get(func)` keyed on the **function object**
+/// (`_impl/base.py:829`), so a library filter's handle is in the map only once
+/// `{% load %}` registered it — "loaded" is implied by the key being present at
+/// all. A second Rust filter table would be a routing distinction the seam does
+/// not make, and `django_own_filters()` would have to guess which table to search.
+///
+/// The nine are appended *in place*, so the ascending order [`MEASURED_NAMES`]
+/// pins is one order over the whole table rather than two concatenated ones.
 static REGISTRY: &[FilterEntry] = &[
     FilterEntry {
         name: "add",
@@ -333,6 +357,39 @@ static REGISTRY: &[FilterEntry] = &[
         run: json_script::run,
         stringfilter: false,
     },
+    // --- the four `i18n` language filters (M12 Task 7) ---------------------
+    // Not built-ins: `register.filter` entries in `django/templatetags/i18n.py`,
+    // and they go into the one registry for trap 7's measured reason — the
+    // Python seam is `django_own_filters().get(func)`, keyed on the **function
+    // object**, so a library filter's handle exists only once `{% load %}`
+    // registered it and "loaded" is already implied by the key being present.
+    // A second Rust table would be a routing decision the tree does not make.
+    // All four are `FilterFlags::NONE` (bare `@register.filter`) and
+    // `stringfilter: false`; `language_bidi` returns a bool, not text.
+    FilterEntry {
+        name: "language_bidi",
+        flags: FilterFlags::NONE,
+        run: language_bidi::run,
+        stringfilter: false,
+    },
+    FilterEntry {
+        name: "language_name",
+        flags: FilterFlags::NONE,
+        run: language_name::run,
+        stringfilter: false,
+    },
+    FilterEntry {
+        name: "language_name_local",
+        flags: FilterFlags::NONE,
+        run: language_name_local::run,
+        stringfilter: false,
+    },
+    FilterEntry {
+        name: "language_name_translated",
+        flags: FilterFlags::NONE,
+        run: language_name_translated::run,
+        stringfilter: false,
+    },
     FilterEntry {
         name: "last",
         flags: FilterFlags::SAFE,
@@ -368,6 +425,24 @@ static REGISTRY: &[FilterEntry] = &[
         flags: FilterFlags::SAFE,
         run: ljust::run,
         stringfilter: true,
+    },
+    // --- the two `l10n` filters (M12 Task 7) -------------------------------
+    // `l10n.py`'s only two registrations, and both are `is_safe=False`
+    // (`l10n.py:7,15`) — a registration property, not decoration: it is what
+    // keeps `base.py:816` from marking a `SafeString` input's result safe.
+    FilterEntry {
+        name: "localize",
+        flags: FilterFlags::NONE,
+        run: localize::run,
+        stringfilter: false,
+    },
+    // The first of the three `tz` names over one transcribed Python body
+    // (`do_timezone`, `tz.py:38-84`); `timezone` and `utc` are the other two.
+    FilterEntry {
+        name: "localtime",
+        flags: FilterFlags::NONE,
+        run: localtime::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "lower",
@@ -465,6 +540,15 @@ static REGISTRY: &[FilterEntry] = &[
         run: timeuntil::run,
         stringfilter: false,
     },
+    // The `timezone` name is `tz.py`'s `do_timezone` under a registered alias
+    // (`tz.py:37-38`); its Rust body reaches the same transcribed Python
+    // function `localtime` and `utc` do — `ours/theirs` at the seam.
+    FilterEntry {
+        name: "timezone",
+        flags: FilterFlags::NONE,
+        run: timezone::run,
+        stringfilter: false,
+    },
     FilterEntry {
         name: "title",
         flags: FilterFlags::SAFE,
@@ -494,6 +578,13 @@ static REGISTRY: &[FilterEntry] = &[
         flags: FilterFlags::SAFE,
         run: truncatewords_html::run,
         stringfilter: true,
+    },
+    // `l10n`'s second filter — `localize` with the flag forced the other way.
+    FilterEntry {
+        name: "unlocalize",
+        flags: FilterFlags::NONE,
+        run: unlocalize::run,
+        stringfilter: false,
     },
     FilterEntry {
         name: "unordered_list",
@@ -525,6 +616,13 @@ static REGISTRY: &[FilterEntry] = &[
         run: urlizetrunc::run,
         stringfilter: true,
     },
+    // The third `tz` name over the one transcribed `do_timezone` (`tz.py:29-34`).
+    FilterEntry {
+        name: "utc",
+        flags: FilterFlags::NONE,
+        run: utc::run,
+        stringfilter: false,
+    },
     FilterEntry {
         name: "wordcount",
         flags: FilterFlags::NONE,
@@ -547,7 +645,7 @@ static REGISTRY: &[FilterEntry] = &[
 
 /// The entry for `name`, if the engine has one.
 ///
-/// A linear scan of 57, for `parser::registry`'s reason: the table is small, the
+/// A linear scan of 66, for `parser::registry`'s reason: the table is small, the
 /// lookup is per filter call rather than per character, and a `HashMap` behind a
 /// `OnceLock` would add a synchronisation point to buy nothing.
 pub fn filter(name: &str) -> Option<&'static FilterEntry> {
@@ -580,13 +678,22 @@ mod tests {
     use super::*;
     use crate::parser::error::ErrorKind;
 
-    /// The 57 names, spelled out rather than counted.
+    /// The **57 built-in** names, spelled out rather than counted — the M4 set,
+    /// unchanged by M12 Task 7.
     ///
     /// Counted would be shorter and worse: the set is what a later milestone
     /// compares against Django's own registry, and a test that only knows the
     /// length cannot name the filter that went missing. Comparing to a sorted
     /// literal also pins the "ascending by name" claim, so there is no separate
     /// ordering test to drift from this one.
+    ///
+    /// **M12 Task 7 did not widen this list, and that is the measurement.** The
+    /// nine library filters are a *second* measured set ([`LIBRARY_NAMES`]); the
+    /// two are kept apart because they come from two registries — this one from
+    /// `django.template.defaultfilters`' 57 entries, that one from the five
+    /// `django.templatetags` libraries — and a reader diffs each against its own
+    /// source. The registry they both live in is asserted below as their ordered
+    /// union.
     const MEASURED_NAMES: [&str; 57] = [
         "add",
         "addslashes",
@@ -647,6 +754,34 @@ mod tests {
         "yesno",
     ];
 
+    /// The **nine library filter names**, spelled out — M12 Task 7's whole set.
+    ///
+    /// Measured, not read off the census: the five pinned `django.templatetags`
+    /// libraries register exactly these nine `register.filter` entries —
+    /// `i18n.py`'s four `language_*` (`i18n.py:292-310`), `l10n.py`'s two
+    /// (`l10n.py:7,15`), and `tz.py`'s three names over one Python
+    /// `do_timezone` (`tz.py:19-38`). Spelled out for the same reason
+    /// [`MEASURED_NAMES`] is: a length-only guard cannot name the one that went
+    /// missing, and the registry-coverage row in `tests/test_interposition.py`
+    /// diffs the *whole* registry against `django_own_filters()` — a name
+    /// dropped here would leave that row passing on a smaller set.
+    ///
+    /// **The three `tz` names are `ours/theirs` at the seam**, not three Rust
+    /// bodies: `timezone` *is* the transcribed Python `do_timezone` and the other
+    /// two are two-line calls into it. The list does not distinguish them, and
+    /// must not — routing is what it measures, and all three route to Rust.
+    const LIBRARY_NAMES: [&str; 9] = [
+        "language_bidi",
+        "language_name",
+        "language_name_local",
+        "language_name_translated",
+        "localize",
+        "localtime",
+        "timezone",
+        "unlocalize",
+        "utc",
+    ];
+
     /// The filters whose bodies are still stubs: the 57 minus every name a landed
     /// group already answers — **empty, because M4's last group has landed**.
     ///
@@ -679,13 +814,27 @@ mod tests {
     const STILL_STUBBED: [&str; 0] = [];
 
     #[test]
-    fn the_registry_is_the_measured_57() {
+    fn the_registry_is_the_measured_66() {
+        // The union **as one ascending sequence**, not two concatenated lists:
+        // the two sets interleave (`language_*` and `last`, `ljust` and
+        // `localize`, `timeuntil` and `timezone`, …), so a registry that
+        // appended the nine after `yesno` would fail here — which is the point,
+        // because the registry is `filter()`-scanned and its doc claims one
+        // ascending order. Merging both sides and sorting is what makes that
+        // claim the assertion rather than a comment.
+        let mut expected: Vec<&str> = MEASURED_NAMES
+            .iter()
+            .chain(LIBRARY_NAMES.iter())
+            .copied()
+            .collect();
+        expected.sort_unstable();
         assert_eq!(
             filter_names(),
-            MEASURED_NAMES.to_vec(),
-            "the filter registry is not the measured 57; §10.3 gives M4 all of \
-             them, and this list is the one a later milestone diffs against \
-             Django's own registry",
+            expected,
+            "the filter registry is not the measured 57 built-ins plus the nine \
+             library filters; §10.3 gives M4 the 57, M12 Task 7 adds the nine, \
+             and each list is the one a later milestone diffs against its own \
+             Django source",
         );
     }
 

@@ -155,7 +155,7 @@ propagates like a copied citation.
 | `LookupTarget` | `parser/resolve.rs:156` | one resolved value, and the per-bit cascade Django's `_resolve_lookup` runs against it |
 | `Host` | `parser/host.rs:22` | the parser's callbacks — `has_tag`, `call_tag`, and a **defaulted** `check_filter` |
 | `FilterHost` | `filters/host.rs:195` | the Python value protocol a filter body needs: `to_str`, `to_int`, `to_float`, `len`, `iter_values`, `get_index`, `get_slice`, `add_values`, … |
-| `FilterFlags` | `filters/mod.rs:118` | the three per-filter attributes Django reads when calling a filter (`base.py:805-820`); `library.py:85` propagates all three, so they cross the seam |
+| `FilterFlags` | `filters/mod.rs:127` (`pub struct FilterFlags {`) | the three per-filter attributes Django reads when calling a filter (`base.py:805-820`); `library.py:85` propagates all three, so they cross the seam |
 
 #### What this section proposed, and what exists
 

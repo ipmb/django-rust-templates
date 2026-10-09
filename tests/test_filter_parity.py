@@ -195,7 +195,12 @@ class FilterParityTests(unittest.TestCase):
         """
         given, extra = arg_token(case)
         return probe.django_answer(
-            case["filter"], case_value(case), given, case.get("context"), extra
+            case["filter"],
+            case_value(case),
+            given,
+            case.get("context"),
+            extra,
+            case.get("libraries"),
         )
 
     def render_rust(self, case, context):
@@ -384,6 +389,7 @@ class FilterParityTests(unittest.TestCase):
                             given,
                             case.get("context"),
                             extra,
+                            case.get("libraries"),
                         ),
                     )
                     context = probe.context_for(
@@ -428,6 +434,15 @@ class FilterParityTests(unittest.TestCase):
         the registry itself is short: 57 stubs out of 57 names would pass a count
         check while sixteen filters had gone missing from the registry.
 
+        **The registry is 66 names, not 57, since M12 Task 7.** The 57 are
+        `django.template.defaultfilters`'; the nine more are the
+        `django.templatetags` library filters (`i18n`'s four `language_*`, `l10n`'s
+        `localize`/`unlocalize`, `tz`'s `localtime`/`utc`/`timezone`). They are in
+        the **one** Rust registry — `crates/template-core/src/filters/mod.rs`'s
+        `REGISTRY`, whose own count row names the same 66 — rather than a second
+        table, because this seam is keyed by filter **name** and one lookup has to
+        see both sets; see that file's `REGISTRY` doc for the trap.
+
         **The count is the deliberate-edit signal, and it has reached its floor.**
         A group landing moves both this number and the Rust list, in a commit
         that says which group it was — and Task 10's group is the last, so the
@@ -439,7 +454,7 @@ class FilterParityTests(unittest.TestCase):
         stubs = all_names - implemented
 
         self.assertEqual(
-            len(all_names), 57, "the registry itself is not Django's 57 filters"
+            len(all_names), 66, "the registry is not the 57 built-ins plus the nine"
         )
         # 0: **M4's last group has landed.** The 57 minus `lower` and `upper`,
         # which Task 3 lands as the corpus's seed, minus Task 4's six —
@@ -461,9 +476,10 @@ class FilterParityTests(unittest.TestCase):
         # `timeuntil`. **The zero is the deliberate-edit signal**, and it says
         # something a nonzero never could: `STILL_STUBBED` in
         # `crates/template-core/src/filters/mod.rs` is the empty array, so every
-        # one of Django's 57 filters now has a body. A later group cannot move
-        # this number — there is no later group — so a nonzero here means a body
-        # has been reverted or re-stubbed, not that work is pending.
+        # one of the registry's 66 names — the 57 built-ins and M12 Task 7's nine
+        # library filters — now has a body. A later group cannot move this number
+        # — there is no later group — so a nonzero here means a body has been
+        # reverted or re-stubbed, not that work is pending.
         self.assertEqual(
             len(stubs),
             0,

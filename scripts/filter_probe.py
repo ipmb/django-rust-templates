@@ -215,12 +215,38 @@ def context_for(value, context_kwargs: dict | None = None, extra: dict | None = 
     return Context({"x": value, **(extra or {})}, **(context_kwargs or {}))
 
 
+def load_libraries(parser, libraries):
+    """`{% load %}` a row's libraries onto the probe's parser.
+
+    A **library** filter is not in `parser.filters` until a load merges it —
+    `Parser.add_library` is `self.filters.update(lib.filters)` (`base.py:668-670`)
+    — and `Engine()`'s `template_libraries` is `{}` (measured), so a row naming
+    `language_name` would otherwise raise `Invalid filter` on Django's side while
+    our side answered. The corpus's rows for M12 Task 7's nine carry a
+    `libraries` key for exactly this, and it is the faithful equivalent of the
+    `{% load i18n %}` a template would write.
+
+    `import_library` hands back `importlib.import_module(name).register`, so the
+    callable Django's loop runs is the same object `{% load %}` would put in the
+    parser — under the shim that is the `_impl/templatetags/*.py` transcription,
+    which is upstream's text (warranted by `tests/parity_target.py`, the same way
+    `_impl/defaultfilters.py` is).
+    """
+    if not libraries:
+        return
+    from django.template.library import import_library
+
+    for library in libraries:
+        parser.add_library(import_library(library))
+
+
 def django_answer(
     name: str,
     value,
     given,
     context_kwargs: dict | None = None,
     extra: dict | None = None,
+    libraries: list[str] | None = None,
 ):
     """Django's result for `value|name[:arg]`, through `resolve`'s loop.
 
@@ -270,6 +296,7 @@ def django_answer(
         libraries=engine.template_libraries,
         builtins=engine.template_builtins,
     )
+    load_libraries(parser, libraries)
     token = f"x|{name}" if given is NO_ARG else f"x|{name}:{given}"
     expression = django_base().FilterExpression(token, parser)
     context = context_for(value, context_kwargs, extra)
@@ -378,6 +405,17 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="the filter argument, as a Python literal",
     )
+    parser.add_argument(
+        "--library",
+        action="append",
+        default=None,
+        metavar="MODULE",
+        help=(
+            "a library module to `{% load %}` before resolving (repeatable), "
+            "e.g. --library django.templatetags.i18n — required for a library "
+            "filter like `language_name`"
+        ),
+    )
     args = parser.parse_args(argv)
 
     ensure_settings()
@@ -395,7 +433,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         django_result, expression, context = django_answer(
-            args.filter, value, NO_ARG if args.arg is None else args.arg
+            args.filter,
+            value,
+            NO_ARG if args.arg is None else args.arg,
+            libraries=args.library,
         )
     except TemplateSyntaxError as error:
         # Three different mistakes reach here — a name that is not a filter, a

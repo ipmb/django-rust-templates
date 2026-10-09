@@ -50,6 +50,8 @@ django.setup()
 
 from django.template.backends.django import DjangoTemplates  # noqa: E402
 
+from django_rust_templates import host  # noqa: E402
+
 
 def suite_engine():
     """The engine the suite's ``{% load %}`` actually resolves against.
@@ -153,6 +155,7 @@ def main():
     print("engine         :", type(engine).__name__)
     print()
     rows = []
+    filter_rows = []
     for lib in LIBS:
         module = __import__(f"django.templatetags.{lib}", fromlist=["x"])
         ours = "_impl" in (module.__file__ or "")
@@ -187,13 +190,32 @@ def main():
             )
         for name, func in sorted(module.register.filters.items()):
             func_module, func_ours = owner(func)
-            print(f"   filter {name:<23} {func_module:<42} ours={func_ours}")
+            # The *routing* verdict, which the file check above cannot give: the
+            # callable's `__file__` says whose text the body is (ours since M12
+            # Task 3 interposed the library modules), but whether the seam sends
+            # it to Rust is `django_own_filters()`, which is keyed by **handle**.
+            # Before M12 Task 7 the map held `defaultfilters` only, so these nine
+            # were `ours=False`-by-file yet unrouted and the Python body ran.
+            routed = func in host.django_own_filters()
+            filter_rows.append((lib, name, func_module, func_ours, routed))
+            print(
+                f"   filter {name:<23} {func_module:<42} ours={func_ours} "
+                f"routed={routed}"
+            )
         print()
 
     print("=== verdict tally")
     for verdict, count in Counter(r[5] for r in rows).most_common():
         print(f"  {count:>3}  {verdict}")
     print(f"  --- {len(rows)} registered tag name(s) over {len(LIBS)} librar(ies)")
+    print()
+    print("=== filter routing tally (handle in `django_own_filters()`)")
+    for routed, count in Counter(r[4] for r in filter_rows).most_common():
+        print(f"  {count:>3}  routed={routed}")
+    print(
+        f"  --- {len(filter_rows)} registered filter name(s); "
+        f"{sum(1 for r in filter_rows if r[4])} route to Rust"
+    )
 
 
 if __name__ == "__main__":

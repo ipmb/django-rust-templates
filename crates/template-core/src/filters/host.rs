@@ -184,6 +184,58 @@ pub struct DecimalTuple {
     pub truthy: bool,
 }
 
+/// `django.utils.translation.get_language_info(lang_code)`'s three read fields.
+///
+/// The four `language_*` filters read `["name"]`, `["name_local"]` and
+/// `["bidi"]` off **one** call each (`i18n.py:292-310`), so the seam returns the
+/// three fields rather than the dict: a dict would have to be indexed by a
+/// *string*, and every index operation on this seam takes an `i64`. The two
+/// fields the filters do not read (`code`, `name_translated`) stay Python's.
+///
+/// **Reading all three eagerly is the same answer as reading one, and that is
+/// measured rather than assumed.** `get_language_info` resolves the six
+/// fallback entries — `zh-cn`, `zh-hk`, `zh-mo`, `zh-my`, `zh-sg`, `zh-tw`, the
+/// only `LANG_INFO` entries with no `name`/`name_local`/`bidi` of their own —
+/// into their fallback's info before returning — the
+/// `get_language_info(lang_info["fallback"][0])` line
+/// (`django/utils/translation/__init__.py:275`) — so every dict it hands back
+/// carries all three keys.
+#[derive(Clone, PartialEq, Debug)]
+pub struct LanguageInfo {
+    /// The English name: `return translation.get_language_info(lang_code)["name"]` (`i18n.py:294`).
+    pub name: String,
+    /// The local name: `return translation.get_language_info(lang_code)["name_local"]` (`i18n.py:305`).
+    pub name_local: String,
+    /// `["bidi"]` — a `bool`, and `language_bidi` returns it **as the bool**, not
+    /// as a string (`i18n.py:310`).
+    pub bidi: bool,
+}
+
+/// Which timezone the `tz` filters' one body is handed, as the source spells it.
+///
+/// `do_timezone(value, arg)` (`tz.py:38-84`) is **one** Python function under
+/// three registered names: the `localtime` filter passes
+/// `timezone.get_current_timezone()` (`tz.py:26`), `utc` passes the
+/// `do_timezone(value, UTC)` call beside it (`tz.py:34`), and `timezone` *is*
+/// `do_timezone` under the registered alias `@register.filter("timezone")`
+/// (`tz.py:37-38`), so it passes the template's own argument. The three differ
+/// in that one argument and share every other line, so the seam is one method
+/// and this enum is the argument. Three Rust bodies that each rebuilt
+/// `do_timezone` would be three chances to diverge from a Python function the
+/// 1547 exercises **zero** times.
+pub enum TimezoneSource<'a> {
+    /// `timezone.get_current_timezone()` — the `localtime` filter (`tz.py:26`).
+    Current,
+    /// `datetime.UTC` — the `utc` filter (`tz.py:34`).
+    Utc,
+    /// The template's argument, which `args_check` has already required — the
+    /// `timezone` filter. `None` is Django's own missing-argument call
+    /// `do_timezone(value)`, kept rather than forbidden because it is what the
+    /// source runs if the parse-time guard is ever bypassed; it raises the
+    /// `TypeError` Python's own signature raises.
+    Given(Option<&'a Value>),
+}
+
 /// Everything a filter body can ask of Python.
 ///
 /// The methods return `Result<_, Error>` where Django's call can raise, and a
@@ -600,6 +652,21 @@ pub trait FilterHost {
     /// reproducing it. It would stop being safe if `None` ever meant anything
     /// else here.
     fn localtime(&self, value: Value, use_tz: bool) -> Result<Value, Error>;
+    /// `do_timezone(value, …)` (`tz.py:38-84`), under the three `tz` filters'
+    /// three spellings — see [`TimezoneSource`].
+    ///
+    /// **The body stays Python-side, under the seam, and this is the commit that
+    /// decides it against the tree.** M12 Task 4 measured the three `tz` tag
+    /// bodies calling `do_timezone` **zero** times — its only callers are the
+    /// `localtime` and `utc` *filters* (`tz.py:26`, `tz.py:34`) — so there is no
+    /// shared-helper case to port, and the transcribed Python body is the one
+    /// that runs. A `# TRANSCRIBED:` marker says so on the Python side.
+    ///
+    /// The three filters are then `ours/theirs` **at the seam**, not three
+    /// ninth-of-nine Rust bodies: `localtime`, `utc` and `timezone` each have a
+    /// Rust body, and each one's whole content is this call, so what runs is
+    /// Python's `do_timezone`.
+    fn do_timezone(&self, value: Value, source: TimezoneSource<'_>) -> Result<Value, Error>;
     /// `django.utils.formats.date_format` — the active language's formats.
     ///
     /// **`format` is an `Option` because Django's default is spelled `None`, and
@@ -713,6 +780,36 @@ pub trait FilterHost {
     /// signature, and the bound is written here rather than left to be
     /// re-derived — a wider caller would have to widen this first.
     fn ngettext(&self, singular: &str, plural: &str, n: u64) -> String;
+    /// `django.utils.translation.get_language_info(lang_code)`, the four
+    /// `language_*` filters' single lookup each (`i18n.py:292-310`).
+    ///
+    /// The language table is `django.conf.locale.LANG_INFO` — 107 entries of
+    /// `name`/`name_local`/`bidi` data — so the lookup is the host's for the
+    /// reason §D2 gives the active language to the host: it is locale data, not a
+    /// function of the filter's argument. `Result` because the call raises
+    /// `KeyError("Unknown language code …")` for a code that is neither a key nor
+    /// resolvable through its first subtag, and **none of the four filters
+    /// catches it**.
+    fn language_info(&self, lang_code: &Value) -> Result<LanguageInfo, Error>;
+    /// `str(formats.localize(value, use_l10n=…))` — `localize` and `unlocalize`
+    /// (`l10n.py:7-21`), which differ only in the `use_l10n` they force.
+    ///
+    /// **The whole source expression, `str()` included, because the `str()` is
+    /// not [`FilterHost::to_str`].** Measured on the pinned tree,
+    /// `str(formats.localize(mark_safe("123"), use_l10n=True))` is a
+    /// **`SafeString`** — `localize` returns a `str` unchanged
+    /// (`formats.py:201-202`) and `str()` on a `str` is that same object — while
+    /// `to_str`, like every text accessor on this seam, hands back a plain
+    /// `String` the FFI turns into `Value::Str`. `localize` is `is_safe=False`
+    /// (`l10n.py:7`), so the loop does not re-mark the result and the two would
+    /// *render* differently: ours would escape where Django does not.
+    ///
+    /// Everything else `formats.localize` branches on is likewise outside the
+    /// filter's argument: `isinstance(value, str)`, the `bool` / `Decimal` /
+    /// `float` / `int` / `datetime` / `date` / `time` arms, and the
+    /// `date_format`, `time_format` and `number_format` calls the last five make
+    /// (`formats.py:193-215`).
+    fn localize(&self, value: &Value, use_l10n: bool) -> Result<Value, Error>;
     /// `formats.number_format(round(value, 1), 1)` whole (`defaultfilters.py:911-912`).
     ///
     /// A host call rather than [`FilterHost::number_format`] over a Rust-rounded
@@ -997,6 +1094,10 @@ impl FilterHost for NoFilterHost {
         Err(refused("localtime"))
     }
 
+    fn do_timezone(&self, _value: Value, _source: TimezoneSource<'_>) -> Result<Value, Error> {
+        Err(refused("do_timezone"))
+    }
+
     fn date_format(&self, _value: &Value, _format: Option<&str>) -> Result<String, Error> {
         Err(refused("date_format"))
     }
@@ -1032,6 +1133,14 @@ impl FilterHost for NoFilterHost {
 
     fn ngettext(&self, _singular: &str, _plural: &str, _n: u64) -> String {
         refused_panic("ngettext")
+    }
+
+    fn language_info(&self, _lang_code: &Value) -> Result<LanguageInfo, Error> {
+        Err(refused("language_info"))
+    }
+
+    fn localize(&self, _value: &Value, _use_l10n: bool) -> Result<Value, Error> {
+        Err(refused("localize"))
     }
 
     fn decimal_parse(&self, _value: &Value) -> Result<DecimalParse, Error> {
@@ -1155,6 +1264,13 @@ pub struct TestFilterHost {
     pub filesize_number_format: Option<String>,
     pub int_divide_by_power_of_two: Option<f64>,
     pub int_modulo: Option<IntValue>,
+    /// The four `language_*` filters' one lookup. A `LanguageInfo` rather than a
+    /// `Value`, because that is the trait's return shape.
+    pub language_info: Option<LanguageInfo>,
+    /// `str(formats.localize(value, use_l10n=…))`, whose safety the host owns.
+    pub localize: Option<Value>,
+    /// `do_timezone(value, …)` — the three `tz` filters' one seam.
+    pub do_timezone: Option<Value>,
 }
 
 #[cfg(test)]
@@ -1435,6 +1551,13 @@ impl FilterHost for TestFilterHost {
         self.localtime.clone().ok_or_else(|| refused("localtime"))
     }
 
+    fn do_timezone(&self, _value: Value, _source: TimezoneSource<'_>) -> Result<Value, Error> {
+        self.record("do_timezone")?;
+        self.do_timezone
+            .clone()
+            .ok_or_else(|| refused("do_timezone"))
+    }
+
     fn date_format(&self, _value: &Value, _format: Option<&str>) -> Result<String, Error> {
         self.record("date_format")?;
         self.date_format
@@ -1492,6 +1615,18 @@ impl FilterHost for TestFilterHost {
         self.ngettext
             .clone()
             .unwrap_or_else(|| refused_panic("ngettext"))
+    }
+
+    fn language_info(&self, _lang_code: &Value) -> Result<LanguageInfo, Error> {
+        self.record("language_info")?;
+        self.language_info
+            .clone()
+            .ok_or_else(|| refused("language_info"))
+    }
+
+    fn localize(&self, _value: &Value, _use_l10n: bool) -> Result<Value, Error> {
+        self.record("localize")?;
+        self.localize.clone().ok_or_else(|| refused("localize"))
     }
 
     fn decimal_parse(&self, _value: &Value) -> Result<DecimalParse, Error> {
@@ -1646,6 +1781,11 @@ mod tests {
             ("pformat", host.pformat(&v).unwrap_err()),
             ("random_choice", host.random_choice(&v).unwrap_err()),
             ("localtime", host.localtime(v.clone(), false).unwrap_err()),
+            (
+                "do_timezone",
+                host.do_timezone(v.clone(), TimezoneSource::Current)
+                    .unwrap_err(),
+            ),
             ("date_format", host.date_format(&v, Some("Y")).unwrap_err()),
             ("time_format", host.time_format(&v, Some("H")).unwrap_err()),
             (
@@ -1657,6 +1797,8 @@ mod tests {
                 host.dateformat_time_format(&v, &v).unwrap_err(),
             ),
             ("timesince", host.timesince(&v, None, false).unwrap_err()),
+            ("language_info", host.language_info(&v).unwrap_err()),
+            ("localize", host.localize(&v, true).unwrap_err()),
             ("decimal_parse", host.decimal_parse(&v).unwrap_err()),
             (
                 "decimal_quantize",
@@ -1751,7 +1893,7 @@ mod tests {
             "the refusal list and the trait's `Result` methods must be the same \
              names in the same order"
         );
-        assert_eq!(declared.len(), 31, "the `Result` half of the trait is 31");
+        assert_eq!(declared.len(), 34, "the `Result` half of the trait is 34");
     }
 
     /// The other two property: a scripted answer comes back, and a scripted

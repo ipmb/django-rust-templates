@@ -190,7 +190,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # rows in three files, so 426 + 8 - 1 = 432 — measured by discovery (and the
 # failure text before the pin moved read
 # `discovery found 432 tests, the pin says 426`).
-PINNED = 432
+#
+# 432 → 437 is M12 Task 7, **five** rows in one file,
+# `test_interposition.py::FilterRoutingTests`: the counter that the nine library
+# filters reach Rust; the coverage row (nine names, same handle under each); the
+# disjoint-and-injective row (66 names over 66 handles, no name in two of the six
+# tables); the merge-order sentinel (a library's `lower` cannot take the name from
+# `defaultfilters`); and the cache-tracks-a-library-registry row. The corpus rows
+# and the registry constants that moved with this task are **modifications, not
+# methods** — `tests/filter_cases.py` grows rows inside two lists and
+# `tests/test_filter_parity.py` and `tests/test_filter_inventory.py` re-point
+# existing assertions — so none of them moves this count. Measured by discovery:
+# `git diff tests/` since `4e0cee6` adds exactly five `def test_` bodies.
+PINNED = 437
 
 
 def collected() -> unittest.TestSuite:

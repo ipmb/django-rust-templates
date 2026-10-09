@@ -7,7 +7,7 @@ filters/host.rs:195	crates/template-core/src/filters/host.rs	195	-	-	-
 filters/host.rs:519-526	crates/template-core/src/filters/host.rs	519	526	-	-
 filters/host.rs:576-739	crates/template-core/src/filters/host.rs	576	739	-	-
 linebreaks.rs:130	crates/template-core/src/filters/linebreaks.rs	130	-	call.autoescape && !call.host.is_safe(&value)	-
-filters/mod.rs:118	crates/template-core/src/filters/mod.rs	118	-	pub struct FilterFlags {	-
+filters/mod.rs:127	crates/template-core/src/filters/mod.rs	127	-	pub struct FilterFlags {	-
 slugify.rs:99	crates/template-core/src/filters/slugify.rs	99	-	pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {	-
 wordwrap.rs:73	crates/template-core/src/filters/wordwrap.rs	73	-	unwrap_or(Value::None)	-
 desc.rs:49	crates/template-core/src/parser/desc.rs	49	-	-	-
@@ -33,8 +33,8 @@ with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extr
 filters.rs:69-71	crates/template-py/src/filters.rs	69	71	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
 crates/template-py/src/filters.rs:248-257	crates/template-py/src/filters.rs	248	257	*self.raised.borrow_mut() = Some(err)	-
 crates/template-py/src/filters.rs:871	crates/template-py/src/filters.rs	871	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
-template-py/src/filters.rs:1587-1589	crates/template-py/src/filters.rs	1587	1589	Some(host.classify(&args.get_item(0)?)?)	-
-crates/template-py/src/filters.rs:1644-1645	crates/template-py/src/filters.rs	1644	1645	host.take_raised()	-
+template-py/src/filters.rs:1675-1683	crates/template-py/src/filters.rs	1675	1683	match args.len()	-
+crates/template-py/src/filters.rs:1731-1734	crates/template-py/src/filters.rs	1731	1734	host.take_raised()	-
 template-py/src/lib.rs:146	crates/template-py/src/lib.rs	146	-	fn filter_flags	-
 template-py/src/lib.rs:740	crates/template-py/src/lib.rs	740	-	fn if_condition_to_py	-
 crates/template-py/src/lib.rs:1104	crates/template-py/src/lib.rs	1104	-	-	-
@@ -609,6 +609,16 @@ i18n.py:219-239	django/templatetags/i18n.py	219	239	do_get_available_languages	-
 i18n.py:232-234	django/templatetags/i18n.py	232	234	-	-
 i18n.py:243-262	django/templatetags/i18n.py	243	262	-	-
 i18n.py:266-289	django/templatetags/i18n.py	266	289	do_get_language_info_list	-
+i18n.py:290-310	django/templatetags/i18n.py	290	310	-	-
+i18n.py:292-310	django/templatetags/i18n.py	292	310	["bidi"]	-
+i18n.py:292-294	django/templatetags/i18n.py	292	294	-	-
+i18n.py:294	django/templatetags/i18n.py	294	-	return translation.get_language_info(lang_code)["name"]	-
+i18n.py:297-300	django/templatetags/i18n.py	297	300	language_name_translated	-
+i18n.py:298-300	django/templatetags/i18n.py	298	300	-	-
+i18n.py:303-305	django/templatetags/i18n.py	303	305	language_name_local	-
+i18n.py:305	django/templatetags/i18n.py	305	-	return translation.get_language_info(lang_code)["name_local"]	-
+i18n.py:308-310	django/templatetags/i18n.py	308	310	-	-
+i18n.py:310	django/templatetags/i18n.py	310	-	["bidi"]	-
 i18n.py:314-332	django/templatetags/i18n.py	314	332	-	-
 i18n.py:336-355	django/templatetags/i18n.py	336	355	do_get_current_language_bidi	-
 i18n.py:358-359	django/templatetags/i18n.py	358	359	-	-
@@ -636,6 +646,10 @@ i18n.py:569	django/templatetags/i18n.py	569	-	token.contents.strip() != "plural"
 i18n.py:580-584	django/templatetags/i18n.py	580	584	if token.contents.strip() != end_tag_name:	-
 i18n.py:600-616	django/templatetags/i18n.py	600	616	-	-
 i18n.py:613-614	django/templatetags/i18n.py	613	614	-	-
+l10n.py:7-21	django/templatetags/l10n.py	7	21	unlocalize	-
+l10n.py:7	django/templatetags/l10n.py	7	-	-	-
+l10n.py:7-12	django/templatetags/l10n.py	7	12	-	-
+l10n.py:15-21	django/templatetags/l10n.py	15	21	unlocalize	-
 l10n.py:24	django/templatetags/l10n.py	24	-	-	-
 l10n.py:31-36	django/templatetags/l10n.py	31	36	-	-
 l10n.py:40-60	django/templatetags/l10n.py	40	60	localize_tag	-
@@ -658,6 +672,19 @@ static.py:126	django/templatetags/static.py	126	-	-	-
 static.py:129-131	django/templatetags/static.py	129	131	-	-
 static.py:135-138	django/templatetags/static.py	135	138	-	-
 static.py:171	django/templatetags/static.py	171	-	-	-
+tz.py:19-26	django/templatetags/tz.py	19	26	-	-
+tz.py:19-38	django/templatetags/tz.py	19	38	-	-
+tz.py:26	django/templatetags/tz.py	26	-	timezone.get_current_timezone()	-
+tz.py:29-34	django/templatetags/tz.py	29	34	-	-
+tz.py:34	django/templatetags/tz.py	34	-	do_timezone(value, UTC)	-
+tz.py:37-38	django/templatetags/tz.py	37	38	@register.filter("timezone")	-
+tz.py:38-84	django/templatetags/tz.py	38	84	do_timezone(value, arg)	-
+tz.py:38	django/templatetags/tz.py	38	-	def do_timezone(value, arg):	-
+tz.py:46-47	django/templatetags/tz.py	46	47	-	-
+tz.py:48-86	django/templatetags/tz.py	48	86	except Exception	-
+tz.py:54-56	django/templatetags/tz.py	54	56	-	-
+tz.py:59-67	django/templatetags/tz.py	59	67	if isinstance(arg, tzinfo):	-
+tz.py:64-65	django/templatetags/tz.py	64	65	except zoneinfo.ZoneInfoNotFoundError:	-
 tz.py:95	django/templatetags/tz.py	95	-	-	-
 tz.py:112	django/templatetags/tz.py	112	-	-	-
 tz.py:117	django/templatetags/tz.py	117	-	-	-
@@ -688,6 +715,9 @@ formats.py:155-157	django/utils/formats.py	155	157	-	-
 formats.py:160-169	django/utils/formats.py	160	169	-	-
 formats.py:172	django/utils/formats.py	172	-	-	-
 formats.py:179-180	django/utils/formats.py	179	180	-	-
+formats.py:193-215	django/utils/formats.py	193	215	-	-
+formats.py:201-202	django/utils/formats.py	201	202	-	-
+formats.py:203-205	django/utils/formats.py	203	205	-	-
 html.py:44	django/utils/html.py	44	-	MAX_STRIP_TAGS_DEPTH = 50	-
 html.py:47	django/utils/html.py	47	-	long_open_tag_without_closing_re = _lazy_re_compile(r"<[a-zA-Z][^>]{1000,}")	-
 html.py:50-60	django/utils/html.py	50	60	@keep_lazy(SafeString)	return SafeString(html.escape(str(text)))
@@ -755,6 +785,11 @@ timesince.py:83	django/utils/timesince.py	83	-	total_months = (now.year - d.year
 timesince.py:138-143	django/utils/timesince.py	138	143	timeuntil	-
 django/utils/timezone.py:146-161	django/utils/timezone.py	146	161	settings.USE_TZ if use_tz is None else use_tz	-
 timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)
+django/utils/translation/__init__.py:275	django/utils/translation/__init__.py	275	-	get_language_info(lang_info["fallback"][0])	-
+django/utils/translation/__init__.py:279	django/utils/translation/__init__.py	279	-	if "-" not in lang_code:	-
+django/utils/translation/__init__.py:280	django/utils/translation/__init__.py	280	-	raise KeyError("Unknown language code %s." % lang_code)	-
+django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	290	-	info["name_translated"] = gettext_lazy(info["name"])	-
+_impl/base.py:829	python/django_rust_templates/_impl/base.py	829	-	django_own_filters().get(func)	-
 python/django_rust_templates/_impl/base.py:1161	python/django_rust_templates/_impl/base.py	1161	-	-	-
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
 _impl/parser.py:568	python/django_rust_templates/_impl/parser.py	568	-	-	-
@@ -796,4 +831,5 @@ tests/template_tests/tests.py:231-243	tests/template_tests/tests.py	231	243	def 
 tests/test_host_tags.py:32-37	tests/test_host_tags.py	32	37	PROJECT_ROOT = Path(__file__).resolve().parent.parent	sys.path.insert(0, str(_path))
 test_render_parity.py:533	tests/test_render_parity.py	533	-	def test_a_silent_variable_failure_is_substituted(self):	-
 test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
+.django/tests/timezones/tests.py:1051-1071	tests/timezones/tests.py	1051	1071	test_localtime_filters_do_not_raise_exceptions	-
 .django/tests/utils_tests/test_html.py:204-217	tests/utils_tests/test_html.py	204	217	-	-

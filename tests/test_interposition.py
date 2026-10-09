@@ -1326,6 +1326,83 @@ class FilterRoutingTests(unittest.TestCase):
         self.assertIs(func, defaultfilters.register.filters["lower"])
         self.assertIn("_impl", inspect.getfile(func))
 
+    def test_every_library_filter_reaches_rust(self):
+        """M12 Task 7: the nine `django.templatetags` filters route to Rust.
+
+        The same **counter** the built-in row above uses, widened to the library
+        filters — and it is the row the milestone needs rather than a repetition,
+        because these nine are the ones whose *routing* could be missing while
+        everything looked right. A library filter's handle is only in
+        `django_own_filters()` once the merge carries the five registries, and the
+        failure mode of a missing handle is not an error: it is the Python loop
+        running the **transcribed** body, which produces the right answer. Green,
+        and not Rust's. So each case asserts `_native.filter` ran, with the name
+        it was handed.
+
+        The render path is the real one — `{% load %}` merges the library into the
+        parser (as a template would), and the token is the template's. `Engine`
+        needs the library *map* because a bare `Engine()` has
+        `template_libraries == {}` (measured), which is also why the parity
+        corpus carries a `libraries` key; the map here is the three modules this
+        task ports, since `cache`/`static` register no filters.
+        """
+        import datetime
+
+        from scripts.filter_probe import ensure_settings
+
+        from django.template import Context, Engine
+
+        from django_rust_templates import _native
+
+        # `language_name_translated` reaches the host's `gettext`, which needs
+        # settings and a populated app registry; guarded, so this supplies them
+        # only if no earlier module has.
+        ensure_settings()
+
+        engine = Engine(
+            libraries={
+                "i18n": "django.templatetags.i18n",
+                "l10n": "django.templatetags.l10n",
+                "tz": "django.templatetags.tz",
+            }
+        )
+        naive = datetime.datetime(2026, 10, 8, 22, 30)
+        cases = [
+            ("i18n", "language_name", "hu", None),
+            ("i18n", "language_name_local", "hu", None),
+            ("i18n", "language_bidi", "hu", None),
+            ("i18n", "language_name_translated", "hu", None),
+            ("l10n", "localize", 1234.5, None),
+            ("l10n", "unlocalize", 1234.5, None),
+            ("tz", "localtime", naive, None),
+            ("tz", "utc", naive, None),
+            ("tz", "timezone", naive, "Europe/Paris"),
+        ]
+
+        original = _native.filter
+        for library, name, value, arg in cases:
+            with self.subTest(filter=name):
+                calls = []
+
+                def counting(*args, **kwargs):
+                    calls.append(args[0])
+                    return original(*args, **kwargs)
+
+                token = f"x|{name}" if arg is None else f'x|{name}:"{arg}"'
+                source = "{% load " + library + " %}{{ " + token + " }}"
+                _native.filter = counting
+                try:
+                    engine.from_string(source).render(Context({"x": value}))
+                finally:
+                    _native.filter = original
+                self.assertEqual(
+                    calls,
+                    [name],
+                    f"{{{{ x|{name} }}}} did not reach Rust: a handle missing "
+                    f"from `django_own_filters()` falls through to the Python "
+                    f"loop, which answers correctly and so fails only here",
+                )
+
     def test_a_loaded_library_that_rebinds_a_builtin_filter_runs_its_own_body(self):
         """Review Focus 1: the handler is the **handle**, so a rebinding wins.
 
@@ -1692,6 +1769,183 @@ class FilterRoutingTests(unittest.TestCase):
         # And restoring the object restores the map, so the row does not leave a
         # poisoned cache behind for the rest of the session.
         self.assertIs(host.django_own_filters().get(original["lower"]), "lower")
+
+    def test_the_filter_map_covers_every_registered_library_filter(self):
+        """M12 Task 7: nine names, and the *same object* under each.
+
+        The filter-side twin of `test_the_predicate_covers_every_registered_library_tag`,
+        and identity is the claim rather than presence for the same reason:
+        `resolve`'s arm asks `django_own_filters().get(handle)`, so a map carrying
+        a *different* callable under `language_name` names nothing the parse would
+        ever bind, and the Python loop runs while every row stays green.
+
+        The nine are taken from the registries themselves, so a pin that adds a
+        library filter moves this number and the row says by how much. Measured on
+        `.django` @ 6.0.9: cache 0, i18n 4, l10n 2, static 0, tz 3.
+        """
+        import importlib
+
+        from django_rust_templates import host
+
+        registries = {
+            name: importlib.import_module(f"django.templatetags.{name}").register.filters
+            for name in ("cache", "i18n", "l10n", "static", "tz")
+        }
+        own = host.django_own_filters()
+        registered = set().union(*registries.values())
+        self.assertEqual(
+            len(registered),
+            9,
+            f"the five libraries register {len(registered)} filters, not 9: "
+            f"{sorted(registered)}",
+        )
+        for module, filters in sorted(registries.items()):
+            for name, func in sorted(filters.items()):
+                with self.subTest(module=module, filter=name):
+                    self.assertEqual(
+                        own.get(func),
+                        name,
+                        f"{module}.{name} is not the handle the filter map "
+                        f"carries, so the routing cannot clear it and the "
+                        f"transcribed Python body runs instead of Rust's",
+                    )
+
+    def test_the_six_filter_registries_are_disjoint_and_the_inversion_injective(
+        self,
+    ):
+        """The two measurements the merge and the inversion rest on, held as rows.
+
+        Both are claims the docstrings make and nothing re-read:
+        `django_own_filters()` merges **libraries first, `defaultfilters` last**
+        because a name shared between them would otherwise let a library rebind a
+        built-in; and it inverts the merge **by handle**, which is faithful only
+        while no two names share one callable. Disjoint and injective at 6.0.9 —
+        the assertion says so, and a pin that broke either would move this row
+        rather than the answer.
+        """
+        import importlib
+        from collections import Counter
+
+        from django.template import defaultfilters
+
+        tables = [
+            importlib.import_module(f"django.templatetags.{name}").register.filters
+            for name in ("cache", "i18n", "l10n", "static", "tz")
+        ]
+        tables.append(defaultfilters.register.filters)
+
+        merged = {}
+        for table in tables:
+            merged.update(table)
+        self.assertEqual(len(merged), 66, f"the merge is {len(merged)} names, not 66")
+
+        shared = [
+            name for name, count in Counter(n for t in tables for n in t).items() if count > 1
+        ]
+        self.assertEqual(
+            sorted(shared),
+            [],
+            "a name is registered by two of the six tables, so the merge order "
+            "in `django_own_filters()` decides which callable the routing "
+            "carries for it",
+        )
+        collisions = [n for n, c in Counter(merged.values()).items() if c > 1]
+        self.assertEqual(
+            collisions,
+            [],
+            "two names share one handle, so the handle-keyed inversion drops one "
+            "of them and Rust runs the wrong body for it — silently",
+        )
+
+    def test_a_library_rebinding_a_builtin_filter_name_cannot_take_it_from_the_map(
+        self,
+    ):
+        """The merge order, staged with the collision it guards against.
+
+        A sentinel goes into `tz.register.filters` under `lower` — a name
+        `defaultfilters` also registers — and under `timezone`, a name no other
+        merged table has. The second placement is the control: it shows the
+        library table really is merged, so the first assertion cannot be passing
+        because the patch never reached the merge.
+        """
+        import importlib
+
+        from django.template import defaultfilters
+
+        from django_rust_templates import host
+
+        def sentinel(value):  # pragma: no cover - named, never called
+            return value
+
+        sentinel.__name__ = "lower"
+
+        tz = importlib.import_module("django.templatetags.tz")
+        before = tz.register.filters
+        tz.register.filters = {**before, "lower": sentinel, "timezone": sentinel}
+        try:
+            table = host.django_own_filters()
+            self.assertEqual(
+                table.get(sentinel),
+                "timezone",
+                "the control: the library's filter table did not reach the merge",
+            )
+            self.assertNotEqual(
+                table.get(sentinel),
+                "lower",
+                "a library's `lower` won the merge, so a `{% load %}`ed rebind of "
+                "`lower` now compares equal to it and Rust's body runs over the "
+                "library's function",
+            )
+            self.assertEqual(
+                table.get(defaultfilters.register.filters["lower"]), "lower"
+            )
+        finally:
+            tz.register.filters = before
+
+        self.assertEqual(
+            host.django_own_filters().get(defaultfilters.register.filters["lower"]),
+            "lower",
+            "restoring the registry did not restore the map",
+        )
+
+    def test_the_filter_map_tracks_a_library_registry_it_was_built_from(self):
+        """The cache's key is *every* source object, the five libraries included.
+
+        `test_the_builtin_filter_map_tracks_the_registry_it_was_built_from` covers
+        the `defaultfilters` source. This is the half M12 Task 7 added: the map is
+        now built from six registries, and a cache keyed on `defaultfilters` alone
+        (or on `None`) would serve a stale map after a *library* was re-executed —
+        the scratch-universe instrumentation M11's measurement scripts build does
+        exactly that — leaving every one of the library's filters to fall through
+        to Python with the suite green.
+        """
+        import importlib
+
+        from django_rust_templates import host
+
+        def sentinel(value):  # pragma: no cover - named, never called
+            return value
+
+        sentinel.__name__ = "m12_filter_sentinel"
+
+        tz = importlib.import_module("django.templatetags.tz")
+        before = tz.register.filters
+        self.assertNotIn(sentinel, host.django_own_filters())
+        tz.register.filters = {**before, "m12_filter_sentinel": sentinel}
+        try:
+            self.assertEqual(
+                host.django_own_filters().get(sentinel),
+                "m12_filter_sentinel",
+                "the map did not track a replaced library registry, so a "
+                "re-executed library would be answered for by a stale map",
+            )
+        finally:
+            tz.register.filters = before
+        self.assertNotIn(
+            sentinel,
+            host.django_own_filters(),
+            "the map kept the sentinel after its registry was restored",
+        )
 
 
 class TagPredicateCoverageTests(unittest.TestCase):

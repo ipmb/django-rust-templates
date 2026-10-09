@@ -82,6 +82,18 @@ REGISTERED = {
     "urlencode", "urlize", "urlizetrunc", "wordcount", "wordwrap", "yesno",
 }
 
+# The nine `django.templatetags` library filters M12 Task 7 adds to Rust's
+# registry, ascending. They are **not** read off `defaultfilters.py` — that is
+# why they are a second set and not a widened `REGISTERED`, which stays the 57
+# `defaultfilters` metrics below are all about. Named per library because the
+# registry is one table: i18n's four `language_*`, l10n's `localize`/`unlocalize`,
+# tz's `localtime`/`utc`/`timezone`. `cache` and `static` register no filters.
+LIBRARY_FILTERS = {
+    "language_bidi", "language_name", "language_name_local",
+    "language_name_translated", "localize", "localtime", "timezone",
+    "unlocalize", "utc",
+}
+
 # Registered under a different name from their own `def`, via
 # `@register.filter("<name>", ...)`. Seven, and all seven are load-bearing: a
 # scan that assumed `def` name == registered name would silently lose them.
@@ -818,6 +830,16 @@ class FilterInventoryTests(unittest.TestCase):
         that ships. A–C are read off `defaultfilters.py`, so all three of them
         answer a question about *Django*; only D reddens when a body is rewritten
         to stop delegating, which is exactly the event the set exists to catch.
+
+        **M12 Task 7 moved D's answer, and only D's.** A–C are derived from the
+        pinned `defaultfilters.py`, which knows nothing of the nine library
+        filters, so they stay at 24 and the `DELEGATING_FILTERS` literal is
+        unchanged. D reads our own `filters/*.rs`, where the nine now exist — and
+        every one of them delegates: the four `language_*` reach `language_info`
+        (and `language_name_translated` also `gettext`), `localize`/`unlocalize`
+        reach `localize`, and the tz three reach `do_timezone`. So `in_rust` is the
+        union **plus** the nine, which is why the row compares against
+        `DELEGATING_FILTERS | LIBRARY_FILTERS` and not the 24 alone.
         """
         by_utils = delegating_filters_by_utils()
         by_stdlib = set(DELEGATING_BY_STDLIB_ENGINE)
@@ -858,10 +880,10 @@ class FilterInventoryTests(unittest.TestCase):
             f"union: {sorted(union)} ({len(union)})",
         )
         self.assertEqual(
-            in_rust, DELEGATING_FILTERS,
+            in_rust, DELEGATING_FILTERS | LIBRARY_FILTERS,
             "the Rust bodies and the Python source disagree about who delegates:"
-            f" only in Rust: {sorted(in_rust - DELEGATING_FILTERS)};"
-            f" only in Python: {sorted(DELEGATING_FILTERS - in_rust)}",
+            f" only in Rust: {sorted(in_rust - (DELEGATING_FILTERS | LIBRARY_FILTERS))};"
+            f" only in Python: {sorted((DELEGATING_FILTERS | LIBRARY_FILTERS) - in_rust)}",
         )
         self.assertEqual(len(DELEGATING_FILTERS), 24)
 
@@ -903,7 +925,8 @@ class FilterInventoryTests(unittest.TestCase):
         direction of a false delegation.
         """
         self.assertEqual(
-            set(filter_module_sources()), REGISTERED,
+            set(filter_module_sources()),
+            REGISTERED | LIBRARY_FILTERS,
             f"modules: {sorted(filter_module_sources())}",
         )
 
@@ -1095,14 +1118,51 @@ class RustFilterRegistryTests(unittest.TestCase):
         return _native
 
     def test_the_rust_registry_is_djangos_filters(self):
+        """The registry is the 57 built-ins **plus** M12 Task 7's nine.
+
+        `REGISTERED` stays the 57 `defaultfilters` names this whole module is a
+        metric about; the nine library filters are a separate set because they
+        are not in `defaultfilters.py` at all, and folding them in would move
+        every 57-based count below. The claim here is the **exactness** of the
+        Rust table, so it is asserted against the union rather than a superset
+        check: a name Rust carries that Django does not is a body with no
+        upstream, and a name Django has that Rust does not is the inversion this
+        milestone exists to catch.
+        """
         native = self._native()
-        self.assertEqual(sorted(native.filter_names()), sorted(REGISTERED))
+        self.assertEqual(
+            sorted(native.filter_names()), sorted(REGISTERED | LIBRARY_FILTERS)
+        )
 
     def test_the_flags_round_trip(self):
+        """Every registry name's flags, M12 Task 7's nine included.
+
+        The nine are all `(False, False, False)` — every `register.filter` in
+        `i18n.py`, `l10n.py` and `tz.py` is bare — but they are read from their
+        own registries rather than asserted as a literal, because the point of
+        the row is that the flags come from **Django's decorators** and not from
+        a second Rust table. A filter that gained a decorator in a future pin
+        should move this row.
+        """
+        import importlib
+
         native = self._native()
-        for name in sorted(REGISTERED):
+        library_callables = {}
+        for module in ("cache", "i18n", "l10n", "static", "tz"):
+            library_callables.update(
+                importlib.import_module(f"django.templatetags.{module}").register.filters
+            )
+        self.assertEqual(
+            set(library_callables),
+            LIBRARY_FILTERS,
+            "the five libraries' filters are not the nine this module names",
+        )
+        for name in sorted(REGISTERED | LIBRARY_FILTERS):
             with self.subTest(name=name):
-                registered = defaultfilters.register.filters[name]
+                registered = library_callables.get(
+                    name, defaultfilters.register.filters.get(name)
+                )
+                self.assertIsNotNone(registered, f"{name} is in no registry")
                 self.assertEqual(
                     native.filter_flags(name),
                     (
