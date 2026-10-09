@@ -13,12 +13,21 @@ written yet: there is no public Python route to one, so a row would have to
 fabricate it rather than observe what Rust produced. They arrive with the tasks
 that make `{% partialdef %}` reach the seam, at which point `_native.parse`
 drives both methods for real.
+
+Task 3's rows drive `{% partial %}` through `render.render_string`, which is the
+first thing in this file to exercise the whole route — Rust's registry dispatching
+to `partial.rs`, the tag calling `Host::partial_node`, and the shell building the
+`PartialNode`. What they assert is the **move** of a failure (from compile-time
+`UnimplementedTag` to render-time `TemplateSyntaxError`) plus the class the shell
+hands back, neither of which the Rust rows — which parse under a `PartialHost`
+and never materialise — can see.
 """
 
 import unittest
 
 from django.template import Engine
-from django_rust_templates import render
+from django.template.exceptions import TemplateSyntaxError
+from django_rust_templates import _native, render
 from django_rust_templates import host as host_module
 from scripts.filter_probe import ensure_settings
 
@@ -73,6 +82,51 @@ class PartialNodeSeamTests(unittest.TestCase):
         first.parser.extra_data.setdefault("partials", {})["p"] = "one"
         second.parser.extra_data.setdefault("partials", {})["p"] = "two"
         self.assertEqual(node.partial_mapping["p"], "one")
+
+    def test_the_tag_now_compiles_and_fails_at_render_instead(self):
+        """The change Task 3 makes, stated as the *move* of one failure.
+
+        Before: `{% partial p %}` raised `UnimplementedTag` from the registry, at
+        compile. After: it compiles — Rust builds a host node for it, which means
+        the whole route works, `Host::partial_node` included — and the failure,
+        if the name is never defined, comes from `PartialNode.render`
+        (`defaulttags.py:430-435`). So the row asserts **when**, not only what: an
+        assertion on the message alone would pass on the old tree too, because
+        the old tree also failed.
+
+        `{% partial p %}` with no definition anywhere is a template Django
+        *parses* (`tests/parser_corpus.py`'s row rests on the same fact); this is
+        the render half of it, which is where the message lives.
+        """
+        with self.assertRaises(TemplateSyntaxError) as caught:
+            render.render_string("{% partial nodice %}", {})
+        self.assertEqual(
+            str(caught.exception),
+            "Partial 'nodice' is not defined in the current template.",
+        )
+        self.assertNotIsInstance(caught.exception, _native.UnimplementedTag)
+
+    def test_the_argument_errors_are_djangos_two_messages_end_to_end(self):
+        """The tag body's messages, through the whole shell not a unit row.
+
+        `crates/template-core/src/parser/tags/partial.rs` asserts these two under
+        `PartialHost`; this asserts the *class* the shell hands back for them,
+        which is the half the Rust row cannot see. Same message for both, since
+        Django's wildcard arm covers "too few" and "too many" alike — the row
+        exists so a port that split them has to notice.
+        """
+        for source in [
+            "{% partial %}",
+            "{% partial p q %}",
+        ]:
+            with self.subTest(source=source):
+                with self.assertRaises(TemplateSyntaxError) as caught:
+                    render.render_string(source, {})
+                self.assertEqual(
+                    str(caught.exception),
+                    "'partial' tag requires a single argument",
+                )
+                self.assertNotIsInstance(caught.exception, _native.UnimplementedTag)
 
 
 if __name__ == "__main__":

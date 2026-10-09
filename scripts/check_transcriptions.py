@@ -309,18 +309,22 @@ COMPARED_PATH = {
         (40, 54, "stringfilter"),
     ],
     "defaulttags.py": [
-        # Measured, 44 of the file's 82 functions. **The plan's Step 2 predicted
+        # Measured, 46 of the file's 82 functions. **The plan's Step 2 predicted
         # a small set — `load` and `querystring` "because the host does not own
         # them", plus the two stub tags — and the measurement disagrees with it
         # in both directions**, so recording which is which matters more than the
         # list itself:
         #
-        # * **`load` is in it and the other three are not.** `querystring`,
-        #   `partial` and `partialdef` are absent because the parity corpus
-        #   (`tests/parser_corpus.py`) holds no template that uses them, not
-        #   because the shell handles them host-side. The prediction reasoned
-        #   about the *render* path; this pin is about the *harness*'s path, and
-        #   the two reach different code.
+        # * **`load` is in it; `querystring` and `partialdef` are not.** Those
+        #   two are absent because the parity corpus (`tests/parser_corpus.py`)
+        #   holds no template that uses them, not because the shell handles them
+        #   host-side. The prediction reasoned about the *render* path; this pin
+        #   is about the *harness*'s path, and the two reach different code.
+        #   `partial` left this bullet in M13's Task 3: the corpus gained a
+        #   `{% partial p %}` row, so `partial_func` and `PartialNode.__init__`
+        #   are now on the compared path and the count moved 44 → 46. That is the
+        #   bullet's mechanism demonstrated rather than asserted — the corpus, not
+        #   the shell, decides.
         # * **Everything else in it is the tags the shell does own** — `cycle`,
         #   `do_if`, `do_for`, `url`, `widthratio` — for the same reason: the
         #   harness's Django side is a bare `Parser` over this transcription, so
@@ -344,6 +348,7 @@ COMPARED_PATH = {
         (341, 344, "LoremNode.__init__"),
         (364, 367, "RegroupNode.__init__"),
         (400, 402, "NowNode.__init__"),
+        (426, 429, "PartialNode.__init__"),
         (441, 442, "ResetCycleNode.__init__"),
         (450, 451, "SpacelessNode.__init__"),
         (471, 472, "TemplateTagNode.__init__"),
@@ -368,6 +373,7 @@ COMPARED_PATH = {
         (1104, 1133, "load"),
         (1136, 1180, "lorem"),
         (1183, 1203, "now"),
+        (1270, 1285, "partial_func"),
         (1354, 1419, "regroup"),
         (1422, 1445, "resetcycle"),
         (1448, 1476, "spaceless"),

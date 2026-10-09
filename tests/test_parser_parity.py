@@ -63,6 +63,7 @@ from django.template.base import (  # noqa: E402
 from django.template.base import FilterExpression, Variable  # noqa: E402
 from django.template.engine import Engine  # noqa: E402
 from django.template import smartif  # noqa: E402
+from django.utils.datastructures import DeferredSubDict  # noqa: E402
 from django.utils.safestring import SafeData  # noqa: E402
 
 from django_rust_templates import _native, render  # noqa: E402
@@ -230,6 +231,8 @@ def describe(value):
     # M3's two object types. Neither defines `__eq__`, so without these arms a
     # bare `{{ x }}` compared two live objects by identity and could never be
     # equal — which is what adding variables to the corpus reported.
+    if isinstance(value, DeferredSubDict):
+        return describe_deferred_sub_dict(value)
     if isinstance(value, FilterExpression):
         return describe_filter_expression(value)
     if isinstance(value, Variable):
@@ -309,6 +312,35 @@ def describe(value):
         # diff as noise around the keys that actually differ.
         return {key: describe(item) for key, item in value.items()}
     return value
+
+
+def describe_deferred_sub_dict(mapping):
+    """`PartialNode.partial_mapping`, by what it *is* rather than by identity.
+
+    M13's `{% partial %}` is the first corpus row whose node holds a live view
+    over parser state instead of a value built from it: `partial_func` hands
+    `PartialNode` a `DeferredSubDict(extra_data, "partials")`
+    (`defaulttags.py:1279-1280`), and `PartialNode.render` is the only reader —
+    `self.partial_mapping[self.partial_name]` (`defaulttags.py:430-435`). Two
+    instances never compare equal, because `DeferredSubDict` defines no `__eq__`
+    and stores its keys as plain attributes:
+    `self.deferred_key = deferred_key` (`utils/datastructures.py:350-365`). So
+    without this arm the row compares two live objects and can never pass. That
+    is the same failure the `FilterExpression`, `Variable` and smartif arms
+    above exist for.
+
+    **The view is described, not the parent dict.** `parent_dict` is the whole
+    of `parser.extra_data`, which holds parser state no template can see; the
+    part a reader of the tree can see, and the part that changes when a
+    definition is added, is the sub-dict under `deferred_key`. Describing *that*
+    is why this arm is a comparison rather than a second `IGNORED_ATTRIBUTES`
+    entry: an ignore would pass a node deferred over the wrong key, and would
+    stop comparing anything the moment Task 4's rows put a partial in it.
+    """
+    return {
+        "deferred_key": mapping.deferred_key,
+        "sub": describe(mapping.parent_dict.get(mapping.deferred_key)),
+    }
 
 
 def describe_filter_expression(expression):

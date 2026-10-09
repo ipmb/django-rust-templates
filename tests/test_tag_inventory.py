@@ -342,17 +342,26 @@ class RustRegistryTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertNotIn(name, _native.builtin_tag_names_including_stubs())
 
-    def test_the_only_two_unimplemented_entries_are_the_m13_pair(self):
+    def test_the_last_unimplemented_entry_is_the_m13_pair_tail(self):
         """A stub is a real M13 tag, not a stand-in for a name Rust handed over.
 
         `builtin_tag_stub_names()` asks the registry itself which names have a compile
         function that returns `Unimplemented`, so pinning the set here is what
         separates "not done yet" from "not ours": `load` and `querystring` are
-        absent from the table entirely, and only `partial`/`partialdef` remain.
+        absent from the table entirely, and after M13's Task 3 only `partialdef`
+        remains. Task 4 empties it, and that row says so with a control; this one
+        is the pin that moves with each tag.
+
+        **The row's name moves with the literal**, which is why it is no longer
+        `..._the_m13_pair`: two names became one in Task 3, and a name asserting
+        a set of two while the assertion holds one is the same shape of rot as a
+        stale arithmetic in a comment (`registry.rs`'s twin of this pin carried
+        one until this task). A reader trusts the name far more often than the
+        literal.
         """
         from django_rust_templates import _native
 
-        self.assertEqual(set(_native.builtin_tag_stub_names()), {"partial", "partialdef"})
+        self.assertEqual(set(_native.builtin_tag_stub_names()), {"partialdef"})
 
     def test_no_m5_tag_is_still_a_stub(self):
         """M5's switch: the milestone is done iff this intersection is empty.

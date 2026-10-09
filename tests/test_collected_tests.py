@@ -271,7 +271,24 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # view twice over — a name that was never defined compiles, a definition written
 # *after* the node was built is visible through it, and two parsers see only
 # their own `extra_data`.
-PINNED = 447
+#
+# 447 → 449 is M13 Task 3, **two** net rows: `git diff tests/` since `b266741` is
+# `+3/-1`, and the subtraction is a rename rather than a removal.
+# `tests/test_partials_rust.py` gains
+# `test_the_tag_now_compiles_and_fails_at_render_instead` (the tag's failure
+# *moves* — compile-time `UnimplementedTag` to Django's render-time
+# `TemplateSyntaxError`, `defaulttags.py:430-435`) and
+# `test_the_argument_errors_are_djangos_two_messages_end_to_end` (the wildcard
+# arm's one message, through the shell, for both arities). The `-1` is
+# `tests/test_tag_inventory.py`'s
+# `test_the_only_two_unimplemented_entries_are_the_m13_pair` becoming
+# `test_the_last_unimplemented_entry_is_the_m13_pair_tail`: same row, but its
+# literal moved too, `{"partial", "partialdef"}` → `{"partialdef"}`, which is the
+# whole point of renaming it. So 447 + 3 - 1 = 449. Measured by discovery, not
+# read from the failure text: that text says "2 rows" whether the two arrived as
+# two additions or as three additions minus one rename, and only the second is
+# what happened.
+PINNED = 449
 
 
 def collected() -> unittest.TestSuite:

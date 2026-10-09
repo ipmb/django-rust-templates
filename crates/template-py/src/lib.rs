@@ -1437,6 +1437,39 @@ impl Host for FilterCheckHost<'_> {
         }
     }
 
+    fn partial_node(&self, name: &str) -> Result<CoreNodeRef, Error> {
+        let Some(host) = &self.host else {
+            // Reachable, unlike `call_tag`'s `unreachable!`: `has_tag` answering
+            // `false` with no host routes `{% partial %}` *towards* Rust's
+            // registry rather than away from it, and the registry has a body as
+            // of M13's Task 3 — so `_native.parse("{% partial p %}")` with no
+            // `ShellHost` lands here. `Internal` for `compile_filter`'s reason:
+            // nothing raised a Python exception, so this is the caller's
+            // integration bug and not a `Host` error flattened.
+            return Err(Error::internal(
+                "this parse reached {% partial %} with no host; pass a \
+                 `ShellHost` to `_native.parse`",
+            ));
+        };
+        // The object is `ShellHost.partial_node`'s — a real `PartialNode`
+        // holding a live `DeferredSubDict` — and it goes into the same table
+        // `call_tag`'s nodes and `{% cycle %}`'s slots live in: a `NodeRef` is
+        // how a descriptor names an object this side must not read (§5.2), and
+        // the materialiser's `HOST_NODE` arm returns it.
+        //
+        // The name crosses **unresolved**, and that is the seam's contract
+        // rather than an omission: resolving it here would snapshot parser
+        // state at compile time and break `{% partial p %}{% partialdef p %}`,
+        // a template Django renders. `test_partial_node_does_not_resolve_the_name`
+        // is the row that pins it on the Python side.
+        let node = host
+            .call_method1("partial_node", (name,))
+            .map_err(|error| python_host_error(host.py(), &error))?;
+        let mut refs = self.refs.borrow_mut();
+        refs.push(Some(node.unbind()));
+        Ok(CoreNodeRef((refs.len() - 1) as u64))
+    }
+
     /// Python's own `repr()`, which is why this override exists at all.
     ///
     /// [`Host::repr`]'s default (`py_repr_str`) is exact on ASCII only, and the

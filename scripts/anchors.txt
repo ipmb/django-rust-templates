@@ -22,6 +22,7 @@ crates/template-core/src/parser/mod.rs:420-429	crates/template-core/src/parser/m
 crates/template-core/src/parser/mod.rs:473-478	crates/template-core/src/parser/mod.rs	473	478	token.or_else	-
 crates/template-core/src/parser/mod.rs:532	crates/template-core/src/parser/mod.rs	532	-	pub fn extend_nodelist(	-
 crates/template-core/src/parser/mod.rs:538	crates/template-core/src/parser/mod.rs	538	-	if node.must_be_first && nodelist.contains_nontext {	-
+crates/template-core/src/parser/registry.rs:117-132	crates/template-core/src/parser/registry.rs	117	132	-	-
 crates/template-core/src/parser/resolve.rs:28	crates/template-core/src/parser/resolve.rs	28	-	pub enum Step {	-
 crates/template-core/src/parser/resolve.rs:156	crates/template-core/src/parser/resolve.rs	156	-	pub trait LookupTarget {	-
 crates/template-core/src/parser/resolve.rs:253	crates/template-core/src/parser/resolve.rs	253	-	pub enum LookupOutcome {	-
@@ -481,7 +482,9 @@ defaulttags.py:1258	django/template/defaulttags.py	1258	-	-	-
 defaulttags.py:1265	django/template/defaulttags.py	1265	-	-	-
 defaulttags.py:1268	django/template/defaulttags.py	1268	-	@register.tag(name="partial")	-
 defaulttags.py:1277-1281	django/template/defaulttags.py	1277	1281	case "partial", partial_name:	-
+defaulttags.py:1277-1283	django/template/defaulttags.py	1277	1283	raise TemplateSyntaxError("'partial' tag requires a single argument")	-
 defaulttags.py:1279	django/template/defaulttags.py	1279	-	extra_data = parser.extra_data	-
+defaulttags.py:1279-1280	django/template/defaulttags.py	1279	1280	DeferredSubDict(extra_data, "partials")	-
 defaulttags.py:1286	django/template/defaulttags.py	1286	-	simple_tag	-
 defaulttags.py:1286-1287	django/template/defaulttags.py	1286	1287	@register.simple_tag(name="querystring", takes_context=True)	def querystring(context, *args, **kwargs):
 defaulttags.py:1352-1417	django/template/defaulttags.py	1352	1417	@register.tag	return RegroupNode(target, expression, var_name)
@@ -711,6 +714,7 @@ tz.py:193-194	django/templatetags/tz.py	193	194	# token.split_contents() isn't u
 tz.py:196	django/templatetags/tz.py	196	-	len(args) != 3 or args[1] != "as"	-
 tz.py:197-199	django/templatetags/tz.py	197	199	-	-
 django/test/utils.py:108-114	django/test/utils.py	108	114	def instrumented_test_render(self, context):	-
+utils/datastructures.py:350-365	django/utils/datastructures.py	350	365	self.deferred_key = deferred_key	-
 dateformat.py:42	django/utils/dateformat.py	42	-	-	-
 dateformat.py:44-48	django/utils/dateformat.py	44	48	TypeError	-
 dateformat.py:326-329	django/utils/dateformat.py	326	329	-	-

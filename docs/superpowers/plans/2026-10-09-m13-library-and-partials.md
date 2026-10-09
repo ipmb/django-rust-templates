@@ -31,7 +31,7 @@ The five input classes the spec implies but no existing row exercises, each owne
 
 1. **A `{% partial %}` that appears *before* its `{% partialdef %}`.** Django's `partial_mapping` is a `DeferredSubDict` — a live view looked up at *render* time — so the order in the source is irrelevant and the template renders. A Rust implementation that read the mapping at compile time would raise `Partial 'p' is not defined in the current template.` on a template Django renders. → **Task 3**.
 2. **A duplicate `{% partialdef %}` name.** Django raises `TemplateSyntaxError` at compile time, naming the *origin* template: `Partial 'p' is already defined in the 'x.html' template.` The check is "in template order", so the *first* definition wins and the *second* raises. → **Task 4**.
-3. **`{% endpartialdef %}`'s two spellings — and the whitespace that is *not* a third.** Django accepts exactly `endpartialdef` and `endpartialdef p`, with one space and no more. The two checks are different checks on the same token: the scan that decides where the block *ends* matches the **first word** (`base.py:561`, `:564` → our `parser/mod.rs:339-355`), while the check that decides whether it ended *legitimately* compares the **whole contents** (`defaulttags.py:1243`). So `{% endpartialdef  p %}` with two spaces — or three, or a tab — stops the scan and is then **refused**, with `Invalid block tag on line 1: 'endpartialdef', expected 'endpartialdef' or 'endpartialdef p'.` Measured on the pinned tree at 6.0.9, all four spellings: an implementation that compares whole contents to *stop* reports `Unclosed tag` for the multi-space form, and one that compares the first word to *validate* silently accepts a template Django rejects. The two failure directions are different errors on a template that never reaches render. Measured, all four spellings, by `.review/m13-measurements/m13_measure_endpartial_spellings.py` — run it rather than quoting the table. → **Task 4**.
+3. **`{% endpartialdef %}`'s two spellings — and the whitespace that is *not* a third.** Django accepts exactly `endpartialdef` and `endpartialdef p`, with one space and no more. The two checks are different checks on the same token: the scan that decides where the block *ends* matches the **first word** (`base.py:561`, `:564` → our `parser/mod.rs:367-375`, the `pyunicode::split(...).first()` command and the `parse_until.contains` test), while the check that decides whether it ended *legitimately* compares the **whole contents** (`defaulttags.py:1244`). So `{% endpartialdef  p %}` with two spaces — or three, or a tab — stops the scan and is then **refused**, with `Invalid block tag on line 1: 'endpartialdef', expected 'endpartialdef' or 'endpartialdef p'.` Measured on the pinned tree at 6.0.9, all four spellings: an implementation that compares whole contents to *stop* reports `Unclosed tag` for the multi-space form, and one that compares the first word to *validate* silently accepts a template Django rejects. The two failure directions are different errors on a template that never reaches render. Measured, all four spellings, by `.review/m13-measurements/m13_measure_endpartial_spellings.py` — run it rather than quoting the table. → **Task 4**.
 4. **A `{% partialdef %}` nested inside a host-compiled block tag's body.** The hole this milestone closes is *per-route*, not per-tag: `Library.simple_block_tag`'s compile function calls Django's `parser.parse`, so a partial defined inside a user tag's body is still Django's work, and `assert_trees_match` over that body compares Django with Django. → **Task 7**.
 5. **A partial body that names an enclosing `{% cycle %}`.** Django's one-argument `{% cycle c %}` returns the *same node object* as the `{% cycle … as c %}` that named it — measured, `nodes[0] is nodes[1]` is `True` — and ours is an *index* into a per-parse reference table, so "one slot" only means "one node" if the table is one object for the whole parse. `register_partial_def` materialises a body mid-parse, which is where a snapshot table would split it in two. The output does **not** reveal this: `PartialTemplate.render` pushes a render-context state (`base.py:341-346`), so a named cycle restarts inside every partial render anyway, and Django's own string for the shape is `'aaa'` rather than the `'aba'` a single advancing node would give. The row therefore asserts **identity**, not output. → **Task 5**, which is **conditional on that row failing** — the premise's illustration was falsified twice before the mechanism was understood, so the task ships a comment instead of a change if the row passes.
 
@@ -335,7 +335,7 @@ In `crates/template-core/src/parser/host.rs`, after `compile_filter` (`:256`). B
     /// because the host is the thing that owns the dict.
     ///
     /// The name is not resolved here. Resolution is `PartialNode.render`'s
-    /// `self.partial_mapping[self.partial_name]` (`defaulttags.py:432-435`),
+    /// `self.partial_mapping[self.partial_name]` (`defaulttags.py:430-435`),
     /// which raises `Partial 'p' is not defined in the current template.` when
     /// the lookup fails — so a compile-time lookup would raise the *render*
     /// message at the wrong moment, on a template Django renders.
@@ -805,6 +805,10 @@ Expected: PASS.
         let stubs = ["partialdef"];
 ```
 
+**The same test has a second half, and shrinking `stubs` alone reddens it.** `let mut expected: Vec<&str>` (a literal list of the *implemented* names) sits below the `stubs` pin, and the two halves move in opposite directions: a tag that lands leaves `stubs` and joins `expected` while the table's size stays put. `partial` stays in the tag table — only its *body* stops being a stub — so `builtin_tag_names_including_stubs()` still contains it and `expected` must **gain `"partial"` in this commit**. After Task 3 the list is **24**, `stubs` is **1**, and the table is **25** (`the_registry_has_the_twenty_five_names_rust_owns` asserts 25 directly). The comment beside `expected` carried its own stale sum — *"this is 22, `stubs` is still 2, and the sum is 24"*, against a list of 23 and a table of 25 — and it was stale **before** Task 3. Re-derive every figure in that sentence from the two literals rather than adjusting one of them: the plan's operands are not to be borrowed.
+
+`#[expect(dead_code)]` on `support::PartialHost` (`tags/mod.rs:437`, and the one on `PartialDefCall`, `:412` at `b266741`) is removed in this commit, not left in place: Task 3's first row constructs a `PartialHost`, so both attributes fire `unfulfilled_lint_expectations` under `-D warnings`. That is the attribute working as designed — it removes itself when the code it guards is finally used — and the replacement is a comment recording that it fired. (Measured on landing: both fired; the surviving line numbers are `:412` and `:437`.)
+
 `tests/test_tag_inventory.py:345` — the row is `test_the_only_two_unimplemented_entries_are_the_m13_pair`, and its docstring already opens *"A stub is a real M13 tag, not a stand-in for a name Rust handed over"*. Rename it and shrink its literal:
 
 ```python
@@ -839,7 +843,7 @@ Add to `tests/test_partials_rust.py`'s `PartialNodeSeamTests`, below Task 2's th
         Before: `{% partial p %}` raised `UnimplementedTag` from the registry, at
         compile. After: it compiles — the node is built — and the failure (if the
         name is never defined) comes from `PartialNode.render`
-        (`defaulttags.py:432-435`). So the pair of assertions is about *when*, and
+        (`defaulttags.py:430-435`). So the pair of assertions is about *when*, and
         asserting only the message would pass on the old tree too.
         """
         with self.assertRaises(TemplateSyntaxError) as caught:
@@ -854,7 +858,7 @@ Add to `tests/test_partials_rust.py`'s `PartialNodeSeamTests`, below Task 2's th
         """The tag body's messages, through the whole shell rather than a unit row.
 
         `crates/template-core/src/parser/tags/partial.rs` asserts these two under
-        `NoHost`; this asserts the *class* the shell hands back for them, which is
+        `PartialHost`; this asserts the *class* the shell hands back for them, which is
         the half the Rust row cannot see.
         """
         for source, message in [
@@ -901,7 +905,7 @@ The harder half: five match arms, two source offsets read from token positions, 
 - Consumes: `Parser::register_partial_def` (Task 2), `Parser::parse`, `Parser::next_token`, `Parser::invalid_block_tag`, `Parser::unclosed_block_tag`.
 - Produces: `builtin_tag_stub_names() == []`, and every tag inside a partial body compiled by Rust.
 
-**Upstream, verbatim** (`.django/django/template/defaulttags.py:1225-1265`) — the five arms, the `valid_endpartials` tuple, the two `getattr(token, "position", None)` guards, the `parser.parse`/`next_token`/`invalid_block_tag` sequence, the `setdefault("partials", {})` and the duplicate raise.
+**Upstream, verbatim** (`.django/django/template/defaulttags.py:1221-1265`) — the five arms, the `valid_endpartials` tuple, the two `getattr(token, "position", None)` guards, the `parser.parse`/`next_token`/`invalid_block_tag` sequence, the `setdefault("partials", {})` and the duplicate raise.
 
 - [ ] **Step 1: Write the failing rows**
 
@@ -979,7 +983,7 @@ mod tests {
     fn whitespace_stops_the_scan_and_then_fails_the_whole_contents_check() {
         // Review Focus 3, and the reason there are *two* checks on one token.
         // Django's scan matches the first word (`base.py:561`, `:564`) and the
-        // validation compares the whole contents (`defaulttags.py:1243`), so
+        // validation compares the whole contents (`defaulttags.py:1244`), so
         // `endpartialdef  p` terminates the block and is then refused. Measured
         // on the pinned tree: two spaces, three spaces and a tab all print this
         // same message, and the message prints the *first word*.
@@ -1066,8 +1070,8 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
     let source_start = token.position.map(|position| position.0);
 
     // `Parser::parse` returns `Err(unclosed_block_tag)` rather than `Ok` when
-    // `parse_until` is non-empty and the tokens run out (`parser/mod.rs:425-429`),
-    // and it *prepends* the token it stopped on (`parser/mod.rs:349-355`,
+    // `parse_until` is non-empty and the tokens run out (`parser/mod.rs:451-455`),
+    // and it *prepends* the token it stopped on (`parser/mod.rs:380`,
     // Django's `base.py:568`). So reaching here means the scan stopped on a
     // matching token and that token is the next one — it cannot be `None`, and a
     // defensive `else` would be a branch no input can reach and therefore no row
@@ -1110,9 +1114,9 @@ Expected: PASS. If `the_two_source_offsets_come_from_the_two_tokens` is off by t
 
 - [ ] **Step 4: Empty the stub pins and amend the rule's note**
 
-`registry.rs:503` → `let stubs: [&str; 0] = [];`, and `registry.rs:117-132`'s "Flagged, not resolved" note: the pair is no longer flagged, so the note must say so rather than be deleted — the reason it gave (a live view over parse state, which a `NodeDesc` cannot represent) is *why the seam exists*, and it is now a satisfied rule rather than an open one.
+`registry.rs:504` (`:503` at `b266741`; Task 3's comment expansion moved it) → `let stubs: [&str; 0] = [];`, **and the `expected` list below it gains `"partialdef"` in the same edit** (the list becomes 25, `stubs` is empty, the table stays 25 — all three re-derived, since the same sentence's old operands were stale at Task 3), and `registry.rs:117-132`'s "Flagged, not resolved" note: the pair is no longer flagged, so the note must say so rather than be deleted — the reason it gave (a live view over parse state, which a `NodeDesc` cannot represent) is *why the seam exists*, and it is now a satisfied rule rather than an open one.
 
-`tests/test_tag_inventory.py:345` → `test_the_only_two_unimplemented_entries_are_the_m13_pair` becomes `test_no_builtin_tag_is_still_a_stub`, asserting `set() == set()` **with a positive control**, because an empty set is satisfied by a registry that lost its entries:
+`tests/test_tag_inventory.py:345` → the row Task 3 renamed to `test_the_last_unimplemented_entry_is_the_m13_pair_tail` becomes `test_no_builtin_tag_is_still_a_stub`, asserting `set() == set()` **with a positive control**, because an empty set is satisfied by a registry that lost its entries:
 
 ```python
     def test_no_builtin_tag_is_still_a_stub(self):
@@ -1715,7 +1719,7 @@ Message: `docs: M13 closes — the last module, the empty stub set, and the live
 
 **4. Review Focus.** Each of the five has a named task and a real row: (1) Task 3 Step 5, then Task 4 Step 5's `test_a_partial_before_its_definition_renders` once both tags exist; (2) the check is Task 2 Step 8's (`ShellHost.register_partial_def`), the row is Task 4 Step 5's `test_a_duplicate_definition_names_the_origin_template` — project-side, because the corpus's own duplicate row is a gate label asserting Django's behaviour and not evidence about our route; (3) Task 4 Step 1's `the_accepted_spellings_are_exactly_two`, `whitespace_stops_the_scan_and_then_fails_the_whole_contents_check` and `the_wrong_end_tag_name_is_invalid`; (4) Task 7; (5) Task 5 Step 1.
 
-**Two Review Focus items were falsified while writing this, and the corrections are the interesting part.** Item 3 originally claimed `{% endpartialdef   p %}` was *accepted* — reasoning that `parse_until` matches `token.contents.split()[0]`, which extra whitespace does not disturb. That reasoning is right about the scan and wrong about the tag: measured on the pinned tree at 6.0.9, two spaces, three spaces and a tab each stop the scan and are then **refused** by `partialdef_func`'s whole-contents check, with the single-space form the only named spelling accepted. Two consequences are now in the plan: Task 4's body compares whole contents while the scan (which is `Parser::parse`'s) compares the first word, and `next_token` after a successful `parse_until` parse is `expect`ed rather than matched — because `parse` returns `Err(unclosed_block_tag)` when the tokens run out (`parser/mod.rs:425-429`), so a defensive `else` is a branch no input can reach and no row can pin.
+**Two Review Focus items were falsified while writing this, and the corrections are the interesting part.** Item 3 originally claimed `{% endpartialdef   p %}` was *accepted* — reasoning that `parse_until` matches `token.contents.split()[0]`, which extra whitespace does not disturb. That reasoning is right about the scan and wrong about the tag: measured on the pinned tree at 6.0.9, two spaces, three spaces and a tab each stop the scan and are then **refused** by `partialdef_func`'s whole-contents check, with the single-space form the only named spelling accepted. Two consequences are now in the plan: Task 4's body compares whole contents while the scan (which is `Parser::parse`'s) compares the first word, and `next_token` after a successful `parse_until` parse is `expect`ed rather than matched — because `parse` returns `Err(unclosed_block_tag)` when the tokens run out (`parser/mod.rs:451-455`), so a defensive `else` is a branch no input can reach and no row can pin.
 
 Item 5 was worse: it asserted two rendered values (`"aa"` correct, `"ab"` under the snapshot) and a causal story, and all three were wrong. Measured, Django gives `'aaa'`, and the reason is a mechanism the plan had not considered — `PartialTemplate.render` pushes a render-context state, so a named cycle **restarts inside every partial render** and the output no longer distinguishes a live table from a snapshot. So Task 5's row asserts identity instead of output, the instrument that decides it is committed at `.review/m13-measurements/m13_measure_cycle_across_partials.py`, and the task is explicitly conditional on its own row failing. The general lesson is the one this project keeps relearning: **a row's expected value is a claim like any other**, and the example that illustrates a mechanism needs measuring before the mechanism is argued from it.
 

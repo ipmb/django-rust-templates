@@ -401,13 +401,13 @@ pub(crate) mod support {
 
     /// One `register_partial_def` call, as the tag made it.
     ///
-    /// `expect` rather than `allow`, on purpose: the two items below are used by
-    /// the `partial`/`partialdef` rows, which arrive in the next two tasks of the
-    /// same milestone. When they do, this expectation becomes *unfulfilled* and
-    /// the build fails until the attribute is removed — which is the forcing
-    /// function an `allow` would not give, and the reason to write it this way
-    /// rather than to defer the host to the task that uses it.
-    #[expect(dead_code)]
+    /// **This carried `#[expect(dead_code)]` until M13's Task 3, and the
+    /// attribute fired exactly as its comment said it would** — the build
+    /// failed with `unfulfilled_lint_expectations` the moment `partial`'s rows
+    /// constructed a `PartialHost`, which is the forcing function an `allow`
+    /// would have silently skipped. Removed rather than re-scoped, because what
+    /// made the item dead was the *host* being unconstructed, and the host is
+    /// constructed now.
     #[derive(Debug, PartialEq, Eq)]
     pub(crate) struct PartialDefCall {
         pub(crate) name: String,
@@ -428,7 +428,11 @@ pub(crate) mod support {
     /// host owns. The rows here are about what the **tag** passes across the
     /// seam; what the shell does with it is `tests/test_partials_rust.py`'s
     /// subject.
-    #[expect(dead_code)] // used from the `partial`/`partialdef` rows; see above
+    ///
+    /// `#[expect(dead_code)]` stood here until Task 3 and fired then; see
+    /// `PartialDefCall` above for the measurement. `defs` is still unread —
+    /// `register_partial_def` is Task 4's — but the field is written by a live
+    /// trait impl, so it is not dead code and needs no attribute to say so.
     #[derive(Default)]
     pub(crate) struct PartialHost {
         pub(crate) defs: RefCell<Vec<PartialDefCall>>,

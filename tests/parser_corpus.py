@@ -376,6 +376,28 @@ TEMPLATES = [
     # keyword's name and value — a port that calls `token_kwargs` without the
     # flag compiles `a` as the name and `b` as the value and still parses.
     "{% load i18n %}{% blocktranslate with a as b %}x{% endblocktranslate %}",
+    # --- M13 Task 3: `{% partial %}` ---------------------------------------
+    # The row the coverage gate *demands* the moment the tag leaves the stub
+    # set, and the reason it has to exist here rather than only in
+    # `tests/test_partials_rust.py`: `test_the_corpus_covers_every_implemented_tag_with_a_success_path`
+    # derives its demand from `including_stubs() - stub_names()`, so a tag that
+    # lands without a corpus row reddens that test in the same commit. That is
+    # the mechanism working, not a chore — it is what makes "every implemented
+    # tag has a row" a derivation rather than a list someone maintains.
+    #
+    # **No definition in the source, on purpose.** `{% partial p %}` alone is a
+    # template Django *parses* and only fails to *render* ("Partial 'p' is not
+    # defined in the current template."), so it is a success row for the parse
+    # corpus — the mirror of `{% badtag %}` above, whose failure is also at
+    # render. Adding a `{% partialdef %}` here would make it Task 4's row
+    # instead, since that tag is still a stub and raises `UnimplementedTag`.
+    #
+    # It is also the first row whose node carries a value that is neither a
+    # node nor a plain value: `PartialNode.partial_mapping` is a
+    # `DeferredSubDict`, a live view over parser state, which is why `describe`
+    # has an arm for it (see its comment). Without that arm both sides compare
+    # two live objects by identity and this row fails looking like a Rust bug.
+    "{% partial p %}",
 ]
 
 

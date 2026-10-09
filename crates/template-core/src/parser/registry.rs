@@ -497,10 +497,11 @@ mod tests {
         // **All eleven M5 tags landed**, leaving the four names M5 was never
         // going to touch; **M6 then took two of them out of the table
         // entirely** — `load` and `querystring` are host-owned now, so they are
-        // not stubs, they are absent. Two names remain, both M13's, and the
-        // literal shrinks with them here rather than at the end of the
-        // milestone, which is what keeps every commit in between green.
-        let stubs = ["partial", "partialdef"];
+        // not stubs, they are absent. **M13 takes the last two out one at a
+        // time**, and this literal shrinks with each rather than at the end of
+        // the milestone, which is what keeps every commit in between green:
+        // `partial`'s body landed in Task 3, so one name is left.
+        let stubs = ["partialdef"];
         assert_eq!(
             builtin_tag_stub_names(),
             stubs,
@@ -512,13 +513,25 @@ mod tests {
         }
         // The *implemented* names, which is the other half of the same pin:
         // every table entry is either here or in `stubs`, and the two halves
-        // move in opposite directions. The nine are M2's, the eleven after them
-        // landed across M5's tasks, and M6 removed two names from the table
-        // rather than implementing them — so this list was 20 and `stubs` is 2,
-        // summing to the registry's 22. **M7's `block` and `extends` are the
-        // first names to move between the halves rather than in or out of the
-        // table**: neither was ever a stub, and both arrive from the `absent`
-        // list, so this is 22, `stubs` is still 2, and the sum is 24.
+        // move in opposite directions — a tag that lands leaves `stubs` for
+        // this list while the table's size stays put. **This is 24 and `stubs`
+        // is 1, summing to the table's 25**, which
+        // `the_registry_has_the_twenty_five_names_rust_owns` asserts directly —
+        // so the two numbers in this sentence are checkable against a row
+        // rather than asserted twice from the same source. M13's Task 3 is what
+        // moved `partial` from `stubs` to here; Task 4 moves `partialdef`.
+        //
+        // **The counts this comment carried until Task 3 were stale and were
+        // re-derived rather than adjusted.** It read "this is 22, `stubs` is
+        // still 2, and the sum is 24" against a list of 23 and a table of 25 —
+        // a sum disagreeing with the test beside it by one, which is worse than
+        // no sum at all, and the kind of drift `--update`-style patching would
+        // have preserved by moving the wrong number. Nothing reddens when a
+        // prose count rots; only re-deriving it catches that.
+        //
+        // **M7's `block` and `extends` remain the first names to move between
+        // the halves rather than in or out of the table**: neither was ever a
+        // stub, and both arrive from the `absent` list.
         let mut expected: Vec<&str> = [
             "autoescape",
             "block",
@@ -535,6 +548,7 @@ mod tests {
             "include",
             "lorem",
             "now",
+            "partial",
             "regroup",
             "resetcycle",
             "spaceless",
