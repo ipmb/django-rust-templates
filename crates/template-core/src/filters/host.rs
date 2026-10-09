@@ -684,7 +684,7 @@ pub trait FilterHost {
     /// `now` is an `Option` for the same reason: `timeuntil_filter` passes
     /// `arg=None` straight through, and `now` is filled from `d.tzinfo` *before*
     /// the swap, so a swap performed by the caller would have to pass `d = None`
-    /// and die at `:61` on `d.year`.
+    /// and die at `timesince.py:62` on `d.year`.
     ///
     /// `reversed` is therefore a parameter here rather than a property of the
     /// call site, because it is only expressible on Python's side of the seam.

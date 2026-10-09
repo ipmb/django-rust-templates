@@ -365,6 +365,7 @@ text.py:480	django/utils/text.py	480	-	-	-
 timesince.py:28	django/utils/timesince.py	28	-	-	-
 timesince.py:60-73	django/utils/timesince.py	60	73	now.astimezone(d.tzinfo)	-
 timesince.py:60-70	django/utils/timesince.py	60	70	-	-
+timesince.py:62	django/utils/timesince.py	62	-	d = datetime.datetime(d.year, d.month, d.day)	-
 timesince.py:67-68	django/utils/timesince.py	67	68	-	-
 timesince.py:83	django/utils/timesince.py	83	-	total_months = (now.year - d.year) * 12 + (now.month - d.month)	-
 timesince.py:138-143	django/utils/timesince.py	138	143	timeuntil	-
