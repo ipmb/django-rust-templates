@@ -9,7 +9,7 @@ the tokens it may consume. `Parser.parse` already leaves the end tag on the stac
 for `delete_first_token` (`base.py:564-569`), so a callback that does
 ``nodelist = parser.parse((end_name,)); parser.delete_first_token()`` — which is
 `Library.simple_block_tag` (`library.py:211-212`) and `tag_27584.badtag`
-(`:8-9`) verbatim — runs unmodified.
+(`tag_27584.py:8-9`) verbatim — runs unmodified.
 
 **A `has_tag` that answered `command in parser.tags` would break every built-in.**
 Every one of Django's built-ins is in that dict, so Rust would be told to compile
@@ -150,8 +150,8 @@ class ShellHost:
         kind, contents, lineno, position = token_wire
         token = Token(TokenType(kind), contents, position, lineno)
         # Django's `Parser.parse` pushes `(command, token)` *before* dispatching
-        # (`base.py:573`) and pops after the compile returns (`:587-588`). Rust
-        # drives the outer loop and keeps its own stack
+        # (`base.py:573`) and pops after the compile returns (`base.py:587-588`).
+        # Rust drives the outer loop and keeps its own stack
         # (`crates/template-core/src/parser/mod.rs:52,304,343`), so Django's is
         # empty here — and a host block tag whose body is unclosed reaches
         # `Parser.unclosed_block_tag`, which is `self.command_stack.pop()`

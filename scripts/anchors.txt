@@ -24,6 +24,7 @@ base.py:568	django/template/base.py	568	-	self.prepend_token(token)	-
 base.py:573	django/template/base.py	573	-	(command, token)	-
 base.py:583-585	django/template/base.py	583	585	except Exception as e:	raise self.error(token, e)
 base.py:585	django/template/base.py	585	-	-	-
+base.py:587-588	django/template/base.py	587	588	self.command_stack.pop()	-
 base.py:611	django/template/base.py	611	-	-	-
 base.py:615	django/template/base.py	615	-	node.token = token	-
 base.py:619-630	django/template/base.py	619	630	def error(self, token, e):	return e
