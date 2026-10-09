@@ -174,6 +174,70 @@ def _is_ours(module) -> bool:
     return str(getattr(module, "__file__", "") or "").startswith(str(_IMPL_DIR))
 
 
+_CAPTURE_NAMESPACES = ("django.template", "django.templatetags")
+
+
+def _in_capture_namespace(name: str) -> bool:
+    """Is ``name`` a module whose globals can hold a class from ours?"""
+    return any(
+        name == namespace or name.startswith(namespace + ".")
+        for namespace in _CAPTURE_NAMESPACES
+    )
+
+
+def _stale_captures() -> list[str]:
+    """Bindings in ``sys.modules`` that name a class the defining module lost.
+
+    **The hazard.** ``from django.template.base import Node`` is a copy taken
+    when the importing module is executed, and nothing done to
+    ``django.template.base`` afterwards can change it. A module executed while
+    *Django's* template modules were current keeps Django's ``Node`` for the rest
+    of the process, so after we interpose ``base`` that module builds Django
+    nodes while everything else builds ours. Measured, in the two shapes the
+    design spec names: a captured **class** makes every ``isinstance`` false
+    (``django/template/defaulttags.py:30-38`` takes nine names including ``Node``
+    and ``NodeList``), and a captured **enum member** makes every comparison
+    false (``django/templatetags/i18n.py:5`` imports ``TokenType``). A captured
+    *function* is the mild one — stale but working.
+
+    **Why this and not a precondition on ``sys.modules``.** Refusing whenever a
+    ``django.template*`` module is already imported would refuse the ordinary
+    ``uninstall()``/``install()`` cycle, where the modules we serve come back
+    *from the cache* — the same objects, so their captures are still valid. What
+    is actually wrong is narrower, and it is a property of the binding rather
+    than of the module's presence: a global whose value is no longer what its
+    defining module binds. So this compares identities, after the substitution
+    has been made, and reports only the bindings that are now pointing at a
+    universe nothing else is in.
+
+    Compared **by name, not by the local spelling**: ``import Node as N`` is
+    legal, and the local attribute name then says nothing about which name in the
+    defining module the copy came from.
+    """
+    stale = []
+    for name, module in list(sys.modules.items()):
+        if module is None or not _in_capture_namespace(name):
+            continue
+        if _served(name) or _is_ours(module):
+            continue
+        for attr, value in list(vars(module).items()):
+            owner = getattr(value, "__module__", None)
+            if not isinstance(owner, str) or not _served(owner):
+                continue
+            defining = sys.modules.get(owner)
+            if defining is None:
+                continue
+            value_name = getattr(value, "__name__", None)
+            if value_name is None:
+                continue
+            if getattr(defining, value_name, None) is not value:
+                stale.append(
+                    f"{name}.{attr} is a {value_name} from before the "
+                    f"substitution, while {owner}.{value_name} is ours"
+                )
+    return stale
+
+
 # Modules we have executed, kept across install/uninstall cycles, and Django's
 # own modules we displaced for the names the finder serves.
 #
@@ -265,6 +329,20 @@ def install(strict: bool = False) -> None:
 
     importlib.import_module(TARGET)
 
+    # The substitution is in place, so a capture from the previous universe is
+    # now tellable from a live binding — see `_stale_captures`. Undo before
+    # raising, so a caller that catches this is left where it started rather
+    # than half-interposed.
+    stale = _stale_captures()
+    if stale:
+        uninstall()
+        raise ShimError(
+            "these modules imported names from Django's template modules before "
+            "this package was installed, and nothing can rebind a copy — "
+            "install before importing `django.template`, or start a fresh "
+            "interpreter:\n  " + "\n  ".join(stale)
+        )
+
     if strict:
         remaining = unshimmed()
         if remaining:
@@ -277,16 +355,32 @@ def install(strict: bool = False) -> None:
 def uninstall() -> None:
     global _installed_finder
 
-    if _installed_finder is not None:
-        try:
-            sys.meta_path.remove(_installed_finder)
-        except ValueError:
-            pass
-        _installed_finder = None
+    # **Not a no-op to skip.** With the finder already out, the swap below runs
+    # against Django's own modules and files them under the *ours* cache — so the
+    # next `install()` places Django's `base` under our name, and every module
+    # holding *our* `Node` is then reported stale by the check above, because the
+    # binding it is compared against has become Django's. Measured in
+    # `test_shim`'s own run: 24 bindings reported, each of them correct until a
+    # `uninstall()` was issued for a shim that was already out. `test_shim`'s
+    # `tearDown` uninstalls and its rows call `uninstall()` themselves, so the
+    # redundant call is the ordinary path here, not a corner.
+    if _installed_finder is None:
+        return
+
+    try:
+        sys.meta_path.remove(_installed_finder)
+    except ValueError:
+        pass
+    _installed_finder = None
 
     # Mirror of `install`: our served modules go back in the cache, Django's own
     # come back out of it. The non-served modules were never removed, so they
     # are still the objects every other module is holding.
+    #
+    # Everything served that is in `sys.modules` here is ours: `install` places
+    # our copy of every served name it has cached, and anything it has not is
+    # imported through the finder. The guard above is what keeps that true —
+    # without it this loop files Django's modules under the *ours* cache.
     for name in list(sys.modules):
         if _served(name):
             _our_modules[name] = sys.modules[name]
