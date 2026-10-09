@@ -22,3 +22,20 @@ Django and would "prove" the filter path is Django's by measuring a run in which
 our engine was never installed. That is not hypothetical: the first run of this
 script did exactly that, and printed `django.template.base -> .django/...` while
 the conclusion it was written to test was about our `_impl/base.py`.
+
+**The rule is not "never use `-I`" — it is "never use `-I` when you want the
+shim".** An instrument that wants the *opposite* needs the opposite flag, and
+`.review/m12-measurements/`'s unshimmed probe headers **require** `-I` for the
+same reason this forbids it: `-I` makes `sitecustomize` unreachable rather than
+asking it to stand down. That is a sharper guarantee than
+`DJANGO_RUST_TEMPLATES=0`, and its cost is that the pinned tree goes with it —
+`.django/` arrives by the `PYTHONPATH` that `-E` closes, so those probes carry an
+explicit `sys.path.insert` of their own.
+
+The two directories therefore disagree about one flag **deliberately**. Stated
+here as well as there because a reader who finds the same flag forbidden in one
+place and required in another will read a contradiction, and the repair they will
+reach for — making one match the other — silently breaks whichever instrument
+they did not run. That is D3′, the vacuity reasons and the `milestone_ownership`
+clause a fourth time: two correct statements, where the second reader cannot tell
+the disagreement was chosen.
