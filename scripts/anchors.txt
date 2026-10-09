@@ -185,6 +185,7 @@ defaultfilters.py:642-648	django/template/defaultfilters.py	642	648	-	-
 defaultfilters.py:651-665	django/template/defaultfilters.py	651	665	-	-
 defaultfilters.py:651-666	django/template/defaultfilters.py	651	666	@register.filter("slice", is_safe=True)	-
 defaultfilters.py:669-743	django/template/defaultfilters.py	669	743	-	-
+defaultfilters.py:708-714	django/template/defaultfilters.py	708	714	if isinstance(next_item, (list, tuple, types.GeneratorType)):	yield item, next_item
 defaultfilters.py:745-754	django/template/defaultfilters.py	745	754	-	-
 defaultfilters.py:757-776	django/template/defaultfilters.py	757	776	get_digit	-
 defaultfilters.py:783-794	django/template/defaultfilters.py	783	794	-	-

@@ -329,7 +329,8 @@ pub trait FilterHost {
     /// that argument is against *splitting* a semantic unit, and this question
     /// has nothing to be fused with.
     fn is_tuple(&self, value: &Value) -> bool;
-    /// `unordered_list`'s nested-sequence test (`:695-706`). `Some(items)` when
+    /// `unordered_list`'s nested-sequence test: the `isinstance` triple and
+    /// the `iter()` probe (`defaultfilters.py:708-714`). `Some(items)` when
     /// **both** halves hold — `isinstance(next_item, (list, tuple,
     /// types.GeneratorType))` *and* `iter(next_item)` does not raise — and `None`
     /// otherwise, meaning "a plain item".
