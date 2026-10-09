@@ -18,6 +18,7 @@ see `char::to_uppercase`, and that one cannot see CPython. Each covers the side
 the other cannot.
 """
 
+import unicodedata
 import unittest
 
 from django_rust_templates import _native
@@ -51,21 +52,36 @@ class CaseMappingParityTests(unittest.TestCase):
         this pins is that the *specific instances* the module doc explains are
         still the instances, so a future Unicode release that moves them is
         noticed here as well as there.
-        """
-        # Unicode 17.0 assigned the capitals and retro-fitted the mapping; these
-        # small letters were already named in 16.0.0, so Python knows the
-        # character and maps it to itself.
-        already_named = [0xA7D3, 0xA7D5]
-        # The other Latin Extended-D entry: Python 16.0.0 has no name for it.
-        unnamed = [0xA7CF]
-        # Beria Erfe, a Unicode 17.0 block (U+16EA0..U+16EDF) that CPython
-        # 3.14.4's `unicodedata` 16.0.0 does not know at all — 25 of the 28.
-        beria_erfe = [0x16EBB, 0x16EC0, 0x16ED3]
 
-        for cp in already_named + unnamed + beria_erfe:
-            ch = chr(cp)
-            self.assertEqual(ch.upper(), ch, f"U+{cp:04X}")
-            self.assertEqual(_native.python_upper(ch), ch, f"U+{cp:04X}")
+        **The two kinds are separated by `unicodedata.name()`, and that is the
+        only thing that separates them** — a count of diverging code points
+        cannot. An earlier revision of the module doc said "25 Beria Erfe, plus
+        U+A7CF, U+A7D3, U+A7D5", which lumped U+A7CF in with the retro-fitted
+        mappings; it has no name in 16.0.0, so it is a new *assignment* like the
+        Beria Erfe letters. The assertion below is what makes the doc's split
+        checked rather than asserted.
+        """
+        # Unicode 17.0 assigned the capitals and retro-fitted the mappings; the
+        # small letters were already named in 16.0.0, so Python knows the
+        # character, knows it is lowercase, and maps it to itself. These two are
+        # the genuinely interesting case, and only a mapping table can see them.
+        retrofitted = [0xA7D3, 0xA7D5]
+        # New assignments: 16.0.0 has no name for the code point at all. The
+        # Beria Erfe block (U+16EA0..U+16EDF) that Unicode 17.0 introduced, plus
+        # U+A7CF whose capital U+A7CE arrived in the same release.
+        unassigned_then = [0x16EBB, 0x16EC0, 0x16ED3, 0xA7CF]
+
+        for cp in retrofitted:
+            # The distinction, measured: named in the pinned release.
+            unicodedata.name(chr(cp))
+            self.assertEqual(chr(cp).upper(), chr(cp), f"U+{cp:04X}")
+            self.assertEqual(_native.python_upper(chr(cp)), chr(cp), f"U+{cp:04X}")
+
+        for cp in unassigned_then:
+            with self.assertRaises(ValueError, msg=f"U+{cp:04X} is named here"):
+                unicodedata.name(chr(cp))
+            self.assertEqual(chr(cp).upper(), chr(cp), f"U+{cp:04X}")
+            self.assertEqual(_native.python_upper(chr(cp)), chr(cp), f"U+{cp:04X}")
 
     def test_a_growing_mapping_is_not_collapsed(self):
         """`'ß'` is one code point in and two out, in both languages."""

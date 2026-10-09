@@ -57,10 +57,21 @@ exercise. Each is pinned by a test in the task that owns the code.
    with two different answers.** Measured against the pinned tree, over all
    1,112,064 code points: **56 code points diverge, 28 in each direction**, and
    every difference is the same shape — Python maps the code
-   point to *itself* where Rust maps it to another character. `U+A7D3` is `Ll`
-   in Python 3.14.4's Unicode 16.0.0 and `.upper()` returns itself, while Rust
-   1.98's `char::to_uppercase` returns `U+A7D2`; `U+16EBB` (Beria Erfe, new in
-   Unicode 16.0) is a third family. So Rust's tables are **ahead** of Python's
+   point to *itself* where Rust maps it to another character. The 28 are **two
+   families**, and the split is measured with `unicodedata.name()` rather than
+   with a count, because a count cannot tell them apart:
+   * **2 are retro-fitted mappings.** `U+A7D3` (LATIN SMALL LETTER DOUBLE THORN)
+     is `Ll` in Python 3.14.4's Unicode 16.0.0 and `.upper()` returns itself,
+     while Rust 1.98's `char::to_uppercase` returns `U+A7D2`; `U+A7D5` is the
+     same shape. Both small letters are **already named in 16.0.0** and their
+     capitals are `unassigned` there — 17.0 assigned the capitals and
+     retro-fitted the mappings. This is the family that makes the table a
+     *mapping* table rather than a list of characters Python never heard of.
+   * **26 are new assignments**, with no name at all in 16.0.0: 25 are the
+     **Beria Erfe** (Zaghawa) lowercase letters U+16EBB..U+16ED3, added in
+     Unicode **17.0** (an earlier revision of this list said 16.0), and the
+     26th is U+A7CF.
+   So Rust's tables are **ahead** of Python's
    here — the opposite of M1's `\w` divergence, where Rust was behind.
    **That is the code-point-local half, and it is `upper` and `capfirst`'s
    problem: ported, in Rust, pinned by an exhaustive parity test (Task 1).**
@@ -495,6 +506,35 @@ maps it away: `upper differs at U+A7CF`, which is a real failure and not a silen
 one. `tests/test_pyunicode_case_parity.py` is also what catches a `rustc` bump
 moving Rust's side of the same pair.
 
+**The generator's `--check` is wired into `check.sh`, and that is a guard, not
+housekeeping.** `--check` regenerates and diffs, so it says *what* differs, and
+it is self-maintaining — a legitimate move is fixed by re-running the generator,
+never by editing a number. Both this generator and M3's
+`gen_python_word_ranges.py` documented `--check` as *the* way to verify currency
+and **neither was invoked anywhere**, which made the drift guard for both
+generated artifacts a guard nobody ran. It sits on the non-`--fast` path because
+this one compiles a Rust probe.
+
+**What `--check` closes that the parity test cannot: an edit that is
+behaviourally inert.** Duplicating an entry (`[char; 28]` → `[char; 29]` with a
+repeat) leaves the parity test green, because suppression is idempotent, and
+leaves `every_entry_is_one_rust_would_map` green, because the duplicate names a
+code point Rust maps. It is the one edit that escapes both the behavioural and
+the property guard, and it is exactly the edit that makes the file stop being
+what the generator emits. So the cover is **three** guards, and the division of
+labour is: parity pins behaviour, the property pins non-inertness, `--check`
+pins file-equals-generator.
+
+**The 28 are two families, and the split is measured with `unicodedata.name()`,
+not counted** — so the generator refuses if it moves (see `EXPECTED_BERIA_ERFE`,
+`EXPECTED_UNNAMED_OTHER`, `EXPECTED_NAMED`). 25 Beria Erfe letters plus U+A7CF
+have **no name** in 16.0.0 and are new *assignments*; U+A7D3 and U+A7D5 **are
+named** in 16.0.0 and only their capitals and mappings arrived with 17.0, which
+is the family the module doc's interesting paragraph is about. An earlier
+revision of that doc said "25 Beria Erfe, plus U+A7CF, U+A7D3, U+A7D5" — 25 + 3
+where the measurement says 26 + 2, wrong in the direction that *overstates* the
+interesting case.
+
 The emitted module:
 
 ```rust
@@ -639,6 +679,21 @@ layout cannot be wrong for a different table length, and Step 6's gate is what
 confirms the file is reachable. Do not "verify" formatting of a generated file
 before it is wired in.
 
+**One instance, not three, and the general statement is the useful one:
+`cargo fmt`, `cargo clippy` and `cargo test` all skip an unreachable `.rs` file.**
+The formatter only happens to be the one that noticed. So the window between
+writing a file and adding its `pub mod` is a window in which *every* Rust gate is
+silently vacuous — no formatting check, no lint, and no `#[test]` run — which is
+the same failure shape as the unwired `--check` above, in a different tool. A
+step that adds a `.rs` file is not done when the file exists; it is done when the
+crate root names it.
+
+A Python analogue was checked and there is no live instance: `check.sh` discovers
+`test_*.py` under `tests/`, and the four files there that do not match —
+`differential/cases.py`, `lexer_corpus.py`, `parser_corpus.py`,
+`parser_error_corpus.py` — are corpora rather than tests, so the pattern is doing
+its job. Worth knowing a future `corpus_tests.py` would be skipped in silence.
+
 - [ ] **Step 6: Run the gate and commit**
 
 ```bash
@@ -656,8 +711,8 @@ git commit -m "pyunicode: Python's uppercase mapping, which is not Rust's"
 **Files:**
 - Create: `crates/template-core/src/filters/value.rs`
 - Create: `crates/template-core/src/filters/host.rs`
-- Create: `crates/template-core/src/filters/escape.rs` (the `conditional_escape` of §D4)
-- Modify: `crates/template-core/src/filters/mod.rs` (rewrite: the registry, `filter_names`, `filter`)
+- Create: `crates/template-core/src/filters/escape.rs` (the `escape` **filter**, one of the 57 — *not* a `conditional_escape` helper; §D4 says M4 adds no escape module and calls the host's `conditional_escape` instead. An earlier revision of this line said "the `conditional_escape` of §D4", which contradicted its own section.)
+- Modify: `crates/template-core/src/filters/mod.rs` (rewrite: `FilterFlags`, `FilterFn`, `FilterEntry`, the registry, `filter_names`, `filter`)
 - Modify: `crates/template-core/src/parser/error.rs` (**add** `PyErrorKind`, `ErrorKind::FilterHost` and `Error::filter_host`; add `Error::unimplemented_filter`; add one arm to `message()`. §D5 says why this is additive and not a reshape of the existing `ErrorKind::Host`.)
 - Create: 57 files under `crates/template-core/src/filters/`, one per filter, each a stub
 - Modify: `crates/template-core/src/lib.rs` (`pub mod filters;`)
@@ -682,6 +737,32 @@ pub struct FilterCall<'a> {
     pub autoescape: bool,
     /// The context's `use_tz`, for the two `expects_localtime` filters.
     pub use_tz: bool,
+}
+
+/// The arguments of `django.utils.formats.number_format`
+/// (`formats.py:172`, six-argument and keyword-called from exactly two filters
+/// in three shapes: `defaultfilters.py:186`, `:214`, `:912`).
+///
+/// A struct rather than four positional parameters because
+/// `clippy::type_complexity` has already bitten this project, and because the
+/// call sites differ only in `use_l10n` and `force_grouping` — which are the two
+/// things worth being able to name at a call site.
+pub struct NumberFormatArgs<'a> {
+    /// The value to format: an `int`, a `float`, or a **string** of digits.
+    /// `floatformat`'s second call passes its own assembled decimal text
+    /// (`:214` passes `number`, not `rounded_d`), so this cannot be an `f64`.
+    pub value: &'a Value,
+    /// Django's `decimal_pos`; `None` is its default.
+    pub decimal_pos: Option<i64>,
+    /// Django's `use_l10n`, which is **three-valued**: `None` means "localize",
+    /// because `number_format` maps it to `True` itself (`formats.py:179-180`),
+    /// while `Some(false)` means the template asked for `floatformat:…g`.
+    /// `None` and `Some(true)` are behaviourally identical, so a host may
+    /// collapse them — but the caller must not, since that would hide which
+    /// branch `floatformat` took.
+    pub use_l10n: Option<bool>,
+    /// Django's `force_grouping`, `False` on every built-in call path.
+    pub force_grouping: bool,
 }
 
 pub type FilterFn = fn(Value, Option<Value>, &FilterCall<'_>) -> Result<Value, Error>;
@@ -996,9 +1077,31 @@ host cannot pass a bare-shell test by accident.
 
 `Value` as §D1 specifies, with a hand-written `Debug` (the `filters/mod.rs`
 precedent is `Step::Found`, which prints the handle rather than the container) and
-`PartialEq` deriving structurally. Add a `pub fn type_name(&self) -> &'static str`
-returning Python's name (`"NoneType"`, `"bool"`, `"int"`, `"float"`, `"str"`,
-`"list"`), which the corpus's §D5 type comparison uses.
+`PartialEq` deriving structurally (with §D1's "compares converted primitives"
+rule in that derive's doc, because a rule stated only in a plan is a rule the
+next reader does not have). Add a `pub fn type_name(&self) -> &'static str`
+returning Python's name — `"NoneType"`, `"bool"`, `"int"`, `"float"`, `"str"`,
+`"SafeString"`, `"list"`, and `"object"` for `Opaque` — which the corpus's §D5
+type comparison uses.
+
+Two things about that list are load-bearing and not cosmetic:
+
+- **`Safe` reports `"SafeString"`, not `"str"`.** §D5 folds `SafeData` into the
+  type name, and Python's own name for the correct answer is `SafeString`
+  (`type(mark_safe("x")).__name__`, measured). Reporting `"str"` here would make
+  `escape` returning an *unsafe* string indistinguishable from returning a safe
+  one — the exact failure §D5 exists to catch, in the one place built to catch it.
+- **`Opaque` reports `"object"`, which is a limitation, not an answer.** A
+  `&'static str` cannot ask the host what type it owns, so a row whose result is
+  genuinely an `Opaque` (a `datetime` out of `first`) compares `"object"` against
+  `"datetime"` and reports a false mismatch. Task 3's harness owns that: route
+  the name through the host, or drop the type half for that row.
+
+`FilterFlags` and `FilterFn` live in `filters/mod.rs` with the registry they
+describe, not in `value.rs`; `FilterCall` and `NumberFormatArgs` live in
+`host.rs` with the trait. The stub files' import lines (`use
+crate::filters::host::FilterCall;` and so on) are the map, and they are what the
+fan-out agents read.
 
 - [ ] **Step 2: Write `host.rs`**
 
@@ -1356,7 +1459,7 @@ error: Tasks 9 and 10 are nearly all delegation, but their cost is the corpus
 machinery, not the bodies — two settings states for `urlize`'s
 `URLIZE_ASSUME_HTTPS`, a `RemovedInDjango2028Warning` to decide about, a
 time-dependent row that must be a property rather than an equality, and
-`floatformat`'s thread-local decimal context. And `floatformat` — 128 lines, the
+`floatformat`'s thread-local decimal context. And `floatformat` — 127 lines, the
 longest body in M4 — is dispatched as its **own unit inside Task 7 and reviewed
 alone**, which is what "worth its own review round within the group" below means
 concretely.
@@ -1402,7 +1505,7 @@ The group that Task 1 unblocks, and the one that proves the seam end-to-end.
   points; this task's tests are the three interesting shapes** — `"ß"` (Rust and
   Python both give `SS`), `U+A7D3` (Python gives itself, Rust gives `U+A7D2`),
   and a non-`str` input (`upper(5)` is `"5"`, because `@stringfilter` coerces).
-- `lower` (`:247-252`) — `@stringfilter`, `is_safe=False`, body is **the host's
+- `lower` (`:247-251`) — `@stringfilter`, `is_safe=False`, body is **the host's
   `str_lower`** — not `pyunicode::case`, because there is no per-code-point
   `lower` to call (Task 1). `str.lower()` is
   context-sensitive: `"ΟΣ"|lower` is `"ος"` (Final_Sigma), and no per-code-point

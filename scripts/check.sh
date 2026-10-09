@@ -33,6 +33,17 @@ step "differential harness"
 "$PROJECT_ROOT/.venv/bin/python" "$HERE/differential.py"
 
 if [ "$FAST" -eq 0 ]; then
+  # `--check` regenerates and diffs, so it says *what* differs, and it is
+  # self-maintaining: a legitimate move (a new `rustc`, a new CPython, a Django
+  # pin bump) is fixed by re-running the generator, not by editing a count here.
+  # Both generators document `--check` as *the* way to verify currency and
+  # neither was invoked anywhere, which is the failure mode this closes: a drift
+  # guard nobody runs. Not on the `--fast` path because the case generator
+  # compiles a Rust probe.
+  step "generated files are current"
+  "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_python_word_ranges.py" --check
+  "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_python_case_fixups.py" --check
+
   step "django template_tests (rust engine)"
   "$HERE/run_django_suite.sh" template_tests
 fi

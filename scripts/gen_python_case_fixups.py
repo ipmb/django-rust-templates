@@ -39,6 +39,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -51,6 +52,20 @@ OUT = ROOT / "crates" / "template-core" / "src" / "pyunicode" / "case.rs"
 # the failure message says so.
 EXPECTED_UPPER = 28
 EXPECTED_LOWER = 28
+
+# The uppercase table's three groups, counted rather than described. The module
+# doc states them as facts, so this is what keeps the facts true: the split was
+# first written as 25 + 3 and the `unicodedata.name()` check below moved U+A7CF
+# into the "new assignment" half, which is exactly the correction a doc claim
+# nothing measures does not get.
+EXPECTED_BERIA_ERFE = 25
+EXPECTED_UNNAMED_OTHER = 1  # U+A7CF, assigned in 17.0 alongside its capital U+A7CE
+EXPECTED_NAMED = 2  # U+A7D3, U+A7D5: named in 16.0.0, mapping retro-fitted by 17.0
+
+# The Beria Erfe (Zaghawa) block as Unicode 17.0 laid it out: capitals
+# U+16EA0..U+16EB8, lowercase U+16EBB..U+16ED3. Used only to *identify* the group
+# in the emitted doc, never to compute a mapping.
+BERIA_ERFE_BLOCK = (0x16EA0, 0x16EDF)
 
 PROBE_SRC = r"""
 use std::io::Write;
@@ -163,11 +178,43 @@ def classify(name, found):
     return [cp for cp, _, _ in found]
 
 
-def emit(upper_cps, lower_count, upper_count):
+def split_by_assignment(cps):
+    """The table's three groups, **measured**, so the emitted doc cannot lie.
+
+    `unicodedata.name()` is the whole test and it is the only available one: a
+    code point the pinned release has assigned has a name, and one it has not
+    raises `ValueError`. Two diverging code points look identical to a count and
+    are different facts — "16.0.0 has never heard of this character" versus
+    "16.0.0 names this character, calls it lowercase, and maps it to itself".
+    The second is the one worth writing a paragraph about, and the one a count
+    silently absorbs, which is how the emitted doc said "25 Beria Erfe, plus
+    U+A7CF, U+A7D3, U+A7D5" for a release.
+
+    Returns `(beria_erfe, unnamed_other, named)`.
+    """
+    beria_erfe, unnamed_other, named = [], [], []
+    for cp in cps:
+        try:
+            unicodedata.name(chr(cp))
+        except ValueError:
+            if BERIA_ERFE_BLOCK[0] <= cp <= BERIA_ERFE_BLOCK[1]:
+                beria_erfe.append(cp)
+            else:
+                unnamed_other.append(cp)
+        else:
+            named.append(cp)
+    return beria_erfe, unnamed_other, named
+
+
+def emit(upper_cps, lower_count, upper_count, groups):
     # One entry per line. rustfmt's own choice for a table this long, and it is
     # normalized by `rustfmt_format` either way — so this is written for the
     # reader, not to satisfy the formatter.
     const = "\n".join(f"    '\\u{{{cp:x}}}'," for cp in upper_cps)
+    # The three groups, counted by `split_by_assignment` rather than restated:
+    # every number below is a measurement, so a release that moves one moves the
+    # emitted doc with it.
+    beria_erfe, unnamed_other, named = groups
 
     return f'''//! Python's **uppercase** mapping, which is not Rust's. **Generated** by
 //! `scripts/gen_python_case_fixups.py` — do not edit by hand.
@@ -185,17 +232,26 @@ def emit(upper_cps, lower_count, upper_count):
 //! is a character that renders differently from Django's.
 //!
 //! The cause is Unicode 17.0 (September 2025), which Rust 1.98 ships and
-//! `unicodedata` 16.0.0 does not:
+//! `unicodedata` 16.0.0 does not. The entries split into two kinds, and the
+//! split is **measured with `unicodedata.name()`**, not with a count — a count of
+//! diverging code points cannot tell an assignment from a mapping, and the two
+//! need different words:
 //!
-//! * 25 of them are the lowercase letters of **Beria Erfe** (Zaghawa),
-//!   U+16EBB..U+16ED3, whose capitals U+16EA0..U+16EB8 complete the block's case
-//!   pairs. Python 16.0.0 has no name for any of those code points.
-//! * the other 3 — U+A7CF, U+A7D3, U+A7D5 — are a *different kind of divergence*,
-//!   and they are why this table cannot be read as "new characters". U+A7D3
-//!   (LATIN SMALL LETTER DOUBLE THORN) and U+A7D5 (…DOUBLE WYNN) are **already
-//!   named in 16.0.0**; 17.0 assigned their capitals (U+A7D2, U+A7D4) and
-//!   retro-fitted the mappings. Python knows the character and maps it to itself,
-//!   and only a mapping table can see the difference.
+//! * **{len(beria_erfe) + len(unnamed_other)} are new assignments.** 16.0.0 has
+//!   no name for the code point at all — `unicodedata.name()` raises
+//!   `ValueError`, measured:
+//!   * {len(beria_erfe)} are the lowercase letters of **Beria Erfe** (Zaghawa),
+//!     U+16EBB..U+16ED3, whose capitals U+16EA0..U+16EB8 complete the block's
+//!     case pairs;
+//!   * {len(unnamed_other)} is U+A7CF, whose capital U+A7CE 17.0 also introduced.
+//! * **{len(named)} are retro-fitted mappings, and they are the interesting
+//!   ones.** U+A7D3 (LATIN SMALL LETTER DOUBLE THORN) and U+A7D5 (…DOUBLE
+//!   WYNN) are *already named in 16.0.0*, and their capitals U+A7D2 and U+A7D4
+//!   are `unassigned` there; 17.0 assigned the capitals and retro-fitted the
+//!   mappings. Python knows the character, knows it is a lowercase letter, and
+//!   nevertheless maps it to **itself** — so this is not "a character 16.0.0
+//!   lacks" but two releases disagreeing about a character they both have, and
+//!   only a mapping table can see the difference.
 //!
 //! There is deliberately **no `lower` here**. The generator measures the lower
 //! divergence too — {lower_count} code points, the same shape, the same blocks —
@@ -411,7 +467,35 @@ def main():
             f"python3 disagrees on 95 code points per direction."
         )
 
-    text = rustfmt_format(emit(upper_cps, len(lower_cps), len(upper_cps)))
+    # The table's three groups, measured. `split_by_assignment` is the only thing
+    # that can tell an assignment from a retro-fitted mapping, and the emitted
+    # doc's headline is that distinction, so this refusal is what keeps the
+    # headline true. An earlier revision of that doc said "25 Beria Erfe, plus
+    # U+A7CF, U+A7D3, U+A7D5" — U+A7CF belongs with the assignments, and the
+    # number was wrong in the direction that overstates the interesting case.
+    groups = split_by_assignment(upper_cps)
+    expected_groups = (
+        EXPECTED_BERIA_ERFE,
+        EXPECTED_UNNAMED_OTHER,
+        EXPECTED_NAMED,
+    )
+    if tuple(len(g) for g in groups) != expected_groups:
+        beria, other, named = (sorted(g) for g in groups)
+        raise SystemExit(
+            f"the assignment/mapping split moved: Beria Erfe {len(beria)} "
+            f"(pinned {EXPECTED_BERIA_ERFE}), unnamed elsewhere {len(other)} "
+            f"(pinned {EXPECTED_UNNAMED_OTHER}), named-but-retrofitted "
+            f"{len(named)} (pinned {EXPECTED_NAMED}).\n"
+            f"  Beria Erfe: {[f'U+{cp:04X}' for cp in beria]}\n"
+            f"  unnamed elsewhere: {[f'U+{cp:04X}' for cp in other]}\n"
+            f"  named but mapped to itself: {[f'U+{cp:04X}' for cp in named]}\n"
+            f"A Unicode release that assigns or names one of these is the "
+            f"expected cause: update the EXPECTED_* group counts here, the "
+            f"matching lists in tests/test_pyunicode_case_parity.py, and commit "
+            f"the regenerated table."
+        )
+
+    text = rustfmt_format(emit(upper_cps, len(lower_cps), len(upper_cps), groups))
 
     if args.check:
         current = OUT.read_text() if OUT.exists() else ""

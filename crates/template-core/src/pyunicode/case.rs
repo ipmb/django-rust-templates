@@ -14,17 +14,26 @@
 //! is a character that renders differently from Django's.
 //!
 //! The cause is Unicode 17.0 (September 2025), which Rust 1.98 ships and
-//! `unicodedata` 16.0.0 does not:
+//! `unicodedata` 16.0.0 does not. The entries split into two kinds, and the
+//! split is **measured with `unicodedata.name()`**, not with a count — a count of
+//! diverging code points cannot tell an assignment from a mapping, and the two
+//! need different words:
 //!
-//! * 25 of them are the lowercase letters of **Beria Erfe** (Zaghawa),
-//!   U+16EBB..U+16ED3, whose capitals U+16EA0..U+16EB8 complete the block's case
-//!   pairs. Python 16.0.0 has no name for any of those code points.
-//! * the other 3 — U+A7CF, U+A7D3, U+A7D5 — are a *different kind of divergence*,
-//!   and they are why this table cannot be read as "new characters". U+A7D3
-//!   (LATIN SMALL LETTER DOUBLE THORN) and U+A7D5 (…DOUBLE WYNN) are **already
-//!   named in 16.0.0**; 17.0 assigned their capitals (U+A7D2, U+A7D4) and
-//!   retro-fitted the mappings. Python knows the character and maps it to itself,
-//!   and only a mapping table can see the difference.
+//! * **26 are new assignments.** 16.0.0 has
+//!   no name for the code point at all — `unicodedata.name()` raises
+//!   `ValueError`, measured:
+//!   * 25 are the lowercase letters of **Beria Erfe** (Zaghawa),
+//!     U+16EBB..U+16ED3, whose capitals U+16EA0..U+16EB8 complete the block's
+//!     case pairs;
+//!   * 1 is U+A7CF, whose capital U+A7CE 17.0 also introduced.
+//! * **2 are retro-fitted mappings, and they are the interesting
+//!   ones.** U+A7D3 (LATIN SMALL LETTER DOUBLE THORN) and U+A7D5 (…DOUBLE
+//!   WYNN) are *already named in 16.0.0*, and their capitals U+A7D2 and U+A7D4
+//!   are `unassigned` there; 17.0 assigned the capitals and retro-fitted the
+//!   mappings. Python knows the character, knows it is a lowercase letter, and
+//!   nevertheless maps it to **itself** — so this is not "a character 16.0.0
+//!   lacks" but two releases disagreeing about a character they both have, and
+//!   only a mapping table can see the difference.
 //!
 //! There is deliberately **no `lower` here**. The generator measures the lower
 //! divergence too — 28 code points, the same shape, the same blocks —
