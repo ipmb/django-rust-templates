@@ -39,7 +39,7 @@ from django.utils.safestring import SafeData  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 
-from tests.filter_cases import CASES, case_value  # noqa: E402
+from tests.filter_cases import CASES, ERROR_CASES, case_value  # noqa: E402
 
 _PROBE_SPEC = importlib.util.spec_from_file_location(
     "django_rust_templates.filter_probe",
@@ -216,6 +216,77 @@ class FilterParityTests(unittest.TestCase):
                     f":{probe.template_literal(case['arg'])}"
                     if "arg" in case else ""
                 ))
+
+    def assert_raises_same(self, case, side, call):
+        """One engine refuses the row's input, in the row's own words.
+
+        Called once per side, and split out so the *claim* — that the two agree —
+        is one body rather than two that could drift. The class is compared by
+        **name** for the reason the corpus compares type names: a Rust
+        `PyErrorKind` cannot name a Python class, and the name is what Django's
+        own `except` clauses branch on. The message is compared as a literal
+        because that is the measurement the row carries; a class alone is
+        satisfied by both engines being wrong together.
+
+        The exception is caught and asserted on **outside** the handler so a
+        failure is reported as a failure rather than chained onto the raise it
+        came from, which is otherwise the first thing a reader sees.
+        """
+        caught = None
+        result = None
+        try:
+            result = call()
+        except Exception as error:
+            caught = error
+        if caught is None:
+            self.fail(
+                f"{case['name']}: {side} answered {result!r} where the row's "
+                f"whole content is that it raises {case['raises']}"
+            )
+        self.assertEqual(
+            type(caught).__name__,
+            case["raises"],
+            f"{case['name']}: {side} raised {type(caught).__name__} "
+            f"({caught}), not {case['raises']}",
+        )
+        self.assertEqual(
+            str(caught),
+            case["message"],
+            f"{case['name']}: {side}'s message is not the measured one",
+        )
+
+    def test_every_error_case(self):
+        """Both engines raise, with the same class and the same message.
+
+        The sibling of `test_every_case`, for the inputs a `CASES` row cannot
+        hold. The argument resolution is deliberately the same code path —
+        `probe.template_literal` for Django's token, `probe.rust_answer` for our
+        value — so a row here asks the *same question* as a `CASES` row and
+        differs only in what is asserted about the answer.
+
+        There is no token assertion, and none is missing: the token is only in
+        hand when `django_answer` returns, and on these rows it raises instead.
+        The message carries what the token would have proved — that the argument
+        arrived as the type the row meant — because it names that type.
+        """
+        for case in ERROR_CASES:
+            with self.subTest(case=case["name"]):
+                given = probe.template_literal(case["arg"]) if "arg" in case else None
+                self.assert_raises_same(
+                    case,
+                    "Django",
+                    lambda: probe.django_answer(
+                        case["filter"], case_value(case), given, case.get("context")
+                    ),
+                )
+                context = probe.context_for(case_value(case), case.get("context"))
+                self.assert_raises_same(
+                    case,
+                    "ours",
+                    lambda: probe.rust_answer(
+                        case["filter"], case_value(case), case.get("arg"), context
+                    ),
+                )
 
     def test_every_implemented_filter_has_cases(self):
         """The corpus and the bodies name the same filters — both directions.

@@ -134,6 +134,19 @@ def template_literal(value) -> str:
     )
 
 
+def context_for(value, context_kwargs: dict | None = None):
+    """The `Context` the loop reads `autoescape` and `use_tz` off.
+
+    Extracted from [`django_answer`] because an error row needs the same context
+    for the Rust side while Django's own call **raises** instead of returning it:
+    the context cannot come back from that call, so it is built again — and built
+    by the same function, so a change to the defaults cannot reach one side of a
+    comparison and not the other. `Context()`'s defaults are `autoescape=True`,
+    `use_tz=None`, the same two values `_native.filter` defaults to.
+    """
+    return Context({"x": value}, **(context_kwargs or {}))
+
+
 def django_answer(name: str, value, given: str | None, context_kwargs: dict | None = None):
     """Django's result for `value|name[:arg]`, through `resolve`'s loop.
 
@@ -161,7 +174,7 @@ def django_answer(name: str, value, given: str | None, context_kwargs: dict | No
     )
     token = f"x|{name}" if given is None else f"x|{name}:{given}"
     expression = FilterExpression(token, parser)
-    context = Context({"x": value}, **(context_kwargs or {}))
+    context = context_for(value, context_kwargs)
     return expression.resolve(context), expression, context
 
 

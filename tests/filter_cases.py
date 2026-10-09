@@ -65,11 +65,15 @@ half of the failing branch, not a detector. Measured, dropping the key from each
 of the three `context` rows changes the answer for **two** of them and not for
 this one.
 
-**A row cannot express an exception.** `resolve` propagates it rather than
-returning it, so a case whose *point* is that Django raises is a Rust body test,
-not a corpus row — `first(5)`'s `TypeError` and `random({...})`'s `KeyError` live
-in their modules. Rows that survive a filter's own `try` are fine and common: the
-`dictsort` rows that end in `""` are three different caught arms.
+**A `CASES` row cannot carry an exception, and that is why there is a second
+list.** `resolve` propagates one rather than returning it, so a `CASES` row whose
+*point* is that Django raises would abort the comparison instead of making it.
+An exception is nonetheless an **answer**, and an observable one: a filter body's
+own `try`/`except` branches on the exception's *class*, so the class is part of
+what parity means and is compared in [`ERROR_CASES`] below, where both engines
+must raise it. Rows whose input survives the filter's own `try` are a different
+thing and stay here, where they are common: the `dictsort` rows that end in `""`
+are three different caught arms.
 
 Rows for a filter arrive in **the commit that lands its group** (§D6), so the
 set of filters named here is a statement about M4's progress as well as about
@@ -1746,5 +1750,62 @@ CASES: list[dict] = [
         "filter": "stringformat",
         "value": "AbC",
         "arg": "s",
+    },
+]
+
+
+# The inputs whose answer is an **exception**, kept apart from [`CASES`] because a
+# `CASES` row cannot carry one: `resolve` propagates it, so the comparison every
+# `CASES` row makes is replaced by an abort (see the module doc). Nothing about
+# the input differs — same `FilterExpression`, same `_native.filter`, same
+# argument resolution, same default `Context` — only the assertion does: both
+# engines must raise, with the same class **and the same message**.
+#
+# **The message is pinned as a literal, and pinning it is the point.** A class
+# compared alone would be satisfied by two engines agreeing on the wrong
+# question: hand `cut` a `str` where the row meant an `int` and neither raises
+# the `TypeError` this row is about — they would agree on a different answer, or
+# on no exception at all. The literal is the measurement.
+#
+# It is also a *strong* claim rather than a tautology, because the two sides get
+# their text from different places: Django's message is CPython's `str.replace`,
+# and ours is synthesised in Rust (`cut.rs`'s `not_a_string`, since no host
+# operation performs the replacement). A list that compared only classes would
+# never look at that synthesis; this one pins it to the wording a template sees.
+#
+# Keys are `CASES`' keys with the same meanings: an **absent** `arg` means the
+# filter was written without one, and `"arg": None` means the explicit `None`
+# token (`{{ x|cut:None }}`). `value_factory` is available for the one reason it
+# is above — a one-shot input — and `raises`/`message` are the row's assertion.
+ERROR_CASES: list[dict] = [
+    # --- cut: `str.replace`'s argument refusal, which no host performs -------
+    {
+        # `{{ x|cut:1 }}` — a bare token, so the argument arrives as the `int` 1
+        # rather than as the string `"1"`, and `str.replace` refuses it. The
+        # message names the *type* (`not int`), which is what makes this row a
+        # statement about the argument's type rather than about its text.
+        "name": "cut/non-string-argument",
+        "filter": "cut",
+        "value": "a1b",
+        "arg": 1,
+        "raises": "TypeError",
+        "message": "replace() argument 1 must be str, not int",
+    },
+    {
+        # `{{ x|cut:None }}` — reachable where `{{ x|cut }}` is not: the arity
+        # check (`base.py:819`) turns a *missing* argument into a
+        # `TemplateSyntaxError` before any body runs, so this token is the only
+        # way a body sees `None` here. The FFI hands the body `Option::None` for
+        # it, the same value it uses for a missing argument, which is exactly why
+        # the reachable case is the one worth pinning.
+        #
+        # The message says **`None`**, not `NoneType`: `Value::None.type_name()`
+        # would put the wrong word in it, and nothing else in M4 would notice.
+        "name": "cut/none-argument",
+        "filter": "cut",
+        "value": "abc",
+        "arg": None,
+        "raises": "TypeError",
+        "message": "replace() argument 1 must be str, not None",
     },
 ]
