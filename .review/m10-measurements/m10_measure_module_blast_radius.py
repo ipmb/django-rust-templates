@@ -31,11 +31,24 @@ once you know which population it counted.
 A pre-flight, not an assumption
 -------------------------------
 
-M10 has not landed, so ``django.template.engine`` is still Django's own file.
-The script says so on stderr and measures anyway — the number it produces is
-the size of the path a future interposition would sit on, which is exactly what
-the plan needs before the interposition exists. Re-running it after M10 lands
-should reproduce the same counts, and a difference is the finding.
+Written before M10 landed, so it opens by saying which file each target
+resolved to and measures anyway — the number it produces is the size of the
+path a future interposition would sit on, which is what the plan needs before
+the interposition exists. Re-running it after M10 lands should reproduce the
+same counts, and a difference is the finding.
+
+**It was re-run at the close-out, and the pair is identical.** All eight
+targets now report ``is already ours``, and every figure reproduces exactly:
+``context`` 984/95,051, ``engine`` 1166/41,987, ``loaders.base`` 1053/10,282,
+``loaders.filesystem`` 85/676, ``loaders.app_directories`` 34/58,
+``loaders.cached`` 1038/25,249, ``loaders.locmem`` 974/10,854, ``utils`` 46/164,
+and **1232 of the 1547 (79.6%) reached any of the four**. That is the result the
+recon's §3a predicted and the shape it warned about: this instrument measures
+*reach*, and a transcription changes the **identity** of the objects a test
+holds without changing which tests reach them. So the numbers moving would have
+meant a behaviour changed, and their holding still is not evidence that nothing
+did — §3a's identity exposure (79.6%) and behaviour risk (the declared hunks)
+are different populations, and this counts the first.
 
 Run it the way the suite is run, or it measures stock Django:
 

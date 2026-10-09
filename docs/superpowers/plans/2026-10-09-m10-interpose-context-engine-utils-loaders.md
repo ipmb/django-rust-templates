@@ -2279,6 +2279,46 @@ git add docs/superpowers/specs/2026-10-08-django-template-engine-in-rust-design.
 git commit -m "M10 close-out: §10.3's M10 row corrected to four modules; the meter is 14"
 ```
 
+**Measured, and Step 3's command is wrong in one token.** `DJANGO_RUST_TEMPLATES=0`
+is refused outright — the instrument's guard is
+`if not os.environ.get("DJANGO_RUST_TEMPLATES") == "1": sys.exit(...)` — and with
+the shim genuinely off it would measure stock Django rather than our
+transcriptions, which is the opposite of what Step 3 asks for. The pre-landing
+recon ran it with the shim **on** (its own docstring: "run it the way the suite
+is run"), and that is the run the pair is against. Correct command:
+
+```bash
+. scripts/env.sh
+.venv/bin/python -I .review/m10-measurements/m10_measure_module_blast_radius.py
+```
+
+**The pair is identical.** All eight targets report `is already ours`, and every
+figure reproduces exactly:
+
+| module | recon (Django's files) | close (ours) |
+| --- | --- | --- |
+| `context` | 984 / 95,051 | 984 / 95,051 |
+| `engine` | 1166 / 41,987 | 1166 / 41,987 |
+| `loaders.base` | 1053 / 10,282 | 1053 / 10,282 |
+| `loaders.cached` | 1038 / 25,249 | 1038 / 25,249 |
+| `loaders.locmem` | 974 / 10,854 | 974 / 10,854 |
+| `loaders.filesystem` | 85 / 676 | 85 / 676 |
+| `utils` | 46 / 164 | 46 / 164 |
+| `loaders.app_directories` | 34 / 58 | 34 / 58 |
+| **any of the four** | **1232** / 1547 (79.6%) | **1232** / 1547 (79.6%) |
+
+The instrument resolves each target with `importlib.import_module` and filters on
+`__module__`, so the close-out run wrapped **our** functions, not Django's — no
+count moved *because no test changed which code it reaches*, which is what a
+transcription is for. The paragraph in the instrument's docstring that still said
+M10 had not landed is replaced with this pair.
+
+And the module the recon singled out did not move: §3a called
+`loaders.filesystem` "a loader the suite barely uses" at 85 tests, and it is
+still 85. **No module's reach changed, so there is no module to name** — which is
+the one outcome Step 3's "if the count moved" clause does not cover, and it is
+recorded here rather than left as an absent paragraph.
+
 - [ ] **Step 5: Report the goal question to the user.**
 
 M10 does **not** edit §10.1's sentence or §10.3's M14 row: both say the end state is `unshimmed()` empty, and the recon's §2 measured that no row reaches zero without interposing glue §6's vendoring policy exists to refuse (two names: `autoreload`, `context_processors`). The report to the user states the question and the recommendation — that the target become the *set* `UNDECIDED` with a reason per name, which is what `tests/milestone_ownership.py` now expresses and what `tests/test_milestone_ownership.py` asserts — and leaves the decision to them, because changing what §2's acceptance criterion means is theirs and not a milestone's.
