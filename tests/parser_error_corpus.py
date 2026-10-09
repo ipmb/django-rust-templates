@@ -164,6 +164,20 @@ ERRORS = [
     # A stray `and` in *kwarg* form is not a separator: only the legacy branch
     # consumes it (`base.py:1203-1206`).
     ("{% with a=1 and %}{% endwith %}", "'with' received an invalid token: 'and'"),
+    # **The `Host::repr` divergence, and the only row that reaches it.** U+00AD
+    # is category Cf: non-printable in Python, so `repr` escapes it to
+    # `\xad`, while Rust's `char::is_control` is Cc alone and would emit it raw.
+    # `py_repr_str` refuses non-ASCII with a `debug_assert` for exactly this
+    # reason, and the FFI's `FilterCheckHost::repr` overrides it with Python's
+    # own `repr()`. Every other `{% with %}` row above is ASCII *by
+    # construction* (`'b'`, `'and'`, the tag name `'with'`), so without this one
+    # the override could be deleted and the whole suite would still be green —
+    # loud in a debug build, silently wrong in a release one. Measured: exact
+    # message and token parity with Django in both lexer modes.
+    (
+        "{% with a=1 foo­bar %}{% endwith %}",
+        "'with' received an invalid token: 'foo\\xadbar'",
+    ),
     # --- widthratio --------------------------------------------------------
     ("{% widthratio a b %}", "widthratio takes at least three arguments"),
     # Five bits — tag plus four — is the `else`, so the count message is about a

@@ -979,4 +979,24 @@ mod tests {
         assert_eq!(parser.lbp(END), 0);
         assert_eq!(parser.node(END).kind, IfToken::End);
     }
+
+    #[test]
+    #[should_panic(expected = "IfParser::template compiles every literal it builds")]
+    fn condition_refuses_a_literal_the_base_parser_built() {
+        // The executed half of [`IfParser::condition`]'s `unreachable!`. That
+        // invariant is "`IfParser::template` is the only constructor `do_if`
+        // uses", and a comment cannot enforce it: `IfParser::new` is `pub` on
+        // the same type, so a second production caller would compile and
+        // panic at run time instead. Pinned here so the assumption is a
+        // *decision* — this test reddens the moment `new` stops being
+        // test-only, or the arm stops panicking.
+        //
+        // Measured: `IfParser::new` has no caller outside this file's tests.
+        // `Raw` literals exist because the base `smartif.IfParser` keeps the
+        // token as text (`create_var` is the *subclass*'s override), and the
+        // base parser is Django's own dead code outside this module.
+        let mut parser = IfParser::new(tokens(&["foo"]));
+        let root = parser.parse().expect("the base parser accepts one literal");
+        let _ = parser.condition(root);
+    }
 }

@@ -175,8 +175,9 @@ url test). The file exercises **only** `{% url %}` and imports `URLNode` from
 `django.template.defaulttags` (`test_url.py:2`), so it becomes real signal when
 **M11** interposes `defaulttags` — nothing in it needs an i18n, l10n, static, tz
 or cache library. So the tag is M5's (§D8) and the file is M11's; M12's row
-naming `test_url` is a stray, and Task 9's close-out moves it to M11's row.
-Recorded as a spec correction, not applied silently.
+naming `test_url` is a stray, and the close-out (**Task 8**, not "Task 9" — see
+Task 8's Step 1) moves it to M11's row. Recorded as a spec correction, not
+applied silently.
 
 The other three stubs in `parser/registry.rs` are **not** M5: `load` is M6
 (`load.rs:20`), `partial`/`partialdef` are M13 (`partial.rs:16`,
@@ -2199,15 +2200,60 @@ git commit -m "tags: if, and the real compile_filter behind its condition"
 - Modify: `docs/superpowers/specs/*` (§10.3's M5 and M6 rows — §D1's scope change)
 - Create: `.review/m5-seams.md`
 
-- [ ] **Step 1: Re-measure the count.** Do not transcribe any number from this
+- [x] **Step 1: Re-measure the count.** Do not transcribe any number from this
   plan. Run `./scripts/check.sh` and record the actual
-  `Ran <N> tests`, the corpus counts (`CASES`, `ERROR_CASES`), and `cargo test`.
+  `Ran <N> tests`, the corpus counts, and `cargo test`.
 
-- [ ] **Step 2: Record the Step-1 mismatches.** Every place a tag's real
+  **Measured 2026-10-09, at `e34a301` plus the two audit changes below.** Every
+  value is a command's output, not a copy of a number written earlier in this
+  plan:
+
+  | what | command | value |
+  |---|---|---|
+  | acceptance | `./scripts/check.sh` | `all checks passed`; `Ran 1547 tests in 3.594s … OK (skipped=6)` |
+  | Rust tests | `cargo test --workspace` | 642 passed, over 3 test binaries |
+  | success corpus | `len(tests.parser_corpus.TEMPLATES)` | 142 (all unique) |
+  | randomised | `RANDOM_CASES` / `RANDOM_SEED` | 400 / 20261008 |
+  | error corpus | `len(tests.parser_error_corpus.ERRORS)` | 78 |
+  | progress meter | `unshimmed()` after `install()` | 25 — **unchanged**, as every prior milestone's row claims |
+  | stubs left | `_native.builtin_tag_stubs()` | `['load', 'partial', 'partialdef', 'querystring']` |
+
+  **A naming error in this plan, found by running it.** Step 1 above named the
+  corpus exports `CASES` and `ERROR_CASES`. The real names are **`TEMPLATES`**
+  (`tests/parser_corpus.py`) and **`ERRORS`** (`tests/parser_error_corpus.py`);
+  the `*_CASES` spellings belong to M4's filter corpus
+  (`tests/filter_cases.py`), which is a different file. The names were
+  transcribed from that neighbouring module rather than read, which is the
+  defect class this step exists to catch.
+
+  **A Task-numbering error, same source.** This plan's Scope section says "Task
+  9's close-out moves it to M11's row". The close-out is **Task 8**, and there is
+  no Task 9 — the plan has eight tasks. The sentence names a task that cannot be
+  ticked, so the `test_url` move below is recorded as done here rather than
+  deferred to a task that does not exist.
+
+- [x] **Step 2: Record the Step-1 mismatches.** Every place a tag's real
   descriptor differed from §D is evidence the re-measure step is load-bearing —
   list them in this file's close-out, and if there were none, say that too and
-  note that §D was written from the same source. **Two are already known, both
-  found during this plan's own self-review rather than at implementation time:**
+  note that §D was written from the same source.
+
+  **There were 28, across all seven implementation tasks.** They are recorded in
+  the per-task "corrections to the draft" blocks above; this is the index. A
+  correction block is a *plan defect*, so the count is also a measure of how much
+  the plan could not see from reading alone:
+
+  | task | corrections | what they were about |
+  |---|---|---|
+  | Task 1 (the gate) | 2 | a finished-but-unreachable tag (`resetcycle`) the derived loop would have reddened; a `\b` without which `{% ifchanged %}` satisfied `{% if` |
+  | Task 2 (ref table) | 7 | the wire form itself — `NodeDesc.slot`, the `AttrValue::NodeSlot` variant, `extend_nodelist`'s token re-attachment, `NoHost::alloc_slot` returning `0`, and `Host::compile_filter` deferred to Task 7 |
+  | Task 3 (flat tags) | 3 | `{% filter %}` with no argument is a bare `ValueError`, not a `TemplateSyntaxError` |
+  | Task 4 (`regroup`, `url`) | 2 | `{% url %}`'s "Malformed arguments" branch is unreachable, so the draft's error row is wrong twice over |
+  | Task 5 (`ifchanged`, `for`) | 4 | the variadic-`__init__` failure is CPython-worded (assert the failure, not its text); the two-`else` row needs `parse_until`'s suffix |
+  | Task 6 (`cycle`) | 4 | `resetcycle.rs` was already done by Task 2; the `'Only silent'` row's template actually *succeeds* |
+  | Task 7 (`if`) | 6 | listed in full in Task 7's block — the identity assertion's layer, the `endif`-versus-Malformed row, the "smartif rows already in `ERRORS`" that did not exist, where the real `CompileFilter` went, `None` not being permissive, and the missing `cargo fmt` step |
+
+  **Two of the 26 were found during this plan's own self-review rather than at
+  implementation time, and both are `§D` errors:**
 
   1. §D4's `with` said "the two legacy positionals are `None`", and the real
      signature is `WithNode.__init__(self, var, name, nodelist,
@@ -2223,21 +2269,27 @@ git commit -m "tags: if, and the real compile_filter behind its condition"
   first, and keep measuring — a plan whose only found defects are the ones it
   went looking for has not been checked.
 
-- [ ] **Step 3: Update the spec's `§10.3` rows.** M5's row becomes the eleven
+- [x] **Step 3: Update the spec's `§10.3` rows.** M5's row becomes the eleven
   names (`M5_TAGS`, cited to `tests/test_tag_inventory.py`, not copied); M6's row
   gains `querystring`; the `test_url` file moves from M12's row to M11's, per the
   Scope section's resolution. Each row cites the test that derives it.
 
-- [ ] **Step 4: Write `.review/m5-seams.md`** — the milestone's audit record,
+- [x] **Step 4: Write `.review/m5-seams.md`** — the milestone's audit record,
   same shape as `.review/m4-seams.md`: one row per tag, the verdict, the source
   line, and the general rule at the top that **a one-time audit's verdict
   expires when the thing audited changes**. Cite tags by symbol, never by a
   `tags/*.rs` line number — the §D-editing in Task 4 already moves them.
 
-- [ ] **Step 5: Commit and send to the reviewer.**
+- [x] **Step 5: Commit and send to the reviewer.**
+
+  The two audit changes are folded in: they are the remedies the audit record
+  documents, and a record whose remedies are in a later commit does not describe
+  the tree it was written against.
 
 ```bash
-git add docs/superpowers .review/m5-seams.md
+git add docs/superpowers .review/m5-seams.md \
+        tests/parser_error_corpus.py \
+        crates/template-core/src/parser/smartif.rs
 git commit -m "tags: M5 close-out — the count re-measured, the scope change recorded"
 ```
 
