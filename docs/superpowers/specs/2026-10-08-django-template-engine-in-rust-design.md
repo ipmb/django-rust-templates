@@ -767,7 +767,7 @@ the highest-risk milestone, and §5.5 is where the answer to it lives.
 | M4 | All 57 built-in filters | ✅ all 57 names have Rust bodies, asserted as a *set* by `tests/test_filter_inventory.py` (`STILL_STUBBED` is the empty array); corpus parity over `tests/filter_cases.py` — 539 `CASES` + 40 `ERROR_CASES`, every `expected` verified against Django as well as against the engine; `FilterFlags` round-tripping against the pinned registry; the delegating bodies derived by `tests/test_filter_inventory.py`'s four metrics — the set is not stated here, because the only assertion that keeps it current is the one that derives it from both the source and the Rust bodies. `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; progress meter unchanged at 25. **The 1547-test gate cannot see a single filter body** — its only route into the Rust filter layer is `check_filter`'s name-and-arity check — so the corpus, not the acceptance criterion, is what separates a landed body from a verified one; see the M4 summary's "acceptance blind spot" |
 | M5 | The eleven remaining built-in tags. **The set is cited, not copied**: it is `M5_TAGS` in `tests/test_tag_inventory.py`, and the assertion that keeps it current is the one that derives it — a list here would go stale the moment a tag moved | ✅ each of the eleven bodies landed, asserted as a *set* (`builtin_tag_stubs() & M5_TAGS == set()`); success corpus `tests/parser_corpus.py` (142 sources) + error corpus (78), every `expected` verified against Django as well as against the engine; `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; progress meter unchanged at 25. **The milestone's seam audit is `.review/m5-seams.md`** — it found `Host::repr`'s shell override and `IfParser::condition`'s `Raw` arm each guarded by a comment rather than by an input that discriminates |
 | M6 | `Library`, extension host callbacks; **and `querystring`**, moved here from M5 by the M5 plan's §D1 — it is `@register.simple_tag(…, takes_context=True)`, the sole non-`do_` registration among the built-ins, so it needs the extension host M5 does not build | ✅ Python-defined tags/filters work through the engine, incl. re-entrant `ParserHandle.parse`. Ownership, measured: `builtin_tag_names()` is **22** and `builtin_tag_stubs()` is `['partial', 'partialdef']` — `load` and `querystring` are **host-owned**, so Rust implements neither, and `partial`/`partialdef` are names the registry knows with no compile function behind them yet. `unshimmed()` is unchanged at 25; `cargo test` is 645. Gates: `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; the parity corpora are `tests/parser_corpus.py` (152 sources) and `tests/parser_error_corpus.py` (91 errors), plus the 48-case differential harness. **`block`/`extends`/`include` are excluded from the host at M6, so `{% extends %}` still raises `Invalid block tag`** — a divergence from Django, owned by M7, which owes both the removal *and* `must_be_first` across the seam |
-| M7 | Inheritance: `block`, `extends`, `include` | Inheritance corpus parity; **`test_include_cache` passes**, proving the shadow tree is materialised once and node identity is stable (§5.5) |
+| M7 | Inheritance: `block`, `extends`, `include` | ✅ Rust compiles all three, so `builtin_tag_names()` is **25** and the host compiles only `load` and `querystring` (measured: `parser.tags` holds 27 names, Rust's 25 are exactly the registry's set). **The gate is `tests/test_inheritance_gate.py`, and what it takes from `test_include_cache` is the row's *shape*, not the row.** The `.django/` row cannot be M7's gate: the shim does not interpose `loader_tags`, so it runs on stock Django's parser and passes whether or not M7 shipped — §10.3's vacuity rule below. Both engines are compared in one row, and the row is paired with a **structural** one because the counter row is a *parity* instrument: the include cache is Django's own, both engines read it, and breaking it gives the same wrong output on both sides (`IncludeNode.render`, keyed on the node). `unshimmed()` unchanged at **25**; `scripts/check.sh` green with `Ran 1547 tests … OK (skipped=6)` |
 | M8 | Escaping and the Python object protocol | `SafeData`, `Promise`, callables, `alters_data`, `do_not_call_in_templates`; resolver complete |
 | M9 | Interpose `base`, `smartif` | ⚠️ **highest-risk milestone.** All 1547 tests flip onto our `NodeList.render`/`Node.render_annotated` at once (§5.5). Done when `test_base`, `test_parser`, `test_nodelist` (incl. `ErrorIndexTest`), `test_smartif` are real signal **and** the full suite is unchanged from §2 — budget accordingly, this is not a one-line step |
 | M10 | Interpose `context`, `engine`, `utils`, `loaders`, `origin` | `test_context`, `test_engine`, `test_loaders`, `test_origin`; project-side `FileSystemLoader` case-sensitivity test (§2) |
@@ -778,6 +778,25 @@ the highest-risk milestone, and §5.5 is where the answer to it lives.
 | M15 | Hardening | §2 met with margin |
 
 Each milestone ends with its stated check green and one commit.
+
+**The vacuity rule, and every gate above is read through it.** A gate that names
+a `.django/tests/` module is only a gate for the milestone that *interposes* the
+behaviour it exercises. Until then the module runs on stock Django and passes
+whether or not the milestone shipped — so the row is evidence about the shim's
+schedule, not about the engine. The mechanical question, asked once per row:
+
+> **Is the module whose behaviour this gate exercises interposed by this
+> milestone?** If not, the gate is vacuous and the milestone owes a gate of its
+> own, pointing at our engine.
+
+M7 is the worked example and the reason the rule is stated rather than assumed:
+`test_include_cache` is named in the spec as an M7 gate, and at M7 it is vacuous,
+because `loader_tags` interposition is M11's. The obligation is discharged in
+`tests/`, against our engine, by copying the row's *shape*.
+
+This is the question a reader at the next milestone should be able to answer
+without re-reading a plan, and it is why the rule lives here beside the table
+rather than in prose about M7.
 
 **M9 is called out because it is the one milestone where the suite can go from
 green to comprehensively red in a single interposition**, and where a failure is
@@ -986,14 +1005,44 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   against a stand-in `must_be_first` node (`parser/tags/mod.rs:198`). M7
   supplies a tag, not a rule.
 
-  **What M7 owes, stated exactly, because the loose version invites a reader at
+  **What M7 owed, stated exactly, because the loose version invites a reader at
   M7 to think the rule arrives untested:** Django's `{% extends %}` compile
-  function, its message text `"{% %s %} must be the first tag in %s."` with the
-  origin's repr in the second slot, and the corpus entry that reaches it — which
-  additionally needs the harness to pass an `Origin` whose `template_name` repr
-  agrees with Rust's `origin_template_repr`. It does **not** owe the refusal
-  path: `extend_nodelist`'s check ships at M3 and is exercised, by a stand-in,
-  on both the refusing and the permitting branch.
+  function, its message text `"{% %s %} must be the first tag in %s."`, and the
+  corpus entry that reaches it — which additionally needs the harness to pass an
+  `Origin` whose `template_name` agrees with the parser's. It did **not** owe the
+  refusal path: `extend_nodelist`'s check ships at M3 and is exercised, by a
+  stand-in, on both the refusing and the permitting branch.
+
+  **Three corrections to how that obligation was stated, and the first changes
+  what crosses the seam:**
+
+  - **The second slot holds the *raw* `Origin.template_name`, not a repr.**
+    `{% extends %}` compares it against a path and interpolates it with plain
+    `%s` in three messages (`loader_tags.py:246-288`), so a repr is wrong in all
+    three. The field is `origin_template_name` and the repr is derived at the one
+    place a message needs it, through the host's `repr` seam. The paragraph above
+    said "the origin's repr in the second slot", which is the shape that was
+    wrong.
+  - **`must_be_first` crosses the seam *inbound*, and that is an M6 defect M7
+    inherited rather than an M7 feature.** Rust has the field and the 5-tuple
+    descriptor wire does not carry it — it is read off the *Python node the host
+    returned*, before `node.unbind()`. So the refusal can fire for a
+    host-compiled node; the outbound 5-tuple is untouched. The recon's §2 framed
+    it on the outbound wire, which would have required an arity change to a shape
+    `tests/test_ref_table.py` pins.
+  - **The gate is `tests/test_inheritance_gate.py`, not the `.django/` row** —
+    §10.3's vacuity rule, worked through in the M7 row above.
+
+  **M7 also removed a rule rather than adding one.** `ShellHost.has_tag` had an
+  exception list of three names (`block`, `extends`, `include`) *in front of* its
+  identity clause, and the list was wrong in the direction that does not fail
+  loudly: consulted first, it made a `{% load %}`ed library that registers
+  `block` lose — the parser's `block` was the loaded callable, and `has_tag`
+  still answered "Rust's". Widening the clause to read `loader_tags`' table as
+  well as `defaulttags`' makes for all three the same test every other built-in
+  gets, and the two names Rust still does not own (`load`, `querystring`) are
+  answered by the registry's *absence* one clause earlier — by no list. Measured:
+  the registry's 25 names and the names `has_tag` declines are the same set.
 
 - **M6 gate: a library that redefines a built-in tag name.** Host-first
   dispatch order is argued from last-registration-wins semantics rather than

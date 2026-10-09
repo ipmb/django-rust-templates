@@ -378,11 +378,17 @@ is `:512-518` and the check `:502`. `tags/mod.rs:194-212` began two lines above
 **Worth keeping, because it is the third time this record has had it:** a span
 that was right when it was written and a claim that was wrong when it was
 written fail the same way, and only re-reading the tree tells them apart. The
-plan's D3 is the same defect one layer up, and measured: `:435` *was* the check
-when D3 was written, and Task 1's `loaded_blocks` moved it. The spec tracked the
-move at every commit (`435 → 471 → 489 → 502`); the plan did not, because the
-plan is a dated record and nothing scans it. A number is not made durable by
-being a correction.
+plan's D3 is the same defect one layer up, and measured: its subject's line *was*
+the check when D3 was written, and Task 1's `loaded_blocks` moved it. The spec
+tracked the move at every commit; the plan did not, because the plan is a dated
+record and nothing scans it. A number is not made durable by being a correction.
+
+**This file is a dated record and its spans are dated with it.** The corrections
+above are the values at the close-out commit; the *live* values are the
+`scripts/anchors.txt` rows for those symbols, which is where `--check` guards
+them and `--update` moves them. The numbers are kept here rather than deleted
+because a record that cannot be read is not a record — but nothing should take a
+span from this file as current.
 
 ---
 

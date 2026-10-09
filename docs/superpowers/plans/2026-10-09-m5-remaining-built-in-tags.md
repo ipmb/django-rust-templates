@@ -1068,7 +1068,9 @@ def test_resetcycle_targets_the_cycles_node():
 
 - [ ] **Step 2: Run it; expect a loud failure.**
 
-Run: `./scripts/check.sh` (or `pytest tests/test_ref_table.py -v`)
+Run: `./scripts/check.sh` (or `.venv/bin/python -m unittest tests.test_ref_table -v`;
+**corrected at M7's close-out — the draft said `pytest`, which this project does
+not install**, so the alternative was unrunnable as written)
 Expected: **FAIL** — `LookupError: ... needs a resolve_ref callback; none was
 passed to materialise` (`parser.py:344-348`), because nothing produces or
 threads a table yet. This is the "seen to fail" for §Review Focus 3.

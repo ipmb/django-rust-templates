@@ -521,11 +521,12 @@ cache is keyed on. It does **not** pin that the template is materialised once
 
 ## D. Corrections this plan makes
 
-Nine, each with the artifact it corrects and the measurement behind it. The first
+Ten, each with the artifact it corrects and the measurement behind it. The first
 two correct `.review/m7-recon.md` (the recon precedes and is corrected by the
 plan, as M6's did); D3–D6 correct derived artifacts, and D5/D6 came out of the
 reviewer's round on this plan; **D7 was written at Task 3's execution**, **D8 at
-Task 4's**, and **D9 at Task 5's**, correcting this plan's own tasks — the place
+Task 4's**, **D9 at Task 5's**, and **D10 at Task 7's**, correcting this plan's
+own tasks — the place
 a plan's errors cost a run rather than a line of prose. D8 carries a **D8′**, its
 own re-measurement after the reviewer showed its first number came from a
 harness artifact; that is the shape a correction should be able to take.
@@ -546,33 +547,42 @@ because it is a real M6 defect independent of which design wins: a library tag
 returning a `must_be_first` node is accepted today, in a position Django
 refuses.
 
-**D3 — the spec's §10.4 cited `parser/mod.rs:336` for `extend_nodelist`; the
-check is at `:502`, inside the function ported at `:496`.** A vintage, not a
-claim. **Fixed rather than only recorded**, in `7ac772e`: the spec is a living
-document under the anchor guard now, so a number left as a vintage would be a
-number the guard re-checks forever. Found by reading the 29 unmanifested spec
-anchors against the pinned tree one at a time — the widening's first catch, and
-the second was `base.py:948-1000`, twelve lines short of `_resolve_lookup`'s
-end.
+**D3 — the spec's §10.4 cited a line number for `extend_nodelist` that pointed
+at the wrong thing.** A vintage, not a claim. **Fixed rather than only recorded**,
+in `7ac772e`: the spec is a living document under the anchor guard now, so a
+number left as a vintage would be a number the guard re-checks forever. Found by
+reading the 29 unmanifested spec anchors against the pinned tree one at a time —
+the widening's first catch, and the second was a line twelve short of
+`_resolve_lookup`'s end.
 
-**D3′ — the value D3 records is not the value that holds, and the reason is the
-shape of the mistake rather than a slipped digit.** `:435` was the check *at the
-commit that corrected it*, and it moved three more times: the spec and the
-manifest tracked it in step and neither ever went red — measured across the five
-commits, spec `435 → 471 → 489 → 489 → 502`, manifest carrying the matching
-entry at each (`7ac772e`, `1b131a0`, `fdf115b`, `156a24a`, `b8796e2`). **The spec
-is checked; this plan is not, and a number in an unscanned document reads as
-settled once it is written.** So D3 froze a moving target and D3 is what a later
-reader consults. `:502` is the true value and the one the spec already carries;
-the manifest entries are `parser/mod.rs:496` (the function) and `:502` (the
-check).
+**D3′ — and this entry's own replacement number was itself the defect, so it no
+longer carries one.** `7ac772e` wrote the check's line into the spec; Task 1
+inserted `loaded_blocks` above it and the line moved three more times. The spec
+and the manifest tracked it in step and **nothing was ever red** — the tracked
+citation followed the line through all five commits — while this entry stayed at
+the first value, because the plan is not scanned and a written number reads as
+settled. Measured before deleting the number: spec and manifest agreed at every
+commit; D3 and the recon's §6 did not.
 
-**The general form, because M7 produced it twice** (here and in the recon's §6):
-*a correction is not exempt from being checked.* An entry that fixes a wrong
-number is still a number, it is written with the same confidence as the number
-it replaced, and if it lands in a document the guard does not scan, nothing will
-ever move it again. That is why Step 2's remaining work is to move these into the
-spec — a living, scanned document — rather than to leave them here.
+**The remedy is the location, not the diligence, and it is the one this project
+already applied to the checker's own header.** A correction in an unscanned
+document has exactly the lifetime of the error it replaced — and is worse,
+because it carries the authority of having been checked once. So:
+
+> **D3's subject: `extend_nodelist`'s must-be-first check, and the spec's
+> citation of it. What was wrong: a line number pointing elsewhere. Where the
+> truth lives: the `scripts/anchors.txt` row for that check** — the one
+> `--check` guards and `--update` moves. **No replacement number is recorded
+> here.**
+
+A plan is two documents glued together: the task steps are a dated record of
+intent, and the D-sections are live claims about the current tree. The exclusion
+in `NOT_SCANNED_BECAUSE` treats both halves as dated, and only the first half is.
+Taking the number out is what lets a D-section say the thing a dated document can
+say truthfully forever: that a mistake was made, and where the truth now lives.
+**Ten D-sections across M6 and M7 are ten frozen numbers today**, and Step 2's
+work is to move the live claims into the spec, which `--check` does scan, rather
+than to keep them current here.
 
 **D4 — the spec's §10.3 M7 row names `test_include_cache` as the gate, and as
 written that gate is vacuous.** The `.django/` row runs on stock Django's parser
@@ -758,6 +768,63 @@ under the half-fix: `test_the_host_declines_every_name_rust_owns` fails
 is exactly the pre-M7 state for the second test. That is the reason Step 6 runs
 the pair in the order it does: neither test alone distinguishes "the list is
 gone" from "the table was widened", and the pair does.
+
+**D10 — this plan's target counts, re-derived at close-out; two were right, one
+was a right answer to a different question.** Step 3's subject. The registry's
+`22 → 23 → 24 → 25` is **correct, and it happened per commit** — the plan's own
+rule kept, not deferred to the end:
+
+```text
+commit    task    registry literal   absent-count doc   registry test name   PYTHON_OWNED
+1b131a0   1       23                 "Four…"            the_four_…           4 members
+156a24a   3       24                 "Three…"           the_three_…          3 members
+b8796e2   4       25                 "Two…"             the_two_…            2 members
+```
+
+Measured with `git show <commit>:<path> | grep` over the three paths. The corpus
+deltas, measured the same way and counted by `ast` over the `TEMPLATES` /
+`ERRORS` / `ORIGIN_ERRORS` list literals:
+
+```text
+                          pre-M7   Task 1   Task 3   Task 4
+parser_corpus.TEMPLATES      152      156      162      166
+parser_error_corpus.ERRORS    91       95      100      106
+ORIGIN_ERRORS                  —        —        2        3
+```
+
+**The sentence at `:219-221` that predicts this shape is wrong in one clause.**
+It says the "deliberately absent" count "becomes two, then one, then none";
+measured, it is **four, then three, then two**, and the test it names,
+`the_five_python_owned_builtins_are_not_rust_compile_functions`, was the *pre-M7*
+name and was renamed in step at each of the three commits above. The likely
+reading is that "two, then one, then none" is `loader_tags`' own three names
+retiring (3 → 2 → 1 → 0), written into the sentence about the absent-count — the
+shape this plan has caught four times, a right answer to a different question.
+As written it is false of the thing it is attached to, so it is corrected here
+rather than left to read as a live claim.
+
+**Where the truth lives, because a dated document can only say that much:**
+`tests/test_tag_inventory.py:270` and `:277` hold `PYTHON_OWNED` and the literal,
+and `crates/template-core/src/parser/registry.rs:11` and `:324` hold the
+absent-count sentence and the test name — all four inside `TREE_ROOTS`, so the
+*citations* are `--check`-guarded and the *counts* are asserted
+(`test_the_rust_registry_is_djangos_builtins_minus_the_python_owned_two` fails if
+the table shrinks without the literal). The corpus sizes are the exception: the
+only assertion on them is a floor, `test_parser_parity.py:442`'s
+`assertGreaterEqual(len(TEMPLATES), 40)`, so they are written out once here and
+re-derivable only by the `ast` command above. Task 1's
+`m7_measure_gettextlist.py` note at `:1029` — "of the 95 rows" — is the same
+species: right for the commit that wrote it, and superseded the moment the file
+grew, which is why the script now prints its population from the live file.
+
+**One command, in two plans, that could not run.** D7 found that this project has
+no `pytest`; the M5 plan's Task 6 Step 2 kept the draft's `pytest tests/test_ref_table.py
+-v` as its alternative invocation. Measured: `.venv/bin/python -m pytest` raises
+`ModuleNotFoundError: No module named 'pytest'`, while `tests/__init__.py` exists
+so `.venv/bin/python -m unittest tests.test_ref_table -v` runs the same file (17
+tests). Corrected in the M5 plan too, in this pass, because a dated plan that
+ships an unrunnable command is the defect D7 named — cheaper to fix than to
+explain three milestones later.
 
 ---
 
@@ -1545,7 +1612,7 @@ removed). The `None` row cannot separate them: both encodings agree there.
 
 - [ ] **Step 8: Run the guards, then the gates**
 
-Run: `source scripts/env.sh && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && grep -rn origin_template_repr crates/ python/ tests/ scripts/ ; maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m pytest tests/ -x -q`
+Run: `source scripts/env.sh && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && grep -rn origin_template_repr crates/ python/ tests/ scripts/ ; maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m unittest discover -s tests -t . -p 'test_*.py'`
 
 Expected: all pass; the `grep` prints nothing (exit 1, which is the wanted
 result). No corpus row exercises an origin yet — Task 3's rows are the first —

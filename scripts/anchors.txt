@@ -489,6 +489,7 @@ loader_tags.py:233-234	django/template/loader_tags.py	233	234	parser.__loaded_bl
 loader_tags.py:239	django/template/loader_tags.py	239	-	acceptable_endblocks = ("endblock", "endblock %s" % block_name)	-
 loader_tags.py:239-241	django/template/loader_tags.py	239	241	if endblock.contents not in acceptable_endblocks:	parser.invalid_block_tag(endblock, "endblock", acceptable_endblocks)
 loader_tags.py:246	django/template/loader_tags.py	246	-	-	def construct_relative_path(
+loader_tags.py:246-288	django/template/loader_tags.py	246	288	def construct_relative_path(	return f'"{new_name}"' if has_quotes else new_name
 loader_tags.py:264-265	django/template/loader_tags.py	264	265	f"The relative path {relative_name} cannot be evaluated due to "	"an unknown template origin."
 loader_tags.py:275-284	django/template/loader_tags.py	275	284	points outside the file hierarchy that	-
 loader_tags.py:276-277	django/template/loader_tags.py	276	277	"The relative path '%s' points outside the file hierarchy that "	"template '%s' is in." % (relative_name, current_template_name)
