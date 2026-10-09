@@ -114,7 +114,17 @@ It must be a module that calls our entry points directly — `_native.resolve`,
 same conclusion M7 reached from the other direction, and the second milestone in
 a row to reach it.
 
-## 3. The wire defect: `SafeStr` is opaque to Django's protocol
+## 3. The wire type: `SafeStr` is opaque **by design**, and the bridge is tested
+
+> **Correction (2026-10-09, same day, before the plan).** The first version of
+> this section called `SafeStr`'s opacity a *live defect*. **That was wrong**,
+> and wrong in the way this project keeps recording: the measurement was right
+> and the conclusion outran it. `SafeStr` is opaque *as a type*, and the shell
+> decodes it at the boundary — the mechanism is below, with the tests that
+> already pin it. What survives is a narrower and still-real question, at the
+> end of this section. The claim is corrected here rather than deleted, because
+> the reason it was tempting is the M8 trap: a type that participates in no
+> protocol *looks* like a defect until you read the code that consumes it.
 
 `AttrValue::SafeStr` crosses the wire as `_native.SafeStr`
 (`crates/template-py/src/lib.rs:592`). Measured (`m8_measure_escape.py`,
@@ -131,42 +141,47 @@ a row to reach it.
   safe == 'a & b'       : False
 ```
 
-Django's escaping protocol reads two things (`django/utils/html.py:115-126`):
+All true, and all of it is about a value that **never reaches a template in that
+state**. Django's escaping protocol reads three things
+(`django/utils/html.py:115-126`, `base.py:1123-1136`):
 
 ```python
-def conditional_escape(text):
-    if isinstance(text, Promise):
-        text = str(text)
-    if hasattr(text, "__html__"):
-        return text.__html__()
-    else:
-        return escape(text)
+if isinstance(text, Promise): text = str(text)      # conditional_escape
+if hasattr(text, "__html__"): return text.__html__()
+if not issubclass(type(value), str): value = str(value)   # render_value_in_context
 ```
 
-and `render_value_in_context` (`base.py:1123-1136`) reads a third:
+`SafeStr` satisfies none of them — so the bridge lives on the Python side, at
+`_impl/parser.py:600`'s `_decode_value`:
 
 ```python
-if not issubclass(type(value), str):
-    value = str(value)
-return conditional_escape(value)
+if isinstance(value, _native.SafeStr):
+    return mark_safe(value.text)
 ```
 
-`SafeStr` satisfies none of the three. Its `str()` is a **debug repr**, so a
-`SafeStr` that reaches a template renders `&lt;SafeStr &quot;…&quot;&gt;` —
-escaped garbage, silently. That is a D3-class defect (wrong and quiet) and it is
-**live on the wire**, not merely latent: unlike the callable stub, nothing has
-to be interposed for it to reach a render.
+(`python/django_rust_templates/_impl/parser.py:666-667`.) And `_decode_value` is
+called on every path a descriptor's value can travel: the node itself (`:259`),
+a node's kwargs (`:310`), a variable's literal (`:342`), and recursively into
+sequences and mappings (`:696`, `:704`, `:711`). The two ends are pinned —
+`tests/test_materialise.py:318` (`test_a_safe_str_becomes_a_safe_string`) and
+`:470-477`, whose comment states the container case outright: *"a `SafeStr`
+inside a container arrives as a `SafeStr` and still needs `mark_safe`; a list
+returned as-is would escape the content when the node renders."*
 
-Where it reaches one today is not yet measured and is the first open question
-for the plan (§6). The two consumers in our own tree are
-`python/django_rust_templates/_impl/parser.py:666`, which tests `isinstance(value,
-_native.SafeStr)` — so the shell already knows the type exists and converts
-somewhere — and the Rust side, where `AttrValue::SafeStr` carries `Variable.literal`
-(`parser/variable.rs:98,203`) and `{% verbatim %}` content
-(`parser/tags/verbatim.rs:44`). **A `{% verbatim %}` body and a string literal in
-an `{% if %}` are the two places a `SafeStr` is definitely produced**, which
-makes "does either reach `render_value_in_context` unconverted?" a question with
-a definite answer and a cheap measurement.
+So the design is: **Rust's `Value::Safe` is a marker, not a string subclass, and
+`_decode_value` is the single crossing where it becomes Django's `SafeString`.**
+The opacity is the *point* — `filters/value.rs:56-59` records that the marker
+cannot be dropped separately from the text.
+
+**What survives as a real M8 question is totality, not correctness.** The bridge
+covers what the *materialiser* sees. M8 adds two producers that are not the
+materialiser: `Promise` forcing and a *called callable's* return value — both of
+which originate in the resolver or the filter layer, and both of which could
+carry a safe or promise-wrapped value that never passes `_decode_value`. That is
+a question about M8's new paths, and it is cheap to answer once the paths exist:
+**for each value M8 newly produces, name the crossing.** The obligation recorded
+for the plan is therefore *"M8 adds no producer that bypasses `_decode_value`
+without saying so"*, not *"repair `SafeStr`"*.
 
 ## 4. `alters_data` and `do_not_call_in_templates` are read off the *resolved object*
 
@@ -274,10 +289,7 @@ registered filters are shadowed by a different module attribute
 
 `defaultfilters.escape` is `django.utils.html.escape`, **the unconditional one**;
 a template's `|escape` reaches `escape_filter`, which is `conditional_escape`.
-This is not a footnote — it produced this recon's first false divergence, and
-the way it failed is worth keeping: the measurement was correct and the
-*conclusion* was wrong, because the entry point was. Against the registry, all
-six rows agree:
+Against the registry, all six rows agree:
 
 ```text
   escape       plain stock='a &amp; b'  ours='a &amp; b'  same
@@ -288,10 +300,23 @@ six rows agree:
   safe         safe  stock='a & b'      ours='a & b'      same
 ```
 
-**Any stock-vs-ours comparison in M8 reaches the filter through
-`register.filters[name]` or through a real render — never through
-`defaultfilters.<name>`. Five of the six shadowed names are filters this project
-still owes**, so the trap is not confined to M8's own rows.
+**This reconnaissance did not discover T1 — it rediscovered it, and the
+rediscovery is the part worth recording.** `tests/test_filter_inventory.py:779`
+is `test_escape_is_not_the_registered_escape`, whose docstring already says
+*"anything that reaches for `defaultfilters.escape` to compare against has
+reached for the wrong object"*. This recon wrote a script to measure a fact our
+own suite pins, then wrote it up as a finding — the exact failure the project's
+"consult the tree before claiming" rule exists to prevent, and worse than being
+wrong, because the answer was one `grep` away the whole time.
+
+The trap is real and the row stays, for a reason that has nothing to do with
+novelty: it produced this recon's **first false divergence**, and the way it
+failed is the part a script re-run cannot recover — the measurement was correct
+and the *conclusion* was wrong, because the entry point was. **Any stock-vs-ours
+comparison in M8 reaches the filter through `register.filters[name]` or through
+a real render — never through `defaultfilters.<name>`.** Five of the six
+shadowed names are filters this project still owes, so the trap is not confined
+to M8's own rows.
 
 **T2 — a flag set where the lookup cannot see it is inert.** §4. The rule for
 every fixture M8 writes: put `alters_data` / `do_not_call_in_templates` on the
@@ -323,10 +348,10 @@ Five obligations, in the order the measurement puts them:
 3. **`Promise` forcing** — §5.2's `force_promise`, on the trait that exists.
    Measured target: `isinstance(lazy_value, Promise) = True` and
    `conditional_escape` forces it (`html.py:121-122`).
-4. **The `SafeStr` bridge** — the one live defect. Either the type participates
-   in the protocol (`str` subclass + `SafeData` + `__html__`) or it never
-   reaches `render_value_in_context`; which one is correct depends on §6's open
-   question, and the answer changes the FFI.
+4. **`SafeStr` stays opaque; M8 adds no producer that bypasses
+   `_decode_value`.** Not a repair — the bridge exists and is tested (§3). The
+   obligation is a naming discipline: for each value M8 newly produces (a forced
+   `Promise`, a called callable's return), state the crossing it takes.
 5. **`render_value_in_context`'s sequence** — `template_localtime` →
    `localize` → the autoescape branch (`base.py:1123-1136`), including
    `issubclass(type(value), str)` as the *conversion* test rather than
@@ -341,12 +366,15 @@ Is that the right conclusion from §10.3's unresolved half, or does the rule's
 "a row naming no `.django` module is out of scope" mean I should not be drawing
 a M8 gate conclusion from the pinned suite at all?
 
-**Q2.** For the `SafeStr` bridge: making it a real `str` subclass with
-`SafeData` in its MRO puts the type in Django's protocol but makes it a Python
-type the Rust side must keep in sync; keeping it opaque means the conversion
-must be total, and totality is the property that fails quietly. Which failure do
-you want recorded as the one M8 chose — and is there a third shape where the
-wire carries a plain `str` plus a marker the shell reads?
+**Q2.** With §3 corrected, this is no longer "which `SafeStr` shape" — the shape
+is settled and tested. The question is the one §3 ends on: **is "name the
+crossing for every value M8 newly produces" enough of a rule, or does it need a
+test?** A rule is checkable only by a reader, and the two new producers (a forced
+`Promise`, a called callable's return) both route through code M8 is about to
+write. I would rather pin it: one test per new producer asserting the value is
+protocol-visible after M8's path, in the shape of
+`test_a_safe_str_becomes_a_safe_string`. Say if you think that is one test too
+many for a boundary that has not yet been crossed wrongly.
 
 **Q3.** §5.2: correct the names in place (`ValueResolver` → `LookupTarget`), or
 mark the section as design-time and point at the traits? The spec is under the
