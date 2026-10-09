@@ -9,10 +9,45 @@
 //! missing entry.
 //!
 //! **Three built-in names are deliberately absent**, and a test asserts their
-//! absence: `block`, `extends` and `include`. §6 assigns their render-time logic
-//! to Python, and M7 supplies them through the host seam; they are not Rust
-//! compile functions at any milestone, so an entry here would be a promise this
-//! project has already decided not to keep.
+//! absence: `block`, `extends` and `include`. §6 assigns them to Python and M7
+//! supplies them through the host seam, so they are not Rust compile functions
+//! at any milestone, and an entry here would be a promise this project has
+//! already decided not to keep. The mechanical reason — the one to reach for
+//! when the next built-in's side has to be decided — is the rule below.
+//!
+//! **The rule behind that subtraction, stated rather than listed**, because
+//! "which built-ins does Rust own" has now been asked four times and each time a
+//! different list was a right answer to a different question. This table is the
+//! set of tags whose `CompileFn` is a function of **the token and the parser's
+//! structural cursor alone** — the cursor being `Parser::parse`, `next_token`
+//! and the end-tag names. A tag is subtracted when its compile reads or writes
+//! **host-side parser state**, which a `NodeDesc` cannot carry across the wire:
+//!
+//! - `block` writes `parser.__loaded_blocks` (`loader_tags.py:227-232`), a Python
+//!   attribute the duplicate-name check is built on.
+//! - `extends` reads `parser.origin.template_name` (`:308`) and inspects the
+//!   just-parsed nodelist through `get_nodes_by_type` (`:311`) — a query over
+//!   *materialised* nodes, which do not exist at compile time.
+//! - `include` reaches `parser.compile_filter` and the loader machinery.
+//!
+//! Note what the rule is **not**: it is not "the node's `render` needs the
+//! host". Every node is materialised as Django's own class and renders in
+//! Python, so that test would subtract all 24 — `NowNode.render` reads
+//! `settings.USE_TZ` and `timezone.get_current_timezone()`
+//! (`defaulttags.py:404-405`) and `now` is one of M2's nine. The discriminator is
+//! on the **compile** side.
+//!
+//! **Flagged, not resolved: `partial` and `partialdef` are the rule's next two
+//! candidates, and M13 must place them.** Both touch `parser.extra_data`
+//! (`defaulttags.py:1251`, `:1279`), the same *kind* of host parse state the rule
+//! subtracts, so neither can be compiled from a token alone as written. They stay
+//! in this table for now because their stubs make the milestone visible and
+//! because M13 has a real choice — widen the seam, or grow the wire an
+//! `extra_data` channel — that M3 must not pre-empt. The reviewer's argument
+//! distinguished the pair (only `partial`'s *render* re-enters host state); that
+//! distinction does not hold under this rule, which acts at compile time, where
+//! both are the same case. What is recorded here is the measurement, not a
+//! verdict.
 //!
 //! The count is 24 = 27 built-ins minus those three, and the metric matters:
 //! `Engine().template_builtins[0].tags` is 24 (`defaulttags` alone), while the
@@ -20,7 +55,9 @@
 //! `loader_tags` 3). Both are right answers to different questions, and this
 //! project has lost time to that shape four times. `builtin_tag_names` is
 //! cross-checked against Django's real registry by `tests/test_tag_inventory.py`
-//! so the number cannot drift unnoticed.
+//! so the number cannot drift unnoticed — and that cross-check computes the
+//! complement from `REGISTERED` minus an explicit set, so a change here is a
+//! change in both places at once rather than a silent drift.
 
 use crate::parser::desc::NodeDesc;
 use crate::parser::error::Error;

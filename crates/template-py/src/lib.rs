@@ -177,6 +177,23 @@ create_exception!(
      `Template.get_exception_info` inspect."
 );
 
+create_exception!(
+    _native,
+    UnimplementedTag,
+    ParseError,
+    "A built-in tag this engine does not implement yet.\n\
+     \n\
+     A **subclass** of `ParseError`, so every existing `except ParseError` and\n\
+     the shell's conversion to `TemplateSyntaxError` are unchanged; the subclass\n\
+     exists so a parity harness can bucket an outcome as \"not implemented here\"\n\
+     rather than \"errored differently\". That distinction cannot be recovered\n\
+     from the message, and it must not be: Django would compile `{% for %}`\n\
+     successfully, so our `Unimplemented` is a statement about the engine, not a\n\
+     verdict on the template, and a harness comparing messages would score it as\n\
+     agreeing with Django's \"Did you forget to register or load this tag?\" — the\n\
+     opposite of the truth."
+);
+
 /// A token's wire shape, shared with `_native.lex`.
 type WireToken = (u8, String, usize, Option<(usize, usize)>);
 
@@ -286,6 +303,10 @@ fn parse_error(py: Python<'_>, error: &Error) -> PyResult<PyErr> {
         // it a message would be a gratuitous difference from Django at the one
         // place `assertRaises` is used instead of `assertRaisesMessage`.
         ErrorKind::UnterminatedMarker => PyStopIteration::new_err(()),
+        // Its own class, so the "this engine has not built it yet" bucket is
+        // visible at the FFI. See the exception's docstring for why the message
+        // cannot carry that.
+        ErrorKind::Unimplemented(_) => UnimplementedTag::new_err(error.message()),
         _ => ParseError::new_err(error.message()),
     };
     let token = match &error.token {
@@ -339,5 +360,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<NodeRef>()?;
     m.add_class::<SafeStr>()?;
     m.add("ParseError", m.py().get_type::<ParseError>())?;
+    m.add("UnimplementedTag", m.py().get_type::<UnimplementedTag>())?;
     Ok(())
 }

@@ -324,6 +324,29 @@ class ShapeTests(unittest.TestCase):
         self.assertIn("M3", str(caught.exception))
         self.assertEqual(caught.exception.token[2], 1)
 
+    def test_an_unimplemented_tag_is_its_own_kind_at_the_ffi(self):
+        """`Unimplemented` is not just a `ParseError` with a different message.
+
+        Django compiles `{% for %}` successfully, so our refusing it is a fact
+        about *this engine*. A harness that compared messages would match our
+        text against Django's "Did you forget to register or load this tag?" and
+        score the one case where we are wrong as a pass. The class carries it
+        instead — and as a subclass, so the shell's single `except ParseError`
+        still converts it to `TemplateSyntaxError` exactly as before.
+        """
+        with self.assertRaises(_native.UnimplementedTag) as caught:
+            _native.parse("{% for x in y %}{% endfor %}")
+        self.assertIsInstance(caught.exception, _native.ParseError)
+        self.assertEqual(caught.exception.token[1], "for x in y")
+
+        # The classes are genuinely different, and a syntax error is not
+        # silently swept into the "not built yet" bucket.
+        self.assertNotEqual(_native.UnimplementedTag, _native.ParseError)
+        self.assertTrue(issubclass(_native.UnimplementedTag, _native.ParseError))
+        with self.assertRaises(_native.ParseError) as syntax:
+            _native.parse("{% endfor %}")
+        self.assertNotIsInstance(syntax.exception, _native.UnimplementedTag)
+
     def test_the_comparison_target_is_genuinely_djangos_parser(self):
         from django_rust_templates import _shim
 
