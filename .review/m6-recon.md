@@ -319,3 +319,16 @@ The order of the sweep decides when each row becomes visible: a row cited only
 from files swept last surfaces last. So the list still has to be read once, at
 the end — but the end is when the last row becomes visible, not when the
 cleanup is done.
+
+**The list is not the only instrument, and the naming pass has one of its own.**
+Naming a file forces each sentence citing it to be read in context, which
+surfaces wrong *counts* — not anchors, so no bucket holds them and no check
+sees them. Two so far: `parser.py:385` said the render path reads
+`context.template.engine` "in five places" and then enumerated six (fixed in
+`1546c36`), and `urlize.rs:54-56` said `handle_word` uses `safe_input` "in
+exactly four places: the two `if autoescape and not safe_input:` guards … and
+the two … branches" when the tree has one guard and two branches (fixed in
+`cfa14e1`). Both were held back from their naming commits, because a naming
+commit never moves a number. Neither is reachable from the stranded list: the
+lines were cited with a file name already, so the pass that caught them is the
+one that rewrote the line beside them, not the one that requotes a row.
