@@ -52,17 +52,18 @@
 //! ## The `safe_input` collapse
 //!
 //! `Urlizer.__call__` computes `safe_input = isinstance(text, SafeData)`
-//! (`html.py:319`) and `handle_word` (`html.py:337-405`) uses it in exactly four
-//! places: the two `if autoescape and not safe_input:` guards (`html.py:387-389`)
-//! and the two `if safe_input: return mark_safe(word)` branches
-//! (`html.py:397-398`, `html.py:401-402`). Under the substitution
-//! `autoescape <- autoescape and not safe_input`:
+//! (`html.py:319`) and `handle_word` (`html.py:337-405`) uses the parameter three
+//! times: the `if autoescape and not safe_input:` guard (`html.py:387-389`) and
+//! the two `… safe_input: return mark_safe(word)` branches — the `if`
+//! (`html.py:397-398`) and the matching `elif` (`html.py:401-402`). Under the
+//! substitution `autoescape <- autoescape and not safe_input`:
 //!
-//! * the first pair is the substitution verbatim;
-//! * the second pair differ only in *safety* at the word level — `mark_safe(word)`
-//!   against `word` — and `__call__` ends in `"".join(urlized_words)`, which
-//!   returns a plain `str` for either, so the two are text-identical and the
-//!   filter's final safety is the `def` body's own `mark_safe` regardless.
+//! * the guard is the substitution verbatim;
+//! * the two branches differ only in *safety* at the word level —
+//!   `mark_safe(word)` against `word` — and `__call__` ends in
+//!   `"".join(urlized_words)`, which returns a plain `str` for either, so the two
+//!   are text-identical and the filter's final safety is the `def` body's own
+//!   `mark_safe` regardless.
 //!
 //! Measured over 32 cases — `{plain, mark_safe} × {autoescape on, off} × 8`
 //! inputs, including one with all four of `<`, `&`, `'`, `"` in one string —
