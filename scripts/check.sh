@@ -27,22 +27,20 @@ step "clippy"
 cargo clippy --workspace --all-targets --quiet -- -D warnings
 
 step "python unit tests"
-# Shimmed, like the Django suite: the shim loads our file under Django's module
-# name, so a test module that binds `Node` before `install()` holds a
-# *different class object* than one that binds it after, `isinstance` fails
-# across the boundary, and `describe()`'s dispatch falls to its memory-address
-# arm — measured as 537 order-dependent failures in the parity harness, and 8
-# once the shim is installed for the session (from 543 mid-run). Installing at
-# session start makes every module bind the same classes.
+# Shimmed, like the Django suite, and for the same reason: the shim loads our
+# file under Django's module name, so a test module that binds `Node` before
+# `install()` holds a *different class object* than one that binds it after,
+# `isinstance` fails across the boundary, and `describe()`'s dispatch falls to
+# its memory-address arm — measured as 537 order-dependent failures in the parity
+# harness, and 8 once the shim is installed mid-run.
 #
-# `shimpath` is what makes it happen: it holds a `sitecustomize` that installs
-# the shim at interpreter start, and only when DJANGO_RUST_TEMPLATES=1 (which
-# env.sh sets). This is the same mechanism `run_django_suite.sh` uses, sourced
-# rather than retyped so the two invocations cannot drift apart.
-DJANGO_RUST_TEMPLATES=1 \
-PYTHONPATH="$HERE/shimpath:$PROJECT_ROOT/.django${PYTHONPATH:+:$PYTHONPATH}" \
-  "$PROJECT_ROOT/.venv/bin/python" -m unittest discover \
-    -s "$PROJECT_ROOT/tests" -t "$PROJECT_ROOT" -p 'test_*.py'
+# The invocation lives in `run_unit_tests.sh` rather than here, because the
+# environment it needs is three lines long and the plan's per-task commands need
+# the same three lines: written twice, one of them is wrong. That script also
+# pins the *discovery* — `tests/test_collected_tests.py` asserts the count this
+# command collects, so a future `-p` change or a module named without `test_`
+# fails a row instead of silently running fewer tests.
+"$HERE/run_unit_tests.sh"
 
 step "python anchor manifest"
 # Every `` `name.py:N` `` in our prose is a claim about the pinned checkout, and a

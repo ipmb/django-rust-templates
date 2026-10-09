@@ -13,6 +13,14 @@
 ## Global Constraints
 
 - `.django/` is gitignored, pinned at **6.0.9**, and **never modified**. Every transcription reads from it; nothing writes to it.
+- **`scripts/run_unit_tests.sh` is the only meaningful unit-suite invocation**, for the
+  same reason: it exports `DJANGO_RUST_TEMPLATES=1` and puts `shimpath` ahead of the
+  checkout, so the shim is installed at interpreter start rather than by the first test
+  that needs it. Every per-task `Run:` below calls it; `scripts/check.sh` calls it too,
+  so the two cannot drift. It also pins its own discovery through
+  `tests/test_collected_tests.py`, which asserts the number of tests this command
+  collects — a module named without `test_` runs its rows for nobody, and
+  `all checks passed` cannot tell you.
 - **`scripts/run_django_suite.sh` is the only meaningful suite invocation.** `scripts/shimpath/sitecustomize.py` installs the shim only when `DJANGO_RUST_TEMPLATES == "1"`, which only that script exports. Running `.django/tests/runtests.py` directly produces output byte-identical to stock Django's and is evidence of nothing. Every `Ran N tests` in prose or a commit message must sit within twelve lines of a marker naming the run — `scripts/check_suite_counts.py` gates this and *will* fire on a bare count.
 - **The meter is the acceptance number:** `_shim.unshimmed()` is **23** at the start of M10 and must be **14** at its close. It moves in the commit that interposes, and `tests/test_shim.py::test_unshimmed_reports_progress` pins the count rather than a membership test.
 - **Never `git checkout` to restore a file after a mutation.** The work is uncommitted; use `git show HEAD:<path> > <path>` or an `Edit`.
@@ -218,7 +226,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 2: Run the tests to verify they fail.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_milestone_ownership -v`
+Run: `scripts/run_unit_tests.sh tests.test_milestone_ownership -v`
 Expected: `ModuleNotFoundError: No module named 'tests.milestone_ownership'`.
 
 - [ ] **Step 3: Write the table.**
@@ -351,7 +359,7 @@ def spec_milestones() -> set:
 
 - [ ] **Step 4: Run the tests again to see which rows now fail.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_milestone_ownership -v`
+Run: `scripts/run_unit_tests.sh tests.test_milestone_ownership -v`
 Expected: `AttributeError: module 'django_rust_templates._shim' has no attribute 'dotted_suffix'` — the failure that names the next step.
 
 - [ ] **Step 5: Add the two `_shim` helpers and restate `unshimmed()`.**
@@ -435,7 +443,7 @@ Then restate `unshimmed()`'s body (docstring unchanged apart from the last line)
 
 - [ ] **Step 6: Run the tests to verify they pass.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_milestone_ownership tests.test_shim -v`
+Run: `scripts/run_unit_tests.sh tests.test_milestone_ownership tests.test_shim -v`
 Expected: PASS. The meter row in `test_shim.py` still asserts **23** — this task moves no names — and that is the check that the `unshimmed()` restatement is a refactor rather than a change.
 
 - [ ] **Step 7: Add the anchor row for the `context_processors` citation.**
@@ -528,7 +536,7 @@ In `tests/test_interposition.py`, replace `ShadowingTests.test_each_kind_is_the_
                     name,
                     equivalence.EQUIVALENCE,
                     f"{name} is declared 'fresh' in SHADOWING but states no "
-                    "equivalence in tests/transcription_equivalence.py, so "
+                    "equivalence in tests/test_transcription_equivalence.py, so "
                     "nothing in this tree can falsify it — transcribe it "
                     "instead, or state the equivalence as rows",
                 )
@@ -542,7 +550,7 @@ In `tests/test_interposition.py`, replace `ShadowingTests.test_each_kind_is_the_
 
 - [ ] **Step 2: Run it to verify it fails.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_interposition.ShadowingTests -v`
+Run: `scripts/run_unit_tests.sh tests.test_interposition.ShadowingTests -v`
 Expected: `ModuleNotFoundError: No module named 'tests.test_transcription_equivalence'`.
 
 - [ ] **Step 3: Write the pinned-module reader.**
@@ -639,7 +647,7 @@ from tests.pinned_module import load_pinned
 EQUIVALENCE = {
     # `_impl`-relative path → (importable module, TestCase class name).
     "exceptions.py": (
-        "tests.transcription_equivalence",
+        "tests.test_transcription_equivalence",
         "TemplateExceptionsEquivalenceTests",
     ),
 }
@@ -782,7 +790,7 @@ In `python/django_rust_templates/_shim.py`, append this paragraph to the comment
 
 - [ ] **Step 6: Run the tests to verify they pass.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_interposition.ShadowingTests tests.test_transcription_equivalence -v`
+Run: `scripts/run_unit_tests.sh tests.test_interposition.ShadowingTests tests.test_transcription_equivalence -v`
 Expected: PASS. If a row of `TemplateExceptionsEquivalenceTests` fails, the equivalence is **not** stated — fix the classes rather than the row, and say so in the commit message.
 
 - [ ] **Step 7: Run the whole fast check and commit.**
@@ -791,7 +799,7 @@ Run: `. scripts/env.sh && bash scripts/check.sh --fast`
 Expected: `all checks passed`.
 
 ```bash
-git add tests/pinned_module.py tests/transcription_equivalence.py \
+git add tests/pinned_module.py tests/test_transcription_equivalence.py \
         tests/test_interposition.py python/django_rust_templates/_shim.py
 git commit -m "M10: a 'fresh' _impl file owes a stated equivalence, not a promise"
 ```
@@ -915,7 +923,7 @@ class ModuleInterpositionTests(unittest.TestCase):
 
 - [ ] **Step 2: Run to verify they fail.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_interposition.ModuleInterpositionTests -v`
+Run: `scripts/run_unit_tests.sh tests.test_interposition.ModuleInterpositionTests -v`
 Expected: `ModuleInterpositionTests.test_utils_resolves_to_our_file` fails with the path to `.django/django/template/utils.py`; the identity row passes by accident (both are Django's object, so `assertIsNot` is true only against a *fresh* pinned copy — it does pass, and Step 3 is what makes it mean something); `test_the_engine_lookup_runs_our_code` fails with `KeyError`/empty counter.
 
 - [ ] **Step 3: Teach the generator the no-docstring shape, and add the module.**
@@ -1161,7 +1169,7 @@ Add to `ModuleInterpositionTests`:
 
 - [ ] **Step 2: Run to verify they fail.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_interposition.ModuleInterpositionTests -v`
+Run: `scripts/run_unit_tests.sh tests.test_interposition.ModuleInterpositionTests -v`
 Expected: `test_context_resolves_to_our_file` fails naming Django's file; `test_the_parse_harness_runs_our_context` fails with an empty counter for `Context.__init__`.
 
 **Two corrections to that expectation, both measured while executing this step.**
@@ -1207,7 +1215,7 @@ and the meter in `tests/test_shim.py` becomes `self.assertEqual(len(remaining), 
 
 - [ ] **Step 4: Run the tests to verify they pass.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_interposition tests.test_shim tests.test_milestone_ownership -v`
+Run: `scripts/run_unit_tests.sh tests.test_interposition tests.test_shim tests.test_milestone_ownership -v`
 Expected: PASS, including `test_the_compared_path_is_the_measured_one`, which re-measures `context.py`'s spans in-process and fails if the numbers above are wrong.
 
 - [ ] **Step 5: Run the fast check and the suite.**
@@ -1332,7 +1340,7 @@ with `import django.template.engine as django_engine` added to that row's local 
 
 - [ ] **Step 2: Run to verify they fail.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_interposition.ModuleInterpositionTests -v`
+Run: `scripts/run_unit_tests.sh tests.test_interposition.ModuleInterpositionTests -v`
 Expected: `test_engine_resolves_to_our_file` fails naming Django's file.
 
 - [ ] **Step 3: Generate the file and register it.**
@@ -1370,7 +1378,7 @@ and the meter in `tests/test_shim.py` becomes `20` with `assertNotIn("django.tem
 
 - [ ] **Step 4: Run the tests, the fast check and the suite, then commit.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_interposition tests.test_shim tests.test_milestone_ownership && bash scripts/check.sh --fast && bash scripts/run_django_suite.sh`
+Run: `scripts/run_unit_tests.sh tests.test_interposition tests.test_shim tests.test_milestone_ownership && bash scripts/check.sh --fast && bash scripts/run_django_suite.sh`
 Expected: green throughout; `Ran 1547 tests in …s` / `OK (skipped=6)`.
 
 ```bash
@@ -1804,7 +1812,7 @@ Add to `ModuleInterpositionTests`:
 
 - [ ] **Step 2: Run to verify they fail.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_interposition.ModuleInterpositionTests -v`
+Run: `scripts/run_unit_tests.sh tests.test_interposition.ModuleInterpositionTests -v`
 Expected: every loader row fails naming Django's file or Django's class.
 
 - [ ] **Step 3: Generate the six files.**
@@ -1873,7 +1881,7 @@ and `tests/test_shim.py`'s meter becomes `self.assertEqual(len(remaining), 14, s
 
 - [ ] **Step 5: Run the tests to verify they pass.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_interposition tests.test_shim tests.test_milestone_ownership tests.test_loader_case_sensitivity -v`
+Run: `scripts/run_unit_tests.sh tests.test_interposition tests.test_shim tests.test_milestone_ownership tests.test_loader_case_sensitivity -v`
 Expected: PASS. `test_the_compared_path_is_the_measured_one` re-measures all nine new entries in-process — the loaders must measure `[]`, and if any is not empty the paste in Step 4 is wrong.
 
 - [ ] **Step 6: Run the fast check and the suite.**
@@ -2018,12 +2026,12 @@ if __name__ == "__main__":
 
 - [ ] **Step 2: Run it to verify it fails.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_loader_case_sensitivity -v`
+Run: `scripts/run_unit_tests.sh tests.test_loader_case_sensitivity -v`
 Expected: `setUp` fails with Django's `loaders/filesystem.py` path — Task 7 has not landed. (If Tasks 7 and 8 are being run in one sitting, this is the row's *first* honest run: it fails until `_impl/loaders/filesystem.py` exists.)
 
 - [ ] **Step 3: Run it again after Task 7 and fix any expectation that is wrong.**
 
-Run: `. scripts/env.sh && .venv/bin/python -m unittest tests.test_loader_case_sensitivity -v`
+Run: `scripts/run_unit_tests.sh tests.test_loader_case_sensitivity -v`
 Expected: PASS on a case-insensitive volume through the second branch, and PASS on a case-sensitive one through the first. The `sources()` expectations are Django's own and are copied from the upstream row; if one of them fails, the failure is real and is about our `filesystem.py`, not about this test.
 
 - [ ] **Step 4: Run the fast check and commit.**
