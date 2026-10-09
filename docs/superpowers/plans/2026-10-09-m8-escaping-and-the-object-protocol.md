@@ -1547,9 +1547,10 @@ The other four pass. That split is the point and it is why this task needs no
 manufactured red of its own: **the four stock rows and the one already-shipped
 `DoNotCall` row pass, and exactly the two rows that depend on M8's arms fail,
 each naming the arm it needs.** Task 4 executes after Tasks 1 and 2, so the run
-in *this* step is the green one (`Ran 6 tests … OK`); the transcript above is the
-observation that the rows are not vacuous, and it belongs here because it was
-made before the arms existed.
+in *this* step is the green one (`Ran 6 tests … OK` from
+`.venv/bin/python -m unittest tests.test_m8_side_effects`); the transcript above
+is the observation that the rows are not vacuous, and it belongs here because it
+was made before the arms existed.
 
 - [ ] **Step 3: Observe the non-parity property itself, by mutation**
 

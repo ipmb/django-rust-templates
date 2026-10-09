@@ -193,7 +193,9 @@ incremented.
 The module's Step 2 transcript is the evidence that its rows are not vacuous.
 It was taken during plan authoring — **against the tree while both arms were
 still M3's stubs**, which is why it is a stronger statement than a green run and
-why the plan kept it rather than the later one:
+why the plan kept it rather than the later one. It is a direct-entry run of one
+module (`.venv/bin/python -m unittest tests.test_m8_side_effects`), not a suite
+run, so it carries no progress meter and needs none:
 
 ```text
 Ran 6 tests ... FAILED (errors=2)

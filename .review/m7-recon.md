@@ -187,8 +187,16 @@ Every count below was reproduced here. Runs are
 
 Measured runs, all green: `test_extends` + `test_extends_relative` +
 `test_loaders` + `tests` → `Ran 80 tests … OK (skipped=1)`; the four
-`syntax_tests` modules → `Ran 96 tests … OK`. **`80 + 96 = 176`**, which is
-**11.4%** of the 1547.
+`syntax_tests` modules — `test_extends`, `test_include`, `test_named_endblock`,
+`test_exceptions` → `Ran 96 tests … OK`. **`80 + 96 = 176`**, which is
+**11.4%** of the 1547. Both figures come from `scripts/run_django_suite.sh` with
+those labels, and both were re-measured there when this paragraph was written
+rather than carried forward: each run prints `engine installed; 25 module(s)
+still served by Django`. The sub-suite labels change *which* tests run, not
+whether the engine is installed, which is the property that makes a partial run
+comparable to the whole one. (`syntax_tests` as a *package* is 803, not 96 —
+"the four `syntax_tests` modules" is a list of four files, and reading it as the
+package was this paragraph's own first mistake.)
 
 Modules that touch the tags incidentally and are **not** counted in 176:
 `test_partials.py` (28), `syntax_tests/test_partials.py` (24), `test_context.py`

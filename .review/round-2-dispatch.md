@@ -13,7 +13,8 @@ Django's *real* `Lexer` and `DebugLexer` imported from `.django/`, with no shim
 in the path.
 
 M1 deliberately changes nothing observable: the Django suite still runs on stock
-Django and must still report `Ran 1547 tests … OK (skipped=6)`. That is by
+Django and must still report `Ran 1547 tests … OK (skipped=6)` — stock Django's
+own figure, since the shim is in the path but M1 interposes nothing. That is by
 design (§10.1: engine progress and integration progress move independently), so
 "the suite is unchanged" is a *pass* here, not evidence of no work.
 

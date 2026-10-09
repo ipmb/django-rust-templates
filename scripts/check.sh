@@ -45,6 +45,15 @@ step "python anchor manifest"
 # come back for them.
 "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_python_anchors.py" --check --frozen
 
+step "suite counts carry their provenance"
+# Every milestone is accepted on a *count*, and a count is the easiest claim to
+# make vacuously: measured, running `.django/tests/runtests.py` directly with
+# `DJANGO_RUST_TEMPLATES` unset produces a result byte-identical to stock
+# Django's and still reports OK. The guard requires every `Ran N tests` in our
+# prose to sit near something naming the run that produced it. On the fast path
+# because it reads text and nothing else.
+"$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_suite_counts.py"
+
 step "differential harness"
 "$PROJECT_ROOT/.venv/bin/python" "$HERE/differential.py"
 

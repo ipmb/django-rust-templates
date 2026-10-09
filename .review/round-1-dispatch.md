@@ -15,7 +15,8 @@
 The reviewer should read the committed version, not any earlier copy.
 
 - **§2** — "zero skips" was wrong. The measured baseline is `Ran 1547 tests …
-  OK (skipped=6)`. The criterion is now enumerated and falsifiable: 1547 run,
+  OK (skipped=6)` on stock Django — the pinned checkout's own number, before any
+  shim. The criterion is now enumerated and falsifiable: 1547 run,
   1541 pass, exactly the 6 named structural skips, and any *new* skip is a
   regression.
 - **§9** — the differential harness has two modes: shim-vs-stock, which is

@@ -130,7 +130,8 @@ incl. `FilterFlags` round-tripping"*.
 **M4 adds no tags and interposes nothing.** M5 owns the remaining tags, M11 owns
 swapping `defaultfilters` out from under Django. So M4's deliverable is not
 observable in the Django suite at all — the suite stays at `Ran 1547 tests … OK
-(skipped=6)` and the progress meter stays at 25, and a reader who expects those
+(skipped=6)` under `scripts/run_django_suite.sh` and the progress meter stays at
+25, and a reader who expects those
 numbers to move at M4 has the wrong model. What moves is:
 
 - `cargo test -p template-core` — the 57 bodies' own unit tests, which fan-out
