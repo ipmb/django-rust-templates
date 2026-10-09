@@ -4803,8 +4803,9 @@ ERROR_CASES: list[dict] = [
     },
     # --- wave 3: the third filter in the list whose message Rust authors ------
     {
-        # `{{ x|floatformat:"" }}` — `arg[-1]` at `:141`, before the parse and
-        # before any host call. It is an `IndexError` rather than a syntax error
+        # `{{ x|floatformat:"" }}` — `arg[-1]` at `defaultfilters.py:141`,
+        # before the parse and before any host call. It is an `IndexError`
+        # rather than a syntax error
         # because the arity check counts arguments and this one is present.
         #
         # **This message is synthesised in Rust**, like `cut`'s: no host
