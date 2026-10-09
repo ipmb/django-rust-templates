@@ -27,7 +27,22 @@ step "clippy"
 cargo clippy --workspace --all-targets --quiet -- -D warnings
 
 step "python unit tests"
-"$PROJECT_ROOT/.venv/bin/python" -m unittest discover -s "$PROJECT_ROOT/tests" -t "$PROJECT_ROOT" -p 'test_*.py'
+# Shimmed, like the Django suite: the shim loads our file under Django's module
+# name, so a test module that binds `Node` before `install()` holds a
+# *different class object* than one that binds it after, `isinstance` fails
+# across the boundary, and `describe()`'s dispatch falls to its memory-address
+# arm — measured as 537 order-dependent failures in the parity harness, and 8
+# once the shim is installed for the session (from 543 mid-run). Installing at
+# session start makes every module bind the same classes.
+#
+# `shimpath` is what makes it happen: it holds a `sitecustomize` that installs
+# the shim at interpreter start, and only when DJANGO_RUST_TEMPLATES=1 (which
+# env.sh sets). This is the same mechanism `run_django_suite.sh` uses, sourced
+# rather than retyped so the two invocations cannot drift apart.
+DJANGO_RUST_TEMPLATES=1 \
+PYTHONPATH="$HERE/shimpath:$PROJECT_ROOT/.django${PYTHONPATH:+:$PYTHONPATH}" \
+  "$PROJECT_ROOT/.venv/bin/python" -m unittest discover \
+    -s "$PROJECT_ROOT/tests" -t "$PROJECT_ROOT" -p 'test_*.py'
 
 step "python anchor manifest"
 # Every `` `name.py:N` `` in our prose is a claim about the pinned checkout, and a
@@ -53,6 +68,16 @@ step "suite counts carry their provenance"
 # prose to sit near something naming the run that produced it. On the fast path
 # because it reads text and nothing else.
 "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_suite_counts.py"
+
+step "transcriptions differ from upstream only where declared"
+# A `# TRANSCRIBED:` file is a claim about the pinned tree, and the suite cannot
+# falsify it: measured, `_impl/base.py` as a verbatim copy and `_impl/base.py`
+# transcribing wrongly both keep all 1547 tests green. So the diff is the
+# instrument, and this is where the parity harness's own warrant comes from —
+# once `base` is interposed, `test_parser_parity` compares Rust against *our*
+# transcription, and "our transcription is upstream" is exactly this step.
+# Fast path: it reads text and needs only `.django/`.
+"$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_transcriptions.py"
 
 step "differential harness"
 "$PROJECT_ROOT/.venv/bin/python" "$HERE/differential.py"

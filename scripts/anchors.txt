@@ -629,6 +629,7 @@ timesince.py:138-143	django/utils/timesince.py	138	143	timeuntil	-
 timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
 _shim.py:52	python/django_rust_templates/_shim.py	52	-	TARGET = "django.template"	-
+_shim.py:166	python/django_rust_templates/_shim.py	166	-	if installed():	-
 filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-
 test_unordered_list.py:143	tests/template_tests/filter_tests/test_unordered_list.py	143	-	unordered_list(item_generator()),	-
 test_unordered_list.py:148	tests/template_tests/filter_tests/test_unordered_list.py	148	-	def test_nested_generators(self):	-

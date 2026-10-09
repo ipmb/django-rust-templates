@@ -147,6 +147,22 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
 
         This creates that situation with one throwaway module and checks both
         that our module wins and that its Django sibling still resolves.
+
+        ``django.template.loaders`` and ``django.template.loaders.filesystem``
+        are the subjects because they are a package with siblings and are as far
+        from the interposition frontier as the tree allows. The spec's §10.3
+        schedules ``loaders`` for M10 (line 789), so this subject has a known
+        expiry rather than an open-ended one, and the next person should re-pick
+        it deliberately rather than by bisecting a failure.
+
+        The purge below is not incidental. The row writes a module and expects
+        the finder to see it, but ``install()`` returns early when the shim is
+        already installed (``_shim.py:166``), so ``_purge()`` never runs —
+        and a session-start install (which ``check.sh`` now does, so every test
+        module binds the same classes) means the shim *is* already installed by
+        the time this row runs. A ``django.template.loaders`` cached earlier in
+        the session then wins over the file just written, and the assertion
+        below reads ``None != 'ours'``. Measured both ways before the fix.
         """
         package_dir = (
             PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "loaders"
@@ -158,6 +174,14 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
         init.write_text("MARKER = 'ours'\n")
         try:
             _shim.install()
+
+            # Drop the cached bindings so the finder is consulted for the
+            # package we just created — the purge `install()` would have done if
+            # it were not already installed.
+            for name in [
+                n for n in sys.modules if n.startswith("django.template.loaders")
+            ]:
+                del sys.modules[name]
 
             ours = importlib.import_module("django.template.loaders")
             self.assertEqual(getattr(ours, "MARKER", None), "ours")

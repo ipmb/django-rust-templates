@@ -4,10 +4,10 @@ Three things are compared per case: the message, the token the error is
 attributed to (including its debug positions), and the fact that Django agrees
 with the corpus's expectation.
 
-The comparison target is Django's real `Parser` imported from `.django/` with no
-shim in the path, and `test_the_comparison_target_is_genuinely_djangos_parser`
-keeps it that way — including by checking that no other test module has left the
-shim installed in this process.
+The comparison target is the real `Parser` that `django.template.base` resolves
+to, and `test_the_comparison_target_is_not_rust_owned` keeps that from becoming
+a Rust-against-Rust comparison — see `tests/parity_target.py` for what that now
+means, and why it is no longer "the target file is Django's".
 """
 
 import ast
@@ -40,6 +40,7 @@ from django.template.exceptions import TemplateSyntaxError  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 from django_rust_templates.host import ShellHost  # noqa: E402
+from tests.parity_target import assert_target_is_not_rust_owned  # noqa: E402
 from tests.parser_corpus import LIBRARIES  # noqa: E402
 from tests.parser_error_corpus import ERRORS, ORIGIN_ERRORS  # noqa: E402
 from tests.test_tag_inventory import M5_TAGS  # noqa: E402
@@ -428,15 +429,25 @@ class ErrorParityTests(unittest.TestCase):
                 self.assertIsNone(django_failure(source))
                 self.assertIsNone(ours_failure(source))
 
-    def test_the_comparison_target_is_genuinely_djangos_parser(self):
-        from django_rust_templates import _shim
+    def test_the_comparison_target_is_not_rust_owned(self):
+        """The Python side of this comparison must not itself be Rust.
 
-        source = inspect.getsourcefile(Parser)
-        self.assertNotIn("_impl", source)
-        self.assertTrue(Path(source).resolve().is_relative_to(DJANGO_CHECKOUT.resolve()))
-        # A leaked install from another test module would make this comparison
-        # circular the moment we provide a `base` module, which M3 does.
-        self.assertFalse(_shim.installed(), "the shim is installed in this process")
+        Restated at M9, not weakened. This row used to assert two things: that
+        the target file was Django's, and that the shim was not installed in
+        this process. The second is now false by construction — `check.sh`
+        installs the shim for the whole unit-test session, deliberately, because
+        otherwise a module binding `Parser` before the install compares against
+        a different class object than one binding it after. The first stops
+        holding the moment `base` is ours.
+
+        Both were proxies for one claim, and that claim is asserted directly in
+        `tests/parity_target.py`: the target is either Django's own file or a
+        transcription gated against it, and the code this module actually calls
+        lies outside the transcription's declared differences. That last clause
+        is what still catches a leaked or newly interposed module, and it does
+        so without depending on which frame installed what.
+        """
+        assert_target_is_not_rust_owned(self, Parser, "Parser")
 
 
 if __name__ == "__main__":

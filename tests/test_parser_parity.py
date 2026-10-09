@@ -1,8 +1,10 @@
 """M2's acceptance test: our parse tree is Django's parse tree.
 
 Both sides are materialised into real Django nodes and compared structurally.
-The target is Django's own `Parser` imported from `.django/` with no shim in the
-path; `test_the_comparison_target_is_genuinely_djangos_parser` keeps it that way.
+The target is the real `Parser` that `django.template.base` resolves to, and
+`test_the_comparison_target_is_not_rust_owned` keeps that from becoming a
+Rust-against-Rust comparison — see `tests/parity_target.py` for what that now
+means, and why it is no longer "the target file is Django's".
 
 Two independent traversals are compared for every node: one reading `vars()`
 directly (which catches a wrong attribute *name*), and one through
@@ -63,6 +65,7 @@ from django.utils.safestring import SafeData  # noqa: E402
 
 from django_rust_templates import _native, render  # noqa: E402
 from django_rust_templates.host import ShellHost  # noqa: E402
+from tests.parity_target import assert_target_is_not_rust_owned  # noqa: E402
 from tests.parser_corpus import (  # noqa: E402
     LIBRARIES as TEMPLATE_LIBRARIES,
     RANDOM_CASES,
@@ -836,13 +839,16 @@ class ShapeTests(unittest.TestCase):
             _native.parse("{% endif %}")
         self.assertNotIsInstance(syntax.exception, _native.UnimplementedTag)
 
-    def test_the_comparison_target_is_genuinely_djangos_parser(self):
-        from django_rust_templates import _shim
+    def test_the_comparison_target_is_not_rust_owned(self):
+        """The Python side of this comparison must not itself be Rust.
 
-        source = inspect.getsourcefile(Parser)
-        self.assertNotIn("_impl", source)
-        self.assertTrue(Path(source).resolve().is_relative_to(DJANGO_CHECKOUT.resolve()))
-        self.assertFalse(_shim.installed(), "the shim is installed in this process")
+        Restated at M9. See `tests/parity_target.py` for the claim both this row
+        and its siblings in `test_parser_errors.py`, `test_lexer_parity.py` and
+        `test_filter_expr_parity.py` now assert, and why "the target file is
+        Django's" and "the shim is not installed" both stopped being available:
+        `check.sh` installs the shim for the session, and `base` is ours.
+        """
+        assert_target_is_not_rust_owned(self, Parser, "Parser")
 
 
 if __name__ == "__main__":
