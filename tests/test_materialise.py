@@ -862,8 +862,8 @@ class ExpressionMaterialisationTests(unittest.TestCase):
         "provided" **includes the value being filtered**: `x|cut` has one
         provided and needs two, and `x|upper:5` has two and needs one. It is also
         called *inside* the match loop, so the arity error beats the remainder
-        error for `x|upper:1:2` — the last row below, where `:2` is left over and
-        never reached.
+        error for `x|upper:1:2` — the last row below, where the `2` is left over
+        and never reached.
         """
         for token in ("x|cut", "x|cut:'a'", "x|upper:5", 'x|default:"d"'):
             with self.subTest(token=token):
@@ -873,7 +873,7 @@ class ExpressionMaterialisationTests(unittest.TestCase):
                     "materialisation-time check differs from Django's",
                 )
         # Two rows where the arity error must **beat** the remainder error, and
-        # `:2` is genuinely left over, so that is only possible with the host
+        # the `2` is genuinely left over, so that is only possible with the host
         # inside the parse loop.
         check = materialiser.check_filter(parser())
         for token in ("x|upper:1:2", 'x|upper:1:"s"'):
@@ -892,8 +892,8 @@ class ExpressionMaterialisationTests(unittest.TestCase):
 
         Both orders are wrong for at least one row here, so the messages name
         which ran first: `x|nope:1:2` would be an arity error under the wrong
-        order, and it is the *more* plausible one, since `:2` is genuinely left
-        over — while Django reports the filter name.
+        order, and it is the *more* plausible one, since the `2` is genuinely
+        left over — while Django reports the filter name.
 
         The last row shows the other side of the boundary: `_bad` raises while
         the argument's `Variable` is built (`base.py:768`), which is before
@@ -909,11 +909,11 @@ class ExpressionMaterialisationTests(unittest.TestCase):
         """The same token, with and without the seam — the seam's whole point.
 
         `x|nope:1:2` has *two* things wrong with it: the filter does not exist,
-        and `:2` is left over. Django reports the filter, because `find_filter`
-        runs inside the loop and the remainder check runs after it. Without a
-        host the parse runs to the end of the loop and reports the remainder
-        instead — a different message for the same token, which is why the host
-        could not be a batched shell-side pass over the finished parse.
+        and the `2` is left over. Django reports the filter, because
+        `find_filter` runs inside the loop and the remainder check runs after it.
+        Without a host the parse runs to the end of the loop and reports the
+        remainder instead — a different message for the same token, which is why
+        the host could not be a batched shell-side pass over the finished parse.
         """
         with self.assertRaises(Exception) as without:
             _native.parse_filter_expression("x|nope:1:2")
