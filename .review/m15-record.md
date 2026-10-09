@@ -132,11 +132,24 @@ both forms once `f ∈ B ∪ C` — but `A`: the union's left operand escapes bo
 subtractions, so the row silently stops asserting its own `A - B - C`.
 
 **The sixth control is instrument-level and the row does not leave the set.**
-`do_not_call_in_templates` and `alters_data` are on **0 of the 57** builtin
-filters at 6.0.9; every carrier in the checkout is model-side. So the same
-`hasattr` on the same object for `is_safe` (on 55 of the 57) shows the loop is
-handed functions and that the instrument can see a flag — and neither half can
-make the row *fire*, because no mutation in this tree can make the clause false.
+`do_not_call_in_templates` and `alters_data` are on **0 of the 111** callables
+every registry the template layer exposes holds at 6.0.9 — measured over
+`defaultfilters.register.filters` (57), `defaulttags.register.tags` (24),
+`loader_tags.register.tags` (3), and the five `django.templatetags` libraries'
+filters and tags (27), with **no carrier of either flag anywhere**; every carrier
+in the checkout is model-side. The 111 rather than the 57 because the 57 invites
+"but what about the library filters" — a question the narrower number opens and
+the wider one closes; the population is *every object this row or any neighbouring
+row could reach*, not the registry this row happens to name. So the same `hasattr`
+on the same object for `is_safe` — true of **57 of the 111**, being 55 of the 57
+builtins plus both of `l10n`'s — shows the loop is handed functions and that the
+instrument can see a flag; and neither half can make the row *fire*, because no
+mutation in this tree can make the clause false. The population is a measurement,
+not a reading, and it is re-runnable:
+`.review/m15-measurements/m15_measure_filter_flag_carriers.py`, which prints its
+counts, its carriers, its control, and the tree it read — run twice, stock and
+shimmed, because the registry is one the shim replaces and a count that agrees in
+one tree is a count about that tree. Both give 111 and no carriers.
 Under §1's membership test the second half is unavailable, so the row moves from
 *uncontrolled* to *instrument-controlled, subject-discrimination unproven*, and
 it is carried in the residue (§8) rather than counted here. The tempting repair —
@@ -210,6 +223,31 @@ Ranked, with the reason each is not closable here.
    (`.review/m4-summary.md:386-389`); kept exactly as it is, because it is the
    deliberate-edit signal and "fixing" it removes the signal.
 4. **`tests/test_filter_inventory.py:1238` is instrument-controlled, and its
-   subject discrimination is unproven** (§5 above). Ranked last because the claim
-   is true today and only a Django that sets one of those two flags on a builtin
-   filter would expose it.
+   subject discrimination is unproven** (§5 above). Ranked last among the clauses
+   because the claim is true today, and now true over a wider population than the
+   record first stated: **0 carriers among 111**, not 0 among 57
+   (`m15_measure_filter_flag_carriers.py`), so it would take a Django that sets
+   one of those two flags on **any** object the template registries hold — not
+   only on a builtin filter — to expose it.
+5. **M15's own citations are the ones its instrument cannot check.** The spec row
+   cites seven files without line numbers, and the reason is sound
+   (`ANCHOR_RE` requires a manifest row, and a narrative row does not argue from
+   seven lines) — but the consequence is larger than the trade: every number that
+   carries this milestone, `scripts/run_django_suite.sh:25`,
+   `scripts/check.sh:139` and the six control line numbers, now lives in
+   `.review/`, which `NOT_SCANNED_BECAUSE` excludes. So **the milestone whose
+   subject is "how much could be false while the gate still passes" has put its
+   own evidence in the one directory the gate cannot reach.** Both alternatives
+   have this: the manifest cannot reach `.review/` either, and `check_python_anchors.py:290-300`
+   already records why widening the scan is worse — scanning the review directory
+   would fail the build on the reviewer's *accurate* quotation of one of our own
+   wrong anchors, and the only way to make that green is to falsify the record.
+   Name it; do not close it. It is listed here rather than among the four because
+   it is not a §2 clause — it is about the record of the work — and a reader who
+   later finds a wrong number in this file should find it predicted rather than
+   discovered. The statement is not one this file can exempt itself from: the
+   paragraph above cites `scripts/check_python_anchors.py:290-300` for the tool's
+   own reason, and that citation is **exactly as unchecked as the others**, since
+   `TREE_ROOTS` is `crates python tests docs/superpowers/specs` and this file is
+   in none of them. The tool's reason for excluding `.review/` is recorded in a
+   directory the tool excludes.
