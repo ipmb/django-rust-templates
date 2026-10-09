@@ -93,7 +93,10 @@ pub mod wordcount;
 pub mod wordwrap;
 pub mod yesno;
 
-pub use host::{FilterCall, FilterHost, NoFilterHost, NumberFormatArgs};
+pub use host::{
+    DecimalParse, DecimalTuple, FilterCall, FilterHost, NoFilterHost, NumberFormatArgs,
+    ParsedDecimal,
+};
 // Test-only, and re-exported under the same gate for the same reason it is
 // `#[cfg(test)]` in `host.rs`: a filter module's `mod tests` reaches it, and
 // nothing in a real build should be able to.

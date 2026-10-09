@@ -2389,8 +2389,10 @@ function of the filter's arguments. What stays Rust is the control flow, the
 `arg`-suffix dispatch, the 200-digit refusal, the `not m and p <= 0` integer
 branch, the digit assembly, the `.` insertion and the sign.
 
-**2. The host contract this adds.** Three methods, and the rest of the group
-needs none of them:
+**2. The host contract this adds.** Six methods, and the rest of the group
+needs none of them — the two `%` methods because measurement showed
+`filesizeformat`'s operands are not shapes `percent_format` can take (below),
+and `decimal_quantize` gaining a fourth field for the reason in **4**:
 
 ```rust
 /// `Decimal(str(value))`, then the `Decimal(str(float(value)))` retry
@@ -2416,7 +2418,8 @@ pub struct ParsedDecimal {
     /// `None` for `"F"`/`"n"`/`"N"` (inf and nan). That is the `TypeError` arm
     /// at `:168-170` **and** the reason `int(d)` raises at `:180`; both mean
     /// `return input_val`, so the body tests this once and never reads a
-    /// meaningless `integral`.
+    /// meaningless `integral`. `None` also covers an integer exponent too large
+    /// for `i64`, where `:176` refuses for the same reason.
     pub exponent: Option<i64>,
     /// `not (int(d) - d)` — the source's `m` (`:180`) — and `false` when that
     /// raised, which is exactly when `exponent` is `None`.
@@ -2441,8 +2444,14 @@ fn decimal_quantize(
 
 pub struct DecimalTuple {
     pub sign: bool,
+    /// The **digit values**, not a count: `:206` is
+    /// `[str(digit) for digit in reversed(digits)]`.
     pub digits: Vec<u8>,
     pub exponent: i64,
+    /// `bool(rounded_d)` — the second half of `:210`'s `if sign and rounded_d`.
+    /// A separate field from `integral`, which is the *unrounded* value's
+    /// truthiness; see **4**.
+    pub truthy: bool,
 }
 
 /// `formats.number_format(round(value, 1), 1)` whole (`:911-912`).
@@ -2472,11 +2481,39 @@ on two ints, so it is the existing `add_values` over the two coerced
 is canonical decimal *text*, so `Big % Big` and a carrying `i64 + i64` have no
 Rust expression and the arithmetic is host territory either way.
 
-`filesizeformat` therefore needs **four** host calls, not the two this section
-says: `filesize_number_format`, `ngettext`, `percent_format` (for both
-`gettext("%s KB") % …` and `ngettext(…) % {"size": …}`, which is a mapping
-operand) and `gettext`. `avoid_wrapping` is **verified pure** and stays Rust:
-`django/utils/html.py:502-507` is `return value.replace(" ", "\xa0")` on a `str`.
+`filesizeformat` therefore needs **three** host calls, and not the four an
+earlier revision of this section claimed: `filesize_number_format`,
+`percent_format` and `percent_mapping`. `avoid_wrapping` is **verified pure** and
+stays Rust: `django/utils/html.py:502-507` is `return value.replace(" ", "\xa0")`
+on a `str`.
+
+**The four-call version was wrong about `percent_format`, and measurement says
+why.** It read as though `ngettext` and `gettext` were the two other calls and
+`percent_format` applied the `%` to their answers — but `filesizeformat`'s two
+`%` operations have operand shapes its old signature could not take, and one of
+them it cannot take at all:
+
+* **The byte branch's operand is a dict, which no `Value` can be.** `:925` is
+  `ngettext("%(size)d byte", "%(size)d bytes", bytes_) % {"size": bytes_}`.
+  Measured on the pinned tree: `"%(size)d bytes" % {"size": 1023}` is
+  `"1023 bytes"`, while the same expression over a **list**, a **tuple**, an
+  **int** or a **str** raises `TypeError: format requires a mapping`. `classify`
+  interns a dict as an `Opaque`, so Rust can neither build the operand nor pass a
+  `Value` in its place. That is `percent_mapping`, and the docstring `%(size)d`
+  is why it takes a name rather than the raw dict text.
+* **The unit branches' format string is a translation, not a literal.** `:927` is
+  `gettext("%s KB") % filesize_number_format(bytes_ / KB)` — the `%` applies to
+  the **translation**, and a catalog may move the `%s`. So the method had to stop
+  taking `stringformat`'s `"%" + spec` suffix and take the whole format string:
+  under English the two agree exactly (measured `("%" + "s KB") % "1.0"` is
+  `"1.0 KB"`, same as `"%s KB" % "1.0"`), which is precisely why an
+  English-only corpus could never catch the difference. Nothing implemented
+  `percent_format` yet, so generalising it cost nothing; `stringformat` now builds
+  `format!("%{}", to_str(arg))`, which is the source's own `"%" + str(arg)`.
+
+So `ngettext` and `gettext` are still called by `filesizeformat` — for the format
+string — and `percent_format`/`percent_mapping` are the operator. Six new
+methods, two of them the `%`'s two operand shapes.
 
 **3. What measurement says about the individual bullets above**, three of which
 the plan got wrong and the rest of which it got only partly:
@@ -2534,6 +2571,36 @@ the plan got wrong and the rest of which it got only partly:
   `(None, "d") -> ""`, `(42, "z") -> ""`, and `([1], "s") -> "[1]"` — so the
   refusal is the `%` operator's, and `str(arg)` alone is Rust's.
 
+**4. `DecimalTuple` needs the rounded value's truthiness, and `integral` does not
+cover it — a review finding.** `:210` is `if sign and rounded_d`, a truthiness
+test on the value **after** the quantization, three lines after `m` asked the
+same question of the value **before** it. The two disagree exactly where the sign
+is decided, and the corpus can see it because it only takes a plain template:
+
+```text
+  floatformat("-0.0001", 2)  ->  '0.00'    m=Decimal('0.0001') truthy
+                                           rounded=Decimal('-0.00') falsy   ← minus dropped
+  floatformat("-0.004",  2)  ->  '0.00'    same shape
+  floatformat("-0.5",    0)  ->  '-1'      rounded=Decimal('-0.50') truthy  ← minus kept
+```
+
+A `DecimalTuple` of `(sign, digits, exponent)` would emit `-0.00` for the first
+two, so the tuple carries `truthy` too. It is not derivable from the parse side:
+`ParsedDecimal::integral` is `m`'s truthiness, and `m` is truthy for `-0.0001`.
+
+The same review round resolved the `scaleb` disagreement that had been left open,
+and the resolution is worth recording because it is the seventh instance of the
+same pattern: **the two readings were two right answers to two unstated
+questions, and the unstated question was the sign.** `Decimal(1).scaleb(n)`
+raises `InvalidOperation` for `|n| > 2*(Emax + prec)` in either direction, but
+*inside* that boundary the directions differ — positive overflows upward
+(`Overflow` at `prec=1, n=2000000`) where negative clamps to `Etiny`
+(`Decimal('0E-999999')` at the same magnitude). `floatformat` calls
+`scaleb(-abs(p))`, always the negative arm, so the clamp measurement is the one
+that describes the filter and the `Overflow` reading described a direction it
+never takes. It was **not** an interpreter difference; the 3.9 hypothesis would
+have been a wrong fix for a real disagreement.
+
 **§11 for this group.** The central mutation is on the seam itself and it is the
 one §11's "moves 0 rows" rule exists for:
 
@@ -2545,6 +2612,9 @@ one §11's "moves 0 rows" rule exists for:
            the 2*(Emax+prec) boundary, and a raising row cannot be a corpus row)
       ?   floatformat: ROUND_HALF_UP -> ROUND_HALF_EVEN
           (moves floatformat/rounds-half-up-on-the-exact-decimal)
+      ?   floatformat: `truthy` -> `true` in `decimal_quantize`
+          (moves the two negative-rounds-to-zero rows above — and it is the
+           mutation that says whether the field earns its place)
       ?   pluralize: the ValueError arm folded into the TypeError one
           (moves pluralize/non-numeric-string-is-not-len-based)
 ```

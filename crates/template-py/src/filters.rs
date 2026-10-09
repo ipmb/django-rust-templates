@@ -33,14 +33,18 @@
 //! loop because it is the part no filter's own unit test can reach.
 
 use pyo3::exceptions::{
-    PyAttributeError, PyException, PyIndexError, PyKeyError, PyRuntimeError, PyValueError,
+    PyAttributeError, PyException, PyIndexError, PyKeyError, PyOverflowError, PyRuntimeError,
+    PyTypeError, PyValueError,
 };
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PySlice, PyString, PyTuple};
 use std::cell::RefCell;
 
-use template_core::filters::host::{FilterCall, FilterHost, NestedSequence, NumberFormatArgs};
+use template_core::filters::host::{
+    DecimalParse, DecimalTuple, FilterCall, FilterHost, NestedSequence, NumberFormatArgs,
+    ParsedDecimal,
+};
 use template_core::filters::value::{Value, ValueId};
 use template_core::parser::error::{Error, PyErrorKind};
 use template_core::pynum::IntValue;
@@ -628,14 +632,30 @@ impl FilterHost for PyFilterHost<'_> {
             .map_err(|e| self.host_error("add_values", e))
     }
 
-    fn percent_format(&self, value: &Value, spec: &str) -> Result<Value, Error> {
+    fn percent_format(&self, format: &str, value: &Value) -> Result<Value, Error> {
         let py = self.py;
         let outcome = (|| {
-            let format = PyString::new(py, &format!("%{spec}"));
-            let formatted = format.call_method1("__mod__", (self.object(value)?,))?;
+            let formatted =
+                PyString::new(py, format).call_method1("__mod__", (self.object(value)?,))?;
             self.classify(&formatted)
         })();
         outcome.map_err(|e| self.host_error("percent_format", e))
+    }
+
+    fn percent_mapping(&self, format: &str, name: &str, size: &Value) -> Result<Value, Error> {
+        let py = self.py;
+        let outcome = (|| {
+            // The dict is Python's to build because it is the operand: `%` reads
+            // it as a **mapping**, and a `Value` cannot be one (`classify` interns
+            // a dict as an `Opaque`). Measured — the same expression with a list,
+            // a tuple, an int or a str raises `TypeError: format requires a
+            // mapping`, so there is nothing here Rust could pass instead.
+            let mapping = PyDict::new(py);
+            mapping.set_item(name, self.object(size)?)?;
+            let formatted = PyString::new(py, format).call_method1("__mod__", (mapping,))?;
+            self.classify(&formatted)
+        })();
+        outcome.map_err(|e| self.host_error("percent_mapping", e))
     }
 
     fn is_safe(&self, value: &Value) -> bool {
@@ -900,6 +920,215 @@ impl FilterHost for PyFilterHost<'_> {
             translated.extract::<String>()
         })();
         outcome.unwrap_or_else(|e| self.infallible_failure("ngettext", e))
+    }
+
+    fn decimal_parse(&self, value: &Value) -> Result<DecimalParse, Error> {
+        let py = self.py;
+        let outcome = (|| -> PyResult<DecimalParse> {
+            let decimal_module = py.import("decimal")?;
+            let decimal_type = decimal_module.getattr("Decimal")?;
+            let invalid_operation = decimal_module.getattr("InvalidOperation")?;
+
+            let subject = self.object(value)?.bind(py).clone();
+            // `input_val = str(text)` shares the `try` with the parse, and the
+            // handler names `InvalidOperation` **only** (`:152-155`), so a
+            // `__str__` that raises anything else is not retried — it leaves the
+            // filter. That is why this is `str()` and not `text_of`, whose
+            // fallback would swallow exactly the case this must not.
+            let input_val = subject.str()?.to_string();
+
+            let decimal = match decimal_type.call1((PyString::new(py, &input_val),)) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    if !error.is_instance(py, &invalid_operation) {
+                        return Err(error);
+                    }
+                    // `Decimal(str(float(text)))`, with the source's own tuple —
+                    // `(ValueError, InvalidOperation, TypeError)` at `:158` — so
+                    // an `OverflowError` from an object whose `__float__` cannot
+                    // fit escapes rather than answering `""`.
+                    let retried = py
+                        .get_type::<PyFloat>()
+                        .call1((subject.clone(),))
+                        .and_then(|as_float| as_float.str())
+                        .and_then(|text| decimal_type.call1((text,)));
+                    match retried {
+                        Ok(parsed) => parsed,
+                        Err(error)
+                            if error.is_instance(py, &invalid_operation)
+                                || error.is_instance_of::<PyValueError>(py)
+                                || error.is_instance_of::<PyTypeError>(py) =>
+                        {
+                            return Ok(DecimalParse::Unparseable);
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+            };
+
+            let tuple = decimal.call_method0("as_tuple")?;
+            let mut digits = Vec::new();
+            for digit in tuple.get_item(1)?.try_iter()? {
+                digits.push(digit?.extract::<u8>()?);
+            }
+            // `None` for a `"F"`/`"n"`/`"N"` exponent **and** for an integer one
+            // that does not fit an `i64`. The fold is safe rather than merely
+            // convenient: a `Decimal` whose exponent exceeds `i64` has
+            // `len(digits) + abs(exponent) > 200`, so `:176` refuses it and
+            // returns `input_val` — the same answer the non-finites get at
+            // `:168-170` and `:180-182`, which is the only thing the body does
+            // with a `None`.
+            let exponent = tuple.get_item(2)?.extract::<i64>().ok();
+
+            // `m = int(d) - d` (`:180`), inside a handler that names
+            // `(ValueError, OverflowError, InvalidOperation)`. That handler is
+            // where the non-finites land — `int(Decimal("inf"))` raises
+            // `OverflowError`, `int(Decimal("NaN"))` a `ValueError` — so
+            // `integral` is `false` for exactly the decimals whose `exponent` is
+            // `None`, and the body never reads it in that case.
+            let integral = {
+                let difference = py
+                    .get_type::<PyInt>()
+                    .call1((decimal.clone(),))
+                    .and_then(|as_int| as_int.sub(decimal.clone()))
+                    .and_then(|difference| difference.is_truthy());
+                match difference {
+                    Ok(nonzero) => !nonzero,
+                    Err(error)
+                        if error.is_instance_of::<PyValueError>(py)
+                            || error.is_instance_of::<PyOverflowError>(py)
+                            || error.is_instance(py, &invalid_operation) =>
+                    {
+                        false
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
+
+            Ok(DecimalParse::Parsed(ParsedDecimal {
+                value: self.intern(decimal.unbind()),
+                input_val,
+                sign: tuple.get_item(0)?.is_truthy()?,
+                digits,
+                exponent,
+                integral,
+            }))
+        })();
+        outcome.map_err(|e| self.host_error("decimal_parse", e))
+    }
+
+    fn decimal_quantize(
+        &self,
+        decimal: &Value,
+        places: u64,
+        integral: bool,
+    ) -> Result<DecimalTuple, Error> {
+        let py = self.py;
+        let outcome = (|| -> PyResult<DecimalTuple> {
+            let decimal_module = py.import("decimal")?;
+            let decimal_type = decimal_module.getattr("Decimal")?;
+            let subject = self.object(decimal)?.bind(py).clone();
+
+            // `exp = Decimal(1).scaleb(-abs(p))` (`:194`). The negation happens
+            // on the Python side because `p` is an arbitrary-precision int: a
+            // `u64` does not fit an `i64`, and `scaleb` must see the real
+            // magnitude — `:194` is one of the two places where a `p` past
+            // `2*(Emax + prec)` is observable, clamping below that and raising
+            // `InvalidOperation` above it.
+            let negative_places = -(i128::from(places));
+            let exponent = decimal_type
+                .call1((1,))?
+                .call_method1("scaleb", (negative_places,))?;
+
+            // `units = len(tupl[1]); units += -tupl[2] if m else tupl[2]`
+            // (`:196-198`). `m` truthy is `!integral`.
+            let tuple = subject.call_method0("as_tuple")?;
+            let tuple_exponent = tuple.get_item(2)?.extract::<i128>()?;
+            let mut units = i128::try_from(tuple.get_item(1)?.len()?).unwrap_or(i128::MAX);
+            units += if integral {
+                tuple_exponent
+            } else {
+                -tuple_exponent
+            };
+
+            // `prec = abs(p) + units + 1; prec = max(getcontext().prec, prec)`
+            // (`:199-200`). The context read is the point of the whole method:
+            // it bounds the quantize below, so a caller that computed its own
+            // `prec` would be answering a different question.
+            let mut prec = i128::from(places) + units + 1;
+            let context_prec = decimal_module
+                .getattr("getcontext")?
+                .call0()?
+                .getattr("prec")?
+                .extract::<i128>()?;
+            if context_prec > prec {
+                prec = context_prec;
+            }
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("prec", prec)?;
+            let context = decimal_module.getattr("Context")?.call((), Some(&kwargs))?;
+
+            // `d.quantize(exp, ROUND_HALF_UP, Context(prec=prec))` (`:204`).
+            let rounded = subject.call_method1(
+                "quantize",
+                (exponent, decimal_module.getattr("ROUND_HALF_UP")?, context),
+            )?;
+
+            let rounded_tuple = rounded.call_method0("as_tuple")?;
+            let mut digits = Vec::new();
+            for digit in rounded_tuple.get_item(1)?.try_iter()? {
+                digits.push(digit?.extract::<u8>()?);
+            }
+            Ok(DecimalTuple {
+                sign: rounded_tuple.get_item(0)?.is_truthy()?,
+                digits,
+                exponent: rounded_tuple.get_item(2)?.extract::<i64>()?,
+                // `:210`'s second half, and a question `integral` does not
+                // answer: `m` is the *unrounded* value's truthiness, this the
+                // rounded one's. Measured `floatformat("-0.0001", 2)` is
+                // `"0.00"` — `m` truthy, `Decimal("-0.00")` falsy.
+                truthy: rounded.is_truthy()?,
+            })
+        })();
+        outcome.map_err(|e| self.host_error("decimal_quantize", e))
+    }
+
+    fn filesize_number_format(&self, value: f64) -> String {
+        let py = self.py;
+        let outcome = (|| {
+            // `round(value, 1)` as a two-argument call to the builtin, not a Rust
+            // round: on a float Python rounds the **exact binary** value, so
+            // measured `round(0.35, 1)` is `0.3` where the decimal tie-break gives
+            // `0.4`. `bytes_ / KB` is a float, which is why this takes an `f64`.
+            let rounded = py.import("builtins")?.getattr("round")?.call1((value, 1))?;
+            let formatted = py
+                .import("django.utils.formats")?
+                .getattr("number_format")?
+                .call1((rounded, 1))?;
+            formatted.extract::<String>()
+        })();
+        outcome.unwrap_or_else(|e| self.infallible_failure("filesize_number_format", e))
+    }
+
+    fn int_modulo(&self, a: &Value, b: &Value) -> Result<IntValue, Error> {
+        let py = self.py;
+        let outcome = (|| {
+            let int_type = py.get_type::<PyInt>();
+            // `int(value) % int(arg)`, in that order (`:857`): Python evaluates
+            // the value's conversion first, so a `ValueError` from it is the one
+            // that escapes when both operands are bad. No `try` in the source, so
+            // `arg == 0` leaves as a `ZeroDivisionError` and a non-numeric
+            // operand as its conversion's own class.
+            let left = int_type.call1((self.object(a)?,))?;
+            let right = int_type.call1((self.object(b)?,))?;
+            let remainder = left.rem(right)?;
+            Ok(match remainder.extract::<i64>() {
+                Ok(small) => IntValue::Small(small),
+                Err(_) => IntValue::Big(remainder.str()?.to_string()),
+            })
+        })();
+        outcome.map_err(|e| self.host_error("int_modulo", e))
     }
 
     fn now(&self) -> Result<Value, Error> {

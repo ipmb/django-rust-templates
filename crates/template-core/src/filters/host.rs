@@ -11,7 +11,7 @@
 //! **The trait is settled before the fan-out and this file is not edited
 //! afterwards** (§10.4): the seven group tasks each own one filter module and
 //! none of them owns this one, so an agent that finds an operation missing stops
-//! and reports rather than adding it. That is what makes the 35 methods below a
+//! and reports rather than adding it. That is what makes the 40 methods below a
 //! contract rather than a suggestion.
 //!
 //! Three implementations exist, and they are three names rather than two
@@ -106,6 +106,83 @@ impl NestedSequence {
     }
 }
 
+/// A `Decimal`, as [`FilterHost::decimal_parse`] hands it back: the parts Rust
+/// needs in order to decide and to assemble, plus a handle for the call that
+/// rounds it.
+///
+/// The handle is a [`Value::Opaque`] rather than a second `str(value)` through
+/// the seam, because the source parses `str(text)` **once** (`:153-154`) and
+/// every later use is the same object — a re-parse would be a second evaluation
+/// of a source-level expression.
+#[derive(Clone, PartialEq, Debug)]
+pub struct ParsedDecimal {
+    /// The `Decimal` itself, as an `Opaque`, for
+    /// [`FilterHost::decimal_quantize`].
+    pub value: Value,
+    /// `str(text)` (`:153`) — the payload of all three `return input_val` arms
+    /// (`:163`, `:177`, `:182`). A plain `str`, and **not** safe.
+    pub input_val: String,
+    /// `d.as_tuple()`'s sign.
+    pub sign: bool,
+    /// `d.as_tuple()`'s digits, most-significant first, so `digits.len()` is the
+    /// source's `len(tupl[1])` at `:197`.
+    pub digits: Vec<u8>,
+    /// `d.as_tuple()`'s exponent, or `None` for the `"F"`/`"n"`/`"N"` a
+    /// non-finite `Decimal` reports.
+    ///
+    /// **`None` is two source arms at once, and both mean `return input_val`**:
+    /// it is the `TypeError` the 200-digit sum catches (`:168-170`) *and* the
+    /// reason `int(d)` raises at `:180` (`OverflowError` for an infinity,
+    /// `ValueError` or `InvalidOperation` for a NaN). A body tests this once and
+    /// never reads [`ParsedDecimal::integral`], which is meaningless for a
+    /// non-finite.
+    pub exponent: Option<i64>,
+    /// `not (int(d) - d)` — the source's `m` at `:180` — and `false` when that
+    /// raised, which is exactly when `exponent` is `None`.
+    ///
+    /// **This is the *integral-value* test, not `exponent < 0`.** A whole number
+    /// with a negative exponent (`Decimal("1.0")`) has a falsy `m`, which is how
+    /// `floatformat(1.0, -1)` reaches the `not m and p <= 0` integer branch
+    /// (measured `"1"`) where an exponent test would take the quantize path.
+    pub integral: bool,
+}
+
+/// [`FilterHost::decimal_parse`]'s answer: the parse, or the `return ""` its
+/// double failure produces (`:158-159`).
+#[derive(Clone, PartialEq, Debug)]
+pub enum DecimalParse {
+    Parsed(ParsedDecimal),
+    /// `Decimal(input_val)` and the `Decimal(str(float(text)))` retry both
+    /// raised — measured, `floatformat("abc")` and `floatformat(None)` are both
+    /// `""`.
+    Unparseable,
+}
+
+/// `Decimal.as_tuple()` **after** the quantization, for the Rust-side assembly
+/// (`:205-212`).
+#[derive(Clone, PartialEq, Debug)]
+pub struct DecimalTuple {
+    pub sign: bool,
+    /// The **digit values**, not a count: `:206` is
+    /// `[str(digit) for digit in reversed(digits)]`, so the assembly needs the
+    /// digits themselves where the parse side needs only `len`.
+    pub digits: Vec<u8>,
+    /// Always an integer: `quantize` cannot produce a non-finite, and the source
+    /// reads `abs(exponent)` to pad (`:207`).
+    pub exponent: i64,
+    /// `bool(rounded_d)` — the second half of `:210`'s `if sign and rounded_d`.
+    ///
+    /// **A separate question from [`ParsedDecimal::integral`], and a separate
+    /// field because of it.** `m` is the truthiness of `int(d) - d`, i.e. of the
+    /// value *before* rounding; this is the truthiness of the value *after* it,
+    /// and the two disagree exactly where the sign is decided — measured
+    /// `floatformat("-0.0001", 2)` is `"0.00"` with `m` truthy and the rounded
+    /// value `Decimal("-0.00")` falsy, so a port that read `integral` here would
+    /// emit `"-0.00"`. Same for `"-0.004"` at 2 against `"-0.5"` at 0, which
+    /// keeps its minus.
+    pub truthy: bool,
+}
+
 /// Everything a filter body can ask of Python.
 ///
 /// The methods return `Result<_, Error>` where Django's call can raise, and a
@@ -156,10 +233,32 @@ pub trait FilterHost {
     /// then a bare `except Exception` → `""`; all three arms are reachable
     /// because `+` is `__add__`, which no `Value` variant can answer for.
     fn add_values(&self, a: &Value, b: &Value) -> Result<Value, Error>;
-    /// `("%" + spec) % value` — `stringformat` (`:277-294`), inside a
-    /// `try/except (ValueError, TypeError)` → `""`. The format string is Rust's
-    /// to build; the operator is Python's.
-    fn percent_format(&self, value: &Value, spec: &str) -> Result<Value, Error>;
+    /// `format % value` — the `%` operator with the format string **already
+    /// built**. Two callers, and they are the two shapes a Python `%` has:
+    /// `stringformat` (`:292`, whose own docstring makes the leading `%` part of
+    /// the *filter's* interface) and `filesizeformat`'s five unit branches
+    /// (`:927-935`, where the format is `gettext("%s KB")`'s **translation**).
+    ///
+    /// The format string is Rust's to build and the operator is Python's, so
+    /// `stringformat` passes `format!("%{}", to_str(arg))` and `filesizeformat`
+    /// passes what `gettext` returned. The second is why this takes the whole
+    /// format rather than `stringformat`'s `"%" + spec` suffix: a catalog may
+    /// **move** the `%s`, so a Rust body that reassembled `"%s " + unit` would
+    /// apply the operator to the untranslated literal and answer the English
+    /// string under every locale — a divergence no English-only corpus row can
+    /// see, which is the same blindness §11's rule is about.
+    fn percent_format(&self, format: &str, value: &Value) -> Result<Value, Error>;
+    /// `format % {name: size}` — the same operator with the **mapping** operand
+    /// `filesizeformat`'s two byte branches use (`:908`, `:925`).
+    ///
+    /// A second method rather than a flag on the first, because the operand is
+    /// not a `Value` at all: `{"size": n}` is a **dict**, and `classify` interns
+    /// one as an `Opaque` — Rust cannot build it. Measured on the pinned tree,
+    /// `"%(size)d bytes" % {"size": 1023}` is `"1023 bytes"` while the same
+    /// expression with a list, a tuple, an int or a str raises
+    /// `TypeError: format requires a mapping`, so no `Value` can stand in for the
+    /// one-entry dict the source writes.
+    fn percent_mapping(&self, format: &str, name: &str, size: &Value) -> Result<Value, Error>;
     /// `isinstance(value, SafeData)` — the question `escape`, `force_escape`,
     /// `safeseq`, `cut` and `linebreaksbr` branch on, and the one a Rust
     /// `Value::Safe` cannot answer for an `Opaque` that carries `__html__`.
@@ -331,6 +430,52 @@ pub trait FilterHost {
     fn gettext(&self, text: &str) -> String;
     /// `ngettext` — the same, with the plural form.
     fn ngettext(&self, singular: &str, plural: &str, n: u64) -> String;
+    /// `Decimal(str(value))`, then Django's `Decimal(str(float(value)))` retry
+    /// (`defaultfilters.py:152-159`) — `floatformat`.
+    ///
+    /// **The decimal engine is host-side**, which is §D2's own rule read
+    /// literally: "what a `decimal.Context` is set to" is not a function of the
+    /// filter's arguments. The plan's earlier claim that `floatformat`'s
+    /// "exponent arithmetic" was Rust was refuted by measurement — see the
+    /// Task 7 amendment — and this method and the next are the two halves it
+    /// crosses the seam as.
+    fn decimal_parse(&self, value: &Value) -> Result<DecimalParse, Error>;
+    /// `:194-205`: `exp = Decimal(1).scaleb(-abs(p))`, the `prec` computation and
+    /// `d.quantize(exp, ROUND_HALF_UP, Context(prec=prec))`, as **one** call.
+    ///
+    /// Not three, because `prec = max(getcontext().prec, abs(p) + units + 1)`
+    /// (`:200`) is a read of thread-local state that *bounds the quantize three
+    /// lines below it*: splitting the method would invite a Rust caller to
+    /// compute its own `prec`, which is the divergence this seam exists to
+    /// prevent. The context does reach the answer, measurably — below
+    /// `2*(Emax + prec)` the `scaleb` clamps to `Decimal('0E-' + Etiny)` (so the
+    /// rounding *position* is 999999 whatever `p` is), and above it the same call
+    /// raises `InvalidOperation` out of a `try` that does not exist.
+    ///
+    /// `places` is `abs(p)`; `integral` is [`ParsedDecimal::integral`], passed
+    /// rather than recomputed so the source's single `int(d) - d` stays single.
+    fn decimal_quantize(
+        &self,
+        decimal: &Value,
+        places: u64,
+        integral: bool,
+    ) -> Result<DecimalTuple, Error>;
+    /// `formats.number_format(round(value, 1), 1)` whole (`:911-912`).
+    ///
+    /// A host call rather than [`FilterHost::number_format`] over a Rust-rounded
+    /// argument, because Python's two-argument `round` on a **float** rounds
+    /// against the exact binary value: measured `round(0.35, 1)` is `0.3` (the
+    /// exact value is `0.34999999999999997780…`) where the decimal tie-break
+    /// gives `0.4`. A Rust `round` over the decimal text — what the rest of this
+    /// crate does — would answer `0.4`.
+    fn filesize_number_format(&self, value: f64) -> String;
+    /// `int(a) % int(b)` — `divisibleby` (`:854-858`), which has **no** `try`, so
+    /// `b == 0` is a `ZeroDivisionError` and a non-numeric operand a `ValueError`
+    /// or `TypeError`; all three escape the filter.
+    ///
+    /// Rust compares the answer to zero, which is a `Small(0)` test: an
+    /// `IntValue::Big` is canonical decimal text and never zero.
+    fn int_modulo(&self, a: &Value, b: &Value) -> Result<IntValue, Error>;
     /// `django.utils.timezone.now`, for `timeuntil`'s default argument.
     fn now(&self) -> Result<Value, Error>;
 }
@@ -346,7 +491,7 @@ fn refused(operation: &'static str) -> Error {
     Error::host(format!("no host answers `{operation}`"))
 }
 
-/// The panic the 15 non-`Result` operations give when nobody answers them.
+/// The panic the 16 non-`Result` operations give when nobody answers them.
 ///
 /// Those methods cannot return the refusal as a value, so the refusal is the
 /// panic's message — and it is the same text [`refused`] produces, so "the host
@@ -407,8 +552,12 @@ impl FilterHost for NoFilterHost {
         Err(refused("add_values"))
     }
 
-    fn percent_format(&self, _value: &Value, _spec: &str) -> Result<Value, Error> {
+    fn percent_format(&self, _format: &str, _value: &Value) -> Result<Value, Error> {
         Err(refused("percent_format"))
+    }
+
+    fn percent_mapping(&self, _format: &str, _name: &str, _size: &Value) -> Result<Value, Error> {
+        Err(refused("percent_mapping"))
     }
 
     fn is_safe(&self, _value: &Value) -> bool {
@@ -519,6 +668,27 @@ impl FilterHost for NoFilterHost {
         refused_panic("ngettext")
     }
 
+    fn decimal_parse(&self, _value: &Value) -> Result<DecimalParse, Error> {
+        Err(refused("decimal_parse"))
+    }
+
+    fn decimal_quantize(
+        &self,
+        _decimal: &Value,
+        _places: u64,
+        _integral: bool,
+    ) -> Result<DecimalTuple, Error> {
+        Err(refused("decimal_quantize"))
+    }
+
+    fn filesize_number_format(&self, _value: f64) -> String {
+        refused_panic("filesize_number_format")
+    }
+
+    fn int_modulo(&self, _a: &Value, _b: &Value) -> Result<IntValue, Error> {
+        Err(refused("int_modulo"))
+    }
+
     fn now(&self) -> Result<Value, Error> {
         Err(refused("now"))
     }
@@ -535,14 +705,14 @@ impl FilterHost for NoFilterHost {
 /// [`TestFilterHost::calls`] can be reimplemented in Rust and still pass.
 ///
 /// The field order is the trait's order, so a reader can walk the two together.
-/// Non-`Result` operations (the 15 that return a bare `String`, `bool` or
+/// Non-`Result` operations (the 16 that return a bare `String`, `bool` or
 /// `Value`) panic when unset rather than defaulting, for the same reason: a
 /// sentinel could silently satisfy an assertion.
 ///
 /// `#[cfg(test)]`, because the only thing that needs it is a test: this crate's
 /// `cargo test` compiles every `#[cfg(test)] mod tests` in `filters/<name>.rs`
 /// against the same crate, so it is visible everywhere an agent's filter tests
-/// live. Shipping it in the library would put 35 `Option` fields and two
+/// live. Shipping it in the library would put 40 `Option` fields and two
 /// `RefCell`s in the real build, reachable from a non-test path with nothing to
 /// stop it. The one cost is that a *doc* test cannot demonstrate it — doc tests
 /// link against the crate compiled normally — so its demonstrations live in the
@@ -553,7 +723,7 @@ pub struct TestFilterHost {
     // Crate-visible rather than private, and the reason is a Rust rule worth
     // stating: functional-update syntax (`..TestFilterHost::default()`) requires
     // *every* field to be visible at the construction site, so two private fields
-    // here would stop a filter module's test from scripting any of the 35 answers
+    // here would stop a filter module's test from scripting any of the 40 answers
     // — the struct's whole purpose. `pub(crate)` is the narrowest visibility that
     // restores it, and it costs nothing in this struct's case, since the struct is
     // itself `#[cfg(test)]` and so unconstructible from outside the crate anyway.
@@ -578,6 +748,7 @@ pub struct TestFilterHost {
     pub get_slice: Option<Value>,
     pub add_values: Option<Value>,
     pub percent_format: Option<Value>,
+    pub percent_mapping: Option<Value>,
     pub is_safe: Option<bool>,
     pub mark_safe: Option<Value>,
     pub conditional_escape: Option<Value>,
@@ -606,6 +777,10 @@ pub struct TestFilterHost {
     pub number_format: Option<String>,
     pub gettext: Option<String>,
     pub ngettext: Option<String>,
+    pub decimal_parse: Option<DecimalParse>,
+    pub decimal_quantize: Option<DecimalTuple>,
+    pub filesize_number_format: Option<String>,
+    pub int_modulo: Option<IntValue>,
     pub now: Option<Value>,
 }
 
@@ -732,11 +907,18 @@ impl FilterHost for TestFilterHost {
         self.add_values.clone().ok_or_else(|| refused("add_values"))
     }
 
-    fn percent_format(&self, _value: &Value, _spec: &str) -> Result<Value, Error> {
+    fn percent_format(&self, _format: &str, _value: &Value) -> Result<Value, Error> {
         self.record("percent_format")?;
         self.percent_format
             .clone()
             .ok_or_else(|| refused("percent_format"))
+    }
+
+    fn percent_mapping(&self, _format: &str, _name: &str, _size: &Value) -> Result<Value, Error> {
+        self.record("percent_mapping")?;
+        self.percent_mapping
+            .clone()
+            .ok_or_else(|| refused("percent_mapping"))
     }
 
     fn is_safe(&self, _value: &Value) -> bool {
@@ -907,6 +1089,43 @@ impl FilterHost for TestFilterHost {
             .unwrap_or_else(|| refused_panic("ngettext"))
     }
 
+    fn decimal_parse(&self, _value: &Value) -> Result<DecimalParse, Error> {
+        self.record("decimal_parse")?;
+        // `DecimalParse::Unparseable` is a *value* here, not an error, which is
+        // why a scripted `Unparseable` and an unscripted field must not be
+        // confused: only the outer `Option` is "not scripted", and a scripted
+        // refusal is the inner variant. Collapsing the two — `ok_or` over a
+        // flat `Option<Decimal>` — would make the unparseable arm untestable in
+        // a bare shell, and that arm is the one the `float`-retry exists for.
+        self.decimal_parse
+            .clone()
+            .ok_or_else(|| refused("decimal_parse"))
+    }
+
+    fn decimal_quantize(
+        &self,
+        _decimal: &Value,
+        _places: u64,
+        _integral: bool,
+    ) -> Result<DecimalTuple, Error> {
+        self.record("decimal_quantize")?;
+        self.decimal_quantize
+            .clone()
+            .ok_or_else(|| refused("decimal_quantize"))
+    }
+
+    fn filesize_number_format(&self, _value: f64) -> String {
+        self.record_plain("filesize_number_format");
+        self.filesize_number_format
+            .clone()
+            .unwrap_or_else(|| refused_panic("filesize_number_format"))
+    }
+
+    fn int_modulo(&self, _a: &Value, _b: &Value) -> Result<IntValue, Error> {
+        self.record("int_modulo")?;
+        self.int_modulo.clone().ok_or_else(|| refused("int_modulo"))
+    }
+
     fn now(&self) -> Result<Value, Error> {
         self.record("now")?;
         self.now.clone().ok_or_else(|| refused("now"))
@@ -995,9 +1214,17 @@ mod tests {
                 .map(|_| "get_slice")
                 .unwrap_err(),
             host.add_values(&v, &v).map(|_| "add_values").unwrap_err(),
-            host.percent_format(&v, "s")
+            host.percent_format("%s", &v)
                 .map(|_| "percent_format")
                 .unwrap_err(),
+            host.percent_mapping("%(size)d", "size", &v)
+                .map(|_| "percent_mapping")
+                .unwrap_err(),
+            host.decimal_parse(&v).map(|_| "decimal_parse").unwrap_err(),
+            host.decimal_quantize(&v, 2, false)
+                .map(|_| "decimal_quantize")
+                .unwrap_err(),
+            host.int_modulo(&v, &v).map(|_| "int_modulo").unwrap_err(),
             host.conditional_escape(&v)
                 .map(|_| "conditional_escape")
                 .unwrap_err(),
@@ -1023,8 +1250,8 @@ mod tests {
         ];
         assert_eq!(
             names.len(),
-            20,
-            "the Result half of the trait is 20 methods"
+            24,
+            "the Result half of the trait is 24 methods"
         );
         for error in names {
             match error.kind {
