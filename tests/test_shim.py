@@ -8,6 +8,7 @@ Django's fallback.
 """
 
 import importlib
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -133,6 +134,50 @@ class SubstituteDjangoTemplateTests(unittest.TestCase):
             )
         )
         self.assertFalse(_shim.installed())
+
+    def test_a_partial_subpackage_still_falls_back_for_its_siblings(self):
+        """The fallback has to be reapplied at every level, not just the top.
+
+        ``django.template.loaders`` is a package. The moment we provide
+        ``_impl/loaders/__init__.py``, that package's ``__path__`` is ours alone
+        unless the finder rebuilds it with Django's directory appended — and then
+        ``django.template.loaders.filesystem`` stops resolving at all. That would
+        make the fallback vanish exactly when a milestone is half-finished, which
+        is when it is needed most.
+
+        This creates that situation with one throwaway module and checks both
+        that our module wins and that its Django sibling still resolves.
+        """
+        package_dir = (
+            PROJECT_ROOT / "python" / "django_rust_templates" / "_impl" / "loaders"
+        )
+        init = package_dir / "__init__.py"
+        self.assertFalse(package_dir.exists(), "leftover from an earlier run")
+
+        package_dir.mkdir()
+        init.write_text("MARKER = 'ours'\n")
+        try:
+            _shim.install()
+
+            ours = importlib.import_module("django.template.loaders")
+            self.assertEqual(getattr(ours, "MARKER", None), "ours")
+
+            sibling = importlib.import_module("django.template.loaders.filesystem")
+            self.assertNotIn(
+                "_impl",
+                sibling.__file__,
+                "our partial package cut its Django sibling off from the fallback",
+            )
+
+            # The meter must now tell the truth about this case too: `loaders` is
+            # ours, its siblings are not, and they still import.
+            remaining = _shim.unshimmed()
+            self.assertNotIn("django.template.loaders", remaining)
+            self.assertIn("django.template.loaders.filesystem", remaining)
+        finally:
+            # Importing the package writes a __pycache__ into it, so this is a
+            # tree removal rather than an unlink+rmdir.
+            shutil.rmtree(package_dir, ignore_errors=True)
 
     def test_install_is_idempotent(self):
         _shim.install()

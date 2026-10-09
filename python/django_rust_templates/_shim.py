@@ -45,33 +45,88 @@ class _ShimFinder(importlib.abc.MetaPathFinder):
         self.real_paths = real_paths
 
     def find_spec(self, fullname, path=None, target=None):
-        if fullname != TARGET:
+        relative = _relative_name(fullname)
+        if relative is None:
             return None
-        if not _IMPL_INIT.is_file():
+        if relative == "" and not _IMPL_INIT.is_file():
             raise ShimError(f"expected implementation package at {_IMPL_INIT}")
-        return importlib.util.spec_from_file_location(
-            fullname,
-            _IMPL_INIT,
-            loader=importlib.machinery.SourceFileLoader(fullname, str(_IMPL_INIT)),
-            # Ours first so our modules win; Django's second so anything we have
-            # not written yet still resolves.
-            submodule_search_locations=[str(_IMPL_DIR), *self.real_paths],
-        )
+
+        base = _IMPL_DIR if not relative else _IMPL_DIR.joinpath(*relative.split("."))
+
+        # A package we provide needs its own search path — ours first, Django's
+        # second. Returning a spec without one would leave the package with
+        # `__path__ == [our directory]` only, so the first time a half-finished
+        # subpackage exists (say `_impl/loaders/__init__.py`), every sibling
+        # (`django.template.loaders.filesystem`) stops resolving entirely. The
+        # fallback has to be reapplied at every level, not just the top.
+        init = base / "__init__.py"
+        if init.is_file():
+            return importlib.util.spec_from_file_location(
+                fullname,
+                init,
+                loader=importlib.machinery.SourceFileLoader(fullname, str(init)),
+                submodule_search_locations=[
+                    str(base),
+                    *_real_subdirs(relative, self.real_paths),
+                ],
+            )
+
+        module = base.with_suffix(".py")
+        if module.is_file():
+            return importlib.util.spec_from_file_location(
+                fullname,
+                module,
+                loader=importlib.machinery.SourceFileLoader(fullname, str(module)),
+            )
+
+        # Not ours: fall through to PathFinder, which resolves it against the
+        # parent's __path__ — the one we built above.
+        return None
+
+
+def _relative_name(fullname: str) -> str | None:
+    """``django.template.loaders`` → ``loaders``; the package itself → ``""``.
+
+    Returns ``None`` for anything outside the ``django.template`` namespace,
+    which is everything this finder must leave alone.
+    """
+    if fullname == TARGET:
+        return ""
+    if fullname.startswith(TARGET + "."):
+        return fullname[len(TARGET) + 1:]
+    return None
+
+
+def _real_subdirs(relative: str, real_paths: list[str]) -> list[str]:
+    """Django's own directories corresponding to one of our packages."""
+    parts = relative.split(".") if relative else []
+    return [
+        str(candidate)
+        for real_path in real_paths
+        if (candidate := Path(real_path).joinpath(*parts)).is_dir()
+    ]
 
 
 def _real_search_paths() -> list[str]:
     """Search paths of Django's own template package.
 
-    Must be called while the real package is imported, or not yet imported.
+    Uses ``find_spec`` rather than ``import_module``: the spec carries
+    ``submodule_search_locations`` without executing the package, so nothing is
+    imported merely to discover where Django's code lives, and no module that
+    already bound a name via ``from django.template import X`` is left holding a
+    stale reference to a package we then discard.
     """
     try:
-        real = importlib.import_module(TARGET)
-    except ImportError as exc:  # pragma: no cover - Django is a hard dependency
-        raise ShimError(f"cannot import {TARGET}: {exc}") from exc
+        spec = importlib.util.find_spec(TARGET)
+    except (ImportError, ValueError) as exc:  # pragma: no cover - hard dependency
+        raise ShimError(f"cannot locate {TARGET}: {exc}") from exc
 
-    paths = [str(p) for p in getattr(real, "__path__", [])]
+    if spec is None:  # pragma: no cover - Django is a hard dependency
+        raise ShimError(f"cannot locate {TARGET}")
+
+    paths = [str(p) for p in (spec.submodule_search_locations or [])]
     if not paths:
-        raise ShimError(f"{TARGET} has no __path__; is it a package?")
+        raise ShimError(f"{TARGET} has no search locations; is it a package?")
     if str(_IMPL_DIR) in paths:
         raise ShimError("already shimmed; uninstall before reinstalling")
     return paths

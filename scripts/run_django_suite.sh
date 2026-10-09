@@ -32,5 +32,36 @@ fi
 # root, so the working directory and PYTHONPATH differ.
 export PYTHONPATH="$HERE/shimpath:$CHECKOUT:${PYTHONPATH:-}"
 
+# Pre-flight: prove the shim is actually installed before spending a suite run on
+# it. This runs the same interpreter with the same PYTHONPATH, in a subprocess,
+# and asserts that a module we provide resolved to our file rather than Django's.
+# Without it, a mistyped path or an unsynced venv yields a green suite that
+# proves nothing about our code.
+if [ "${DJANGO_RUST_TEMPLATES:-1}" = "1" ]; then
+  echo "verifying the Rust engine is installed..." >&2
+  "$PROJECT_ROOT/.venv/bin/python" - <<'PY'
+import sys
+
+import django.template.exceptions
+
+from django_rust_templates import _shim
+
+if not _shim.installed():
+    sys.exit("shim is not installed; refusing to run the suite")
+
+module_file = django.template.exceptions.__file__ or ""
+if "_impl" not in module_file:
+    sys.exit(
+        f"django.template.exceptions resolved to {module_file}, "
+        "not to our implementation; refusing to run the suite"
+    )
+
+print(
+    f"engine installed; {len(_shim.unshimmed())} module(s) still served by Django",
+    file=sys.stderr,
+)
+PY
+fi
+
 cd "$CHECKOUT/tests"
 exec "$PROJECT_ROOT/.venv/bin/python" runtests.py "${LABELS[@]}"
