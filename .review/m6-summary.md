@@ -121,12 +121,29 @@ is recorded rather than fixed: a name-based key would need the resolver, which i
 the thing the census avoids.
 
 The count is checkable rather than asserted, and the check is the one that
-caught this paragraph undercounting — it first said two, copied from a sibling
-record. **`824 (anchor, citing file)` relations against `821` on constructs is a
-difference of three**, and that difference *is* the single-file pairs: each one
-is two anchor rows and one construct row for the same file. A relation count and
-a construct count are therefore not two measurements of one quantity; they are
-two units, and their difference counts the files that spell one construct twice.
+caught this paragraph undercounting — it first said two. **`824 (anchor, citing
+file)` relations against `821` on constructs is a difference of three**, and that
+difference *is* the single-file pairs: each one is two anchor rows and one
+construct row for the same file. A relation count and a construct count are
+therefore not two measurements of one quantity; they are two units, and their
+difference counts the files that spell one construct twice.
+
+**And the "two" is a vintage, not a typo — measured.** The pair count is not
+stable across the scanner's widening: `6754684` changed `ANCHOR_RE` from
+`` `([a-zA-Z_0-9/]+\.py):(\d+)(?:-(\d+))?` `` to
+`` `([a-zA-Z_0-9/.\-]+\.(?:py|rs)):…` ``, admitting leading dots, hyphens and
+`.rs` names. Run the **old** regex over the current tree and the census finds
+**3 two-spelling constructs, of which 2 are single-file**; run the current one
+and it finds **6, of which 3 are**. The one the widening added is
+`test_host_tags.py`'s, whose long spelling `.django/tests/…` has the leading dot
+the old pattern could not match. So the sentence mixed two vintages of one tool:
+its **six** is the widened count and its **two** is the narrow one, written into
+a document committed seven minutes after the widening landed. A copy from a
+sibling record would look identical; a timestamp check clears the copy reading
+and only the arithmetic convicts the vintage. **Widening a scanner is monotone
+in the counts it reports and not in the sub-counts derived from a different run
+of it**, which is the reason the number belongs in a tool's output rather than in
+prose — the same remedy the header's counts already have.
 
 ## The base is a precondition, not a label
 
