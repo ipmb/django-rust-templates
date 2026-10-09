@@ -2128,6 +2128,24 @@ CASES: list[dict] = [
         "value": "abc",
     },
     {
+        # **The second route to the coincidence, and the measurement that
+        # refutes what the `"1"` row used to claim.** An input is blind to the
+        # `__float__` defect exactly when `len(v) == 1` and "the float arm
+        # answers the singular suffix" agree — and the float arm answers
+        # singular *two* ways: `float(v) == 1`, and `float(v)` raising
+        # **`ValueError`**, because the source `pass`es that and falls out to
+        # `return ""`, which is the singular suffix. Every one-character
+        # non-numeric string coincides by the second route (`"a"`, `"!"`, `"."`),
+        # answering `""` on both sides. Kept, like `"1"`, as the coinciding twin
+        # of a failing row — of `"abc"` immediately above — because the pair is
+        # what shows the arm is not on its own what discriminates: the length has
+        # to differ from 1 as well. Like `"1"` it cannot separate the arms by
+        # itself, so it is here as a statement of the rule and not as a trap.
+        "name": "pluralize/one-char-non-numeric-string-is-one",
+        "filter": "pluralize",
+        "value": "a",
+    },
+    {
         "name": "pluralize/empty-string-is-not-len-based",
         "filter": "pluralize",
         "value": "",
@@ -2136,12 +2154,16 @@ CASES: list[dict] = [
         # A numeric *string* goes through `float`, so it is a number and not a
         # length — and `"1"` is the row where that is invisible: `float("1")` is
         # `1.0` and `len("1") == 1` select the same empty singular suffix, so a
-        # body that took the `len` arm by mistake agrees here. It is the *only*
-        # one-character string that coincides (a one-character string is
-        # singular through `len`, and singular through `float` only for `"1"`),
-        # which is why it is kept even though it can never fail on its own: it is
-        # the coinciding twin of `"2"` below, and a set with `"2"` alone would not
-        # show that the other single digit had been *agreeing*.
+        # body that took the `len` arm by mistake agrees here. It is kept even
+        # though it cannot separate the arms on its own: it is the coinciding
+        # twin of `"2"` below, and a set with `"2"` alone would not show that the
+        # other single digit had been *agreeing*.
+        #
+        # **It is not the only one-character string that coincides**, which is
+        # what this comment claimed before it was measured. The coincidence has
+        # two routes and `"1"` is one of them; the other is a one-character
+        # string that does not parse, and it has its own row on
+        # `pluralize/one-char-non-numeric-string-is-one`.
         "name": "pluralize/numeric-string-one",
         "filter": "pluralize",
         "value": "1",

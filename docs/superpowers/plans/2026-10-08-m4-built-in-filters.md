@@ -2848,26 +2848,38 @@ the case §10.4's rule exists for, and it is worth recording that the rule
 produced a finding rather than only a constraint.
 
 **And the coincidence is a property of the *string*, not a quirk of `"1"`.**
-An input is blind to the defect exactly when `float(v) == 1.0` and `len(v) == 1`
-agree, since those are what the two arms select on. That happens either because
-`v` is one character long, parses to `1.0`, and is neither `"0"` nor `"2"` —
-which leaves only `"1"` — or because `v` is longer and its float is not `1.0`,
-which includes `"-1"`, `"10"`, `"1_0"`, `"nan"` and `"inf"`. Measured over the
-shapes a template can write:
+An input is blind to the defect exactly when
 
 ```text
-  coincides     "1"  "-1"  "1_0"  "10"  "nan"  "inf"
-  discriminates "2"  "0"  "+1"  "1e0"  "1."  " 1 "     ← the rows that can see it
+  len(v) == 1   <=>   the float arm answers the singular suffix
+```
+
+since those two selections are what the arms make, and a string on which they
+agree is one where the defect has nothing to show. **"The float arm answers
+singular" is itself two conditions, and saying it as one cost a correction:**
+it is `float(v) == 1` *or* `float(v)` raising **`ValueError`**, because the
+source `pass`es the `ValueError` and falls out to `return ""`, which is the
+singular suffix (`defaultfilters.py:969-978`). A rule phrased as "`float(v) ==
+1.0` and `len(v) == 1` agree" therefore mispredicts *every* `ValueError` row —
+measured, 6 of 23 shapes, and the six are exactly the `ValueError` ones. The
+four cells, each with the corpus row that occupies it:
+
+```text
+                      len(v) == 1                len(v) != 1
+  float(v) == 1       agree      "1"            differ   "+1"  "1e0"  "1."  " 1 "
+  float(v) raises     agree      "a"            differ   "abc"  ""
+  float(v) != 1       differ     "2"  "0"       agree    "-1"  "10"  "nan" "inf"
 ```
 
 The discriminating set splits both ways — `"2"` and `"0"` take the plural arm
-that `len` would not, `"+1"`, `"1e0"`, `"1."` and `" 1 "` take the singular arm
-that `len` would not — and the singular half is the interesting one, because
-those are precisely the strings `float()` accepts and a character count cannot
-see: a sign, an exponent, a trailing point, surrounding whitespace. `"1"` earns
-its place as the *coinciding* row of the same length as `"2"`, which is what
-makes the pair a pair rather than a single lucky row; the singular-arm syntax is
-carried by `"+1"` and `"1e0"`.
+that `len` would not, and the singular half takes the singular arm that `len`
+would not — and the singular half is the interesting one, because those are
+precisely the strings `float()` accepts and a character count cannot see: a
+sign, an exponent, a trailing point, surrounding whitespace. `"1"` and `"a"`
+earn their places as the *coinciding* twins of `"2"` and of `"abc"`: without
+them a reader cannot see that it is the pair — which arm, at which length —
+that decides, and a set holding only the failing rows would suggest the arm was
+the whole story.
 
 **The corpus also needed an argument no template can spell.** `[1]`, `[","]` and
 `object()` are the three of `comma_bits`'s five rows that settle the fusion, and
