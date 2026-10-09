@@ -19,6 +19,7 @@ pub mod filter_expr;
 pub mod host;
 pub mod kwargs;
 pub mod registry;
+pub mod relative;
 pub mod resolve;
 pub mod smartif;
 pub mod tags;
@@ -51,16 +52,22 @@ pub struct Parser<'a> {
     /// last. `unclosed_block_tag` pops it to name the tag that was left open.
     command_stack: Vec<(String, Token)>,
     host: &'a dyn Host,
-    /// Python's `repr()` of `Origin.template_name`, or `None` when the origin
-    /// has no template name.
+    /// `parser.origin.template_name` — the **raw** name Django's `Origin` holds,
+    /// not a rendered `repr`.
     ///
-    /// Only `extend_nodelist`'s must-be-first message reads it, and it arrives
-    /// pre-rendered because a Python `repr` is Python's to produce — the same
-    /// rule §5.2 already records for `LookupError::Missing::current_repr`.
-    /// Python's `repr` escapes by Unicode category and Rust has no categories
-    /// without a new dependency; guessing would put a subtly wrong string in a
-    /// message the suite compares exactly.
-    origin_template_repr: Option<String>,
+    /// `{% extends %}` and `{% include %}` read it directly (that is the field's
+    /// shape after M7 Task 2), and `extend_nodelist`'s must-be-first message
+    /// renders a `repr` on demand through [`Parser::py_repr`] because a Python
+    /// `repr` is Python's to produce — the same rule §5.2 already records for
+    /// `LookupError::Missing::current_repr`. Python's `repr` escapes by Unicode
+    /// category and Rust has no categories without a new dependency; guessing
+    /// would put a subtly wrong string in a message the suite compares exactly.
+    ///
+    /// `None` stands for the origin a `Template` built without a loader has —
+    /// `Origin(UNKNOWN_SOURCE).template_name` is `None` (A3) — and **not** for
+    /// "no origin object": the Python side always passes a real `Origin`, and
+    /// what reaches Rust is the attribute read from it.
+    origin_template_name: Option<String>,
     /// `parser._last_cycle_node` and `parser._named_cycle_nodes`, which
     /// `{% cycle %}` sets and `{% resetcycle %}` reads by name or by default.
     ///
@@ -114,19 +121,30 @@ impl<'a> Parser<'a> {
             tokens,
             command_stack: Vec::new(),
             host,
-            origin_template_repr: None,
+            origin_template_name: None,
             last_cycle_node: None,
             named_cycle_nodes: HashMap::new(),
             loaded_blocks: Vec::new(),
         }
     }
 
-    /// Set the origin's `repr`, as `Parser(…, origin=…)` plus Python's `repr`
-    /// would have produced it.
+    /// Set the origin's template name, as `Parser(…, origin=…)` plus
+    /// `origin.template_name` would have produced it.
     #[must_use]
-    pub fn with_origin_template_repr(mut self, repr: String) -> Self {
-        self.origin_template_repr = Some(repr);
+    pub fn with_origin_template_name(mut self, name: String) -> Self {
+        self.origin_template_name = Some(name);
         self
+    }
+
+    /// `parser.origin.template_name` (`loader_tags.py:305`).
+    ///
+    /// The read half, and the reason the field holds the name rather than a
+    /// rendered `repr`: `{% extends %}` hands this straight to
+    /// `construct_relative_path`, whose messages interpolate it with `%s` and
+    /// whose recursion check compares it — none of which is a `repr`. Only
+    /// `extend_nodelist` wants one, and it asks for one.
+    pub fn origin_template_name(&self) -> Option<&str> {
+        self.origin_template_name.as_deref()
     }
 
     /// The `{% block %}` names seen so far, in the order `do_block` recorded them.
@@ -469,9 +487,14 @@ impl<'a> Parser<'a> {
         token: &Token,
     ) -> Result<(), Error> {
         if node.must_be_first && nodelist.contains_nontext {
-            let origin = match &self.origin_template_repr {
-                Some(repr) => repr.clone(),
-                None => "the template".to_string(),
+            // Django's test is **truthiness**, not `is None` (`base.py:602-606`):
+            // `if self.origin.template_name:` picks "the template" for an empty
+            // name as well as for `None`. Rust holds `Some("")` for the empty
+            // one, so the arm is explicit — the two encodings differ on exactly
+            // that input, and a `match` on `Option` alone would answer `''`.
+            let origin = match self.origin_template_name() {
+                Some(name) if !name.is_empty() => self.py_repr(name),
+                _ => "the template".to_string(),
             };
             return Err(self.error(
                 token,

@@ -36,7 +36,7 @@ __all__ = ("ShellHost",)
 
 # A5: M7's three. They are Django's builtins and not Rust's, so without this they
 # would reach the host. The ordering check itself is *not* the reason — Rust
-# ports `extend_nodelist` itself (`crates/template-core/src/parser/mod.rs:465`) and
+# ports `extend_nodelist` itself (`crates/template-core/src/parser/mod.rs:483`) and
 # runs it for a host descriptor like any other block node. The reason is that
 # `NodeDesc.must_be_first` does not cross the seam, so `{% extends %}` would be
 # accepted *and* uncheckable — and accepting a tag whose render path is M7's is

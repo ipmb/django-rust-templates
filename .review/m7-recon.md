@@ -84,6 +84,16 @@ and would silently compile here.
 at `lib.rs:1499` as "Python's `repr()` of `Origin.template_name`, or…". The
 `"the template"` fallback (`parser/mod.rs:438`) is Django's `B:606`.
 
+**Correction, added 2026-10-09 (M7 Task 2):** that is the state this recon
+measured, and it is no longer the shipping one. The field is
+`Parser::origin_template_name: Option<String>` and holds the **raw**
+`Origin.template_name`, because `{% extends %}` compares it against a path and
+interpolates it with `%s` — a `repr` is wrong in all three of
+`construct_relative_path`'s messages (plan A3). `extend_nodelist` derives the
+`repr` through `Host::repr`. The fallback is no longer a `match` on `None`
+either: Django's test is truthiness (`B:603`), so an empty name says "the
+template" as well.
+
 ---
 
 ## 3. Django's machinery, cited
@@ -328,8 +338,9 @@ measurements that bound each item:
    `tests/test_ref_table.py:173-181` pins at length 5.
 3. **`{% extends %}`'s compile function, and its message**
    `"{% %s %} must be the first tag in %s."` (`B:607-610`; Rust's port at
-   `parser/mod.rs:436-444`), with `origin_template_repr` supplied
-   (`lib.rs:1446-1457`).
+   `parser/mod.rs:436-444`), with the origin supplied (`lib.rs:1446-1457`).
+   *Superseded:* Task 2 shipped it as `origin_template_name`, the raw attribute,
+   with the repr derived in `extend_nodelist` — see the correction in §2.
 4. **The corpus entries that reach it** — `test_extends.py:188` and `:193`, whose
    two expected strings differ only in the origin slot. `tests/parser_corpus.py:238-241`
    already carries the `contains_nontext` rows that set the rule's input and

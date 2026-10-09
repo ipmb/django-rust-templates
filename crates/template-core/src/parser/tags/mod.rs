@@ -248,11 +248,17 @@ pub(crate) mod support {
         parser.parse(&[]).expect_err("expected a parse failure")
     }
 
-    /// The error `source` fails with, with an origin repr attached.
-    pub(crate) fn failure_with_origin(source: &str, repr: Option<&str>) -> Error {
+    /// The error `source` fails with, with an origin template name attached.
+    ///
+    /// The parameter is the origin's **name**, not a rendered `repr`: since M7
+    /// Task 2 the field holds `Origin.template_name` and `extend_nodelist`
+    /// derives the `repr` from it, so a caller passing `"tpl.html"` here is what
+    /// exercises the derivation — the assertion below still expects the quoted
+    /// form, and that difference is the thing being tested.
+    pub(crate) fn failure_with_origin(source: &str, name: Option<&str>) -> Error {
         let mut parser = Parser::new(Lexer::new(source).tokenize(), &NoHost);
-        if let Some(repr) = repr {
-            parser = parser.with_origin_template_repr(repr.to_string());
+        if let Some(name) = name {
+            parser = parser.with_origin_template_name(name.to_string());
         }
         parser.parse(&[]).expect_err("expected a parse failure")
     }
@@ -459,7 +465,7 @@ mod tests {
     fn the_innermost_token_wins_across_a_nested_parse() {
         let error = failure_with_origin(
             "{% standin %}\n{% standin_first %}\n{% standin_first %}\n{% endstandin %}",
-            Some("'tpl.html'"),
+            Some("tpl.html"),
         );
         assert_eq!(
             error.kind,
@@ -476,6 +482,22 @@ mod tests {
     #[test]
     fn without_an_origin_the_message_says_the_template() {
         let error = failure_with_origin("{% standin_first %}{% standin_first %}", None);
+        assert_eq!(
+            error.kind,
+            ErrorKind::Syntax(
+                "{% standin_first %} must be the first tag in the template.".to_string(),
+            ),
+        );
+    }
+
+    /// Django's test is **truthiness**, not `is None` (`base.py:602-606`), so an
+    /// origin whose `template_name` is the empty string says "the template"
+    /// too. An `Option`-shaped port of that check answers `''` instead, and the
+    /// `None` row above cannot tell the two apart — both encodings agree there.
+    /// This is the row that separates them.
+    #[test]
+    fn an_empty_origin_name_says_the_template_too() {
+        let error = failure_with_origin("{% standin_first %}{% standin_first %}", Some(""));
         assert_eq!(
             error.kind,
             ErrorKind::Syntax(

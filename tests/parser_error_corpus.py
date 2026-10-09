@@ -404,7 +404,7 @@ ERRORS = [
     #       and with debug, position (26, 39) — the `now` block, not `div`'s
     #
     # Rust has the matching guard (`Error::error`'s `token.or_else`,
-    # `parser/mod.rs:406-410`) and is inert without this: the token never
+    # `parser/mod.rs:424-428`) and is inert without this: the token never
     # crosses the seam, so the guard sees `None` and attaches the **outer**
     # token — `(2, 'div', 1, None)`. Both assertions of
     # `test_every_case_carries_the_same_token*` fail without the transport, and

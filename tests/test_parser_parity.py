@@ -472,8 +472,8 @@ class CorpusParityTests(unittest.TestCase):
         """Review Focus 4: the host node must be token-bearing *by the same route*
         as every other node, which is the thing Task 2's arm can quietly break.
 
-        Rust ports `extend_nodelist` (`crates/template-core/src/parser/mod.rs:465`)
-        and calls it at `crates/template-core/src/parser/mod.rs:377` for a host
+        Rust ports `extend_nodelist` (`crates/template-core/src/parser/mod.rs:483`)
+        and calls it at `crates/template-core/src/parser/mod.rs:395` for a host
         descriptor exactly as for a Rust-built block node, so the token reaches
         the descriptor either way. The failure
         mode is therefore not "Django forgot to attach it" but "the

@@ -921,7 +921,15 @@ git commit -m "M7 Task 1: {% block %} — the compile function, and Rust's loade
 - Consumes: `Host::repr` (`host.rs:161`), `Parser::py_repr` (`parser/mod.rs:167`).
 - Produces: `pyposix::normpath(&str) -> String`, `pyposix::dirname(&str) -> String`, `pyposix::join(&str, &str) -> String`; `parser::relative::construct_relative_path(Option<&str>, &str, bool) -> Result<String, Error>`; `Parser::origin_template_name(&self) -> Option<&str>`; `Parser::with_origin_template_name(String)`. Task 3 consumes `origin_template_name` and `construct_relative_path`; Task 4 consumes `construct_relative_path`.
 
-**Declared environment:** `render.parser_for`'s new `origin` keyword defaults to `None`, so every existing caller (the parity corpus in `tests/`, `test_parser_errors.py`) keeps compiling unchanged. `_native.parse`'s keyword rename is **not** backward-compatible — the two `tests/` call sites that pass it are updated in the same commit, and a grep for `origin_template_repr` over `crates/ python/ tests/ scripts/` must come back empty before the commit.
+**Declared environment:** `render.parser_for`'s new `origin` keyword defaults to
+`UNKNOWN_ORIGIN` — an `Origin`, not `None`, for A3's reason — so every existing
+caller (the parity corpus in `tests/`, `test_parser_errors.py`) keeps compiling
+unchanged and the host `Parser` carries a real `Origin` for Django's own nested
+parses. `_native.parse`'s keyword rename is **not** backward-compatible, and a
+grep for `origin_template_repr` over `crates/ python/ tests/ scripts/` must come
+back empty before the commit. (No call site in `tests/` passed the old keyword:
+the grep is empty before the rename as well as after it — measured, not assumed,
+and the plan's earlier claim that two sites needed updating was wrong.)
 
 - [ ] **Step 1: Write the failing `pyposix` test**
 
@@ -1259,7 +1267,7 @@ pub fn construct_relative_path(
     }
     if !allow_recursion && stripped == new_name {
         // `current`, **not** `new_name`: the second `%s` in Django's message is
-        // `current_template_name` (`loader_tags.py:280-283`), and the two differ
+        // `current_template_name` (`loader_tags.py:281-283`), and the two differ
         // whenever the origin had a leading slash — measured on the pin,
         // `construct_relative_path("/index.html", "'./index.html'", False)`
         // says "template name '/index.html'" while the new name is
@@ -1318,6 +1326,36 @@ object**, so `ExtendsNode.render`'s `[self.origin]` and `IncludeNode.render`'s
 `origin` reaches Rust as `origin.template_name`, i.e. `origin.template_name if
 origin is not None else None` — the *attribute*, never the object (A3).
 
+**`template_for` gains the same `origin`, and leaving it at `None` is the
+silent half-fix this step exists to prevent.** Django sets `node.origin` in
+`extend_nodelist` (`base.py:616`) *and* `Template.origin` in `__init__`
+(`base.py:154`), and `Node.render_annotated` decides whether to attach the debug
+traceback by comparing them:
+
+```python
+if (not hasattr(e, "template_debug")
+    and context.render_context.template.origin == e._culprit_node.origin):
+```
+
+so a tree whose nodes carry a real origin under a `Template` that carries `None`
+stops annotating `engine.debug` templates. Both were `None` before this task
+(equal, and the comparison held trivially); threading one and not the other
+would break it where nothing in the M7 corpora looks. Measured on the pin:
+`Origin(UNKNOWN_SOURCE) == None` is `False` (`Origin.__eq__` returns `False` for
+anything that is not an `Origin`, `base.py:125-129`), while two
+`Origin(UNKNOWN_SOURCE)` values are equal — so threading the materialiser's
+origin and leaving `template.origin` at `None` silently stops the annotation.
+
+**And the must-be-first message is Django's *truthiness* test, not `is None`.**
+`extend_nodelist` reads `if self.origin.template_name:` (`base.py:603`), so an
+origin whose name is the **empty string** says "the template" too — while
+`Option<String>` distinguishes `Some("")` from `None` and would answer `''`.
+The Rust arm is therefore `Some(name) if !name.is_empty()`, and the row that
+separates the two encodings is
+`parser::tags::tests::an_empty_origin_name_says_the_template_too` (observed
+failing with `left: … must be the first tag in ''.` when the conjunct is
+removed). The `None` row cannot separate them: both encodings agree there.
+
 - [ ] **Step 8: Run the guards, then the gates**
 
 Run: `source scripts/env.sh && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && grep -rn origin_template_repr crates/ python/ tests/ scripts/ ; maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m pytest tests/ -x -q`
@@ -1330,6 +1368,14 @@ Observe the guard: revert `extend_nodelist` to a hard-coded `"the template"` and
 confirm Task 1's error-corpus rows still pass but the *stand-in* must-be-first row
 in `tests/parser_error_corpus.py` (which passes an origin) fails. If no row
 notices, one is missing and this task adds it.
+
+**Measured, run as written:** with `extend_nodelist`'s arm replaced by
+`let origin = "the template".to_string();`, `cargo test -p template-core` reddens
+exactly one test — `parser::tags::tests::the_innermost_token_wins_across_a_nested_parse`
+— and `tests.test_parser_errors` stays `OK` (14 tests). The new
+`an_empty_origin_name_says_the_template_too` row does **not** redden under that
+mutation, because the hard-coded string is what it expects; it reddens under the
+*conjunct's* removal instead, which is the other half of the same guard.
 
 - [ ] **Step 9: Commit**
 

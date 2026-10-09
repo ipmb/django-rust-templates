@@ -9,6 +9,7 @@ pub mod filters;
 pub mod lexer;
 pub mod parser;
 pub mod pynum;
+pub mod pyposix;
 pub mod pyregex;
 pub mod pyunicode;
 pub mod text;

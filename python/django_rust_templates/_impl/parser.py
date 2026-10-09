@@ -378,7 +378,7 @@ def _materialise_operand(lookup, value, parser=None):
     return (lookup, variable if lookup else variable.resolve({}))
 
 
-def template_for(nodelist, engine=None, parser=None):
+def template_for(nodelist, engine=None, parser=None, origin=None):
     """A real :class:`~django.template.base.Template` around a materialised tree.
 
     The render goes through this rather than calling ``nodelist.render(context)``
@@ -400,7 +400,17 @@ def template_for(nodelist, engine=None, parser=None):
     * ``nodelist`` — `Template._render`.
     * ``engine`` — the five `string_if_invalid`/`debug` reads above.
     * ``name`` — `Template.render` assigns it to `context.template_name`.
-    * ``origin``, ``source`` — only the debug exception path
+    * ``origin`` — the debug exception path (`get_exception_info`,
+      `base.py:1060-1063`), and a *comparison* one step earlier:
+      `Node.render_annotated` attaches `template_debug` only when
+      `context.render_context.template.origin == e._culprit_node.origin`
+      (`base.py:1058-1062`). The node origins come from the same object —
+      `materialise`'s argument — so the shell passes the same value to both and
+      they are equal by construction. ``None`` (the default, and what every
+      hand-built fixture in `tests/test_materialise.py` gets) is that comparison
+      holding trivially, which is why the parameter defaults rather than being
+      required.
+    * ``source`` — only the debug exception path
       (`get_exception_info`, `base.py:1060-1063`). Set so that path fails on Django's
       terms rather than on an `AttributeError` from here.
     * ``extra_data`` — ``self.extra_data = parser.extra_data``, but **not** in
@@ -434,7 +444,7 @@ def template_for(nodelist, engine=None, parser=None):
     template.nodelist = nodelist
     template.engine = engine
     template.name = None
-    template.origin = None
+    template.origin = origin
     template.source = ""
     template.extra_data = {} if parser is None else parser.extra_data
     return template

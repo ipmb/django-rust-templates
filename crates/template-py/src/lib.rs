@@ -1443,7 +1443,7 @@ fn parse_source(
     py: Python<'_>,
     source: &str,
     debug: bool,
-    origin_template_repr: Option<String>,
+    origin_template_name: Option<String>,
     host: &dyn Host,
 ) -> PyResult<Py<PyAny>> {
     let tokens = if debug {
@@ -1453,8 +1453,8 @@ fn parse_source(
     };
 
     let mut parser = CoreParser::new(tokens, host);
-    if let Some(repr) = origin_template_repr {
-        parser = parser.with_origin_template_repr(repr);
+    if let Some(name) = origin_template_name {
+        parser = parser.with_origin_template_name(name);
     }
 
     match parser.parse(&[]) {
@@ -1496,10 +1496,10 @@ fn with_ref_table(
 /// allocated**.
 ///
 /// `debug` selects Django's `DebugLexer`, so token positions are recorded.
-/// `origin_template_repr` is Python's `repr()` of `Origin.template_name`, or
-/// `None` when the origin has no template name; it arrives pre-rendered because
-/// a Python `repr` is Python's to produce — the rule §5.2 already records for
-/// `LookupError::Missing::current_repr`.
+/// `origin_template_name` is `Origin.template_name`, or `None` when the origin
+/// has none — the **name**, not a rendered `repr`: `{% extends %}` and
+/// `{% include %}` read it directly, and [`Parser::extend_nodelist`] derives the
+/// `repr` its must-be-first message needs (M7 Task 2, A3).
 ///
 /// The result is `(nodes, contains_nontext, refs)`. The third element is the
 /// per-parse table `Host::alloc_slot` reserves into; a caller that materialises
@@ -1529,12 +1529,12 @@ fn with_ref_table(
 /// `Parser` in hand pass `materialiser.compile_filter(parser)`; `render` builds
 /// its own, so the shell's end-to-end path cannot forget it.
 #[pyfunction]
-#[pyo3(signature = (source, debug = false, origin_template_repr = None, check_filter = None, compile_filter = None, host = None))]
+#[pyo3(signature = (source, debug = false, origin_template_name = None, check_filter = None, compile_filter = None, host = None))]
 fn parse(
     py: Python<'_>,
     source: &str,
     debug: bool,
-    origin_template_repr: Option<String>,
+    origin_template_name: Option<String>,
     check_filter: Option<Bound<'_, PyAny>>,
     compile_filter: Option<Bound<'_, PyAny>>,
     host: Option<Bound<'_, PyAny>>,
@@ -1545,7 +1545,7 @@ fn parse(
         refs: RefCell::new(Vec::new()),
         host,
     };
-    let nodelist = parse_source(py, source, debug, origin_template_repr, &host)?;
+    let nodelist = parse_source(py, source, debug, origin_template_name, &host)?;
     with_ref_table(py, nodelist, &host)
 }
 
@@ -2135,8 +2135,25 @@ fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>
 /// itself, and the caller's `Template.render` propagates the render's own
 /// exceptions the same way, because `tests/test_render_parity.py` compares
 /// exception *types and messages* as well as output.
+///
+/// `origin` is Django's `Origin` for this template, and it reaches **two**
+/// readers, which is why it is one object rather than two values (A3):
+///
+/// - the parse, as `origin.template_name` — the *attribute*, never the object,
+///   which is what `{% extends %}` compares against a path;
+/// - every materialised node's `node.origin`, and the `Template.origin` of the
+///   tree `template_for` builds, both of which Django's own
+///   `Parser.extend_nodelist` (`base.py:616`) and `Template.__init__`
+///   (`base.py:154`) set to the parser's origin.
+///
+/// They have to be the *same* object: `Node.render_annotated` decides whether to
+/// attach the debug traceback by comparing `context.render_context.template.origin
+/// == e._culprit_node.origin` (`base.py:1058-1062`), so the node's origin and the
+/// template's must be equal for `engine.debug` templates to keep annotating.
+/// Before M7 Task 2 both were `None`, which was equal; threading one and not the
+/// other would be the silent half-fix.
 #[pyfunction]
-#[pyo3(signature = (source, parser, tree, engine, host = None))]
+#[pyo3(signature = (source, parser, tree, engine, host = None, origin = None))]
 fn compile_template(
     py: Python<'_>,
     source: &str,
@@ -2144,6 +2161,7 @@ fn compile_template(
     tree: Py<PyAny>,
     engine: Py<PyAny>,
     host: Option<Bound<'_, PyAny>>,
+    origin: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     let tree = tree.bind(py);
     let check = tree.getattr("check_filter")?.call1((parser.bind(py),))?;
@@ -2159,7 +2177,15 @@ fn compile_template(
         host,
     };
 
-    let desc = parse_source(py, source, false, None, &host)?;
+    // The attribute, never the object (A3): `{% extends %}` compares this
+    // against a path. `None` is Django's `Origin(UNKNOWN_SOURCE).template_name`
+    // and is not special-cased here — `Parser::extend_nodelist` is where
+    // Django's truthiness test lives.
+    let origin_name: Option<String> = match &origin {
+        Some(origin) => origin.getattr("template_name")?.extract()?,
+        None => None,
+    };
+    let desc = parse_source(py, source, false, origin_name, &host)?;
     // The table is the render's own, and it is handed to `materialise` **with**
     // the descriptor rather than being left for the shell to find: this is the
     // hole §Review Focus 3 names. Before this, a `Ref` in the tree reached
@@ -2173,7 +2199,7 @@ fn compile_template(
     let desc = with_ref_table(py, desc, &host)?;
     let nodelist = tree.getattr("materialise")?.call1((
         desc,
-        py.None(),
+        origin.unwrap_or_else(|| py.None().into_bound(py)),
         resolve_ref,
         register_ref,
         parser.bind(py),

@@ -45,14 +45,33 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from django.template.base import Lexer, Parser
+from django.template.base import UNKNOWN_SOURCE, Lexer, Origin, Parser
 from django.template.context import Context
 from django.template.engine import Engine
 
 from django_rust_templates import _native
 from django_rust_templates.host import ShellHost
 
-__all__ = ("materialiser", "parse_template", "parser_for", "render_string")
+__all__ = (
+    "UNKNOWN_ORIGIN",
+    "materialiser",
+    "parse_template",
+    "parser_for",
+    "render_string",
+)
+
+# The origin a parse has when nothing loaded it — `Template.__init__`'s own
+# default (`base.py:151-152`), spelled once here.
+#
+# **It is an `Origin` and not `None`,** and that is A3's correction rather than a
+# convenience: under Design B a *host*-compiled block tag's nested `parser.parse()`
+# reaches Django's own `do_extends` and `extend_nodelist`, which read
+# `parser.origin.template_name`. Django never has `None` there, because every
+# `Parser` Django builds itself comes from `Template.__init__`, which guarantees
+# this value. The **Rust** side is unaffected either way:
+# `Origin(UNKNOWN_SOURCE).template_name` is `None`, and the attribute is what
+# crosses the seam.
+UNKNOWN_ORIGIN = Origin(UNKNOWN_SOURCE)
 
 # `django_rust_templates._impl.parser`, as a file. Resolved from this module's
 # own location rather than from the working directory, so importing this from
@@ -100,7 +119,7 @@ def materialiser():
     return _CACHED
 
 
-def parser_for(source, engine=None):
+def parser_for(source, engine=None, origin=UNKNOWN_ORIGIN):
     """Django's own `Parser`, built the way Django builds one.
 
     The tokens are Django's because `Parser` is Django's, and `find_filter`
@@ -121,6 +140,11 @@ def parser_for(source, engine=None):
     `parser.libraries` (`defaulttags.py:1065-1075`) and `Parser.__init__` fills it
     from `Engine.template_libraries`. Nothing but a `{% load %}` reads it, which
     is why its absence went unnoticed for five milestones.
+
+    `origin` is M7's fourth, and it defaults to [`UNKNOWN_ORIGIN`] rather than to
+    `None` for the reason that constant records. It reaches Django's `Parser`
+    only: what Rust receives is `origin.template_name`, read in
+    `_native.compile_template`.
     """
     if engine is None:
         engine = Engine()
@@ -128,10 +152,11 @@ def parser_for(source, engine=None):
         Lexer(source).tokenize(),
         builtins=engine.template_builtins,
         libraries=engine.template_libraries,
+        origin=origin,
     )
 
 
-def parse_template(source, engine=None):
+def parse_template(source, engine=None, origin=UNKNOWN_ORIGIN):
     """Parse `source` with the Rust engine and return Django's `Template`.
 
     This is the shell's one source-to-`Template` path, and it is the shape
@@ -148,20 +173,26 @@ def parse_template(source, engine=None):
     a `Template` built by `__new__` never runs `Template.__init__`'s
     `self.extra_data = parser.extra_data` (`base.py:198-200`); the parser reaches
     it as an argument. Setting it in two places is how the two would drift.
+
+    `origin` reaches three places from here — the `Parser`, the Rust parse (as
+    `origin.template_name`) and the materialised tree (as every node's `origin`
+    and the `Template`'s) — and `_native.compile_template`'s doc records why the
+    node's and the template's have to be the same object.
     """
     if engine is None:
         engine = Engine()
-    parser = parser_for(source, engine)
+    parser = parser_for(source, engine, origin)
     return _native.compile_template(
         source,
         parser,
         materialiser(),
         engine,
         ShellHost(parser),
+        origin,
     )
 
 
-def render_string(source, context, engine=None):
+def render_string(source, context, engine=None, origin=UNKNOWN_ORIGIN):
     """Render `source` with the Rust engine, Django supplying the filters.
 
     `context` is a Django `Context`, or a plain mapping that is wrapped in one.
@@ -182,7 +213,11 @@ def render_string(source, context, engine=None):
     No exception handling: the parse's `TemplateSyntaxError` and the render's
     own exceptions must both reach the caller as themselves, because
     `tests/test_render_parity.py` compares types and messages as well as output.
+
+    `origin` is forwarded to [`parse_template`], and through it to the reader
+    that makes it observable: `{% extends %}` resolves a parent relative to
+    `origin.template_name`, and `{% include %}` reads it at render time.
     """
     if isinstance(context, dict):
         context = Context(context)
-    return parse_template(source, engine).render(context)
+    return parse_template(source, engine, origin).render(context)
