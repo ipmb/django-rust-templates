@@ -293,7 +293,7 @@
       <span class="cap">built-in tags implemented in Rust</span>
     </div>
     <div class="stat is-open">
-      <span class="num">12</span>
+      <span class="num">11</span>
       <span class="cap">modules of <code>django.template</code> still Django's own code</span>
     </div>
   </div>
@@ -472,7 +472,7 @@
   </section>
 
   <section>
-    <h2>Where Django's code is still running <span class="count">12 modules</span></h2>
+    <h2>Where Django's code is still running <span class="count">11 modules</span></h2>
     <p class="sub">
       The number that moves when a feature really lands. Each module named here is still
       Django's, and the acceptance suite would pass with it in place — which is exactly why
@@ -484,7 +484,6 @@
           <tr><th>Module of <code>django.template</code></th><th>What it does</th><th>Status</th></tr>
         </thead>
         <tbody>
-          <tr><td class="mod">defaulttags</td><td>The built-in tags</td><td><i class="pill wip">In progress</i></td></tr>
           <tr><td class="mod">library</td><td>Tag and filter registration</td><td><i class="pill todo">To do</i></td></tr>
           <tr><td class="mod">loader</td><td>Public loading facade</td><td><i class="pill todo">To do</i></td></tr>
           <tr><td class="mod">response</td><td>Template responses</td><td><i class="pill todo">To do</i></td></tr>
@@ -500,9 +499,10 @@
       </table>
     </div>
     <p class="sub" style="margin-top:16px">
-      Fourteen modules are already Rust's: the template base, its exceptions, expressions,
+      Fifteen modules are already Rust's: the template base, its exceptions, expressions,
       template utilities, context, the engine, the loader package and its five loaders, and —
-      as of the current pass — template inheritance and the built-in filters.
+      as of the current pass — template inheritance, the built-in filters and the built-in
+      tags.
     </p>
   </section>
 
