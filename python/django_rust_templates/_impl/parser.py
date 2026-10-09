@@ -36,7 +36,9 @@ from django.template.defaulttags import (
     DebugNode,
     FilterNode,
     FirstOfNode,
+    ForNode,
     LoremNode,
+    IfChangedNode,
     NowNode,
     RegroupNode,
     ResetCycleNode,
@@ -59,11 +61,39 @@ __all__ = (
     "template_for",
 )
 
+
+def _ifchanged_factory(nodelist_true, nodelist_false, _varlist=()):
+    """Build an `IfChangedNode`, splicing the values its `__init__` takes variadically.
+
+    `IfChangedNode.__init__(self, nodelist_true, nodelist_false, *varlist)`
+    (`defaulttags.py:262`) has no keyword for `varlist`, so `cls(**kwargs)` cannot
+    express it (measured: `TypeError: … unexpected keyword argument '_varlist'`).
+
+    The kwarg is named `_varlist` because that is Django's own attribute name for
+    the tuple (`defaulttags.py:265`, `self._varlist = varlist`); the descriptor
+    emits that name and this is the only place it is unpacked. The default `()`
+    matches Django's own variadic default, so a descriptor that omits the values
+    builds the empty case rather than raising.
+    """
+    return IfChangedNode(nodelist_true, nodelist_false, *_varlist)
+
+
 # An explicit registry rather than `getattr(base, class_name)`: a
 # `getattr`-based lookup would resolve anything that happens to be in Django's
 # modules, turning a Rust typo into a wrong node class instead of a loud
 # failure, and it would silently pick up a class M7 must *not* materialise from
 # Rust (block/extends/include are Python-owned).
+#
+# A value is the **callable that builds the node from its kwarg set**, which is
+# the class itself in every case but one: a class is callable taking keywords, so
+# `NODE_CLASSES["SpacelessNode"] = SpacelessNode` is already a factory. The
+# exception is `IfChangedNode`, whose `__init__` is variadic
+# (`nodelist_true, nodelist_false, *varlist` — `defaulttags.py:262`) and so has no
+# keyword for its values: a bare class entry raised `TypeError: IfChangedNode.
+# __init__() got an unexpected keyword argument '_varlist'` (measured, Python
+# 3.14). `_ifchanged_factory` below splices them. Any future variadic node needs
+# the same treatment; a descriptor that names a node not buildable this way is
+# the failure this comment exists to prevent.
 NODE_CLASSES = {
     "TextNode": TextNode,
     "AutoEscapeControlNode": AutoEscapeControlNode,
@@ -72,6 +102,8 @@ NODE_CLASSES = {
     "DebugNode": DebugNode,
     "FilterNode": FilterNode,
     "FirstOfNode": FirstOfNode,
+    "ForNode": ForNode,
+    "IfChangedNode": _ifchanged_factory,
     "LoremNode": LoremNode,
     "NowNode": NowNode,
     "RegroupNode": RegroupNode,

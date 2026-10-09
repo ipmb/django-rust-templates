@@ -536,19 +536,25 @@ mod tests {
 
     #[test]
     fn an_unimplemented_builtin_says_so_rather_than_denying_the_tag_exists() {
-        // The behaviour change M3 introduces. Before it, `{% for %}` fell through
-        // to `invalid_block_tag` and reported Django's "Did you forget to
-        // register or load this tag?" — a message that is *false* for a built-in
-        // tag, since the template is not missing anything. Now it is an
-        // `Unimplemented` naming the milestone that supplies it.
-        let error = failure("{% for x in y %}{% endfor %}");
+        // The behaviour change M3 introduces. Before it, an unimplemented
+        // built-in fell through to `invalid_block_tag` and reported Django's
+        // "Did you forget to register or load this tag?" — a message that is
+        // *false* for a built-in tag, since the template is not missing
+        // anything. Now it is an `Unimplemented` naming the milestone that
+        // supplies it.
+        //
+        // The example is `{% if %}`, not `{% for %}`: this test is one of the
+        // few that names a *specific* unimplemented tag, so M5's tasks move it
+        // as they land. Any still-stubbed M5 tag serves; `if` is the last one
+        // besides `cycle`, and Task 7 rewrites this line again.
+        let error = failure("{% if x %}y{% endif %}");
         assert_eq!(
             error.kind,
             ErrorKind::Unimplemented(
-                "'for' is a built-in tag this engine does not implement yet (M5)".to_string(),
+                "'if' is a built-in tag this engine does not implement yet (M5)".to_string(),
             ),
         );
-        assert_eq!(error.token.unwrap().contents, "for x in y");
+        assert_eq!(error.token.unwrap().contents, "if x");
     }
 
     #[test]

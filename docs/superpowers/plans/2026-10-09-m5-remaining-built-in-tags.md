@@ -1700,8 +1700,13 @@ expected from it.
 
 **Files:**
 - Modify: `crates/template-core/src/parser/tags/{ifchanged,for}.rs`
+- Modify: `crates/template-core/src/parser/registry.rs` (the stub pin — added by
+  measurement, see this task's corrections)
 - Modify: `python/django_rust_templates/_impl/parser.py` (the `IfChangedNode` factory and the `NODE_CLASSES` doc — §E)
 - Modify: `tests/parser_corpus.py`, `tests/parser_error_corpus.py`, `tests/test_materialise.py`
+- Modify (added by measurement): `crates/template-core/src/parser/mod.rs` and
+  `tests/test_parser_parity.py` — two tests that used `{% for %}` as their
+  example of an unimplemented built-in
 
 **Interfaces:**
 - Consumes: `Parser::parse(&["else", "endifchanged"])` / `parse(&["empty",
@@ -1774,6 +1779,60 @@ Errors: one per message, e.g. `("{% for x in %}", "'for' statements should have 
   is the proof that `cls(**kwargs)` cannot express this node (§E). Then add the
   factory and the `NODE_CLASSES` entry; run again, expected PASS.
 - [ ] **Step B: then run the seven steps** for `ifchanged` and `for`.
+
+**Four corrections to the draft, every one of them found by running it.**
+
+*1. Step A's predicted `TypeError` wording is interpreter-version-dependent.* The
+plan predicts `TypeError: __init__() takes 3 positional arguments but 4 were
+given`. Measured on this machine's Python 3.14 with `"IfChangedNode"` registered
+as the *bare class*: `TypeError: IfChangedNode.__init__() got an unexpected
+keyword argument '_varlist'`. The **class** of failure is what the step claims
+and it holds — `cls(**kwargs)` cannot express a variadic `__init__` — but the
+wording is CPython's, so the step should assert the failure happens, not its
+text. (The first red seen was neither: with `IfChangedNode` absent from
+`NODE_CLASSES` entirely, the materialiser raised `LookupError` from
+`materialise_node`'s unknown-class guard, which is a *different* proof and not
+the one this step is about. The plan's Step A ordering — register the factory,
+then run — is what isolates the right failure.)
+
+*2. The two-`else` row needs Django's `parse_until` suffix, and the message is the
+**parser's**, not the tag's.* The draft gives
+`"Invalid block tag on line 1: 'else', expected 'endifchanged'."` Measured on the
+pinned tree, the real message is
+`Invalid block tag on line 1: 'else', expected 'endifchanged'. Did you forget to
+register or load this tag?` — `invalid_block_tag` appends the suffix whenever
+`parse_until` is non-empty, which it always is here. Nothing in `ifchanged.rs`
+produces this text: it is `Parser::parse(&["endifchanged"])` refusing the second
+`else`, which is why the plan's own coverage test exempts `ifchanged` (Task 1's
+derivation). The row is kept because it pins that the tag *does not* accept a
+second `else` — seen to fail by changing the false branch's terminator to
+`&["else", "endifchanged"]`, which flips both the message and the token.
+
+*3. `for`'s checks are ordered arity → `in` → loop variables, and `{% for a b c %}`
+is the discriminator.* The draft's error example for the *format* message is
+`{% for x of y %}`, which does work, but the interesting case is the ordering the
+plan does not state: `{% for a b c %}` fails the **format** check (because
+`bits[-2]` is `b`) even though `a b` is also an invalid loop variable, and
+`{% for a|b in %}` fails the **arity** check even though both the loop variable
+and the sequence are bad. Both are in the corpus now.
+
+*4. `{% for a b in y %}` is the invalid-argument case, not a two-variable loop.*
+The join-then-split means no comma produces the **single** loop variable `"a b"`,
+which the space then rejects; the plan's prose says the `invalid_chars` check
+"rejects a filter separator or a quote inside a loop variable" and omits the space
+case, which is the one a naive `split_whitespace` port would get wrong.
+
+**One file the draft did not list, and two tests it did not name.** The registry's
+stub pin (`crates/template-core/src/parser/registry.rs`) holds a literal that must
+shrink to `["cycle", "if", "load", "partial", "partialdef", "querystring"]` in
+this commit, exactly as Tasks 3 and 4 shrank it. Two tests named `{% for %}` as
+their *example* of an unimplemented built-in —
+`parser::tests::an_unimplemented_builtin_says_so_rather_than_denying_the_tag_exists`
+and `tests/test_parser_parity.py::test_an_unimplemented_tag_is_its_own_kind_at_the_ffi`
+— and both moved to `{% if %}`, the last still-stubbed M5 tag but `cycle`. Any
+tag that has landed breaks these; the plan's "no other file changes" framing hid
+that, and a task landing the *last* tag should expect to rewrite them again.
+
 
 ```bash
 git add crates/template-core/src/parser/tags/ifchanged.rs \

@@ -40,6 +40,7 @@ from django.template.base import (  # noqa: E402
 )
 from django.template.defaulttags import (  # noqa: E402
     AutoEscapeControlNode,
+    IfChangedNode,
     SpacelessNode,
     VerbatimNode,
 )
@@ -375,6 +376,48 @@ class MaterialiseTests(unittest.TestCase):
         self.assertIsInstance(decoded, dict)
         self.assertIsInstance(decoded["a"], SafeString)
         self.assertEqual(decoded["b"], 2)
+
+    def test_a_variadic_node_is_built_by_a_factory_and_keeps_its_tuple(self):
+        """`IfChangedNode` is the one M5 node `cls(**kwargs)` cannot build.
+
+        `IfChangedNode.__init__(self, nodelist_true, nodelist_false, *varlist)`
+        (`defaulttags.py:262`) takes its values **positionally**, so there is no
+        keyword for them and a descriptor that reached a bare `cls(**kwargs)`
+        raised `TypeError: __init__() takes 3 positional arguments but 4 were
+        given` — which is why `NODE_CLASSES["IfChangedNode"]` is a factory and
+        not the class. Everywhere else the class *is* its own factory.
+
+        The kwarg is `_varlist` because that is Django's own attribute name for
+        the tuple (`:265`); the descriptor emits that name and the factory is the
+        only place it is unpacked.
+        """
+        desc = (
+            "IfChangedNode",
+            (
+                (
+                    "_varlist",
+                    [
+                        _native.parse_filter_expression("a"),
+                        _native.parse_filter_expression("b"),
+                    ],
+                ),
+            ),
+            (
+                ("nodelist_true", ([text_desc("x")], False)),
+                ("nodelist_false", ([], False)),
+            ),
+            (1, "ifchanged a b", 1, None),
+        )
+        node = materialiser.materialise_node(desc, parser=parser())
+        self.assertIsInstance(node, IfChangedNode)
+        # A tuple, because Django's `*varlist` builds one — a list here would
+        # compare unequal against Django's own tree in the parity harness.
+        self.assertIsInstance(node._varlist, tuple)
+        self.assertEqual([var.token for var in node._varlist], ["a", "b"])
+        # The two nodelists are separate named children, and the false one is an
+        # empty `NodeList`, not absent.
+        self.assertEqual(len(node.nodelist_true), 1)
+        self.assertEqual(len(node.nodelist_false), 0)
 
 
 class ParseToMaterialiseTests(unittest.TestCase):

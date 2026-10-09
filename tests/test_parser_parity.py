@@ -161,6 +161,15 @@ def describe(value):
         return {"safe_str": str(value)}
     if isinstance(value, list):
         return [describe(item) for item in value]
+    if isinstance(value, tuple):
+        # `IfChangedNode._varlist` is a **tuple**, and it is the one attribute
+        # whose *container type* is the contract: the constructor's `*varlist`
+        # is what makes it a tuple, and rebuilding it as a list would render
+        # identically and be a different node. So this arm carries a `"tuple"`
+        # marker where the `list` arm deliberately carries none — the marker is
+        # what makes "list where a tuple belongs" a diff instead of a
+        # coincidence.
+        return {"tuple": [describe(item) for item in value]}
     if isinstance(value, dict):
         # `AttrValue::Map`'s product — `WithNode.extra_context` is the first
         # dict-valued attribute any node carries, and `{% include %}`'s `with`
@@ -586,24 +595,28 @@ class ShapeTests(unittest.TestCase):
     def test_an_unimplemented_tag_is_its_own_kind_at_the_ffi(self):
         """`Unimplemented` is not just a `ParseError` with a different message.
 
-        Django compiles `{% for %}` successfully, so our refusing it is a fact
+        Django compiles `{% if %}` successfully, so our refusing it is a fact
         about *this engine*. A harness that compared messages would match our
         text against Django's "Did you forget to register or load this tag?" and
         score the one case where we are wrong as a pass. The class carries it
         instead — and as a subclass, so the shell's single `except ParseError`
         still converts it to `TemplateSyntaxError` exactly as before.
+
+        The example is a tag that is **still** a stub: M5's tasks implement the
+        rest one at a time, and a test that named an implemented tag would stop
+        exercising this path entirely. `if` is the last one but `cycle`.
         """
         with self.assertRaises(_native.UnimplementedTag) as caught:
-            _native.parse("{% for x in y %}{% endfor %}")
+            _native.parse("{% if x %}y{% endif %}")
         self.assertIsInstance(caught.exception, _native.ParseError)
-        self.assertEqual(caught.exception.token[1], "for x in y")
+        self.assertEqual(caught.exception.token[1], "if x")
 
         # The classes are genuinely different, and a syntax error is not
         # silently swept into the "not built yet" bucket.
         self.assertNotEqual(_native.UnimplementedTag, _native.ParseError)
         self.assertTrue(issubclass(_native.UnimplementedTag, _native.ParseError))
         with self.assertRaises(_native.ParseError) as syntax:
-            _native.parse("{% endfor %}")
+            _native.parse("{% endif %}")
         self.assertNotIsInstance(syntax.exception, _native.UnimplementedTag)
 
     def test_the_comparison_target_is_genuinely_djangos_parser(self):

@@ -201,6 +201,36 @@ ERRORS = [
     # no bit `split_contents` yields starts with one), so no corpus row carries
     # its message; `tags/url.rs`'s unit test drives it directly.
     ("{% url 'view' k=v nope= %}", "Could not parse the remainder: '=' from 'nope='"),
+    # --- for ----------------------------------------------------------------
+    # The arity check fires before anything is inspected, and `%s` is the raw
+    # `token.contents`, not a repr and not the command name.
+    ("{% for x in %}", "'for' statements should have at least four words: for x in"),
+    # `bits[-2]` is `b`, so check 2 fires before the loop variables are even
+    # split — `a b` is also an invalid variable, and is not the message.
+    ("{% for a b c %}", "'for' statements should use the format 'for x in y': for a b c"),
+    # No comma, so the split yields the *one* variable `"a b"`, which the space
+    # makes invalid.
+    (
+        "{% for a b in y %}{% endfor %}",
+        "'for' tag received an invalid argument: for a b in y",
+    ),
+    # `FILTER_SEPARATOR` is one of the four forbidden characters, so this is an
+    # *argument* error rather than a filter to compile.
+    (
+        "{% for a|b in y %}{% endfor %}",
+        "'for' tag received an invalid argument: for a|b in y",
+    ),
+    # --- ifchanged ----------------------------------------------------------
+    # Not a check in the tag: `parse(("else", "endifchanged"))` stops at the
+    # first `else`, and the second one then fails to terminate the body's
+    # `parse(("endifchanged",))`. Here for the wording, which the tag's own unit
+    # test also pins; the coverage test exempts `ifchanged` because the message
+    # is the base parser's, not the tag's.
+    (
+        "{% ifchanged %}{% else %}{% else %}{% endifchanged %}",
+        "Invalid block tag on line 1: 'else', expected 'endifchanged'. "
+        "Did you forget to register or load this tag?",
+    ),
     # --- the innermost token, across a nested parse -------------------------
     (
         "{% autoescape on %}\n{% now a b %}\n{% endautoescape %}",

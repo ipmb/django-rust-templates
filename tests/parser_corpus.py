@@ -151,6 +151,30 @@ TEMPLATES = [
     "{% url url_name a %}",
     # `\w` admits digits, so `1=2` is a kwarg named `1`.
     "{% url 'view' 1=2 %}",
+    # --- for: the end-counted `in`, two nodelists, and the loop variables ---
+    "{% for x in y %}{% endfor %}",
+    # `reversed` is read from the end, so the `in` moves one bit left: the
+    # sequence is still `y` and the loop variable is still `x`.
+    "{% for x in y reversed %}{% endfor %}",
+    # The join-then-split (`defaulttags.py:877`): all three comma spellings give
+    # `["a", "b"]`, and a body that split the bits directly would give one loop
+    # variable for the first two.
+    "{% for a, b in y %}{% endfor %}",
+    "{% for a,b in y %}{% endfor %}",
+    "{% for a , b in y %}{% endfor %}",
+    # The `{% empty %}` branch is a second *nodelist*, not a flag.
+    "{% for x in y %}{% empty %}none{% endfor %}",
+    # A nested loop, so `nodelist_loop` holds a real `ForNode`.
+    "{% for a, b in y %}{% for c in d %}{{ c }}{% endfor %}{% endfor %}",
+    # --- ifchanged: the variadic `_varlist` and the false branch ------------
+    "{% ifchanged %}x{% endifchanged %}",
+    "{% ifchanged %}x{% else %}y{% endifchanged %}",
+    # Two values, so `_varlist` is a tuple of arity 2 — the shape the factory
+    # exists to rebuild (`IfChangedNode` is the only variadic M5 node).
+    "{% ifchanged a b %}x{% else %}y{% endifchanged %}",
+    # Where the tag is meant to be used, and the only place its state is
+    # interesting at render time.
+    "{% for x in y %}{% ifchanged %}{{ x }}{% endifchanged %}{% endfor %}",
     # --- variables, and the `contains_nontext` they set ---------------------
     # M3's half of §10.4's ordering gate. `{{ … }}` is what sets
     # `contains_nontext` — measured: `text{% extends %}` is legal and
