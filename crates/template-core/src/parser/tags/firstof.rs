@@ -1,4 +1,4 @@
-//! `{% firstof %}` — `defaulttags.firstof` (`defaulttags.py:759-805`).
+//! `{% firstof %}` — `defaulttags.firstof` (`defaulttags.py:758-804`).
 //!
 //! # `as` is read from the end, before anything is compiled
 //!

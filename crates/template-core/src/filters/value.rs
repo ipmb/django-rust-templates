@@ -32,7 +32,7 @@ pub type ValueId = u32;
 /// The cost is real and lands on exactly one filter, `cut`, which compares a
 /// `Value` against a literal: under structural equality `Value::Safe(";") !=
 /// Value::Str(";")` where Python's `SafeString(";") != ";"` is false, which would
-/// flip `cut`'s `mark_safe` branch (`defaultfilters.py:447-450`). So the rule
+/// flip `cut`'s `mark_safe` branch (`defaultfilters.py:447-448`). So the rule
 /// that contains it, and it is a rule for every body rather than a note about
 /// `cut`:
 ///

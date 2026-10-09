@@ -1,4 +1,4 @@
-//! `escapejs` — `defaultfilters.py:78-83`.
+//! `escapejs` — `defaultfilters.py:78-82`.
 //!
 //! ```python
 //! @register.filter("escapejs")

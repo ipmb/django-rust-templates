@@ -1,4 +1,4 @@
-//! `dictsort` — `defaultfilters.py:578-588`.
+//! `dictsort` — `defaultfilters.py:578-587`.
 //!
 //! ```python
 //! def _property_resolver(arg):

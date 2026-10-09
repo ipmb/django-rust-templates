@@ -334,7 +334,7 @@ pub struct FilterCall {
     /// (`Invalid filter: 'x'`) and what [`crate::parser::tags::filter`] reads.
     ///
     /// **Not what renders.** The function is Python's and
-    /// `FilterExpression.args_check` inspects its signature (`base.py:822-833`),
+    /// `FilterExpression.args_check` inspects its signature (`base.py:822-839`),
     /// so no Rust type can carry one; it crosses as [`Self::handle`] instead.
     pub name: String,
     /// At most one, because `filter_re`'s argument group allows zero or one

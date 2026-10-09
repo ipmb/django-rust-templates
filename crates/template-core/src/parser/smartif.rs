@@ -608,8 +608,8 @@ mod tests {
         case.iter().map(|s| (*s).to_string()).collect()
     }
 
-    /// `TokenBase.__repr__` / `Literal.__repr__` (`smartif.py:40-43`,
-    /// `142-143`), so a parsed tree can be compared with Django's own `repr`.
+    /// `TokenBase.__repr__` / `Literal.__repr__` (`smartif.py:40-42`,
+    /// `smartif.py:142-143`), so a parsed tree can be compared with Django's
     fn repr(parser: &IfParser, id: NodeId) -> String {
         match &parser.node(id).kind {
             IfToken::End => "()".to_string(),

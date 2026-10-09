@@ -29,9 +29,9 @@ base.py:615	django/template/base.py	615	-	node.token = token	-
 base.py:619-630	django/template/base.py	619	630	-	-
 base.py:632-648	django/template/base.py	632	648	def invalid_block_tag(self, token, command, parse_until=None):	-
 base.py:651	django/template/base.py	651	-	-	-
+base.py:668-670	django/template/base.py	668	670	def add_library(self, lib):	self.filters.update(lib.filters)
 base.py:669-670	django/template/base.py	669	670	self.filters.update(lib.filters)	-
 base.py:669	django/template/base.py	669	-	self.tags.update	-
-base.py:669-671	django/template/base.py	669	671	-	-
 base.py:676	django/template/base.py	676	-	return FilterExpression(token, self)	-
 base.py:678-682	django/template/base.py	678	682	def find_filter(self, filter_name):	raise TemplateSyntaxError("Invalid filter: '%s'" % filter_name)
 base.py:682	django/template/base.py	682	-	raise TemplateSyntaxError("Invalid filter: '%s'" % filter_name)	-
@@ -72,9 +72,9 @@ base.py:815	django/template/base.py	815	-	new_obj = func(obj, *arg_vals)	-
 base.py:816	django/template/base.py	816	-	-	-
 base.py:819	django/template/base.py	819	-	-	-
 base.py:822	django/template/base.py	822	-	def args_check(name, func, provided):	-
-base.py:822-833	django/template/base.py	822	833	-	-
 base.py:822-826	django/template/base.py	822	826	len(provided)	-
 base.py:822-836	django/template/base.py	822	836	def args_check(name, func, provided):	"%s requires %d arguments, %d provided" % (name, alen - dlen, plen)
+base.py:822-839	django/template/base.py	822	839	def args_check(name, func, provided):	return True
 base.py:823-826	django/template/base.py	823	826	plen = len(provided) + 1	-
 base.py:850-925	django/template/base.py	850	925	-	-
 base.py:898-902	django/template/base.py	898	902	-	-
@@ -124,7 +124,7 @@ defaultfilters.py:46	django/template/defaultfilters.py	46	-	first = str(first)	-
 defaultfilters.py:48	django/template/defaultfilters.py	48	-	if isinstance(first, SafeData) and getattr(unwrap(func), "is_safe", False):	-
 defaultfilters.py:60-68	django/template/defaultfilters.py	60	68	addslashes	-
 defaultfilters.py:71-75	django/template/defaultfilters.py	71	75	capfirst	-
-defaultfilters.py:78-83	django/template/defaultfilters.py	78	83	-	-
+defaultfilters.py:78-82	django/template/defaultfilters.py	78	82	@register.filter("escapejs")	return escapejs(value)
 defaultfilters.py:85-91	django/template/defaultfilters.py	85	91	-	-
 defaultfilters.py:94-220	django/template/defaultfilters.py	94	220	@register.filter(is_safe=True)	)
 defaultfilters.py:95	django/template/defaultfilters.py	95	-	def floatformat(text, arg=-1):	-
@@ -214,7 +214,7 @@ defaultfilters.py:431-438	django/template/defaultfilters.py	431	438	def center(v
 defaultfilters.py:435-437	django/template/defaultfilters.py	435	437	if width <= 0:	return value
 defaultfilters.py:441-449	django/template/defaultfilters.py	441	449	-	-
 defaultfilters.py:445	django/template/defaultfilters.py	445	-	safe = isinstance(value, SafeData)	-
-defaultfilters.py:447-450	django/template/defaultfilters.py	447	450	-	-
+defaultfilters.py:447-448	django/template/defaultfilters.py	447	448	if safe and arg != ";":	return mark_safe(value)
 defaultfilters.py:457-461	django/template/defaultfilters.py	457	461	-	-
 defaultfilters.py:464-471	django/template/defaultfilters.py	464	471	escapeseq	-
 defaultfilters.py:474-482	django/template/defaultfilters.py	474	482	force_escape	-
@@ -222,12 +222,11 @@ defaultfilters.py:485-494	django/template/defaultfilters.py	485	494	def linebrea
 defaultfilters.py:486	django/template/defaultfilters.py	486	-	-	-
 defaultfilters.py:493	django/template/defaultfilters.py	493	-	-	-
 defaultfilters.py:497-508	django/template/defaultfilters.py	497	508	def linebreaksbr(value, autoescape=True):	return mark_safe(value.replace("\n", "<br>"))
-defaultfilters.py:511-516	django/template/defaultfilters.py	511	516	-	-
+defaultfilters.py:511-515	django/template/defaultfilters.py	511	515	@register.filter(is_safe=True)	return mark_safe(value)
 defaultfilters.py:518-525	django/template/defaultfilters.py	518	525	safeseq	-
 defaultfilters.py:528-532	django/template/defaultfilters.py	528	532	def striptags(value):	return strip_tags(value)
 defaultfilters.py:540-575	django/template/defaultfilters.py	540	575	def _property_resolver(arg):	-
 defaultfilters.py:558-570	django/template/defaultfilters.py	558	570	def resolve(value):	value = getattr(value, part)
-defaultfilters.py:578-588	django/template/defaultfilters.py	578	588	-	-
 defaultfilters.py:578-599	django/template/defaultfilters.py	578	599	def dictsort(value, arg):	-
 defaultfilters.py:578-587	django/template/defaultfilters.py	578	587	return sorted(value, key=_property_resolver(arg))	return ""
 defaultfilters.py:590-600	django/template/defaultfilters.py	590	600	dictsortreversed	-
@@ -239,7 +238,6 @@ defaultfilters.py:633-639	django/template/defaultfilters.py	633	639	return len(v
 defaultfilters.py:642-648	django/template/defaultfilters.py	642	648	return random_module.choice(value)	return ""
 defaultfilters.py:651-665	django/template/defaultfilters.py	651	665	-	-
 defaultfilters.py:651-666	django/template/defaultfilters.py	651	666	return value[slice(*bits)]	return value  # Fail silently.
-defaultfilters.py:669-743	django/template/defaultfilters.py	669	743	-	-
 defaultfilters.py:669-737	django/template/defaultfilters.py	669	737	def unordered_list(value, autoescape=True):	return mark_safe(list_formatter(value))
 defaultfilters.py:708-714	django/template/defaultfilters.py	708	714	if isinstance(next_item, (list, tuple, types.GeneratorType)):	yield item, next_item
 defaultfilters.py:745-754	django/template/defaultfilters.py	745	754	-	-
@@ -311,10 +309,10 @@ defaulttags.py:697-699	django/template/defaulttags.py	697	699	else:	node = Cycle
 defaulttags.py:698	django/template/defaulttags.py	698	-	values = [parser.compile_filter(arg) for arg in args[1:]]	-
 defaulttags.py:699	django/template/defaulttags.py	699	-	node = CycleNode(values)	-
 defaulttags.py:700	django/template/defaulttags.py	700	-	parser._last_cycle_node = node	-
-defaulttags.py:724-757	django/template/defaulttags.py	724	757	-	-
+defaulttags.py:724-755	django/template/defaulttags.py	724	755	def do_filter(parser, token):	return FilterNode(filter_expr, nodelist)
 defaulttags.py:744	django/template/defaulttags.py	744	-	_, rest = token.contents.split(None, 1)	-
 defaulttags.py:745	django/template/defaulttags.py	745	-	filter_expr = parser.compile_filter("var|%s" % (rest))	-
-defaulttags.py:759-805	django/template/defaulttags.py	759	805	-	-
+defaulttags.py:758-804	django/template/defaulttags.py	758	804	@register.tag	return FirstOfNode([parser.compile_filter(bit) for bit in bits], asvar)
 defaulttags.py:807-906	django/template/defaulttags.py	807	906	def do_for(parser, token):	return ForNode(loopvars, sequence, is_reversed, nodelist_loop, nodelist_empty)
 defaulttags.py:877	django/template/defaulttags.py	877	-	is_reversed = bits[-1] == "reversed"	-
 defaulttags.py:878	django/template/defaulttags.py	878	-	in_index = -3 if is_reversed else -2	-
@@ -387,13 +385,14 @@ loader_tags.py:87	django/template/loader_tags.py	87	-	-	-
 loader_tags.py:227-232	django/template/loader_tags.py	227	232	-	-
 loader_tags.py:347	django/template/loader_tags.py	347	-	-	-
 smartif.py:22-26	django/template/smartif.py	22	26	-	-
-smartif.py:40-43	django/template/smartif.py	40	43	-	-
+smartif.py:40-42	django/template/smartif.py	40	42	def __repr__(self):	return "(" + " ".join(out) + ")"
 smartif.py:51	django/template/smartif.py	51	-	class Operator(TokenBase):	-
 smartif.py:54-56	django/template/smartif.py	54	56	self.first = left	self.second = parser.expression(bp)
 smartif.py:81-83	django/template/smartif.py	81	83	self.first = parser.expression(bp)	self.second = None
 smartif.py:83	django/template/smartif.py	83	-	self.second = None	-
 smartif.py:115-116	django/template/smartif.py	115	116	-	-
 smartif.py:140	django/template/smartif.py	140	-	return self.value	-
+smartif.py:142-143	django/template/smartif.py	142	143	def __repr__(self):	return "(%s %r)" % (self.id, self.value)
 smartif.py:149-150	django/template/smartif.py	149	150	-	-
 smartif.py:153	django/template/smartif.py	153	-	EndToken = EndToken()	-
 smartif.py:157	django/template/smartif.py	157	-	ValueError	-

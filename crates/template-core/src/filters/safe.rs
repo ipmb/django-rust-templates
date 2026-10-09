@@ -1,4 +1,4 @@
-//! `safe` — `defaultfilters.py:511-516`.
+//! `safe` — `defaultfilters.py:511-515`.
 //!
 //! ```python
 //! @register.filter(is_safe=True)
