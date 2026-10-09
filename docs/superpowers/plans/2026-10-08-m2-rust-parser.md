@@ -192,7 +192,7 @@ Each line names a failure mode this design implies but that no task's happy-path
 test would catch. Each has a test in the task that owns the code.
 
 1. **`contains_nontext` is per-nodelist and survives nesting.** It is a *class*
-   attribute on Django's `NodeList` (`base.py:1087`) shadowed per instance by
+   attribute on Django's `NodeList` (`base.py:1088`) shadowed per instance by
    `extend_nodelist`. A Rust implementation that puts it on the parser, or on the
    node, passes every single-tag test and fails `{% extends %}` ordering. (Task 2)
 2. **`token.contents.split()[0]` is not `split_contents()`.** Tag *dispatch* uses
@@ -608,8 +608,12 @@ mistakes have already happened in this project.
 
 - [ ] **Step 6: Commit**
 
+Step 1's `git rm` already staged the placeholder's deletion, so it must not be
+named here — `git add -A <removed path>` exits 128 with "pathspec did not match
+any files". Only the new directory is added; the deletion is already staged.
+
 ```bash
-git add -A crates/template-core/src/parser.rs crates/template-core/src/parser/
+git add -A crates/template-core/src/parser/
 git commit -m "M2 Task 1: the node descriptor
 
 Rust's Node/NodeList: NodeDesc, NodeListDesc, AttrValue, TokenDesc and the
