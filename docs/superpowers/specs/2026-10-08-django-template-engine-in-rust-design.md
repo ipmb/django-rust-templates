@@ -1053,7 +1053,7 @@ Recorded here while they are cheap, so they are not rediscovered at M9:
   variable-versus-tag `contains_nontext`**, the part that was unexercised — and
   the `{% extends %}`-specific case moves to M7. The rule's *machinery* is
   already Rust's and already tested: `extend_nodelist`'s
-  `must_be_first && contains_nontext` check (`parser/mod.rs:524`) is exercised
+  `must_be_first && contains_nontext` check (`parser/mod.rs:512`) is exercised
   against a stand-in `must_be_first` node (`parser/tags/mod.rs:205`). M7
   supplies a tag, not a rule.
 

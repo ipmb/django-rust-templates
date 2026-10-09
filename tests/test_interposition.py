@@ -1759,9 +1759,121 @@ class TagPredicateCoverageTests(unittest.TestCase):
         chosen as the first name M12 adds to Rust's registry — and Task 2 broke
         it, which is the widening measured from the other side: a name that was
         absent from the table in Task 0b is in it now.
+
+        The fixture wears the `unregistered_` prefix, which
+        `FabricatedNameTests` below holds to a registry check — the replacement
+        above was one rename, and the convention is what makes the next one
+        unnecessary.
         """
         with self.assertRaises(AssertionError):
-            self.assert_covers(self.host._rust_owned | {"m12_not_a_tag"}, self.own)
+            self.assert_covers(self.host._rust_owned | {"unregistered_tag"}, self.own)
+
+
+class FabricatedNameTests(unittest.TestCase):
+    """A negative fixture that names a real tag or filter **expires**.
+
+    Any row asserting "the registry lacks this name", "this is not a library
+    tag" or "this tag is unloaded" is a negative only until some milestone ports
+    that name, after which the fixture flips to the positive case and keeps
+    whatever colour it had. It does not redden, so nothing announces it. This
+    file has paid for that twice already: `TagPredicateCoverageTests`' control
+    named `trans` and Task 2 broke it, and the plan for Task 4 flagged the same
+    risk for the three `tz` names before they landed.
+
+    The repair is a rename, not a restructure: a fabricated name the tree cannot
+    overtake, spelled `unregistered_`. The prefix is the point — the property
+    the name must have is that no registry holds it, so the name states its own
+    invariant at the call site instead of leaving it to a comment.
+
+    **The registry row below checks the converse of that property.** It makes
+    the prefix trustworthy — an `unregistered_`-prefixed name really is in no
+    registry — and it cannot show that every negative fixture wears the prefix.
+    A real name used as a negative (`trans` here, `nope` in `parser/mod.rs`,
+    `m12_not_a_tag` before this commit) is not identifiable from the source
+    without reading the fixture's intent, and no mechanical check can read
+    intent. So the remaining obligation is a reviewer's, and this row exists to
+    make the prefix worth writing rather than to close the class.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib
+
+        _shim.install()
+        from django_rust_templates import host as host_module
+
+        cls.host_module = host_module
+        cls.libraries = {
+            name: importlib.import_module(name).register.filters
+            for name in host_module._LIBRARY_TAG_MODULES
+        }
+
+    def setUp(self):
+        _shim.install()
+
+    def registries(self):
+        """Every registry a template's tag and filter names resolve against.
+
+        Tags and filters both, and both sides of the boundary: Rust's three tag
+        lists and its filter list, the merged predicate `has_tag` compares
+        against, and Django's own filter registry — which is where a
+        `{% load %}`ed library's names live until a later milestone ports them.
+        Kept as a mapping rather than a list so a failure names the registry it
+        came from.
+        """
+        from django.template import defaultfilters
+
+        from django_rust_templates import _native
+
+        return {
+            "builtin_tag_names_including_stubs": set(
+                _native.builtin_tag_names_including_stubs()
+            ),
+            "builtin_tag_stub_names": set(_native.builtin_tag_stub_names()),
+            "library_tag_names": set(_native.library_tag_names()),
+            "filter_names": set(_native.filter_names()),
+            "django_own_tags": set(self.host_module.django_own_tags()),
+            "defaultfilters": set(defaultfilters.register.filters),
+            "loaded_library_filters": set().union(
+                *(set(filters) for filters in self.libraries.values())
+            ),
+        }
+
+    def test_no_registry_holds_an_unregistered_prefixed_name(self):
+        for registry, names in sorted(self.registries().items()):
+            with self.subTest(registry=registry):
+                self.assertEqual(
+                    sorted(name for name in names if name.startswith("unregistered_")),
+                    [],
+                    f"{registry} holds an `unregistered_`-prefixed name, so the "
+                    f"prefix no longer means what a negative fixture using it "
+                    f"asserts: that no registry can overtake the name",
+                )
+
+    def test_the_row_above_can_see_a_name_that_is_there(self):
+        """The control, in the two ways that row can pass without meaning it.
+
+        Empty is the first: a registry with no names satisfies "none of them is
+        prefixed" trivially, so each is asserted non-empty. A filter that never
+        matches is the second: the same prefix test is run over these registries
+        with one staged name added, and the staged registry must be the one it
+        names. Without the second half, a typo in the prefix would leave the row
+        green forever.
+        """
+        registries = self.registries()
+        for registry, names in sorted(registries.items()):
+            with self.subTest(registry=registry):
+                self.assertTrue(names, f"{registry} is empty, so the row is vacuous")
+
+        staged = {**registries, "staged": {"unregistered_tag"}}
+        self.assertEqual(
+            sorted(
+                registry
+                for registry, names in staged.items()
+                if any(name.startswith("unregistered_") for name in names)
+            ),
+            ["staged"],
+        )
 
 
 class LibraryTagPredicateTests(unittest.TestCase):

@@ -369,32 +369,36 @@ pub(crate) mod support {
         parser.parse(&[]).expect("expected a successful parse")
     }
 
-    /// A host that reports every **library** tag as loaded.
+    /// A host that reports an **explicit set** of library tags as loaded.
     ///
-    /// The library tags (`{% cache %}`, `{% static %}`, the two prefix tags) are
-    /// reachable in Rust only behind [`Host::library_tag_loaded`], so
-    /// [`compile`]/[`failure`] — which use [`NoHost`], whose answer is the trait
-    /// default `false` — cannot reach them at all: `{% static %}` under `NoHost`
-    /// is `Invalid block tag on line 1: 'static'.`, which is *correct* and is the
-    /// unloaded case. These tests are about the loaded one, so they need a host
-    /// that says yes.
+    /// The library tags (`{% cache %}`, `{% static %}`, the two prefix tags,
+    /// `tz`'s three) are reachable in Rust only behind
+    /// [`Host::library_tag_loaded`], so [`compile`]/[`failure`] — which use
+    /// [`NoHost`], whose answer is the trait default `false` — cannot reach them
+    /// at all: `{% static %}` under `NoHost` is `Invalid block tag on line 1:
+    /// 'static'.`, which is *correct* and is the unloaded case. These tests are
+    /// about the loaded one, so they need a host that says yes.
     ///
-    /// It says yes by consulting
-    /// [`registry::library_tag_names`](crate::parser::registry::library_tag_names)
-    /// rather than unconditionally, which makes it the real host's shape and
-    /// gives the pair of questions the dispatch asks its two answers. Under it,
-    /// `{% not_a_library_tag %}` still fails with `Invalid block tag` — that is
-    /// the `library_tag_loaded && library_tag(name).is_none()` arm, and
-    /// `load_tag_interposition.rs`-style rows in the modules that use this host
-    /// pin it rather than leaving it to the comment on `parser/mod.rs`'s
-    /// dispatch.
+    /// **Why the set is a parameter and not `library_tag_names()`.** That was
+    /// this host's first shape, and it made one of the dispatch's two questions
+    /// unanswerable: `registry::library_tag` reads the same table, so
+    /// `library_tag_loaded(name) && library_tag(name).is_none()` could not be
+    /// made true by any name, and the arm that handled it was dead code no row
+    /// could distinguish (`loaded_library_tag`, `parser/mod.rs`, records the
+    /// measurement). Taking the set from the caller is also the real
+    /// `ShellHost`'s shape — `command in parser.tags`, mutated by `{% load %}`
+    /// — so a row can now load a name Rust has **no** body for and pin what the
+    /// refusal is (the real instance is `trans` from `i18n`; the row uses a
+    /// fabricated `unregistered_` name, because `trans` becomes one Rust *has* a
+    /// body for in M12 Task 6, which is the expiry
+    /// `test_interposition.py::FabricatedNameTests` documents).
     ///
     /// [`Host::library_tag_loaded`]: crate::parser::host::Host::library_tag_loaded
     #[cfg(test)]
-    pub(crate) struct LibraryLoadedHost;
+    pub(crate) struct LoadedLibrariesHost(pub Vec<&'static str>);
 
     #[cfg(test)]
-    impl crate::parser::host::Host for LibraryLoadedHost {
+    impl crate::parser::host::Host for LoadedLibrariesHost {
         fn has_tag(&self, _command: &str) -> bool {
             // The library tags Rust compiles are *not* host tags — that is what
             // `ShellHost.has_tag`'s identity clause decides for the real host,
@@ -410,13 +414,13 @@ pub(crate) mod support {
             _tokens: &[Token],
         ) -> Result<(NodeDesc, Vec<Token>), Error> {
             unreachable!(
-                "LibraryLoadedHost::call_tag is never reached: has_tag returns false \
+                "LoadedLibrariesHost::call_tag is never reached: has_tag returns false \
                  for every command"
             )
         }
 
         fn library_tag_loaded(&self, command: &str) -> bool {
-            crate::parser::registry::library_tag_names().contains(&command)
+            self.0.contains(&command)
         }
 
         fn alloc_slot(&self) -> usize {
@@ -435,9 +439,21 @@ pub(crate) mod support {
         }
     }
 
-    /// [`compile`], against [`LibraryLoadedHost`] — the loaded-library case.
+    /// The loaded set the library modules' own rows run under: exactly the names
+    /// Rust has a body for, so those rows exercise the tag and not the routing.
+    /// `library_tag_names()` is the *registry's* answer standing in for the
+    /// host's here, which is the conflation this host's doc is about — the
+    /// routing rows pass literals instead, so that the two questions can
+    /// disagree.
+    fn rust_libraries_loaded() -> Vec<&'static str> {
+        crate::parser::registry::library_tag_names()
+    }
+
+    /// [`compile`], against the libraries Rust has bodies for — the
+    /// loaded-library case.
     pub(crate) fn compile_loaded(source: &str) -> NodeDesc {
-        let mut parser = Parser::new(Lexer::new(source).tokenize(), &LibraryLoadedHost);
+        let host = LoadedLibrariesHost(rust_libraries_loaded());
+        let mut parser = Parser::new(Lexer::new(source).tokenize(), &host);
         let nodelist = parser.parse(&[]).expect("expected a successful parse");
         assert_eq!(
             nodelist.nodes.len(),
@@ -447,9 +463,10 @@ pub(crate) mod support {
         nodelist.nodes.into_iter().next().expect("checked above")
     }
 
-    /// [`failure`], against [`LibraryLoadedHost`] — the loaded-library case.
+    /// [`failure`], against the same host — the loaded-library case.
     pub(crate) fn failure_loaded(source: &str) -> Error {
-        let mut parser = Parser::new(Lexer::new(source).tokenize(), &LibraryLoadedHost);
+        let host = LoadedLibrariesHost(rust_libraries_loaded());
+        let mut parser = Parser::new(Lexer::new(source).tokenize(), &host);
         parser.parse(&[]).expect_err("expected a parse failure")
     }
 }

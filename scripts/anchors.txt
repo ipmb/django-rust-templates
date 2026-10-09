@@ -18,10 +18,10 @@ error.rs:292-293	crates/template-core/src/parser/error.rs	292	293	str.replace	-
 parser/host.rs:22	crates/template-core/src/parser/host.rs	22	-	-	-
 parser/mod.rs:321	crates/template-core/src/parser/mod.rs	321	-	NodeDesc::new("VariableNode")	-
 parser/mod.rs:394-403	crates/template-core/src/parser/mod.rs	394	403	Err(error) => Err(error)	-
-crates/template-core/src/parser/mod.rs:430	crates/template-core/src/parser/mod.rs	430	-	-	-
-parser/mod.rs:459-464	crates/template-core/src/parser/mod.rs	459	464	token.or_else	-
-crates/template-core/src/parser/mod.rs:518	crates/template-core/src/parser/mod.rs	518	-	pub fn extend_nodelist(	-
-parser/mod.rs:524	crates/template-core/src/parser/mod.rs	524	-	if node.must_be_first && nodelist.contains_nontext {	-
+crates/template-core/src/parser/mod.rs:418	crates/template-core/src/parser/mod.rs	418	-	-	-
+parser/mod.rs:447-452	crates/template-core/src/parser/mod.rs	447	452	token.or_else	-
+crates/template-core/src/parser/mod.rs:506	crates/template-core/src/parser/mod.rs	506	-	pub fn extend_nodelist(	-
+parser/mod.rs:512	crates/template-core/src/parser/mod.rs	512	-	if node.must_be_first && nodelist.contains_nontext {	-
 resolve.rs:28	crates/template-core/src/parser/resolve.rs	28	-	pub enum Step {	-
 parser/resolve.rs:156	crates/template-core/src/parser/resolve.rs	156	-	pub trait LookupTarget {	-
 resolve.rs:253	crates/template-core/src/parser/resolve.rs	253	-	pub enum LookupOutcome {	-

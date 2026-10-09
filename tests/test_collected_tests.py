@@ -138,7 +138,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # 6). `git diff tests/` since the previous commit is `+4` rows in two files and
 # no removals, so 404 + 4 = 408 — measured by discovery, and the failure text
 # before the pin moved read `discovery found 408 tests, the pin says 404`.
-PINNED = 408
+#
+# 408 → 410 is the post-Task-4 review batch, **two** rows in
+# `test_interposition.py::FabricatedNameTests`: the registry check that makes the
+# `unregistered_` prefix trustworthy, and the control that shows it is neither
+# vacuous over an empty registry nor blind to a name. The batch's other two
+# pieces move no count — the `m12_not_a_tag` → `unregistered_tag` rename is a
+# rename, and the Rust-side rows are `cargo test`'s, not this suite's. `git diff
+# tests/` since `f89a9d4` is `+2` rows in one file, no removals.
+PINNED = 410
 
 
 def collected() -> unittest.TestSuite:

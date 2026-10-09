@@ -400,28 +400,16 @@ impl<'a> Parser<'a> {
                         }
                     } else if let Some(compile) = registry::builtin_tag(&command) {
                         compile(self, &token)
-                    } else if self.host.library_tag_loaded(&command) {
+                    } else if let Some(compile) = loaded_library_tag(self.host, &command) {
                         // A **library** tag — `{% load static %}` then
                         // `{% static %}`. The host said `false` to `has_tag`
                         // because the registered function is still Django's own
                         // and the name is one Rust compiles, so the remaining
                         // question is whether Rust has a body for it, and that
-                        // one is the registry's (M12).
-                        //
-                        // `library_tag_loaded` alone must never be enough: it is
-                        // `true` for all 18 library tags, and 14 of them are
-                        // Python's — so `library_tag_loaded(name) &&
-                        // library_tag(name).is_none()` must be `Invalid block
-                        // tag`, not a panic and not an `Unimplemented`. (Those 14
-                        // never reach here at all, since `has_tag` is `true` for
-                        // them; the arm is what keeps the ordering an invariant
-                        // rather than a coincidence.)
-                        match registry::library_tag(&command) {
-                            Some(compile) => compile(self, &token),
-                            None => {
-                                return Err(self.invalid_block_tag(&token, &command, parse_until))
-                            }
-                        }
+                        // one is the registry's (M12). Both questions are inside
+                        // `loaded_library_tag`, whose doc says why the
+                        // conjunction is the shape.
+                        compile(self, &token)
                     } else {
                         return Err(self.invalid_block_tag(&token, &command, parse_until));
                     };
@@ -551,6 +539,46 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// The compile function for `command` **as a loaded library tag**, if it is one.
+///
+/// Two questions, asked in this order, and the conjunction is this function's
+/// reason to exist rather than a convenience:
+///
+/// * the host answers whether the template loaded a library providing
+///   `command` — `ShellHost.library_tag_loaded` is `command in parser.tags`,
+///   which `{% load %}` mutates, and it is `true` for **all 18**
+///   `django.templatetags` names, 14 of which are Python's;
+/// * the registry answers whether Rust has a body for it ([`registry`]'s
+///   `LIBRARY_REGISTRY` — seven names as of M12 Task 4).
+///
+/// Either question alone routes wrongly. The host's alone sends a loaded
+/// `{% trans %}` to a Rust compiler for `trans` that does not exist; the
+/// registry's alone compiles `{% static %}` in a template that never wrote
+/// `{% load static %}`, which Django refuses.
+///
+/// **This replaced a `match` with a third arm, and that arm was dead.**
+/// Measured: the arm (`library_tag_loaded(name) && library_tag(name).is_none()`
+/// → `invalid_block_tag`) was replaced by `unreachable!()` and the whole gate
+/// stayed green — `cargo test --workspace`, the Python unit suite (408 rows
+/// then; this batch's own two rows are counted after it), the 48-case
+/// differential harness, and Django's 1547 — and it is unreachable in
+/// production too: the shell's `_rust_owned` takes its library half from
+/// `library_tag_names()`, the *same* table [`registry::library_tag`] reads, so
+/// a loaded name Rust owns always has a body here, while a loaded name Rust
+/// does not own makes `has_tag` return `true` in its second clause
+/// (`command not in self._rust_owned`,
+/// `python/django_rust_templates/host.py`) at the top of the chain, so this
+/// line is never consulted for it. Two branches with identical bodies are not
+/// defence in depth; they are a claim of coverage no input can distinguish. The
+/// two inputs that *do* distinguish the conjunction are rows in this module's
+/// tests, one per direction.
+fn loaded_library_tag(host: &dyn Host, command: &str) -> Option<CompileFn> {
+    if !host.library_tag_loaded(command) {
+        return None;
+    }
+    registry::library_tag(command)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -676,6 +704,79 @@ mod tests {
             ),
         );
         assert_eq!(error.token.unwrap().contents, "nope");
+    }
+
+    /// Parse one tag under a host that reports exactly `loaded` as loaded —
+    /// the shape `ShellHost`'s `library_tag_loaded` has, `command in
+    /// parser.tags`, and the only shape under which the two questions
+    /// [`loaded_library_tag`] conjoins can disagree.
+    fn parse_with_loaded(loaded: Vec<&'static str>, source: &str) -> Result<NodeListDesc, Error> {
+        let host = crate::parser::tags::support::LoadedLibrariesHost(loaded);
+        Parser::new(Lexer::new(source).tokenize(), &host).parse(&[])
+    }
+
+    #[test]
+    fn a_library_tag_that_was_never_loaded_is_refused() {
+        // One direction of the disagreement, on a production path: `{% static %}`
+        // with no `{% load static %}`, which is the template Django refuses
+        // (`Invalid block tag … Did you forget to register or load this tag?`,
+        // `static.py`'s tag being unreachable without the load). The registry
+        // has a body for the name and the host says the library was not loaded —
+        // the input that tells the conjunction from the registry lookup alone,
+        // which would compile a `StaticNode` for a template stock Django rejects.
+        let error = parse_with_loaded(vec![], r#"{% static "a/b.css" %}"#)
+            .expect_err("the library was never loaded");
+        assert_eq!(
+            error.kind,
+            ErrorKind::Syntax(
+                "Invalid block tag on line 1: 'static'. \
+                 Did you forget to register or load this tag?"
+                    .to_string(),
+            ),
+        );
+    }
+
+    #[test]
+    fn the_same_tag_compiles_once_the_host_says_the_library_was_loaded() {
+        // The row above is only a row if this one passes: same source, one
+        // answer different, and the outcome flips. Together they are what makes
+        // the conjunction observable instead of asserted — and this is also the
+        // production path M12 Task 3 opened, `{% load static %}{% static %}`.
+        let nodelist = parse_with_loaded(vec!["static"], r#"{% static "a/b.css" %}"#)
+            .expect("loaded, and Rust has a body");
+        assert_eq!(nodelist.nodes[0].class_name, "StaticNode");
+    }
+
+    #[test]
+    fn a_loaded_library_tag_rust_has_no_body_for_is_refused_rather_than_panicking() {
+        // The other direction, and the input no production path reaches. The
+        // real instance is `trans` after `{% load i18n %}`: Django compiles it
+        // (`i18n.py`'s `do_trans`) and the real `ShellHost` answers `has_tag`
+        // first — `true`, by its `command not in self._rust_owned` clause — so
+        // [`loaded_library_tag`] is never consulted for it. The fixture is a
+        // **fabricated** name rather than `trans` because `trans` stops being an
+        // instance of this case the moment M12 Task 6 ports it: the row would
+        // then read a compile where it expects a refusal. `unregistered_tag` is
+        // a name no registry holds and no milestone can overtake, and the host's
+        // set is a literal, so the host can claim it was loaded.
+        //
+        // This row exists because the dispatch's *previous* shape had a branch
+        // for exactly this case and nothing could reach it — see
+        // [`loaded_library_tag`] for the measurement. What it holds is that the
+        // answer, if reached, is the same refusal an unregistered tag gets: not
+        // a panic, and not an `Unimplemented` — which is what a
+        // `library_tag_loaded`-alone gate would have to invent for a name it
+        // claimed and no body answered.
+        let error = parse_with_loaded(vec!["unregistered_tag"], "{% unregistered_tag %}")
+            .expect_err("Rust has no body for it");
+        assert_eq!(
+            error.kind,
+            ErrorKind::Syntax(
+                "Invalid block tag on line 1: 'unregistered_tag'. \
+                 Did you forget to register or load this tag?"
+                    .to_string(),
+            ),
+        );
     }
 
     #[test]
