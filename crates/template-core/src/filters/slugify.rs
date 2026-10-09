@@ -97,7 +97,7 @@ use crate::parser::error::Error;
 /// `&str` case) and the whole of `django.utils.text.slugify` through
 /// [`FilterHost::slugify`]. The body has no algorithm of its own to get wrong.
 pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
-    // `defaultfilters.py:44`'s `str(value)`, done once by the FFI loop (§D3).
+    // `defaultfilters.py:46`'s `str(value)`, done once by the FFI loop (§D3).
     let text = call.host.to_str(&value)?;
     // `text.py:471-481`, whole — NFKD, the ascii drop and its two `re.sub`s.
     Ok(Value::Str(call.host.slugify(&text).into()))

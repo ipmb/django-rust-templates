@@ -619,7 +619,7 @@ fn attr_value_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
         AttrValue::Map(entries) => {
             // A real `dict`, not a list of pairs. Python's dict has kept
             // insertion order since 3.7, so a list would buy nothing and lose
-            // something: measured against `token_kwargs` (`base.py:1196`), which
+            // something: measured against `token_kwargs` (`base.py:1202`), which
             // assigns `kwargs[key] = …`, a repeated key **keeps its first
             // position and takes the last value** — which `set_item` reproduces
             // exactly and `dict(pairs)` would too, while a list handed to
@@ -1118,7 +1118,7 @@ struct FilterCheckHost<'py> {
     /// The shell's `token -> FilterExpression` callable — that is, Django's own
     /// `Parser.compile_filter` (`base.py:697-701`), which is
     /// `TemplateIfParser.create_var`'s
-    /// `self.template_parser.compile_filter(value)` (`defaulttags.py:928`).
+    /// `self.template_parser.compile_filter(value)` (`defaulttags.py:929`).
     ///
     /// **A second callable rather than "the parser", because the first one is
     /// already composed in Python** — `check_filter(parser)` is `find_filter`
@@ -1785,7 +1785,7 @@ impl LookupTarget for PyTarget {
 
     /// Django's three tests, folded in because only the host can read the two
     /// flags: `callable(current)`, then `do_not_call_in_templates`, then
-    /// `alters_data` (`base.py:999-1003`).
+    /// `alters_data` (`base.py:993-996`).
     ///
     /// `None` — not a `CallArm` — when `callable(current)` is false, because
     /// that is when Django's arm does not run at all; folding it into
@@ -1891,7 +1891,7 @@ fn silent_variable_failure(py: Python<'_>, error: &PyErr) -> PyResult<bool> {
 }
 
 /// `context.template.engine.string_if_invalid` — Django's substitution for both
-/// `alters_data` and a silent variable failure (`base.py:1024`).
+/// `alters_data` and a silent variable failure (`base.py:1023-1024`).
 ///
 /// Three plain attribute reads, deliberately not a `getattr` chain with
 /// defaults: stock Django fails with `AttributeError: 'NoneType' object has no
@@ -1976,7 +1976,7 @@ fn outcome_to_py(
 ///
 /// `SafeStr` is the exception, and the difference is a type that rendering
 /// reads: Django stores `mark_safe(unescape_string_literal(var))`
-/// (`base.py:912`), a `SafeString`, and returns it from `resolve` unchanged — so
+/// (`base.py:906`), a `SafeString`, and returns it from `resolve` unchanged — so
 /// a `SafeStr` wire object (not a `str` subclass, and not `SafeData`) would make
 /// the value escape-able on a path Django never escapes. `mark_safe` is called
 /// here rather than in the shell because `_native.resolve` returns the value
@@ -2005,7 +2005,7 @@ fn literal_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
 /// raises — `VariableDoesNotExist` from the arms, and whatever an object's own
 /// code raised — and substitutes `string_if_invalid` in the two places
 /// `_resolve_lookup` itself substitutes it, `alters_data` (M8) and a
-/// `silent_variable_failure` (`base.py:1024`). It does **not** do `resolve`'s
+/// `silent_variable_failure` (`base.py:1023-1024`). It does **not** do `resolve`'s
 /// substitution, the one for a missing key, which is one frame out and the
 /// shell's. An unused parameter kept "for symmetry" would be a parameter the next
 /// reader has to prove is unused.

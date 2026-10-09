@@ -203,7 +203,7 @@ impl Operator {
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiteralValue {
     /// `IfParser.create_var` is `Literal(value)`, with `value` the raw token;
-    /// `eval` returns it unchanged (`smartif.py:139-140`, `214-215`).
+    /// `eval` returns it unchanged (`smartif.py:140`, `214-215`).
     Raw(String),
     /// `TemplateIfParser.create_var` is
     /// `TemplateLiteral(self.template_parser.compile_filter(value), value)`.

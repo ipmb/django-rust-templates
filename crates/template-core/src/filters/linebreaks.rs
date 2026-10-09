@@ -23,7 +23,7 @@
 //! ```
 //!
 //! * `normalize_newlines` is `django.utils.text.normalize_newlines`
-//!   (`text.py:308-310`): `re_newlines.sub("\n", str(value))` with
+//!   (`text.py:308-310`): `re_newlines.sub("\n", str(text))` with
 //!   `re_newlines = \r\n|\r` (`text.py:36`), so `\r\n` and a lone `\r` become
 //!   `\n` **before** the `\n{2,}` split.
 //! * The escaping primitive is Django's **unconditional** `escape` =
@@ -86,7 +86,7 @@ fn autoescape_collision() -> Error {
     )
 }
 
-/// `re_newlines.sub("\n", str(value))` with `re_newlines = \r\n|\r`: CRLF first,
+/// `re_newlines.sub("\n", str(text))` with `re_newlines = \r\n|\r`: CRLF first,
 /// then a lone CR, so `\r\n` becomes one `\n` rather than two.
 fn normalize_newlines(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
@@ -119,7 +119,7 @@ fn split_paragraphs(text: &str) -> Vec<&str> {
     paragraphs
 }
 
-/// `linebreaks`'s body: `mark_safe(html.linebreaks(str(value), autoescape))`.
+/// `linebreaks`'s body: `mark_safe(linebreaks(value, autoescape))`.
 pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
     if arg.is_some() {
         return Err(autoescape_collision());

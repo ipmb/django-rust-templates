@@ -158,7 +158,7 @@ pub enum AttrValue {
     /// `token_kwargs` produced and the **materialiser** decides what Python
     /// object it becomes. There is exactly one place that decision is made and
     /// the repeated-key case is why: `token_kwargs` does `kwargs[key] = …`
-    /// (`base.py:1196`), so a repeated key keeps its first position and takes the
+    /// (`base.py:1202`), so a repeated key keeps its first position and takes the
     /// last value, and only `dict(pairs)` reproduces that.
     Map(Vec<(String, AttrValue)>),
     /// A position in this node's own `NodeDesc.nodelists`.
@@ -220,7 +220,7 @@ pub enum AttrValue {
     /// Its leaves are [`AttrValue::Ref`]s, not [`AttrValue::FilterExpr`]s: the
     /// `FilterExpression` behind a `TemplateLiteral` is built by the **host**
     /// during the parse, which is where Django builds it (`create_var` calls
-    /// `self.template_parser.compile_filter(value)`, `defaulttags.py:928`), so a
+    /// `self.template_parser.compile_filter(value)`, `defaulttags.py:929`), so a
     /// bad filter in a condition raises at parse time carrying Django's message.
     ///
     /// **Boxed**, for [`AttrValue::Variable`]'s reason: `IfConditionDesc` holds
@@ -316,7 +316,7 @@ pub struct VariableDesc {
 /// The second is not a shortcut around an emulation, it is the only faithful
 /// form. `Variable.resolve` for a `_("…")`-marked literal returns
 /// `gettext_lazy(msgid)` (`base.py:932-939`) — a *lazy proxy*, not a string — and
-/// `django/tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py:16`
+/// `tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py:16`
 /// asserts `Template("{{ _('Yes') }}").render(...) == "Oui"` on exactly that
 /// object. A descriptor carrying the resolved value has no way to hold one, so a
 /// `{{ _("literal") }}` built from it renders untranslated and fails that test.
@@ -370,7 +370,7 @@ pub struct FilterExprDesc {
     /// `FilterExpression.var`, **before materialisation**.
     ///
     /// Django does not carry `is_var` on the wire and neither does this: it
-    /// computes `is_var = isinstance(var_obj, Variable)` (`base.py:777`) from the
+    /// computes `is_var = isinstance(var_obj, Variable)` (`base.py:783`) from the
     /// *materialised* object, and the shell recomputes it the same way. The flag
     /// here is `lookup`, which happens to agree with `is_var` for the variable
     /// part and is a different question for an argument.
@@ -649,7 +649,7 @@ mod tests {
 
     #[test]
     fn a_map_keeps_a_repeated_key_as_two_entries() {
-        // `token_kwargs` does `kwargs[key] = …` (`base.py:1196`), so a repeated
+        // `token_kwargs` does `kwargs[key] = …` (`base.py:1202`), so a repeated
         // key keeps its *first position* and takes the *last value*. Rust keeps
         // both entries and in order; the collapsing is the FFI's, one
         // `PyDict::set_item` per entry, which is where Django's own behaviour

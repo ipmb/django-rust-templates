@@ -2998,7 +2998,7 @@ CASES: list[dict] = [
     #
     # * `escape` and `force_escape` differ in **which escape** they run.
     #   `escape` is `conditional_escape` — the host *protocol*, which asks
-    #   `__html__` first (`defaultfilters.py:60-66`) — so a `SafeData` input
+    #   `__html__` first (`html.py:115-127`) — so a `SafeData` input
     #   passes through it unchanged, while `force_escape` runs
     #   `django.utils.html.escape`'s five replacements whatever it is handed. The
     #   safe-input rows are the pair no single body can satisfy, and each
@@ -3241,7 +3241,7 @@ CASES: list[dict] = [
     {
         # **The row the depth guard must not fire on.** 50 balanced tags go in
         # *one* `_strip_once` iteration, so the iteration counter — which is what
-        # `MAX_STRIP_TAGS_DEPTH = 50` (`html.py:220-222`) bounds — reaches 1. A
+        # `MAX_STRIP_TAGS_DEPTH = 50` (`html.py:44`) bounds — reaches 1. A
         # body that counted nesting instead would raise here and answer nothing.
         "name": "striptags/balanced-50-deep",
         "filter": "striptags",
@@ -3830,7 +3830,7 @@ CASES: list[dict] = [
     },
     {
         # A `mailto` link carries no `rel` — `Urlizer.handle_word` sets
-        # `nofollow_attr = ""` on the e-mail branch (`html.py:381`).
+        # `nofollow_attr = ""` on the e-mail branch (`html.py:383`).
         "name": "urlize/email",
         "filter": "urlize",
         "value": "mail me at a@b.com",
@@ -3851,7 +3851,7 @@ CASES: list[dict] = [
     },
     {
         # **The `safe_input` row.** `Urlizer.__call__` reads
-        # `safe_input = isinstance(text, SafeData)` (`html.py:314`), and with it
+        # `safe_input = isinstance(text, SafeData)` (`html.py:319`), and with it
         # the `<b>` is *not* escaped, where the row above escapes the same text.
         # `mark_safe` at the *value* key, not `arg`: this is the filter's input.
         #
@@ -4947,7 +4947,7 @@ ERROR_CASES: list[dict] = [
     {
         # **The one row in this list whose exception class is not a builtin.**
         # `strip_tags` counts iterations and raises bare — `raise
-        # SuspiciousOperation` at `html.py:221`, with no argument, which is why
+        # SuspiciousOperation` at `html.py:222`, with no argument, which is why
         # the message below is the empty string and not a sentence. The class is
         # `django.core.exceptions`', not Rust's to synthesise, and the row works
         # because the seam keeps the exception *object* across the FFI
@@ -5130,7 +5130,7 @@ ERROR_CASES: list[dict] = [
     },
     # --- urlizetrunc: `int(limit)`, the body's first call and its own refusal -
     #
-    # `defaultfilters.py:395` is `int(limit)` **before** the helper call, and the
+    # `defaultfilters.py:399` is `int(limit)` **before** the helper call, and the
     # body does it first and with no `try` (`urlizetrunc.rs`, the `wordwrap`
     # pattern). Both messages are CPython's on **both** sides — the class and the
     # text both cross the seam out of the real `int` — so what these rows claim

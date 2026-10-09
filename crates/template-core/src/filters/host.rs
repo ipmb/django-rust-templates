@@ -194,7 +194,7 @@ pub struct DecimalTuple {
 pub trait FilterHost {
     // --- the Python value protocol -----------------------------------------
     /// `str(v)`. `@stringfilter`'s wrapper does this once per filter
-    /// (`defaultfilters.py:44-48`), and `unordered_list` does it again per item.
+    /// (`defaultfilters.py:46`), and `unordered_list` does it again per item.
     fn to_str(&self, value: &Value) -> Result<String, Error>;
     /// `int(v)` — `get_digit` (`:757-776`), `divisibleby` (`:854-858`), and the
     /// three padding filters (`:417-430`). Python's `int` accepts `" 5 "`, `"5_0"`
@@ -263,7 +263,7 @@ pub trait FilterHost {
     /// `safeseq`, `cut` and `linebreaksbr` branch on, and the one a Rust
     /// `Value::Safe` cannot answer for an `Opaque` that carries `__html__`.
     fn is_safe(&self, value: &Value) -> bool;
-    /// `mark_safe(value)` (`safestring.py:64-80`). Measured on the pinned tree:
+    /// `mark_safe(value)` (`safestring.py:64-78`). Measured on the pinned tree:
     /// a value with `__html__` is returned **unchanged and not necessarily
     /// `SafeData`**; a non-str becomes `SafeString(str(v))`. There is no
     /// `SafeText` in 6.0.9 — it was removed in Django 4.0 — so a caller must not
@@ -348,7 +348,7 @@ pub trait FilterHost {
     /// generator, which is truthy even when it yields nothing. See that type.
     fn as_nested_sequence(&self, value: &Value) -> Result<Option<NestedSequence>, Error>;
     /// The comma-separated bits of a filter's argument — `pluralize`
-    /// (`defaultfilters.py:950-952`) and `yesno` (`:863`) — as one call.
+    /// (`defaultfilters.py:965-966`) and `yesno` (`:879`) — as one call.
     ///
     /// `prepend_comma` is the whole of the difference between the two callers,
     /// and it is load-bearing in both directions rather than convenient:

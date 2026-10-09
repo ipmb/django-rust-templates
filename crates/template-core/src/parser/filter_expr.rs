@@ -44,7 +44,7 @@
 //!
 //! # One place the port is deliberately not Django's shape
 //!
-//! Django tests `if var_obj is None` (`base.py:747`) to decide whether a match is
+//! Django tests `if var_obj is None` (`base.py:752`) to decide whether a match is
 //! the variable part or a filter — a *value* used as a flag. If the variable part
 //! ever resolved to `None`, the second match would take the first-match branch,
 //! find neither a `constant` nor a `var` group, and raise `Could not find
@@ -165,7 +165,7 @@ pub fn parse_filter_expression(token: &str, host: &dyn Host) -> Result<FilterExp
         let start = whole.start();
 
         if upto != start {
-            // Django's `%s|%s|%s` (`base.py:743-746`): everything before the
+            // Django's `%s|%s|%s` (`base.py:747-750`): everything before the
             // last match, the skipped run itself, and everything from the new
             // match on. `Match::start`/`end` are *byte* offsets and Python's are
             // code-point offsets, but both are always at a character boundary

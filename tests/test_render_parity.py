@@ -47,7 +47,7 @@ class _RaisesAttributeError:
     """A ``@property`` in the attribute arm's swallowing set.
 
     Measured: Django re-raises it, because the name is in ``dir()``
-    (``base.py:970-977``). A port that treated a swallowed exception as a miss
+    (``base.py:979-980``). A port that treated a swallowed exception as a miss
     would fall through to the index arm and render ``string_if_invalid``.
     """
 

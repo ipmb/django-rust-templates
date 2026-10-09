@@ -63,7 +63,7 @@ use crate::parser::tags::split_contents;
 use crate::parser::Parser;
 use crate::token::Token;
 
-/// Django's `re.split(r" *, *", …)` (`defaulttags.py:877`).
+/// Django's `re.split(r" *, *", …)` (`defaulttags.py:886`).
 ///
 /// The pattern cannot match the empty string — it requires a comma — so Python's
 /// `re.split` and `regex`'s [`Regex::split`] agree on every input, including the

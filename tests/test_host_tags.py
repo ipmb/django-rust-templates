@@ -221,7 +221,7 @@ class HostParserStateTests(unittest.TestCase):
         exists for, and it is why the source below is not the plan's.
 
         Both sides must **render**: `BadNode.render` is what raises
-        (`tag_27584.py:11-12`), and the parse that re-enters succeeds on both.
+        (`tag_27584.py:13-15`), and the parse that re-enters succeeds on both.
         Measured — Django's `from_string(source)` returns a `Template`, so a row
         that stopped at the parse would assert nothing on Django's side and
         would pass for the wrong reason in the other direction.

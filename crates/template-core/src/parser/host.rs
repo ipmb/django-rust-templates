@@ -61,8 +61,8 @@ pub trait Host {
     ) -> Result<(NodeDesc, Vec<Token>), Error>;
 
     /// Django's two filter checks, in Django's order: `Parser.find_filter`
-    /// (`base.py:684-692`, which raises `Invalid filter: '%s'`) and then
-    /// `FilterExpression.args_check` (`base.py:822-833`, which raises
+    /// (`base.py:678-682`, which raises `Invalid filter: '%s'`) and then
+    /// `FilterExpression.args_check` (`base.py:822-836`, which raises
     /// `%s requires %d arguments, %d provided`).
     ///
     /// **Called from inside `FilterExpression.__init__`'s match loop**, once per
@@ -186,7 +186,7 @@ pub trait Host {
     fn alloc_slot(&self) -> usize;
 
     /// `TemplateIfParser.create_var`'s `self.template_parser.compile_filter(
-    /// value)` (`defaulttags.py:928`) — the `FilterExpression` behind one
+    /// value)` (`defaulttags.py:929`) — the `FilterExpression` behind one
     /// `{% if %}` operand.
     ///
     /// **A handle, not a descriptor, and that is the difference from

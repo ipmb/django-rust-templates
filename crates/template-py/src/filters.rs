@@ -568,7 +568,7 @@ impl<'py> PyFilterHost<'py> {
         }
     }
 
-    /// `@stringfilter`'s coercion (`defaultfilters.py:44`): `str(value)`, as the
+    /// `@stringfilter`'s coercion (`defaultfilters.py:46`): `str(value)`, as the
     /// `Value` the body is handed.
     ///
     /// **Not the same question as [`PyFilterHost::is_safe_value`], and that is the

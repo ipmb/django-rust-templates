@@ -1,0 +1,340 @@
+global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
+base.py:60	django/template/base.py	60	-	-	-
+base.py:75	django/template/base.py	75	-	-	-
+django/template/base.py:97-101	django/template/base.py	97	101	-	-
+base.py:109-110	django/template/base.py	109	110	-	-
+base.py:198-200	django/template/base.py	198	200	parser.parse()	-
+django/template/base.py:390-403	django/template/base.py	390	403	-	-
+base.py:472	django/template/base.py	472	-	-	-
+base.py:504-505	django/template/base.py	504	505	-	-
+base.py:514	django/template/base.py	514	-	-	-
+base.py:518-519	django/template/base.py	518	519	if builtins is None:	builtins = []
+base.py:521	django/template/base.py	521	-	self.libraries = libraries	-
+base.py:522-523	django/template/base.py	522	523	for builtin in builtins:	self.add_library(builtin)
+base.py:529-591	django/template/base.py	529	591	token.contents.split()[0]	-
+base.py:549-551	django/template/base.py	549	551	-	-
+base.py:561-564	django/template/base.py	561	564	command = token.contents.split()[0]	if command in parse_until:
+base.py:564-569	django/template/base.py	564	569	-	-
+base.py:568	django/template/base.py	568	-	self.prepend_token(token)	-
+base.py:573	django/template/base.py	573	-	(command, token)	-
+base.py:583-585	django/template/base.py	583	585	-	-
+base.py:585	django/template/base.py	585	-	-	-
+base.py:611	django/template/base.py	611	-	-	-
+base.py:615	django/template/base.py	615	-	node.token = token	-
+base.py:619-630	django/template/base.py	619	630	-	-
+base.py:632-648	django/template/base.py	632	648	def invalid_block_tag(self, token, command, parse_until=None):	-
+base.py:651	django/template/base.py	651	-	-	-
+base.py:669-670	django/template/base.py	669	670	self.filters.update(lib.filters)	-
+base.py:669	django/template/base.py	669	-	self.tags.update	-
+base.py:669-671	django/template/base.py	669	671	-	-
+base.py:676	django/template/base.py	676	-	return FilterExpression(token, self)	-
+base.py:678-682	django/template/base.py	678	682	def find_filter(self, filter_name):	raise TemplateSyntaxError("Invalid filter: '%s'" % filter_name)
+base.py:682	django/template/base.py	682	-	raise TemplateSyntaxError("Invalid filter: '%s'" % filter_name)	-
+base.py:688-699	django/template/base.py	688	699	-	-
+base.py:690-698	django/template/base.py	690	698	re.escape(")")	-
+base.py:695	django/template/base.py	695	-	-	-
+base.py:696	django/template/base.py	696	-	-	-
+base.py:697-701	django/template/base.py	697	701	-	-
+base.py:701-775	django/template/base.py	701	775	-	-
+base.py:701-719	django/template/base.py	701	719	-	-
+base.py:703-712	django/template/base.py	703	712	-	-
+base.py:705	django/template/base.py	705	-	(?P<filter_name>\w+)	-
+django/template/base.py:705	django/template/base.py	705	-	(?P<filter_name>\w+)	-
+base.py:714	django/template/base.py	714	-	"var_chars": r"\w\.\+-",	-
+base.py:722-775	django/template/base.py	722	775	-	-
+base.py:747-749	django/template/base.py	747	749	-	-
+base.py:747-750	django/template/base.py	747	750	if upto != start:	"%s|%s|%s" % (token[:upto], token[upto:start], token[start:])
+base.py:752	django/template/base.py	752	-	if var_obj is None:	-
+base.py:755	django/template/base.py	755	-	var_obj = Variable(constant).resolve({})	-
+base.py:757-761	django/template/base.py	757	761	-	-
+base.py:757-772	django/template/base.py	757	772	-	-
+base.py:758-761	django/template/base.py	758	761	-	-
+base.py:768	django/template/base.py	768	-	-	-
+base.py:771	django/template/base.py	771	-	-	-
+base.py:771-772	django/template/base.py	771	772	-	-
+base.py:771-774	django/template/base.py	771	774	-	-
+base.py:773	django/template/base.py	773	-	filters.append((filter_func, args))	-
+base.py:774	django/template/base.py	774	-	-	-
+base.py:777	django/template/base.py	777	-	is_var = isinstance(var_obj, Variable)	-
+base.py:783	django/template/base.py	783	-	self.is_var = isinstance(var_obj, Variable)	-
+base.py:788-792	django/template/base.py	788	792	-	-
+base.py:793	django/template/base.py	793	-	-	-
+base.py:800-806	django/template/base.py	800	806	-	-
+base.py:803-819	django/template/base.py	803	819	expects_localtime	-
+base.py:804-809	django/template/base.py	804	809	-	-
+base.py:804-810	django/template/base.py	804	810	-	-
+base.py:806-807	django/template/base.py	806	807	-	-
+base.py:811	django/template/base.py	811	-	obj = template_localtime(obj, context.use_tz)	-
+base.py:813	django/template/base.py	813	-	func(obj, autoescape=context.autoescape, *arg_vals)	-
+base.py:816	django/template/base.py	816	-	-	-
+base.py:819	django/template/base.py	819	-	-	-
+base.py:822	django/template/base.py	822	-	def args_check(name, func, provided):	-
+base.py:822-833	django/template/base.py	822	833	-	-
+base.py:822-826	django/template/base.py	822	826	len(provided)	-
+base.py:822-836	django/template/base.py	822	836	def args_check(name, func, provided):	"%s requires %d arguments, %d provided" % (name, alen - dlen, plen)
+base.py:823-826	django/template/base.py	823	826	plen = len(provided) + 1	-
+base.py:850-925	django/template/base.py	850	925	-	-
+base.py:898-902	django/template/base.py	898	902	-	-
+base.py:906	django/template/base.py	906	-	self.literal = mark_safe(unescape_string_literal(var))	-
+base.py:926-928	django/template/base.py	926	928	if self.lookups is not None	-
+base.py:932-939	django/template/base.py	932	939	gettext_lazy(msgid)	-
+base.py:959-1029	django/template/base.py	959	1029	-	-
+base.py:963-995	django/template/base.py	963	995	-	-
+base.py:963	django/template/base.py	963	-	hasattr(type(current), "__getitem__")	-
+base.py:964	django/template/base.py	964	-	-	-
+base.py:966	django/template/base.py	966	-	-	-
+base.py:972-976	django/template/base.py	972	976	-	-
+base.py:972	django/template/base.py	972	-	-	-
+base.py:975	django/template/base.py	975	-	-	-
+base.py:977	django/template/base.py	977	-	-	-
+base.py:979-980	django/template/base.py	979	980	if not isinstance(current, BaseContext) and bit in dir(current):	raise
+base.py:993-996	django/template/base.py	993	996	if callable(current):	elif getattr(current, "alters_data", False):
+base.py:999-1029	django/template/base.py	999	1029	-	-
+base.py:999	django/template/base.py	999	-	-	-
+base.py:1014	django/template/base.py	1014	-	-	-
+base.py:1014-1026	django/template/base.py	1014	1026	silent_variable_failure	-
+base.py:1016-1021	django/template/base.py	1016	1021	logger.debug	-
+base.py:1016-1020	django/template/base.py	1016	1020	-	-
+base.py:1023	django/template/base.py	1023	-	getattr(e, "silent_variable_failure", False)	-
+base.py:1023-1024	django/template/base.py	1023	1024	if getattr(e, "silent_variable_failure", False):	current = context.template.engine.string_if_invalid
+base.py:1036	django/template/base.py	1036	-	-	-
+base.py:1139	django/template/base.py	1139	-	-	-
+base.py:1160	django/template/base.py	1160	-	kwarg_re = _lazy_re_compile(r"(?:(\w+)=)?(.+)")	-
+base.py:1163-1207	django/template/base.py	1163	1207	token_kwargs	-
+base.py:1163	django/template/base.py	1163	-	token_kwargs(bits, parser, support_legacy=False)	-
+base.py:1194	django/template/base.py	1194	-	-	-
+base.py:1200	django/template/base.py	1200	-	-	-
+base.py:1202	django/template/base.py	1202	-	kwargs[key] = parser.compile_filter(value)	-
+base.py:1203-1206	django/template/base.py	1203	1206	-	-
+defaultfilters.py:6	django/template/defaultfilters.py	6	-	-	-
+defaultfilters.py:14	django/template/defaultfilters.py	14	-	-	-
+defaultfilters.py:38-52	django/template/defaultfilters.py	38	52	-	-
+defaultfilters.py:46	django/template/defaultfilters.py	46	-	first = str(first)	-
+defaultfilters.py:48	django/template/defaultfilters.py	48	-	-	-
+defaultfilters.py:60-68	django/template/defaultfilters.py	60	68	addslashes	-
+defaultfilters.py:71-75	django/template/defaultfilters.py	71	75	capfirst	-
+defaultfilters.py:78-83	django/template/defaultfilters.py	78	83	-	-
+defaultfilters.py:85-91	django/template/defaultfilters.py	85	91	-	-
+defaultfilters.py:94-220	django/template/defaultfilters.py	94	220	-	-
+defaultfilters.py:152-159	django/template/defaultfilters.py	152	159	-	-
+defaultfilters.py:186	django/template/defaultfilters.py	186	-	-	-
+defaultfilters.py:223-227	django/template/defaultfilters.py	223	227	iriencode	-
+defaultfilters.py:230-244	django/template/defaultfilters.py	230	244	linenumbers	-
+defaultfilters.py:247-251	django/template/defaultfilters.py	247	251	-	-
+defaultfilters.py:254-263	django/template/defaultfilters.py	254	263	make_list	-
+defaultfilters.py:266-274	django/template/defaultfilters.py	266	274	-	-
+defaultfilters.py:277-294	django/template/defaultfilters.py	277	294	stringformat	-
+defaultfilters.py:297-302	django/template/defaultfilters.py	297	302	-	-
+defaultfilters.py:305-313	django/template/defaultfilters.py	305	313	-	-
+defaultfilters.py:316-327	django/template/defaultfilters.py	316	327	truncatechars_html	-
+defaultfilters.py:330-341	django/template/defaultfilters.py	330	341	-	-
+defaultfilters.py:344-355	django/template/defaultfilters.py	344	355	truncatewords_html	-
+defaultfilters.py:358-362	django/template/defaultfilters.py	358	362	-	-
+defaultfilters.py:365-379	django/template/defaultfilters.py	365	379	urlencode	-
+defaultfilters.py:382-386	django/template/defaultfilters.py	382	386	-	-
+defaultfilters.py:386	django/template/defaultfilters.py	386	-	return mark_safe(_urlize(value, nofollow=True, autoescape=autoescape))	-
+defaultfilters.py:389-400	django/template/defaultfilters.py	389	400	urlizetrunc	-
+defaultfilters.py:399	django/template/defaultfilters.py	399	-	_urlize(value, trim_url_limit=int(limit), nofollow=True, autoescape=autoescape)	-
+defaultfilters.py:403-407	django/template/defaultfilters.py	403	407	wordcount	-
+defaultfilters.py:404	django/template/defaultfilters.py	404	-	@stringfilter	-
+defaultfilters.py:410-414	django/template/defaultfilters.py	410	414	wordwrap	-
+defaultfilters.py:417-421	django/template/defaultfilters.py	417	421	-	-
+defaultfilters.py:424-428	django/template/defaultfilters.py	424	428	-	-
+defaultfilters.py:431-438	django/template/defaultfilters.py	431	438	center	-
+defaultfilters.py:441-449	django/template/defaultfilters.py	441	449	-	-
+defaultfilters.py:447-450	django/template/defaultfilters.py	447	450	-	-
+defaultfilters.py:457-461	django/template/defaultfilters.py	457	461	-	-
+defaultfilters.py:464-471	django/template/defaultfilters.py	464	471	escapeseq	-
+defaultfilters.py:474-482	django/template/defaultfilters.py	474	482	force_escape	-
+defaultfilters.py:485-494	django/template/defaultfilters.py	485	494	-	-
+defaultfilters.py:486	django/template/defaultfilters.py	486	-	-	-
+defaultfilters.py:493	django/template/defaultfilters.py	493	-	-	-
+defaultfilters.py:497-508	django/template/defaultfilters.py	497	508	linebreaksbr	-
+defaultfilters.py:511-516	django/template/defaultfilters.py	511	516	-	-
+defaultfilters.py:518-525	django/template/defaultfilters.py	518	525	safeseq	-
+defaultfilters.py:528-532	django/template/defaultfilters.py	528	532	striptags	-
+defaultfilters.py:558-570	django/template/defaultfilters.py	558	570	-	-
+defaultfilters.py:578-588	django/template/defaultfilters.py	578	588	-	-
+defaultfilters.py:590-600	django/template/defaultfilters.py	590	600	dictsortreversed	-
+defaultfilters.py:602-608	django/template/defaultfilters.py	602	608	-	-
+defaultfilters.py:611-621	django/template/defaultfilters.py	611	621	str.join(list)	-
+defaultfilters.py:624-630	django/template/defaultfilters.py	624	630	-	-
+defaultfilters.py:633-639	django/template/defaultfilters.py	633	639	-	-
+defaultfilters.py:642-648	django/template/defaultfilters.py	642	648	-	-
+defaultfilters.py:651-665	django/template/defaultfilters.py	651	665	-	-
+defaultfilters.py:669-743	django/template/defaultfilters.py	669	743	-	-
+defaultfilters.py:745-754	django/template/defaultfilters.py	745	754	-	-
+defaultfilters.py:757-776	django/template/defaultfilters.py	757	776	get_digit	-
+defaultfilters.py:783-794	django/template/defaultfilters.py	783	794	-	-
+defaultfilters.py:797-808	django/template/defaultfilters.py	797	808	-	-
+defaultfilters.py:811-821	django/template/defaultfilters.py	811	821	-	-
+defaultfilters.py:812	django/template/defaultfilters.py	812	-	def timesince_filter(value, arg=None):	-
+defaultfilters.py:824-832	django/template/defaultfilters.py	824	832	-	-
+defaultfilters.py:840-843	django/template/defaultfilters.py	840	843	-	-
+defaultfilters.py:846-851	django/template/defaultfilters.py	846	851	default_if_none	-
+defaultfilters.py:854-858	django/template/defaultfilters.py	854	858	divisibleby	-
+defaultfilters.py:860-891	django/template/defaultfilters.py	860	891	yesno	-
+defaultfilters.py:899-939	django/template/defaultfilters.py	899	939	filesizeformat	-
+defaultfilters.py:914-925	django/template/defaultfilters.py	914	925	KB = 1 << 10	value = ngettext("%(size)d byte", "%(size)d bytes", bytes_) % {"size": bytes_}
+defaultfilters.py:942-981	django/template/defaultfilters.py	942	981	-	-
+defaultfilters.py:965-966	django/template/defaultfilters.py	965	966	if "," not in arg:	arg = "," + arg
+defaultfilters.py:984-987	django/template/defaultfilters.py	984	987	-	-
+defaultfilters.py:990-996	django/template/defaultfilters.py	990	996	-	-
+defaultfilters.py:996	django/template/defaultfilters.py	996	-	"Error in formatting: %s: %s" % (e.__class__.__name__, e)	-
+defaulttags.py:97	django/template/defaulttags.py	97	-	-	-
+defaulttags.py:106-112	django/template/defaulttags.py	106	112	-	-
+defaulttags.py:262	django/template/defaulttags.py	262	-	-	-
+defaulttags.py:265	django/template/defaulttags.py	265	-	self._varlist = varlist	-
+defaulttags.py:323	django/template/defaulttags.py	323	-	-	-
+defaulttags.py:326	django/template/defaulttags.py	326	-	condition.eval(context)	-
+defaulttags.py:403	django/template/defaulttags.py	403	-	tzinfo = timezone.get_current_timezone() if settings.USE_TZ else None	-
+defaulttags.py:439	django/template/defaulttags.py	439	-	-	-
+defaulttags.py:611-702	django/template/defaulttags.py	611	702	len(args) < 2	-
+defaulttags.py:612	django/template/defaulttags.py	612	-	-	-
+defaulttags.py:669-671	django/template/defaulttags.py	669	671	-	-
+defaulttags.py:693-696	django/template/defaulttags.py	693	696	-	-
+defaulttags.py:724-757	django/template/defaulttags.py	724	757	-	-
+defaulttags.py:744	django/template/defaulttags.py	744	-	_, rest = token.contents.split(None, 1)	-
+defaulttags.py:745	django/template/defaulttags.py	745	-	filter_expr = parser.compile_filter("var|%s" % (rest))	-
+defaulttags.py:759-805	django/template/defaulttags.py	759	805	-	-
+defaulttags.py:807-931	django/template/defaulttags.py	807	931	do_for	-
+defaulttags.py:886	django/template/defaulttags.py	886	-	loopvars = re.split(r" *, *", " ".join(bits[1:in_index]))	-
+defaulttags.py:909-918	django/template/defaulttags.py	909	918	class TemplateLiteral(Literal):	return self.value.resolve(context, ignore_failures=True)
+defaulttags.py:909-911	django/template/defaulttags.py	909	911	-	-
+defaulttags.py:914-915	django/template/defaulttags.py	914	915	-	-
+defaulttags.py:917-918	django/template/defaulttags.py	917	918	value.resolve(context, ignore_failures=True)	-
+defaulttags.py:921	django/template/defaulttags.py	921	-	class TemplateIfParser(IfParser):	-
+defaulttags.py:922	django/template/defaulttags.py	922	-	error_class = TemplateSyntaxError	-
+defaulttags.py:928	django/template/defaulttags.py	928	-	self.template_parser.compile_filter(value)	-
+defaulttags.py:928-929	django/template/defaulttags.py	928	929	TemplateLiteral(self.template_parser.compile_filter(value), value)	-
+defaulttags.py:929	django/template/defaulttags.py	929	-	return TemplateLiteral(self.template_parser.compile_filter(value), value)	-
+defaulttags.py:932-1021	django/template/defaulttags.py	932	1021	do_if	-
+defaulttags.py:993	django/template/defaulttags.py	993	-	condition = TemplateIfParser(parser, bits).parse()	-
+defaulttags.py:995	django/template/defaulttags.py	995	-	conditions_nodelists = [(condition, nodelist)]	-
+defaulttags.py:1013-1017	django/template/defaulttags.py	1013	1017	if token.contents != "endif"	-
+defaulttags.py:1023-1073	django/template/defaulttags.py	1023	1073	-	-
+defaulttags.py:1065-1075	django/template/defaulttags.py	1065	1075	-	-
+defaulttags.py:1086-1095	django/template/defaulttags.py	1086	1095	-	-
+defaulttags.py:1099	django/template/defaulttags.py	1099	-	-	-
+defaulttags.py:1099-1105	django/template/defaulttags.py	1099	1105	-	-
+defaulttags.py:1134-1179	django/template/defaulttags.py	1134	1179	{% lorem %}	-
+defaulttags.py:1204	django/template/defaulttags.py	1204	-	@register.tag(name="partialdef")	-
+defaulttags.py:1250-1251	django/template/defaulttags.py	1250	1251	-	-
+defaulttags.py:1251	django/template/defaulttags.py	1251	-	-	-
+defaulttags.py:1268	django/template/defaulttags.py	1268	-	@register.tag(name="partial")	-
+defaulttags.py:1286	django/template/defaulttags.py	1286	-	simple_tag	-
+defaulttags.py:1286-1287	django/template/defaulttags.py	1286	1287	@register.simple_tag(name="querystring", takes_context=True)	def querystring(context, *args, **kwargs):
+defaulttags.py:1352-1419	django/template/defaulttags.py	1352	1419	-	-
+defaulttags.py:1441-1443	django/template/defaulttags.py	1441	1443	return ResetCycleNode(parser._last_cycle_node)	raise TemplateSyntaxError("No cycles in template.")
+defaulttags.py:1514-1586	django/template/defaulttags.py	1514	1586	-	-
+defaulttags.py:1575	django/template/defaulttags.py	1575	-	kwarg_re.match	-
+defaulttags.py:1575-1577	django/template/defaulttags.py	1575	1577	"Malformed arguments to url tag"	-
+defaulttags.py:1610-1651	django/template/defaulttags.py	1610	1651	parser.compile_filter(max_width)	-
+defaulttags.py:1654-1690	django/template/defaulttags.py	1654	1690	"%r expected at least one variable assignment" % bits[0]	-
+defaulttags.py:1676	django/template/defaulttags.py	1676	-	support_legacy=True	-
+defaulttags.py:1682-1684	django/template/defaulttags.py	1682	1684	"%r received an invalid token: %r"	-
+defaulttags.py:1683	django/template/defaulttags.py	1683	-	remaining_bits[0]	-
+engine.py:15-16	django/template/engine.py	15	16	filters	-
+engine.py:62-63	django/template/engine.py	62	63	-	-
+engine.py:63	django/template/engine.py	63	-	self.template_builtins = self.get_template_builtins(self.builtins)	-
+engine.py:194	django/template/engine.py	194	-	-	-
+library.py:211-212	django/template/library.py	211	212	delete_first_token	-
+library.py:392-480	django/template/library.py	392	480	-	-
+library.py:421	django/template/library.py	421	-	-	-
+library.py:454	django/template/library.py	454	-	parser.compile_filter	-
+loader_tags.py:87	django/template/loader_tags.py	87	-	-	-
+loader_tags.py:227-232	django/template/loader_tags.py	227	232	-	-
+loader_tags.py:347	django/template/loader_tags.py	347	-	-	-
+smartif.py:22-26	django/template/smartif.py	22	26	-	-
+smartif.py:40-43	django/template/smartif.py	40	43	-	-
+smartif.py:51	django/template/smartif.py	51	-	class Operator(TokenBase):	-
+smartif.py:54-56	django/template/smartif.py	54	56	-	-
+smartif.py:81-83	django/template/smartif.py	81	83	-	-
+smartif.py:83	django/template/smartif.py	83	-	self.second = None	-
+smartif.py:115-116	django/template/smartif.py	115	116	-	-
+smartif.py:140	django/template/smartif.py	140	-	return self.value	-
+smartif.py:149-150	django/template/smartif.py	149	150	-	-
+smartif.py:153	django/template/smartif.py	153	-	EndToken = EndToken()	-
+smartif.py:157	django/template/smartif.py	157	-	ValueError	-
+smartif.py:159-173	django/template/smartif.py	159	173	-	-
+smartif.py:160-171	django/template/smartif.py	160	171	-	-
+smartif.py:179-185	django/template/smartif.py	179	185	-	-
+smartif.py:179-183	django/template/smartif.py	179	183	OPERATORS[token]	-
+smartif.py:198-200	django/template/smartif.py	198	200	-	-
+smartif.py:200	django/template/smartif.py	200	-	display()	-
+dateformat.py:42	django/utils/dateformat.py	42	-	-	-
+dateformat.py:44-48	django/utils/dateformat.py	44	48	TypeError	-
+dateformat.py:326-329	django/utils/dateformat.py	326	329	-	-
+dateformat.py:332-335	django/utils/dateformat.py	332	335	-	-
+formats.py:113	django/utils/formats.py	113	-	str(format_type)	-
+formats.py:147-157	django/utils/formats.py	147	157	-	-
+formats.py:155-157	django/utils/formats.py	155	157	-	-
+formats.py:160-169	django/utils/formats.py	160	169	-	-
+formats.py:172	django/utils/formats.py	172	-	-	-
+formats.py:179-180	django/utils/formats.py	179	180	-	-
+html.py:44	django/utils/html.py	44	-	MAX_STRIP_TAGS_DEPTH = 50	-
+html.py:47	django/utils/html.py	47	-	-	-
+html.py:50-60	django/utils/html.py	50	60	@keep_lazy(SafeString)	return SafeString(html.escape(str(text)))
+html.py:51-60	django/utils/html.py	51	60	SafeString(html.escape(str(text)))	-
+html.py:63-85	django/utils/html.py	63	85	-	-
+html.py:63-75	django/utils/html.py	63	75	_js_escapes = {	ord("\u2029"): "\\u2029",
+html.py:88-92	django/utils/html.py	88	92	-	-
+html.py:95-112	django/utils/html.py	95	112	json.dumps	-
+html.py:103	django/utils/html.py	103	-	json.dumps	-
+html.py:103-105	django/utils/html.py	103	105	json.dumps(value, cls=encoder or DjangoJSONEncoder)	-
+html.py:106-110	django/utils/html.py	106	110	-	-
+django/utils/html.py:115-127	django/utils/html.py	115	127	isinstance(text, Promise)	-
+html.py:115-127	django/utils/html.py	115	127	def conditional_escape(text):	return escape(text)
+html.py:130-140	django/utils/html.py	130	140	-	-
+html.py:140	django/utils/html.py	140	-	-	-
+html.py:169-178	django/utils/html.py	169	178	-	-
+html.py:181-197	django/utils/html.py	181	197	convert_charrefs=False	-
+html.py:210-229	django/utils/html.py	210	229	-	-
+html.py:210-232	django/utils/html.py	210	232	-	-
+html.py:211-229	django/utils/html.py	211	229	-	-
+html.py:214	django/utils/html.py	214	-	-	-
+html.py:222	django/utils/html.py	222	-	raise SuspiciousOperation	-
+html.py:246	django/utils/html.py	246	-	-	-
+html.py:319	django/utils/html.py	319	-	safe_input = isinstance(text, SafeData)	-
+html.py:363-366	django/utils/html.py	363	366	settings.URLIZE_ASSUME_HTTPS	-
+html.py:383	django/utils/html.py	383	-	nofollow_attr = ""	-
+html.py:407-410	django/utils/html.py	407	410	"%s…" % x[: max(0, limit - 1)]	-
+html.py:412-415	django/utils/html.py	412	415	-	-
+html.py:492	django/utils/html.py	492	-	-	-
+html.py:496-499	django/utils/html.py	496	499	def urlize(text, trim_url_limit=None, nofollow=False, autoescape=False):	-
+django/utils/html.py:502-507	django/utils/html.py	502	507	avoid_wrapping	-
+html.py:502-507	django/utils/html.py	502	507	avoid_wrapping	-
+safestring.py:64-78	django/utils/safestring.py	64	78	@keep_lazy(SafeString)	return SafeString(s)
+text.py:36	django/utils/text.py	36	-	\r\n	-
+text.py:193-261	django/utils/text.py	193	261	-	-
+text.py:203-204	django/utils/text.py	203	204	if length <= 0:	return ""
+text.py:205	django/utils/text.py	205	-	-	-
+text.py:236	django/utils/text.py	236	-	-	-
+django/utils/text.py:282	django/utils/text.py	282	-	-	-
+text.py:308-310	django/utils/text.py	308	310	def normalize_newlines(text):	return re_newlines.sub("\n", str(text))
+text.py:313-344	django/utils/text.py	313	344	-	-
+text.py:313	django/utils/text.py	313	-	@keep_lazy_text	-
+text.py:344	django/utils/text.py	344	-	phone.lower()	-
+django/utils/text.py:423	django/utils/text.py	423	-	def smart_split(text):	-
+django/utils/text.py:443-460	django/utils/text.py	443	460	-	-
+text.py:471-481	django/utils/text.py	471	481	str(value)	-
+text.py:473-476	django/utils/text.py	473	476	-	-
+text.py:480	django/utils/text.py	480	-	-	-
+timesince.py:28	django/utils/timesince.py	28	-	-	-
+timesince.py:60-73	django/utils/timesince.py	60	73	now.astimezone(d.tzinfo)	-
+timesince.py:60-70	django/utils/timesince.py	60	70	-	-
+timesince.py:67-68	django/utils/timesince.py	67	68	-	-
+timesince.py:138-143	django/utils/timesince.py	138	143	timeuntil	-
+timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)
+python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
+filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-
+test_unordered_list.py:141	tests/template_tests/filter_tests/test_unordered_list.py	141	-	-	-
+filter_tests/test_unordered_list.py:141	tests/template_tests/filter_tests/test_unordered_list.py	141	-	-	-
+i18n/test_blocktranslate.py:881	tests/template_tests/syntax_tests/i18n/test_blocktranslate.py	881	-	-	-
+tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py:16	tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py	16	-	-	-
+bad_tag.py:6-8	tests/template_tests/templatetags/bad_tag.py	6	8	badtag	-
+custom.py:396-399	tests/template_tests/templatetags/custom.py	396	399	parser.extra_data["extra_data"]	-
+tag_27584.py:8-9	tests/template_tests/templatetags/tag_27584.py	8	9	delete_first_token	-
+tag_27584.py:13-15	tests/template_tests/templatetags/tag_27584.py	13	15	class BadNode(template.Node):	raise template.TemplateSyntaxError("error")
+test_parser.py:36	tests/template_tests/test_parser.py	36	-	-	-
+tests.py:148-155	tests/template_tests/tests.py	148	155	def test_compile_tag_extra_data(self):	self.assertEqual(t.extra_data["extra_data"], "CUSTOM_DATA")

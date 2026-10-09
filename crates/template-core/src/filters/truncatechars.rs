@@ -29,7 +29,7 @@
 //!   Django catches only `ValueError`. `int(1.5)` truncates to `1`, and `1` is a
 //!   valid length.
 //! * **A length `<= 0` is `""`**, decided inside `Truncator.chars`
-//!   (`if length <= 0: return ""`, `text.py:207`). The host's `length` is a
+//!   (`if length <= 0: return ""`, `text.py:203-204`). The host's `length` is a
 //!   `usize`, so this branch cannot cross the seam and is Rust's.
 //! * **A length past `i64` is `usize::MAX`.** The length is only ever compared
 //!   with the text's own length, so any value with more digits than the text is
@@ -62,7 +62,7 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
     };
     let length = match length {
         IntValue::Small(length) if length > 0 => length as usize,
-        // `if length <= 0: return ""` (text.py:207) — Rust's, because the seam's
+        // `if length <= 0: return ""` (`text.py:203-204`) — Rust's, because the seam's
         // length is a `usize` and cannot carry this branch.
         IntValue::Small(_) => return Ok(Value::Str("".into())),
         // `IntValue::Big`'s canonical text carries the sign: a negative Big is

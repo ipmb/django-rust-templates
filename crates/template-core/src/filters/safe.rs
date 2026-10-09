@@ -12,7 +12,7 @@
 //! is the non-`str` half. Measured on the pinned tree, `mark_safe(5)` returns the
 //! `str` subclass `SafeString` (through `SafeString.__new__`'s `str()`), and a
 //! value carrying `__html__` returns **unchanged and not necessarily `SafeData`**
-//! (`safestring.py:64-80`). A Rust `Value::Safe(to_str(value))` would answer the
+//! (`safestring.py:64-78`). A Rust `Value::Safe(to_str(value))` would answer the
 //! common `str` case but not those two, and would be a second `mark_safe` drifting
 //! from the first. So the body asks
 //! [`mark_safe`](crate::filters::host::FilterHost::mark_safe).

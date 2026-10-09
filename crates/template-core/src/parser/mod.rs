@@ -127,7 +127,7 @@ impl<'a> Parser<'a> {
     }
 
     /// `Parser.compile_filter(token)` — `FilterExpression(token, self)`
-    /// (`base.py:682`).
+    /// (`base.py:676`).
     ///
     /// One argument, exactly as in the pinned source: there is no
     /// `ignore_invalid` flag in 6.0.9, so every call site passes a bare string.

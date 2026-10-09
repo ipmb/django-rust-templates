@@ -67,7 +67,7 @@
 //! host". Every node is materialised as Django's own class and renders in
 //! Python, so that test would subtract all of them — `NowNode.render` reads
 //! `settings.USE_TZ` and `timezone.get_current_timezone()`
-//! (`defaulttags.py:404-405`) and `now` is one of M2's nine. It is also not
+//! (`defaulttags.py:403`) and `now` is one of M2's nine. It is also not
 //! "`__init__` takes arguments Rust cannot build": `BlockNode.__init__(name,
 //! nodelist, parent=None)` is descriptor-shaped, and `block` is still
 //! subtracted. The discriminator is on the **compile** side, and specifically on

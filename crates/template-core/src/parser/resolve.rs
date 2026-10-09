@@ -141,7 +141,7 @@ pub trait LookupTarget {
     fn is_context(&self) -> bool;
 
     /// `bit in dir(current)` — consulted **only** for a swallowed attribute-arm
-    /// exception (`base.py:970-977`). It is *not* consulted for
+    /// exception (`base.py:979-980`). It is *not* consulted for
     /// [`Step::Raised`]: the measured `RuntimeError` rows propagate whatever
     /// `dir()` says.
     fn in_dir(&self, bit: &str) -> bool;

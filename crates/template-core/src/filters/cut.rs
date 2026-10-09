@@ -14,7 +14,7 @@
 //!
 //! `cut` is the one body in M4 that **reads the safety of the value it was
 //! handed**, and that value is the one `@stringfilter` produced: Django's wrapper
-//! rebinds `first = str(first)` before the body runs (`defaultfilters.py:44`), so
+//! rebinds `first = str(first)` before the body runs (`defaultfilters.py:46`), so
 //! `isinstance(value, SafeData)` asks about the **coerced** value. The FFI does
 //! the coercion once (§D3) and hands the body a safety-carrying `Value`, so the
 //! body's `safe` is `matches!(&value, Value::Safe(_))` and **no host call is
@@ -117,7 +117,7 @@ mod tests {
     //! `run` *does* have a propagation path — `to_str(&value)?`, which
     //! [`crate::filters::host::FilterHost::to_str`] is allowed to refuse, so a
     //! refusal would escape. It is **unreachable, not absent**: `@stringfilter`
-    //! pre-coerces the value before the body runs (`defaultfilters.py:44`), so
+    //! pre-coerces the value before the body runs (`defaultfilters.py:46`), so
     //! the operand is already a `Value::Str` or `Value::Safe` on arrival and
     //! `to_str` cannot fail — the same fact that lets `upper`/`lower` call it as
     //! a pure accessor. **What would make this sentence false:** if `cut` ever

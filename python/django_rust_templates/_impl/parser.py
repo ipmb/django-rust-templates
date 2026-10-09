@@ -350,8 +350,8 @@ def _materialise_operand(lookup, value, parser=None):
     (`:822-826`) — so this returns the pair rather than the value.
 
     ``False`` means a **constant**, and Django holds its *value*:
-    ``Variable(constant).resolve({})`` (`base.py:745-749` for the variable part,
-    `:757-761` for an argument). For a plain quoted string that value is a
+    ``Variable(constant).resolve({})`` (`base.py:755` for the variable part,
+    `:768` for an argument). For a plain quoted string that value is a
     ``SafeString``; for ``_("…")`` it is ``gettext_lazy(msgid)`` — a lazy proxy,
     which is exactly why the wire carries a ``Variable`` and this flag rather
     than a resolved value: Rust cannot build a proxy, and
@@ -473,7 +473,7 @@ def compile_filter(parser):
     """The ``compile_filter`` callable for ``_native.parse``, for a ``Parser``.
 
     ``TemplateIfParser.create_var``'s
-    ``self.template_parser.compile_filter(value)`` (``defaulttags.py:928``) —
+    ``self.template_parser.compile_filter(value)`` (``defaulttags.py:929``) —
     the ``FilterExpression`` behind one ``{% if %}`` operand. Django's own
     ``Parser.compile_filter`` *is* that call (``base.py:697-701``:
     ``return FilterExpression(token, self)``), so this hands the bound method
@@ -525,7 +525,7 @@ def _materialise_filter_expression(desc, parser=None, resolve_ref=None):
 
     ``is_var`` is recomputed as ``isinstance(self.var, Variable)`` rather than
     carried on the wire, because that expression is Django's own definition
-    (`base.py:777`) and a flag would be a second source of truth for it.
+    (`base.py:783`) and a flag would be a second source of truth for it.
     """
     if parser is None:
         raise LookupError(
@@ -619,7 +619,7 @@ def _decode_value(value, resolve_ref=None, parser=None, child_lists=None):
         # here. `ResetCycleNode.node` is the only attribute that holds one.
         #
         # Empty is loud rather than `None`: Django raises at compile time for a
-        # `{% resetcycle %}` with no `{% cycle %}` (`defaulttags.py:1440-1443`),
+        # `{% resetcycle %}` with no `{% cycle %}` (`defaulttags.py:1441-1443`),
         # so an empty slot here is a wire bug, and a `ResetCycleNode` holding
         # `None` would fail later and elsewhere — inside `render`, as
         # `None.reset(context)`.

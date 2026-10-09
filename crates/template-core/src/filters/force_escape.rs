@@ -13,7 +13,7 @@
 //! ```
 //!
 //! where that `escape` is the imported `django.utils.html.escape`
-//! (`html.py:107-116`: `SafeString(html.escape(str(text)))`). **It is Rust's**,
+//! (`html.py:50-60`: `SafeString(html.escape(str(text)))`). **It is Rust's**,
 //! and the pair `force_escape`/`escape` is the sharpest illustration in M4 of
 //! §D2's line: this five-replacement table is a function of its argument alone, so
 //! [`html_escape`] owns it and no host method is needed, whereas `escape`'s

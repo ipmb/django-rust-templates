@@ -16,7 +16,7 @@
 //! 3. A `while token.contents.startswith("elif")` loop (`:1001-1006`) — note
 //!    **`startswith`**, not `==`: `Parser.parse` stops on
 //!    `token.contents.split()[0] in parse_until`, so `{% elif foo %}` terminates
-//!    the body and its contents are `"elif foo"` (`base.py:582-588`).
+//!    the body and its contents are `"elif foo"` (`base.py:561-564`).
 //! 4. An optional `else`, then the `endif` check (`:1009-1018`).
 //!
 //! The `endif` check is the only message this file owns, and it is reached by a
@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn the_condition_carries_the_operands_handle_and_not_a_filter_expression() {
         // The seam: `TemplateIfParser.create_var` calls the *host's*
-        // `compile_filter` (`defaulttags.py:928`), so each operand is a handle
+        // `compile_filter` (`defaulttags.py:929`), so each operand is a handle
         // and not an `AttrValue::FilterExpr`. Two operands must be two handles —
         // which is what makes `CountingHost` and not `NoHost` the right host
         // here: under `NoHost` every handle is `NodeRef(0)` and "two operands, two

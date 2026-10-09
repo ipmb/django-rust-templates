@@ -179,7 +179,7 @@ TEMPLATES = [
     # `reversed` is read from the end, so the `in` moves one bit left: the
     # sequence is still `y` and the loop variable is still `x`.
     "{% for x in y reversed %}{% endfor %}",
-    # The join-then-split (`defaulttags.py:877`): all three comma spellings give
+    # The join-then-split (`defaulttags.py:886`): all three comma spellings give
     # `["a", "b"]`, and a body that split the bits directly would give one loop
     # variable for the first two.
     "{% for a, b in y %}{% endfor %}",
@@ -290,7 +290,7 @@ TEMPLATES = [
     # which is what makes it a success row rather than one for the error corpus.
     "{% load tag_27584 %}{% badtag %}{% endbadtag %}",
     # The host-owned builtin: `querystring` is Django's `simple_tag`
-    # (`defaulttags.py:1349`) and not in Rust's registry at all.
+    # (`defaulttags.py:1286-1287`) and not in Rust's registry at all.
     "{% querystring page=2 %}",
 ]
 

@@ -193,7 +193,7 @@ class IfConditionRefTests(unittest.TestCase):
 
     The other half of this file. A condition's operand is built by the host
     while the tag compiles — `TemplateIfParser.create_var` calls
-    `self.template_parser.compile_filter(value)` (`defaulttags.py:928`) — so the
+    `self.template_parser.compile_filter(value)` (`defaulttags.py:929`) — so the
     table is already filled when `_native.parse` returns, with no
     materialisation step needed to see it. What is left to check is that what it
     was filled with is the *host's own object* rather than a re-parse, which is
@@ -323,7 +323,7 @@ class CycleIdentityTests(unittest.TestCase):
 
     def test_an_empty_slot_in_an_attribute_is_loud(self):
         # `{% resetcycle c %}` with no `{% cycle … as c %}`: Django raises at
-        # compile time (`defaulttags.py:1440-1443`), so this cannot come from a
+        # compile time (`defaulttags.py:1441-1443`), so this cannot come from a
         # template — but a wire bug that reserved a slot and never filled it must
         # not reach `ResetCycleNode.node` as a silent `None`.
         with self.assertRaises(LookupError) as caught:

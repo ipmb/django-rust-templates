@@ -423,7 +423,7 @@ ERRORS = [
     # And the inner failure Django raises itself rather than the inner tag's
     # compile function: `Parser.parse` stopped at `{% enddiv %}`'s absence finds
     # a block tag it was not told to stop for and goes through
-    # `invalid_block_tag` → `self.error(token, msg)` (`base.py:632-651`). Same
+    # `invalid_block_tag` → `self.error(token, msg)` (`base.py:632-648`). Same
     # seam, second producer of the token, so the transport has to be in
     # `call_tag`'s raise path rather than in a particular tag's error.
     (
