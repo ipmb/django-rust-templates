@@ -108,9 +108,9 @@ base.py:1202	django/template/base.py	1202	-	kwargs[key] = parser.compile_filter(
 base.py:1203-1206	django/template/base.py	1203	1206	-	-
 defaultfilters.py:6	django/template/defaultfilters.py	6	-	-	-
 defaultfilters.py:14	django/template/defaultfilters.py	14	-	-	-
-defaultfilters.py:38-52	django/template/defaultfilters.py	38	52	-	-
+defaultfilters.py:38-52	django/template/defaultfilters.py	38	52	def stringfilter(func):	return _dec
 defaultfilters.py:46	django/template/defaultfilters.py	46	-	first = str(first)	-
-defaultfilters.py:48	django/template/defaultfilters.py	48	-	-	-
+defaultfilters.py:48	django/template/defaultfilters.py	48	-	if isinstance(first, SafeData) and getattr(unwrap(func), "is_safe", False):	-
 defaultfilters.py:60-68	django/template/defaultfilters.py	60	68	addslashes	-
 defaultfilters.py:71-75	django/template/defaultfilters.py	71	75	capfirst	-
 defaultfilters.py:78-83	django/template/defaultfilters.py	78	83	-	-
@@ -214,7 +214,7 @@ defaultfilters.py:511-516	django/template/defaultfilters.py	511	516	-	-
 defaultfilters.py:518-525	django/template/defaultfilters.py	518	525	safeseq	-
 defaultfilters.py:528-532	django/template/defaultfilters.py	528	532	def striptags(value):	return strip_tags(value)
 defaultfilters.py:540-575	django/template/defaultfilters.py	540	575	def _property_resolver(arg):	-
-defaultfilters.py:558-570	django/template/defaultfilters.py	558	570	-	-
+defaultfilters.py:558-570	django/template/defaultfilters.py	558	570	def resolve(value):	value = getattr(value, part)
 defaultfilters.py:578-588	django/template/defaultfilters.py	578	588	-	-
 defaultfilters.py:578-599	django/template/defaultfilters.py	578	599	def dictsort(value, arg):	-
 defaultfilters.py:578-587	django/template/defaultfilters.py	578	587	return sorted(value, key=_property_resolver(arg))	return ""
