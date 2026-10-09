@@ -298,11 +298,13 @@ pub struct VariableDesc {
 
 /// One of a `FilterExpression`'s operands: its variable part, or one argument.
 ///
-/// Django's own tuple — `(lookup, value)`, `base.py:758-761` for an argument and
-/// `:745-756` for the variable part. `lookup` is read at **render** time, where
-/// `if not lookup: arg_vals.append(mark_safe(arg))` (`base.py:806-807`) decides
-/// between a constant that is already a value and a variable to resolve against
-/// the context, so it is not decorative.
+/// Django's own pair — `(lookup, value)` — is built for a filter argument at
+/// `base.py:768` and `base.py:770`, and the operand's variable part has the same
+/// two shapes without the pair: `base.py:755` resolves a constant eagerly and
+/// `base.py:763` holds a `Variable` to resolve per render. `lookup` is read at
+/// **render** time, where `if not lookup: arg_vals.append(mark_safe(arg))`
+/// (`base.py:806-807`) decides between a constant that is already a value and a
+/// variable to resolve against the context, so it is not decorative.
 ///
 /// **The value is always an [`AttrValue::Variable`], in both branches.** That
 /// looks like it makes the flag redundant and it does not:
@@ -338,7 +340,7 @@ pub struct FilterCall {
     /// so no Rust type can carry one; it crosses as [`Self::handle`] instead.
     pub name: String,
     /// At most one, because `filter_re`'s argument group allows zero or one
-    /// (`base.py:703-712`). A `Vec` rather than an `Option` because it *is*
+    /// (`base.py:706-711`). A `Vec` rather than an `Option` because it *is*
     /// Django's list, and a future Django that allowed more would otherwise need
     /// a wire change.
     pub args: Vec<FilterVar>,
@@ -362,7 +364,7 @@ pub struct FilterCall {
     pub handle: Option<NodeRef>,
 }
 
-/// A `FilterExpression` as it crosses the wire (`base.py:722-775`).
+/// A `FilterExpression` as it crosses the wire (`base.py:722-783`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilterExprDesc {
     /// `FilterExpression.token` — the `{{ … }}` contents as they arrived.
