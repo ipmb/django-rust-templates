@@ -16,9 +16,9 @@
 //! `dictsort` with `reverse=True` — the **same** host call and the **same**
 //! `(AttributeError, TypeError)` → `""` catch, and only the boolean differs. Both
 //! filters are one [`FilterHost::sort_by_property`] call because
-//! `_property_resolver` (`:540-575`) and the sort are one semantic unit; see
-//! [`crate::filters::dictsort`] for why splitting them across the FFI would mean
-//! reimplementing Python's exception classification in Rust.
+//! `_property_resolver` (`defaultfilters.py:540-575`) and the sort are one
+//! semantic unit; see [`crate::filters::dictsort`] for why splitting them across
+//! the FFI would mean reimplementing Python's exception classification in Rust.
 //!
 //! The argument's **type** is as load-bearing here as it is for `dictsort`
 //! (§D7.1): `float(arg)` sends an int `1` to `itemgetter` and a string `'1'` to
