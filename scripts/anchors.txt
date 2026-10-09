@@ -181,14 +181,16 @@ defaultfilters.py:540-575	django/template/defaultfilters.py	540	575	def _propert
 defaultfilters.py:558-570	django/template/defaultfilters.py	558	570	-	-
 defaultfilters.py:578-588	django/template/defaultfilters.py	578	588	-	-
 defaultfilters.py:578-599	django/template/defaultfilters.py	578	599	def dictsort(value, arg):	-
+defaultfilters.py:578-587	django/template/defaultfilters.py	578	587	return sorted(value, key=_property_resolver(arg))	return ""
 defaultfilters.py:590-600	django/template/defaultfilters.py	590	600	dictsortreversed	-
-defaultfilters.py:602-608	django/template/defaultfilters.py	602	608	-	-
-defaultfilters.py:611-621	django/template/defaultfilters.py	611	621	str.join(list)	-
-defaultfilters.py:624-630	django/template/defaultfilters.py	624	630	-	-
-defaultfilters.py:633-639	django/template/defaultfilters.py	633	639	-	-
-defaultfilters.py:642-648	django/template/defaultfilters.py	642	648	-	-
+defaultfilters.py:590-599	django/template/defaultfilters.py	590	599	return sorted(value, key=_property_resolver(arg), reverse=True)	return ""
+defaultfilters.py:602-608	django/template/defaultfilters.py	602	608	return value[0]	return ""
+defaultfilters.py:611-621	django/template/defaultfilters.py	611	621	def join(value, arg, autoescape=True):	return mark_safe(data)
+defaultfilters.py:624-630	django/template/defaultfilters.py	624	630	return value[-1]	return ""
+defaultfilters.py:633-639	django/template/defaultfilters.py	633	639	return len(value)	return 0
+defaultfilters.py:642-648	django/template/defaultfilters.py	642	648	return random_module.choice(value)	return ""
 defaultfilters.py:651-665	django/template/defaultfilters.py	651	665	-	-
-defaultfilters.py:651-666	django/template/defaultfilters.py	651	666	@register.filter("slice", is_safe=True)	-
+defaultfilters.py:651-666	django/template/defaultfilters.py	651	666	return value[slice(*bits)]	return value  # Fail silently.
 defaultfilters.py:669-743	django/template/defaultfilters.py	669	743	-	-
 defaultfilters.py:708-714	django/template/defaultfilters.py	708	714	if isinstance(next_item, (list, tuple, types.GeneratorType)):	yield item, next_item
 defaultfilters.py:745-754	django/template/defaultfilters.py	745	754	-	-

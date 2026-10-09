@@ -1074,7 +1074,8 @@ CASES: list[dict] = [
         "value": mark_safe("a b c d"),
         "arg": 3,
     },
-    # --- first (`:700`, `value[0]`, catching **only** IndexError) -----------
+    # --- first (`defaultfilters.py:602-608`, `value[0]`, catching **only**
+    #     IndexError)
     #
     # `first` and `last` have the same body shape and **opposite** `is_safe`
     # (`first` is `False`, `last` is `True`), so the pair is what catches a loop
@@ -1118,7 +1119,7 @@ CASES: list[dict] = [
         "filter": "first",
         "value": mark_safe("ab"),
     },
-    # --- last (`:706`, `value[-1]`, is_safe=True) --------------------------
+    # --- last (`defaultfilters.py:624-630`, `value[-1]`, is_safe=True)
     {
         "name": "last/list",
         "filter": "last",
@@ -1136,7 +1137,8 @@ CASES: list[dict] = [
         "filter": "last",
         "value": mark_safe("ab"),
     },
-    # --- length (`:712`, `len(value)` on `(ValueError, TypeError)` -> 0) ---
+    # --- length (`defaultfilters.py:633-639`, `len(value)` on
+    #     `(ValueError, TypeError)` -> 0)
     {
         "name": "length/list",
         "filter": "length",
@@ -1173,7 +1175,8 @@ CASES: list[dict] = [
         "filter": "length",
         "value_factory": lambda: (x for x in [1, 2]),
     },
-    # --- slice (`:640`, Rust parses the bits, the host subscripts) ---------
+    # --- slice (`defaultfilters.py:651-666`, Rust parses the bits, the host
+    #     subscripts)
     #
     # The **type** half of §D5 is the point of the first row: `"abcdef"|slice:":3"`
     # is the *string* `"abc"`, where an index route (get + Rust slicing) yields a
@@ -1270,7 +1273,7 @@ CASES: list[dict] = [
         "value": 5,
         "arg": ":3",
     },
-    # --- join (`:604`, needs_autoescape, is_safe=True) ---------------------
+    # --- join (`defaultfilters.py:611-621`, needs_autoescape, is_safe=True)
     #
     # The pair the per-row `context` key exists for. Both are `safe=True` and
     # differ only in the text, so nothing but the key can tell them apart.
@@ -1350,7 +1353,7 @@ CASES: list[dict] = [
         "value_factory": lambda: (x for x in ["a", "b"]),
         "arg": ", ",
     },
-    # --- random (`:590`, `random.choice` on IndexError -> "") --------------
+    # --- random (`defaultfilters.py:642-648`, `random.choice` on IndexError -> "")
     #
     # **Membership, not equality** (Review Focus 4): the answer is chosen at
     # random, so an equality row would be green roughly one time in three. The
@@ -1376,7 +1379,8 @@ CASES: list[dict] = [
         "value": mark_safe("abc"),
         "membership": True,
     },
-    # --- dictsort / dictsortreversed (`:580`/`:560`) ----------------------
+    # --- dictsort / dictsortreversed
+    #     (`defaultfilters.py:578-587`/`defaultfilters.py:590-599`)
     #
     # One host call each, with `(AttributeError, TypeError)` -> `""`. The
     # argument's *shape* decides the resolver, and this is the pair that shows it:
