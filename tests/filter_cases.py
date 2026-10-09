@@ -109,6 +109,20 @@ exhausted iterator, and a dropped `context` key moves both engines together (see
 there is nothing on the other side for them to agree with. Each time this has
 bitten M4 it has arrived looking like a new problem. It is the same one.
 
+**The fourth form is not about a row at all, and it is the one that was live for
+two waves: the harness's own configuration is a shared input too.** Until Task 7's
+third wave, `filter_probe.ensure_settings` configured `USE_I18N=False` and never
+called `django.setup()`, so every `gettext`/`ngettext` returned its msgid — to
+*both* engines. A body that inlined the English literal therefore scored exactly
+as well as one that asked the host, and every `gettext`-dependent row in waves 1
+and 2 was not weak but **inert**: it would have stayed green through a body that
+deleted the host call outright. No row can carry this, because the row is not
+where the input lives. The defense is the one below — a pinned literal on every
+settings-bearing row — and the reason it is stated as a rule rather than as a
+nicety is that the failure mode is a *silent* one: measured,
+`USE_THOUSAND_SEPERATOR=True` (one letter transposed) moves nothing anywhere, so
+a typo'd setting name leaves a row green and asserting nothing.
+
 The rows whose input survives the filter's own `try` are a different thing and
 stay here, where they are common: the `dictsort` rows that end in `""` are three
 different caught arms.

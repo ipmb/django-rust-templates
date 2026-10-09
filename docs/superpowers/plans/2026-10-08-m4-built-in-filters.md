@@ -486,8 +486,13 @@ author would have to keep current by hand.
 
 **D7 — the fan-out contract, restated for filters because the shared surface is
 bigger than the tags' was.** §10.4's contract is that an agent owns one module,
-writes no other file, runs `cargo test -p template-core`, never runs
-`maturin develop`, and never commits. Filters add one failure mode that tags did
+writes no other file, runs `cargo test -p template-core` **and
+`cargo fmt --all -- --check`**, never runs `maturin develop`, and never commits.
+The formatter belongs in the brief explicitly, because §10.4 names the test
+command and not the formatter and agents follow the contract as written: Task 7's
+third wave landed with `fmt` unrun and was reformatted centrally, and the diff is
+noise in a commit that is meant to be read as a body.
+Filters add one failure mode that tags did
 not have: **the seam is a trait**, and an agent whose filter needs an operation
 `FilterHost` does not have is one line away from editing a shared file. So the
 contract gains a sentence:

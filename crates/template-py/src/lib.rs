@@ -154,6 +154,16 @@ fn filter(
 /// back to `Exception` with the name prefixed; `decimal.InvalidOperation` lands
 /// there, because [`PyErrorKind`] records `__name__` and not the module it came
 /// from, so the name alone cannot find it.
+///
+/// **That gap is unreachable rather than merely unhit, and the distinction is the
+/// one worth recording.** `InvalidOperation` arises only from `Decimal`
+/// arithmetic, and on the pinned tree the name occurs at exactly three sites
+/// outside tests — `defaultfilters.py:6`, `:155` and `:181` — every one of them
+/// inside `floatformat`, and all three inside an `except` clause that catches it
+/// (`:155`, `:158`, `:181`). No filter lets one escape, so no body can hand this
+/// function a class it cannot rebuild. "We have not hit it yet" leaves a reader
+/// unable to tell whether the next filter will; "no filter can produce it" is a
+/// statement about the registry, and it is the one that holds.
 fn filter_py_error(py: Python<'_>, error: &Error) -> PyErr {
     let ErrorKind::FilterHost(inner) = &error.kind else {
         // An `Unimplemented` is a filter this engine has not built. Anything else
