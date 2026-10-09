@@ -7,7 +7,7 @@ direction, so it is worth an instrument rather than a sentence:
   **first word** of the end token (`django/template/base.py:561`, `:564` — the
   `command in parse_until` test, whose `command` is `token.contents.split()[0]`);
 * the check that decides whether it ended **legitimately** compares the **whole
-  contents** (`django/template/defaulttags.py:1243` — `endpartial.contents not in
+  contents** (`django/template/defaulttags.py:1244` — `endpartial.contents not in
   valid_endpartials`).
 
 `Lexer.create_token` strips only the *outer* whitespace

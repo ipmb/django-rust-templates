@@ -25,6 +25,7 @@ crates/template-core/src/parser/mod.rs:487-492	crates/template-core/src/parser/m
 crates/template-core/src/parser/mod.rs:546	crates/template-core/src/parser/mod.rs	546	-	pub fn extend_nodelist(	-
 crates/template-core/src/parser/mod.rs:552	crates/template-core/src/parser/mod.rs	552	-	if node.must_be_first && nodelist.contains_nontext {	-
 crates/template-core/src/parser/registry.rs:117-134	crates/template-core/src/parser/registry.rs	117	134	-	-
+crates/template-core/src/parser/registry.rs:117-132	crates/template-core/src/parser/registry.rs	117	132	-	-
 crates/template-core/src/parser/resolve.rs:28	crates/template-core/src/parser/resolve.rs	28	-	pub enum Step {	-
 crates/template-core/src/parser/resolve.rs:156	crates/template-core/src/parser/resolve.rs	156	-	pub trait LookupTarget {	-
 crates/template-core/src/parser/resolve.rs:253	crates/template-core/src/parser/resolve.rs	253	-	pub enum LookupOutcome {	-
@@ -64,7 +65,7 @@ base.py:198-200	django/template/base.py	198	200	parser.parse()	-
 base.py:204-212	django/template/base.py	204	212	e.raw_error_message = raw_message	-
 base.py:294-346	django/template/base.py	294	346	-	-
 base.py:314-322	django/template/base.py	314	322	-	-
-base.py:341-346	django/template/base.py	341	346	-	-
+base.py:340-346	django/template/base.py	340	346	-	-
 base.py:358-403	django/template/base.py	358	403	class Token:	-
 django/template/base.py:390-403	django/template/base.py	390	403	-	-
 base.py:472	django/template/base.py	472	-	-	-

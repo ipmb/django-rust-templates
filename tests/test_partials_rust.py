@@ -299,7 +299,7 @@ class ReferenceTableTests(unittest.TestCase):
 
         Identity is asserted rather than output, because output **cannot** see
         this: `PartialTemplate.render` does
-        `with context.render_context.push_state(self)` (`base.py:341-346`), so a
+        `with context.render_context.push_state(self)` (`base.py:340-346`), so a
         named cycle restarts inside every partial render either way — measured,
         `.review/m13-measurements/m13_measure_cycle_across_partials.py`, whose
         `'aaa'` is the row below. And the reason no *behavioural* row can replace

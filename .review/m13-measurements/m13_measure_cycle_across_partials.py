@@ -12,7 +12,7 @@ rendered string. Three facts had to be measured before that could stand:
 * **whether `CycleNode`'s position survives a partial render**, which is where the
   premise actually breaks: `PartialNode.render` calls into `PartialTemplate`,
   whose `render` does `context.render_context.push_state(self)`
-  (`base.py:341-346`), so each partial render gets a fresh layer and the named
+  (`base.py:340-346`), so each partial render gets a fresh layer and the named
   cycle **restarts**. That is why the output is `"aaa"` and not the `"aba"` a
   single monotonically-advancing node would give.
 

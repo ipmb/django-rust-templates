@@ -292,10 +292,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # worth writing down: `git diff tests/` since `cea06d9` is `+12/-4`, so the net
 # and "eight new rows and no rename" are the same +8 while the shape is not.
 # `tests/test_partials_rust.py` gains **two classes, eight rows between them** —
-# and this count was wrong on its first pass in exactly the way this comment
-# exists to catch: it named `PartialDefSeamTests` and stopped, as though the file
-# had gained one class, and discovery then disagreed by four. Both classes are
-# Task 4's, because Task 4 is what needs them.
+# and this count was **read rather than run** on its first pass: the hand
+# enumeration named `PartialDefSeamTests` and stopped, as though the file had
+# gained one class, while `git diff cea06d9 24bed0f -- tests/ | grep -c '^+    def
+# test_'` had said **12** all along — the command was right and the application
+# of it was partial, which is the opposite of a tool with a blind spot and is
+# fixed by running the command rather than by improving it. Discovery then
+# disagreed by four, and the four are the second class. Both classes are Task
+# 4's, because Task 4 is what needs them.
 #
 # `PartialDefSeamTests`, four rows and all of them the ones Tasks 2 and 3 could
 # not write because neither tag existed end-to-end until this task: a use
