@@ -1404,6 +1404,29 @@ from Django's own filter_raw_string."
 
 **What this task does not do.** It does not build `filter_re` (Task 3), add a `_native` binding, or touch `kwarg_re` (Task 9). It adds no corpus entry, because at this point there is no variable path for a corpus entry to reach — the divergences are pinned at the class, which is where they are decidable now and where `filter_re` will read them later. If a `regex` upgrade moves `regex-syntax`'s UCD, the guard fails and the fix is a re-measure, not an edit to `PYTHON_WORD_*`: `\p{L}\p{N}_` is Python's definition, and a crate whose tables disagree with CPython is the thing that is wrong.
 
+**Task 2 as implemented — one correction.** Step 6's command,
+`.venv/bin/python -I -m unittest tests.test_pyregex_parity`, does not run: `-I`
+implies `-P`, so the repository root is not on `sys.path` and the loader reports
+`ModuleNotFoundError: No module named 'tests'` before any test is collected. The
+`-I` in the prose was about the *interpreter* (the system Python has no
+`asgiref`, so `import django.template.base` fails there), not about isolation.
+Measured both ways: `-I` fails, and the repository's own convention —
+`.venv/bin/python -m unittest discover -s tests -t <root>`, which is what
+`scripts/check.sh:30` runs — collects the file and passes. Use that, or the
+equivalent `-m unittest tests.test_pyregex_parity`, for this file and for any
+later task whose command Step says `-I`.
+
+The guards were made to fail before being kept. Step 3's five failures were
+observed exactly as written above, `index 5: got (181, 181), expected (178, 179)`
+included. On the Python side three further falsifications were run: the
+committed table's last range widened by one code point (the set-difference test
+names the single code point and the count test reports 142941 ≠ 142940), and the
+fixture's two lines transposed (the fixture test fails). The splice test's counts
+are not vacuous — measured on the raw string, `filter_raw_string` holds exactly
+three bare `\w`: one `(?P<filter_name>\w+)` and two `[\w\.\+-]+`. That is the
+1 + 2 the test asserts, and a replacement that missed either form would leave a
+`\w` behind for `assertNotIn` to catch.
+
 ---
 
 ### Task 3: Python's `int()`/`float()` grammar, and `Variable.__init__`'s parsing
