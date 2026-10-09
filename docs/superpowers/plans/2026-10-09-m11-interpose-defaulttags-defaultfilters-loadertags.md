@@ -704,4 +704,18 @@ is byte-identical to the commit before Task 3 again. (2) survives the revert
 untouched, and the comment that replaced "upstream's order" was rewritten to the
 same length so that the revert shifts nothing: the seam's 33-line `delete` run
 and its 17 executable lines are both recorded, because that run had by then been
-miscounted three ways.**
+miscounted three ways. (4) The same review's SHOULD-FIX — `tests.test_shim`'s
+`tearDown` uninstalled the shim unconditionally, so every module discovered after
+it ran against stock Django — is fixed as the two-method contract (capture the
+baseline in `setUp`, restore it in `tearDown`) with the row
+`test_tearDown_restores_the_state_it_found`, which was **made to fail first**:
+against the old unconditional uninstall it fails `False != True : tearDown did
+not put the session back where setUp found it`. The sentence worth keeping is
+what the repair turned up: **fixing the invariant surfaced two more instances of
+the defect it was fixing, inside the module that caused it** —
+`test_django_template_resolves_to_our_implementation` and
+`test_strict_mode_raises_while_falling_back` had been green on a premise
+inherited from the previous row's teardown, and each now establishes its own. A
+fix that finds more of its own defect is the evidence it was structural rather
+than cosmetic, and it is the result most likely to be rounded to "the fix
+worked".**
