@@ -69,14 +69,14 @@ pub trait Host {
     /// filter and at that point in the iteration, because that is where Django
     /// calls them (`base.py:771-772`). Deferring the check to the shell is not an
     /// option, and the reason is an order rather than a preference: the loop
-    /// checks the *gap* before it compiles a filter and *after* it (`upto !=
-    /// start` at `:747`, `upto != len(token)` at `:775`), so measured,
-    /// `x|does_not_exist||upper` reports `Invalid filter: 'does_not_exist'`
-    /// while `x||does_not_exist` reports `Could not parse some characters`. No
-    /// batched ordering produces both. The second reason is larger: an error
-    /// raised while *materialising* cannot precede one raised while parsing, so
-    /// a `{{ x|bad }}` on an earlier line would lose to a later line's unmatched
-    /// tag.
+    /// checks the *gap* before it compiles a filter and *after* it
+    /// (`upto != start` at `base.py:747`, `upto != len(token)` at `base.py:775`),
+    /// so measured, `x|does_not_exist||upper` reports
+    /// `Invalid filter: 'does_not_exist'` while `x||does_not_exist` reports
+    /// `Could not parse some characters`. No batched ordering produces both. The
+    /// second reason is larger: an error raised while *materialising* cannot
+    /// precede one raised while parsing, so a `{{ x|bad }}` on an earlier line
+    /// would lose to a later line's unmatched tag.
     ///
     /// **Returns the filter Django bound, by handle, and that is not
     /// optional.** `find_filter`'s result is what renders —
@@ -100,9 +100,9 @@ pub trait Host {
     /// ```
     ///
     /// binds token 1 to custom's `upper` under a late lookup, where Django bound
-    /// it to the builtin at `:771`. Measured end-to-end with a library that
-    /// rebinds `upper` to `shadowed-%s`: Django renders `'ABCshadowed-abc'` —
-    /// builtin, then shadow — and `tests/test_filter_rebinding.py` is that row.
+    /// it to the builtin at `base.py:771`. Measured end-to-end with a library
+    /// that rebinds `upper` to `shadowed-%s`: Django renders `'ABCshadowed-abc'`
+    /// — builtin, then shadow — and `tests/test_filter_rebinding.py` is that row.
     ///
     /// This seam is called at `base.py:771`, so it is where the binding is still
     /// Django's; the shell stores the object it found in the same arena
@@ -128,11 +128,11 @@ pub trait Host {
     /// per-iteration order is gap → argument `Variable` → `find_filter` →
     /// `args_check` (`base.py:747-772`), and the first two are separable in
     /// outcome: measured, `x|does_not_exist:_bad` reports the *underscore* error
-    /// because `Variable('_bad')` raises at `:770` and `find_filter` is never
-    /// reached, while `x|does_not_exist:-5` reports `Invalid filter` because
-    /// `-5` parses as a literal and control does reach it. An implementation that
-    /// asked the host first — tempting, since the filter name is known earlier —
-    /// swaps those two.
+    /// because `Variable('_bad')` raises at `base.py:770` and `find_filter` is
+    /// never reached, while `x|does_not_exist:-5` reports `Invalid filter`
+    /// because `-5` parses as a literal and control does reach it. An
+    /// implementation that asked the host first — tempting, since the filter name
+    /// is known earlier — swaps those two.
     fn check_filter(&self, _name: &str, _arg_count: usize) -> Result<Option<NodeRef>, Error> {
         Ok(None)
     }
@@ -195,11 +195,11 @@ pub trait Host {
     /// builds the `FilterExpression`; a condition's operand is the host's own
     /// object, built while the tag compiles. Both are correct and they are not
     /// interchangeable: `TemplateLiteral.value` has to answer
-    /// `value.resolve(context, ignore_failures=True)` (`:917-918`), and the
-    /// handle is what makes the object that answers it the *host's* rather than
-    /// one rebuilt to look like it. It is also the seam M3's `CompileFilter`
-    /// already reserved — `smartif.rs`'s `LiteralValue::Compiled(NodeRef)` —
-    /// and this is its first and only caller.
+    /// `value.resolve(context, ignore_failures=True)` (`defaulttags.py:917-918`),
+    /// and the handle is what makes the object that answers it the *host's*
+    /// rather than one rebuilt to look like it. It is also the seam M3's
+    /// `CompileFilter` already reserved — `smartif.rs`'s
+    /// `LiteralValue::Compiled(NodeRef)` — and this is its first and only caller.
     ///
     /// `token` is one **merged** bit, not the whole condition: `smartif`'s
     /// `merge_tokens` has already folded `is not` and `not in`, and an operator
