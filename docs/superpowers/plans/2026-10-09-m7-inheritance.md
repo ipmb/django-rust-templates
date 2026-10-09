@@ -824,8 +824,14 @@ block's neighbourhood, the four measured success rows:
 
 In `tests/parser_error_corpus.py` add the measured failures (each string was
 produced against `.django` @ 6.0.9 with `settings.configure(USE_I18N=False,
-USE_TZ=False)` + `django.setup()`, because `invalid_block_tag` goes through the
-translation layer):
+USE_TZ=False)` + `django.setup()`). Settings are needed because the
+`{% endblock b %}` row is the first corpus row whose `parse_until` has two
+elements, and only `get_text_list`'s two-element branch evaluates `_(", ")` —
+eagerly, so the translation layer is reached even though the separator is
+discarded (`utils/text.py:297-303`). It is *not* `last_word`'s lazy default:
+`invalid_block_tag` passes `"or"` explicitly. Measured per row in
+`.review/m7-measurements/m7_measure_gettextlist.py` — of the 95 rows, exactly
+that one raises `ImproperlyConfigured` without settings:
 
 ```python
     ("{% block %}x{% endblock %}", "'block' tag takes only one argument"),
@@ -1027,7 +1033,8 @@ the two disagree on a bare filename — `dirname("a")` is `""`, not `"."`. That
 case is reachable here: `construct_relative_path` calls it on
 `current_template_name.lstrip("/")`, which for a top-level template *is* a bare
 filename. The first draft of this step had the `split` form and failed on exactly
-that row; the code below is the version that passes all twelve measured rows.
+that row; the code below is the version that passes all thirteen rows of the
+`normpath` table and all nine of the `dirname` one.
 
 ```rust
 //! `posixpath`, the three functions `construct_relative_path` needs.
@@ -1166,6 +1173,11 @@ mod tests {
         let outside = construct_relative_path(Some("index.html"), "'../../x.html'", false)
             .unwrap_err();
         assert_eq!(outside.kind, ErrorKind::Syntax);
+        assert_eq!(
+            outside.message(),
+            "The relative path ''../../x.html'' points outside the file hierarchy that \
+             template 'index.html' is in."
+        );
 
         let same = construct_relative_path(Some("index.html"), "'index.html'", false);
         assert!(same.is_ok(), "not relative: returns early, no recursion check");
@@ -1173,8 +1185,26 @@ mod tests {
         let same = construct_relative_path(Some("index.html"), "'./index.html'", false)
             .unwrap_err();
         assert_eq!(same.kind, ErrorKind::Syntax);
-        assert!(
-            construct_relative_path(Some("index.html"), "'./index.html'", true).is_ok(),
+        assert_eq!(
+            same.message(),
+            "The relative path ''./index.html'' was translated to template name \
+             'index.html', the same template in which the tag appears."
+        );
+        // The origin with a leading slash, which is the input that separates
+        // `current` from `new_name` in that message: `stripped` is
+        // `index.html` and so is `new_name`, but Django prints the *origin*.
+        // A test that only used slash-free origins would pass with either.
+        // Measured on the pin.
+        let same = construct_relative_path(Some("/index.html"), "'./index.html'", false)
+            .unwrap_err();
+        assert_eq!(
+            same.message(),
+            "The relative path ''./index.html'' was translated to template name \
+             '/index.html', the same template in which the tag appears."
+        );
+        assert_eq!(
+            construct_relative_path(Some("index.html"), "'./index.html'", true).unwrap(),
+            "\"index.html\"",
             "allow_recursion skips the third check"
         );
     }
@@ -1228,9 +1258,16 @@ pub fn construct_relative_path(
         )));
     }
     if !allow_recursion && stripped == new_name {
+        // `current`, **not** `new_name`: the second `%s` in Django's message is
+        // `current_template_name` (`loader_tags.py:280-283`), and the two differ
+        // whenever the origin had a leading slash — measured on the pin,
+        // `construct_relative_path("/index.html", "'./index.html'", False)`
+        // says "template name '/index.html'" while the new name is
+        // `index.html`. That the two coincide for every slash-free origin is
+        // what makes this the branch a same-shape test misses.
         return Err(Error::syntax(format!(
             "The relative path '{relative_name}' was translated to template name \
-             '{new_name}', the same template in which the tag appears."
+             '{current}', the same template in which the tag appears."
         )));
     }
     let bytes = relative_name.as_bytes();

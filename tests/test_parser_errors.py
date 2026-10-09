@@ -151,25 +151,39 @@ def token_shape(token):
 class ErrorParityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # `Engine()` reads settings, and so does Django's own message formatting
-        # for one row of the corpus. Configured here rather than at import time
-        # because a module-level `settings.configure` changes what every test
-        # module discovered after this one sees.
+        # Django's own message formatting reads settings for exactly one row of
+        # the corpus. Configured here rather than at import time because a
+        # module-level `settings.configure` changes what every test module
+        # discovered after this one sees — and without this line the module only
+        # passed because some *other* discovered module had configured settings
+        # first: an order dependency, which is why the failure appears
+        # standalone but not under `unittest discover`.
         #
-        # The row that needs it is `{% block a %}x{% endblock b %}`, whose
-        # Django message is built by `Parser.invalid_block_tag` ->
-        # `get_text_list(["'%s'" % p for p in parse_until], "or")`
-        # (`base.py:632-648`, the `get_text_list` call inside it is at line 641).
-        # `get_text_list` defaults `last_word` to `gettext_lazy("or")`
-        # (`utils/text.py:282`) and joins with `_(", ")`, so *formatting*
-        # the lazy string is what reaches the translation layer and asks for
-        # `USE_I18N`. Every earlier corpus row passed a one-element list, which
-        # returns at the top of the function before any of that runs
-        # (`utils/text.py:297-303`) — so this is the first row that needs
-        # settings, and without this line the module only passed because some
-        # *other* discovered module had configured them first (an order
-        # dependency, which is why the failure appears standalone but not under
-        # `unittest discover`).
+        # The row is `{% block a %}x{% endblock b %}` and it is the only one of
+        # the 95 that raises `ImproperlyConfigured` with settings unconfigured —
+        # measured per row, with `Trans`'s function cache cleared between rows
+        # because it caches the first resolved function and its docstring says a
+        # `USE_I18N` change has no effect after that
+        # (`.review/m7-measurements/m7_measure_gettextlist.py`).
+        #
+        # Why this row: its Django message is built by `Parser.invalid_block_tag`
+        # -> `get_text_list(["'%s'" % p for p in parse_until], "or")`
+        # (`base.py:632-648`, the `get_text_list` call inside it at 641), and it
+        # is the first corpus row whose `parse_until` has **two** elements.
+        # `get_text_list` returns at the top for an empty or one-element list,
+        # and only the branch inside `utils/text.py:297-303` evaluates `_(", ")`
+        # — *eagerly*, before `str.join` consumes the one-item generator it
+        # separates. That call is what reaches `gettext` and asks for
+        # `USE_I18N`; the separator it returns is then discarded. Every earlier
+        # `parse_until` row passes one element (`{% spaceless %}`, line 60), so
+        # this is the first row to get there at all.
+        #
+        # It is **not** the `last_word` default: `invalid_block_tag` passes the
+        # literal `"or"`, so the `gettext_lazy("or")` at `utils/text.py:282` is
+        # never evaluated, and the body's `str(last_word)` is on a plain `str`.
+        # An earlier version of this comment claimed that default was the reach.
+        # Both halves — the call count per row and the raising row — are
+        # measured in the script above.
         from django.conf import settings
 
         if not settings.configured:

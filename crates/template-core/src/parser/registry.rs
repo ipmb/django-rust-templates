@@ -32,11 +32,21 @@
 //!   value that accumulates across siblings, and a `NodeDesc` cannot carry it —
 //!   which is why the rule subtracted `block` for as long as that state lived
 //!   only in Django's parser. M7 added the field to **Rust's** `Parser`
-//!   (`mod.rs`, `loaded_blocks`), so the state now lives where the compile
-//!   function reads and writes it and the rule's test is *satisfied* rather than
-//!   excepted. The discriminator was never the field's type — a `Vec<String>`
-//!   holds those names — it was whose parser held it, and that is what the
-//!   subtraction was measuring all along. `do_block` also recurses through
+//!   (`mod.rs`, `loaded_blocks`), so every occurrence **Rust compiles** now
+//!   reads and writes that state in the same place, and the rule's test is
+//!   *satisfied* rather than excepted — for those occurrences. The state did not
+//!   *move*, though: it forked. A `{% block %}` inside a **host** tag's body is
+//!   still compiled by Django's `do_block` and still accumulates in Django's
+//!   `parser.__loaded_blocks`, two counters that cannot see each other. That is
+//!   A5's recorded divergence, reached exactly once in the pinned suite
+//!   (`test_blocktranslate.py::test_with_block`, where the host raises first).
+//!   What the fork costs is one parse-time message — the `'block' tag with name
+//!   '…' appears more than once` refusal can miss a duplicate split across the
+//!   two counters — and nothing about the rendered tree, which both parsers
+//!   build from materialised nodes. The rule's test is still the one to apply to
+//!   the next built-in; what changes is that satisfying it means *for the
+//!   occurrences Rust compiles*, and the host-compiled ones keep Django's
+//!   attribute. `do_block` also recurses through
 //!   `parser.parse(("endblock",))`, which is structural and was never the
 //!   obstacle.
 //! - `extends` reads `parser.origin.template_name` (`loader_tags.py:305`) and

@@ -20,6 +20,7 @@ and each inserts its own paths, because `-I` implies `-E`.
 | `m7_measure_nesting.py` | A5's predicate: is any `{% block %}` nested inside a body Django parses? | plan A5 |
 | `m7_measure_nest2.py` | the same predicate for `{% extends %}`, and for a library returning an `ExtendsNode` subclass | plan RF3 |
 | `m7_measure_pyposix.py` | Task 2's three functions transliterated to Python and diffed against the pinned `posixpath`: 37 table rows, 221,845 generated unary inputs and 800,000 `normpath(join(a, b))` pairs, 0 mismatches | plan Task 2 |
+| `m7_measure_gettextlist.py` | which error-corpus row needs `settings` configured and by what reach: 1 of 95 raises `ImproperlyConfigured` (the `{% endblock b %}` row), via `_(", ")` evaluated eagerly at `utils/text.py:301` on a two-element list — **not** via `last_word`'s lazy default, and not only at three elements | `tests/test_parser_errors.py` `setUpClass`, plan Task 1 |
 
 **A verdict here is dated.** Each is a number only for as long as the tree it
 numbered holds still; `.django/` is pinned at 6.0.9 and the figures above are
