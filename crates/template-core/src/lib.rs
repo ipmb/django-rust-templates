@@ -7,6 +7,7 @@
 
 pub mod lexer;
 pub mod parser;
+pub mod token;
 
 /// Version of the engine, surfaced through the Python binding.
 pub fn version() -> &'static str {

@@ -7,3 +7,4 @@ license.workspace = true
 description = "Django template engine, reimplemented in Rust. No Python dependency."
 
 [dependencies]
+regex = "1"
