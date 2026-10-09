@@ -29,6 +29,17 @@ cargo clippy --workspace --all-targets --quiet -- -D warnings
 step "python unit tests"
 "$PROJECT_ROOT/.venv/bin/python" -m unittest discover -s "$PROJECT_ROOT/tests" -t "$PROJECT_ROOT" -p 'test_*.py'
 
+step "python anchor manifest"
+# Every `` `name.py:N` `` in our prose is a claim about the pinned checkout, and a
+# claim nothing re-measures is what four rounds of this task got wrong. It is on
+# the *fast* path deliberately, unlike the generators below: it compiles nothing
+# and needs only `.django/`, and its value is in catching a citation written in
+# the commit being written rather than one discovered a commit late.
+#
+# Plain `--check` here, not `--frozen`: the shorthand (`:518`, naming no file) is
+# still present. Step 5 of M6 flips this to `--check --frozen` once it is gone.
+"$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_python_anchors.py" --check
+
 step "differential harness"
 "$PROJECT_ROOT/.venv/bin/python" "$HERE/differential.py"
 
@@ -40,18 +51,9 @@ if [ "$FAST" -eq 0 ]; then
   # neither was invoked anywhere, which is the failure mode this closes: a drift
   # guard nobody runs. Not on the `--fast` path because the case generator
   # compiles a Rust probe.
-  #
-  # The last line is not a generator but a `--check` of the same shape, and it is
-  # here for the same reason: every `` `name.py:N` `` in our prose is a claim
-  # about the pinned checkout, and a claim nothing re-measures is what four
-  # rounds of this task got wrong. It compiles nothing and needs only `.django/`,
-  # so it costs one interpreter start. Plain `--check` here, because the
-  # shorthand (`:518`, naming no file) is still present; Step 5 of M6 switches
-  # this to `--check --frozen`, which fails on the shorthand, once it is gone.
   step "generated files are current"
   "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_python_word_ranges.py" --check
   "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_python_case_fixups.py" --check
-  "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_python_anchors.py" --check
 
   step "django template_tests (rust engine)"
   "$HERE/run_django_suite.sh" template_tests
