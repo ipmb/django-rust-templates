@@ -1,0 +1,2 @@
+filter_name (?P<filter_name>[\p{L}\p{N}_]+)
+var_chars [\p{L}\p{N}_\.\+-]+

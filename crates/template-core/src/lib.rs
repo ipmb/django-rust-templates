@@ -8,6 +8,7 @@
 pub mod filters;
 pub mod lexer;
 pub mod parser;
+pub mod pyregex;
 pub mod pyunicode;
 pub mod text;
 pub mod token;
