@@ -81,7 +81,7 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
     if terminator.contents == "else" {
         let index = nodelists.len();
         nodelists.push(parser.parse(&["endif"])?);
-        // `conditions_nodelists.append((None, nodelist))` (`defaulttags.py:1011`): the `None`
+        // `conditions_nodelists.append((None, nodelist))` (`defaulttags.py:1009`): the `None`
         // condition is what `IfNode.render` reads as "this is the else", and it
         // is emitted rather than left out because the tuple is positional.
         branches.push(AttrValue::Tuple(vec![
