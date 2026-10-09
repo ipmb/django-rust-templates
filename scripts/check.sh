@@ -137,6 +137,17 @@ if [ "$FAST" -eq 0 ]; then
   # that harness now counts the calls and fails if the shim run reaches none.
   step "django template_tests (shim installed)"
   "$HERE/run_django_suite.sh" template_tests
+
+  step "packaging"
+  # A wheel, three virtualenvs and a `pip install` — the one check here that
+  # leaves the checkout and the only one that can see the *distribution* rather
+  # than the source tree. It belongs on the slow path because it builds and
+  # installs, and it is on the gate at all rather than being a script somebody
+  # remembers to run for the reason this file keeps rediscovering: a drift guard
+  # nobody runs is not a guard. It needs the network once to warm a wheel cache
+  # under `target/`, then runs offline; a cold cache with no network fails loudly
+  # rather than passing quietly.
+  "$HERE/check_packaging.sh"
 fi
 
 printf '\nall checks passed\n'

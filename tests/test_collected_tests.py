@@ -373,7 +373,20 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # modified tracked file, an untracked one), and two against the live checkout —
 # the subject itself, and a path with no `.git`, which is the route a tarball
 # takes and the one that used to surface as a traceback. 478 + 9 = 487.
-PINNED = 487
+# 487 → 492 is M17, **five** rows in one new file: `tests/test_packaging_guard.py`
+# covers the version guard an *installed* wheel needs, which is the one thing
+# every other gate here cannot see — they all run against the pinned checkout. The
+# rows are the positive control (the transcription pin itself), the two refusals
+# (`6.1.2`, which used to install cleanly and pass everything, and `5.2.7`, which
+# used to fail in Django's name), the ordering contract (a refused install leaves
+# no finder behind), and the escape hatch. Five rather than the six the design
+# predicted: the absent-Django row was dropped *after* being measured, because its
+# only hermetic lever — `mock.patch.dict(sys.modules, …)` — restores the entire
+# module table on exit and turned four later rows into stale-capture failures that
+# named nothing they tested. That case is covered end-to-end in
+# `scripts/check_packaging.sh`, against a real venv with no Django, which is the
+# population it actually occurs in. 487 + 5 = 492.
+PINNED = 492
 
 
 def collected() -> unittest.TestSuite:
