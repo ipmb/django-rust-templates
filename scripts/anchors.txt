@@ -354,6 +354,10 @@ defaulttags.py:1092-1098	django/template/defaulttags.py	1092	1098	raise Template
 defaulttags.py:1099	django/template/defaulttags.py	1099	-	-	-
 defaulttags.py:1126-1130	django/template/defaulttags.py	1126	1130	for name in bits[1:]:	parser.add_library(lib)
 defaulttags.py:1134-1178	django/template/defaulttags.py	1134	1178	{% lorem %}	-
+defaulttags.py:1160-1175	django/template/defaulttags.py	1160	1175	tagname = bits[0]	count = parser.compile_filter(count)
+defaulttags.py:1162	django/template/defaulttags.py	1162	-	common = bits[-1] != "random"	-
+defaulttags.py:1171-1175	django/template/defaulttags.py	1171	1175	if len(bits) > 1:	count = parser.compile_filter(count)
+defaulttags.py:1176-1177	django/template/defaulttags.py	1176	1177	if len(bits) != 1:	raise TemplateSyntaxError("Incorrect format for %r tag" % tagname)
 defaulttags.py:1204	django/template/defaulttags.py	1204	-	@register.tag(name="partialdef")	-
 defaulttags.py:1250-1251	django/template/defaulttags.py	1250	1251	-	-
 defaulttags.py:1251	django/template/defaulttags.py	1251	-	-	-

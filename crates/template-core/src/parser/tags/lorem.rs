@@ -3,28 +3,28 @@
 //! # Three optional bits, consumed from the back, and a default that is text
 //!
 //! `{% lorem [count] [method] [random] %}` is parsed by popping
-//! (`:1160-1175`): `random` if it is last, then a method if the new last bit is
-//! one of `w`/`p`/`b`, then a count if more than the tag name is left. Two
-//! consequences, both measured on the pinned tree:
+//! (`defaulttags.py:1160-1175`): `random` if it is last, then a method if the
+//! new last bit is one of `w`/`p`/`b`, then a count if more than the tag name
+//! is left. Two consequences, both measured on the pinned tree:
 //!
 //! - the **count defaults to the string `"1"`**, compiled as a
-//!   `FilterExpression` like any other count (`:1171-1175`) — so
+//!   `FilterExpression` like any other count (`defaulttags.py:1171-1175`) — so
 //!   `LoremNode.count` is never absent and the default goes through the same
 //!   compiler as a written argument.
 //! - `{% lorem w %}` reads `w` as the **method**, not as the count, because the
 //!   method pop happens first: a variable named `w` is not reachable here. What
 //!   is left is the tag name alone, so the count is `"1"`.
 //!
-//! The `len(bits) != 1` check at the end (`:1176-1177`) is what remains after
-//! the three pops, and it is reachable — `{% lorem 3 p nope %}` and
-//! `{% lorem 1 2 %}` both leave two bits and both raise.
+//! The `len(bits) != 1` check at the end (`defaulttags.py:1176-1177`) is what
+//! remains after the three pops, and it is reachable — `{% lorem 3 p nope %}`
+//! and `{% lorem 1 2 %}` both leave two bits and both raise.
 //!
 //! # `common` is a bool, not a flag on the presence of `random`
 //!
-//! `common = bits[-1] != "random"` (`:1162`), so `{% lorem %}` — whose last bit
-//! is the tag name — is `True` without any pop happening. The negation is easy
-//! to invert by accident and the field feeds `words`/`paragraphs` at render
-//! time.
+//! `common = bits[-1] != "random"` (`defaulttags.py:1162`), so `{% lorem %}` —
+//! whose last bit is the tag name — is `True` without any pop happening. The
+//! negation is easy to invert by accident and the field feeds
+//! `words`/`paragraphs` at render time.
 
 use crate::parser::desc::{AttrValue, NodeDesc};
 use crate::parser::error::Error;
