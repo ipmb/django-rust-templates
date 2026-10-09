@@ -20,10 +20,12 @@ from tests.milestone_ownership import (
     INTERPOSED,
     NOT_THE_ENGINE,
     OWNERS,
+    between,
     claimed,
     interposed,
     pending,
     spec_milestones,
+    spec_not_the_engine,
 )
 
 TARGET = "django.template"
@@ -194,6 +196,51 @@ class OwnershipTableTests(unittest.TestCase):
         for name, reason in sorted(NOT_THE_ENGINE.items()):
             with self.subTest(name=name):
                 self.assertGreater(len(reason), 80, f"{name}'s reason is a stub")
+
+    def test_the_specs_declaration_is_the_shims(self):
+        """§3 declares the ten, and the shim subtracts the ten it declares.
+
+        `test_the_declared_names_are_the_excluded_ones` ties `_shim.NOT_THE_ENGINE`
+        to this file's table. Neither was tied to **§3**, and the gap has a
+        direction that matters: the meter is
+        `django_modules - ours - NOT_THE_ENGINE`, so growing the subtrahend
+        empties it *exactly as interposing does* — a module moved out of the
+        engine by editing the shim and the reason beside it (which is what the
+        discipline asks for) would leave every row in the tree green while §3
+        still said ten, and M14's empty meter would be indistinguishable from
+        the engine being complete. This is the shape
+        `test_every_owner_is_a_milestone_the_spec_defines` already has one
+        section over, applied to the other table.
+        """
+        declared = spec_not_the_engine()
+        # The reader's own guard, the way the §10.3 reader has one: a frame that
+        # stopped matching would otherwise reach `assertEqual` as an empty set,
+        # and an empty set against a non-empty frozenset is a failure that says
+        # "the spec drifted" when the instrument is what moved.
+        self.assertGreaterEqual(len(declared), 10, sorted(declared))
+        self.assertEqual(
+            declared,
+            set(_shim.NOT_THE_ENGINE),
+            f"§3's enumeration and `_shim.NOT_THE_ENGINE` disagree, and the "
+            f"reader found {sorted(declared)} in the frame — if those look like "
+            "the right ten the shim moved, and if they do not the frame did",
+        )
+
+    def test_the_frame_reader_refuses_a_moved_anchor(self):
+        """The control for the row above: a reworded frame raises, not answers.
+
+        `between` exists because `partition` cannot fail. Without its checks a
+        moved anchor returns the tail of §3 as the frame, and the row above then
+        answers with a *wrong set* — a failure that reads as the spec drifting
+        when the instrument moved. Driven on a literal rather than on §3, so the
+        control is over the function the row actually depends on, and it is the
+        one arm of that function a green run never reaches.
+        """
+        self.assertEqual(between("a FRAME b", "a ", " b"), "FRAME")
+        for start, end in (("gone ", " b"), ("a ", " gone")):
+            with self.subTest(start=start, end=end):
+                with self.assertRaises(AssertionError):
+                    between("a FRAME b", start, end)
 
     def test_interposed_is_the_shadowing_table(self):
         """`INTERPOSED` adds the milestone attribution and no new membership.

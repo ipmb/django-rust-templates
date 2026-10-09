@@ -34,6 +34,7 @@ The input classes / failure modes M14's own change introduces, each owned by the
 4. **The file-level claim and the runtime claim stay distinct in the message.** `unshimmed()` compares source trees, not resolved imports (`_shim.py:777-779`), so a non-empty meter means "a name Django defines has no same-named file in `_impl`". Before M14 the runtime half was **one** module (`django.template.exceptions`); the extraction makes it **total** — every engine module Django defines is imported and asserted to resolve under `_impl`, measured at 21 modules (16 under `django.template`, 5 under `django.templatetags`) importing cleanly with settings unconfigured. The import is safe here because the *pre-flight* has no side-effect-free constraint — that constraint belongs to `unshimmed()`, which a caller may reach for anywhere. What the total check still does **not** establish is *behaviour*: it proves each module's file is ours, not that the file is right — that is the suite's job. The record must state the conjunction exactly. → **Task 1**, **Task 2** (Review Focus 4's row).
 5. **The guard's correctness is dated to the engine being complete.** A pre-flight refusing on a non-empty meter would have blocked every suite run through M10–M13, when the meter was non-empty by design. It is correct *now* because the engine is done, and it will refuse on the first commit of any future milestone that interposes a new engine module. That is the guard's intent, but it must be **recorded as a condition** so the first person to hit it is not left to guess whether it is a bug — the dated-verdict rule, applied to a guard. → **Task 1** (the script's docstring and its refusal message both say so).
 6. **A version bump adding `django/template/*.py` is the failure the guard exists for.** Not testable by making the pin do that, but the guard's population is `django_modules(scope) - ours - NOT_THE_ENGINE`, so a new upstream module arrives in the meter (and in the total runtime check) rather than silently outside it. → **Task 1** (asserted against `_shim.django_modules`, the same call the meter makes).
+7. **The meter can reach empty by widening its subtrahend rather than by interposing.** `unshimmed()` is `django_modules - ours - NOT_THE_ENGINE`, so a name moved out of the engine by editing the shim and the reason beside it empties the meter *without any module being written* — and §3, the document the decision is recorded in and the one M14's criterion names, is read by nothing. → **Task 1b**.
 
 ---
 
@@ -316,6 +317,77 @@ git add scripts/assert_engine_installed.py scripts/run_django_suite.sh \
         tests/test_acceptance_preflight.py
 git commit -m "M14 Task 1: the acceptance run refuses a non-empty meter, in both scopes"
 ```
+
+---
+
+### Task 1b: §3's declaration becomes a row (added after review)
+
+**Why this was not in the plan.** The reviewer's Q2 on Task 1: the ten names
+live in three places — §3's prose, `_shim.NOT_THE_ENGINE`, and
+`tests/milestone_ownership.py::NOT_THE_ENGINE` — and
+`test_the_declared_names_are_the_excluded_ones` ties only the last two
+together. So **either can drift from §3**, and the direction matters: the meter
+is `django_modules - ours - NOT_THE_ENGINE`, so widening the subtrahend empties
+it exactly as interposing does. A name moved out of the engine by editing the
+shim and its reason beside it — which is what this project's discipline asks
+for — leaves every row green while §3 still says ten, and M14's empty meter is
+then indistinguishable from the engine being complete. M14's own criterion row
+names §3, so the tie is this milestone's.
+
+The precedent is in the same file, one function away: `spec_milestones()`
+(`tests/milestone_ownership.py:312`) reads §10.3's labels out of the spec, with
+the reason stated as *"a second list would agree with itself"*.
+
+**Files:**
+- Modify: `tests/milestone_ownership.py` (three helpers beside `spec_milestones`)
+- Modify: `tests/test_milestone_ownership.py` (two rows)
+- Modify: `tests/test_collected_tests.py` (the pin)
+
+**Interfaces:**
+- Produces:
+  - `spec_section(number: str) -> str` — §`number`'s body, up to the next `## `.
+  - `between(text, start, end) -> str` — the frame, with both anchors checked.
+  - `spec_not_the_engine() -> set[str]` — the names §3 enumerates.
+
+- [ ] **Step 1: Write the failing row**
+
+In `OwnershipTableTests`, importing `spec_not_the_engine`: assert
+`len(declared) >= 10` (the reader's own guard, the shape
+`test_every_owner_is_a_milestone_the_spec_defines` has), then
+`declared == set(_shim.NOT_THE_ENGINE)` with a message that prints the
+extraction, so a failure says which side moved.
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `PYTHONPATH=scripts/shimpath:.django DJANGO_RUST_TEMPLATES=1 .venv/bin/python
+-m unittest tests.test_milestone_ownership.OwnershipTableTests.test_the_specs_declaration_is_the_shims`
+Expected: `ImportError: cannot import name 'spec_not_the_engine'`.
+
+- [ ] **Step 3: Implement the reader**
+
+`spec_section` slices the section rather than searching the document (§3
+mentions `django.template` three times outside its list, and the phrase occurs
+in a dozen other sections). `between` checks both anchors, because `partition`
+cannot fail and a moved anchor would return the tail of the section as the
+frame — a *wrong set*, not an error. `spec_not_the_engine` reads the frame
+between `"stay Django's for good:"` and `"The decision is the"` and takes the
+backticked spans.
+
+- [ ] **Step 4: Run it to verify it passes**
+
+Expected: OK, and the extraction is the ten.
+
+- [ ] **Step 5: Add the reader's control**
+
+`test_the_frame_reader_refuses_a_moved_anchor` — `between` on a literal, both
+anchor arms asserted to raise. The failure arm is the one a green run never
+reaches.
+
+- [ ] **Step 6: Run the gate, bump the pin, and commit**
+
+Run: `bash scripts/check.sh` — expect exit 0 and `all checks passed`, 464 unit
+rows (two added). The pin moves 462 → 464 in `tests/test_collected_tests.py`,
+with the delta written down beside it.
 
 ---
 

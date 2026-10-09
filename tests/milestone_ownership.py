@@ -317,3 +317,57 @@ def spec_milestones() -> set:
     ``| M<n> | <component> | <done when> |``; this takes the first cell of each.
     """
     return set(re.findall(r"^\| (M\d+) \|", SPEC.read_text(encoding="utf-8"), re.M))
+
+
+def spec_section(number: str) -> str:
+    """§``number``'s body, up to the next ``## `` heading.
+
+    Scoped rather than searched in the whole document: the reader below greps
+    prose for backticks, and `django.template` — which §3 mentions three times
+    outside its list — appears in a dozen other sections.
+    """
+    body = SPEC.read_text(encoding="utf-8")
+    marker = f"## {number}."
+    if marker not in body:
+        raise AssertionError(f"the spec has no `{marker}` heading")
+    return body.split(marker, 1)[1].split("\n## ", 1)[0]
+
+
+def between(text: str, start: str, end: str) -> str:
+    """``text`` between two anchors, both of which must be present.
+
+    ``partition`` cannot fail, which is the whole reason for this function: an
+    anchor that was reworded away would silently return the rest of the section
+    as the frame, and the reader would then answer with whatever backticks
+    happened to follow — a *wrong set*, not an error.
+    """
+    _, opened, rest = text.partition(start)
+    if not opened:
+        raise AssertionError(f"the frame's opening anchor is gone: {start!r}")
+    frame, closed, _ = rest.partition(end)
+    if not closed:
+        raise AssertionError(f"the frame's closing anchor is gone: {end!r}")
+    return frame
+
+
+def spec_not_the_engine() -> set:
+    """The names §3 declares not the engine, read out of §3.
+
+    Same argument as `spec_milestones`, applied to the other table: `_shim`
+    holds the membership, this package holds the reasons, and
+    `test_the_declared_names_are_the_excluded_ones` ties those two together —
+    so **either can drift from §3**, which is the document the decision is
+    recorded in and the one the acceptance criterion names. The direction that
+    matters is that ``unshimmed()`` is ``django_modules - ours -
+    NOT_THE_ENGINE``: widening the subtrahend empties the meter as surely as
+    interposing does.
+
+    §3 names the ten inside a parenthetical enumeration and, around it,
+    backticks `django.template` (three times), `_shim.NOT_THE_ENGINE`,
+    `unshimmed()`, `engine.get_template` and `Template.render`. So this reads
+    the frame between the sentence's two anchors rather than every backtick in
+    the section, and the anchors are checked rather than trusted.
+    """
+    section = spec_section("3")
+    frame = between(section, "stay Django's for good:", "The decision is the")
+    return set(re.findall(r"`([^`]+)`", frame))

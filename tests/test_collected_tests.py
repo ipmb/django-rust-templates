@@ -346,7 +346,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # population and lies outside it — so the other four cannot be overtaken by a
 # later milestone that registers the name for real. Discovery agrees exactly:
 # 457 + 5 = 462, and there is no rename in this delta.
-PINNED = 462
+# 462 → 464 is M14 Task 3, **two** rows in `tests/test_milestone_ownership.py`,
+# both about §3 rather than about the tree: `test_the_specs_declaration_is_the_shims`
+# ties `_shim.NOT_THE_ENGINE` to the names §3 actually enumerates (§3 was the one
+# document in that three-way tie nothing read), and
+# `test_the_frame_reader_refuses_a_moved_anchor` is its control — the reader
+# parses prose, and its failure arm is the one a green run never reaches.
+# 462 + 2 = 464.
+PINNED = 464
 
 
 def collected() -> unittest.TestSuite:
