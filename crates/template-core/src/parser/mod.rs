@@ -365,6 +365,19 @@ impl<'a> Parser<'a> {
                     // **not** register the built-ins Rust implements, or
                     // host-first would route them to Python and these compile
                     // functions would never run.
+                    //
+                    // Since M7 that "built-in" is not always `defaulttags`':
+                    // `block`, `extends` and `include` are `loader_tags`', merged
+                    // into the same dict by `Parser.__init__` rather than
+                    // registered there. The host's decision is the same either
+                    // way — it compares the entry against the module table it
+                    // ports, from both modules — and the only thing this side
+                    // sees is `true`/`false`. What the *previous* shape got
+                    // wrong is worth naming here because it lived in Python: an
+                    // exception list for those three names was consulted before
+                    // the comparison, so a `{% load %}`ed library redefining
+                    // `block` lost. Nothing on this side changes for that; the
+                    // host is still asked first, and still has the last word.
                     let compiled = if self.host.has_tag(&command) {
                         // The host compiles it, and it may consume the rest of
                         // the stream. Both halves cross by value: the host is

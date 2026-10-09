@@ -8,13 +8,12 @@
 //! and a tag that is not implemented yet is a stub in its own file rather than a
 //! missing entry.
 //!
-//! **Three built-in names are deliberately absent**, and a test asserts their
-//! absence. `include` is §6's — Python's, supplied through the host seam, M7's.
-//! `load` and `querystring` are §6's too, and M6 took them out of the table; the
-//! paragraphs below record which of the rule's clauses each one falls under. An
-//! entry here would be a promise this project has already decided not to keep.
-//! The mechanical reason — the one to reach for when the next built-in's side has
-//! to be decided — is the rule below.
+//! **Two built-in names are deliberately absent**, and a test asserts their
+//! absence. `load` and `querystring` are §6's, and M6 took them out of the table;
+//! the paragraphs below record which of the rule's clauses each one falls under.
+//! An entry here would be a promise this project has already decided not to
+//! keep. The mechanical reason — the one to reach for when the next built-in's
+//! side has to be decided — is the rule below.
 //!
 //! **The rule behind that subtraction, stated rather than listed**, because
 //! "which built-ins does Rust own" has now been asked four times and each time a
@@ -65,7 +64,19 @@
 //!   method. The origin half was never a subtraction reason of its own: Rust
 //!   added `Parser::origin_template_name` in Task 2, and reading an attribute off
 //!   the parse is exactly the kind of thing the rule permits.
-//! - `include` reaches `parser.compile_filter` and the loader machinery.
+//! - `include` **was the bullet that read like a subtraction reason and was not
+//!   one**, which is why it is kept rather than deleted. It "reaches
+//!   `parser.compile_filter` and the loader machinery" — and so does every other
+//!   tag in this table: `compile_filter` is a method on the parser Rust already
+//!   has, and `{% extends %}` reaches it too. What `do_include` actually touches
+//!   is `parser.origin.template_name` (`loader_tags.py:361-365`) and
+//!   `token_kwargs` (`loader_tags.py:347`) — the one a Task 2 field answers, the
+//!   other the helper `{% with %}` already uses. **The loader machinery is on the node's
+//!   side of the seam, not the compile's**: `IncludeNode.render` is what resolves
+//!   and renders the template, and under A1 every node renders in Python whatever
+//!   compiled it. So M7 moved `include` into this table with no new state, no
+//!   widened seam and no second mechanism — the subtraction was a name that had
+//!   been listed as a reason without ever meeting the rule.
 //!
 //! **`load` and `querystring` were the table's last two members under a
 //! deferred decision, and M6 resolved both by subtraction — for two different
@@ -120,7 +131,7 @@
 //! under this rule, which acts at compile time, where both are the same case.
 //! What is recorded here is the measurement, not a verdict.
 //!
-//! The count is 24 = 27 built-ins minus those three, and the metric matters:
+//! The count is 25 = 27 built-ins minus those two, and the metric matters:
 //! `Engine().template_builtins[0].tags` is 24 (`defaulttags` alone), while the
 //! union across all three builtin libraries is 27 (`defaulttags` 24 +
 //! `loader_tags` 3). Both are right answers to different questions, and this
@@ -164,6 +175,7 @@ const REGISTRY: &[Entry] = &[
     ("for", tags::for_tag::compile),
     ("if", tags::if_tag::compile),
     ("ifchanged", tags::ifchanged::compile),
+    ("include", tags::include::compile),
     ("lorem", tags::lorem::compile),
     ("now", tags::now::compile),
     ("partial", tags::partial::compile),
@@ -300,20 +312,22 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_has_the_twenty_four_names_rust_owns() {
-        // 27 built-in names minus `include`, `load` and `querystring`. See the
-        // module doc for why those three are absent and for the counting trap.
-        assert_eq!(builtin_tag_names().len(), 24);
+    fn the_registry_has_the_twenty_five_names_rust_owns() {
+        // 27 built-in names minus `load` and `querystring`. See the module doc
+        // for why those two are absent and for the counting trap. `include` was
+        // the third until M7; the doc keeps its bullet because the reason it was
+        // listed never met the rule.
+        assert_eq!(builtin_tag_names().len(), 25);
     }
 
     #[test]
-    fn the_three_python_owned_builtins_are_not_rust_compile_functions() {
-        // One for M7 (§6's remaining loader tag) and two M6 removed: `load` is
-        // host state, `querystring` is a `simple_tag`. The reasons are separate
-        // and the module doc carries all of them. `block` and `extends` left
-        // this list in M7, which is why the name counts down rather than the
-        // list growing.
-        for absent in ["include", "load", "querystring"] {
+    fn the_two_python_owned_builtins_are_not_rust_compile_functions() {
+        // Both M6's, for separate reasons: `load` is host parse state,
+        // `querystring` is a `simple_tag`. The module doc carries them.
+        // **All three of M7's loader tags have now left this list** — `block`
+        // and `extends` in Tasks 1 and 3, `include` here — which is why it
+        // counts down rather than growing.
+        for absent in ["load", "querystring"] {
             assert!(
                 builtin_tag(absent).is_none(),
                 "{absent} must not be a Rust compile function (§6: Python-owned)",
@@ -411,6 +425,7 @@ mod tests {
             "for",
             "if",
             "ifchanged",
+            "include",
             "lorem",
             "now",
             "regroup",

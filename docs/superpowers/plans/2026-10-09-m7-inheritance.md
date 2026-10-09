@@ -469,6 +469,24 @@ Two things a task will trip over, both recorded rather than fixed:
   rendered tree", read the unreachability of the duplicate as though it followed
   from the dict being shared; it is the refusal, not the dict, that keeps stock
   Django out of the case.
+
+  **"Both nodes reach `self.blocks`" carries a reachability condition, and it is
+  not the one a reader will assume.** `self.blocks` is built by **Django's** walk
+  over *materialised* nodes, and Django's walk iterates `child_nodelists` — so a
+  `{% block %}` inside a body that traversal does not descend into is not in the
+  dict either, whatever the counters say. `simple_block_tag` is exactly that
+  shape: `SimpleBlockNode` stores `self.nodelist` (`library.py:337`) and inherits
+  `child_nodelists = ()` from `SimpleNode` (`:317`), so a block inside
+  `{% div %}` — the example a reader reaches for first — **cannot** produce this.
+  The scenario needs a host block tag whose node class *declares* its nodelist as
+  a child, which is the ordinary shape for a block tag written by hand rather
+  than through `simple_block_tag`. Reachable in principle through the public API;
+  not reached by anything in the pinned suite. Without this condition the next
+  reader builds the case with `{% div %}`, finds no divergence, and concludes the
+  recorded one is imaginary. Measured, both halves:
+  `.review/m7-measurements/m7_measure_child_nodelists.py` for the class shape, and
+  a `{% wrap %}x{% endwrap %}` parse for the descriptor — `('HostNode', (('node',
+  NodeRef 0),), (), …)`, the nodelist tuple empty.
 - `do_block` uses `token.contents.split()`, **not** `split_contents()`, and
   Django's own comment says why (`LT:218-219`: the tag "doesn't accept variable as
   arguments"). Rust must call `crate::pyunicode::split`
@@ -503,12 +521,12 @@ cache is keyed on. It does **not** pin that the template is materialised once
 
 ## D. Corrections this plan makes
 
-Seven, each with the artifact it corrects and the measurement behind it. The first
+Eight, each with the artifact it corrects and the measurement behind it. The first
 two correct `.review/m7-recon.md` (the recon precedes and is corrected by the
 plan, as M6's did); D3–D6 correct derived artifacts, and D5/D6 came out of the
 reviewer's round on this plan; **D7 was written at Task 3's execution** and
-corrects this plan's own Task 3, which is the one place a plan's errors cost a
-run rather than a line of prose.
+corrects this plan's own Task 3, **D8 at Task 4's**, and those two are the one
+place a plan's errors cost a run rather than a line of prose.
 
 **D1 — the recon's §2 frames `must_be_first` on the outbound wire. It crosses
 inbound.** The 5-tuple `node_desc_to_py` emits (`lib.rs:871-915`, pinned by
@@ -640,6 +658,30 @@ it adds rather than leaving them as line-existence checks. **The lesson
 generalises past this task: a new anchor added unquoted is a claim nobody
 re-measures, and the seven rows this task would have added that way included two
 that were false.**
+
+**D8 — Task 4's Step 8 predicts the half-fix's second symptom wrongly, and the
+error is the interesting kind: the predicted symptom is *checkable* and the check
+is one line away from the thing it was supposed to exercise.** The plan said
+reverting `django_own_tags` to `dict(_defaulttags.register.tags)` leaves
+`{% extends "a" %}{% extends "b" %}` *not raising* (Django's duplicate scan
+skipped because Rust, not Django, compiles the tag). Measured: it still raises —
+`AttributeError: 'NoneType' object has no attribute 'template_name'` — and **six
+more corpus rows fail with the same text**. One cause: Rust's origin is a field
+on Rust's `Parser` (`Parser::origin_template_name`, Task 2), the host's `Parser`
+is built with `UNKNOWN_ORIGIN`, and Django's `do_extends`/`do_include` read
+`parser.origin.template_name` (`loader_tags.py:305`, `:362`) before reaching any
+rule of their own — including the duplicate scan. So the half-fix routes the tags
+to a host that cannot compile them at all, which is a *louder* cost than the
+predicted silent acceptance, and a reader who checks only the predicted row would
+have concluded the trap was imaginary. Step 8 now carries the measured table.
+
+The two other measured facts are the asymmetry Step 6 turns on, and it **inverts**
+under the half-fix: `test_the_host_declines_every_name_rust_owns` fails
+(`has_tag` says `True` for all three) while
+`test_a_loaded_library_still_shadows_a_built_in` *passes*, because the half-fix
+is exactly the pre-M7 state for the second test. That is the reason Step 6 runs
+the pair in the order it does: neither test alone distinguishes "the list is
+gone" from "the table was widened", and the pair does.
 
 ---
 
@@ -2033,13 +2075,29 @@ snippet in this plan is run — the quoting is what a reader will get wrong.)
 
 - [ ] **Step 8: Run the guards, then the gates**
 
-Run: `source scripts/env.sh && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m pytest tests/ -q && .venv/bin/python -m pytest tests/parser_corpus.py`
+Run: `source scripts/env.sh && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && maturin develop --manifest-path crates/template-py/Cargo.toml && .venv/bin/python -m unittest discover -s tests -t . -p 'test_*.py' && .venv/bin/python -I scripts/check_python_anchors.py --check --frozen`
 Expected: all pass.
 
-Observe the trap: revert `django_own_tags` to `dict(_defaulttags.register.tags)`
-and confirm Step 6's test fails **and** that `{% extends "a" %}{% extends "b" %}`
-stops raising (the error-corpus row from Task 3 fails) — the half-fix produces
-both symptoms, which is why they are asserted together.
+**Corrected at execution time (D8).** The trap is real and the two symptoms are
+not the two this step predicted. Measured, reverting `django_own_tags` to
+`dict(_defaulttags.register.tags)`:
+
+| what | predicted here | measured |
+|---|---|---|
+| `test_the_host_declines_every_name_rust_owns` | fails | **fails** — `has_tag` returns `True` for all three names, so `block`/`extends`/`include` route to the host |
+| `test_a_loaded_library_still_shadows_a_built_in` | (unstated) | **passes** — the half-fix *is* the pre-M7 state for it, which is the asymmetry Step 6's ordering uses |
+| `{% extends "a" %}{% extends "b" %}` | "stops raising" | **still raises** — `AttributeError: 'NoneType' object has no attribute 'template_name'` |
+| the rest of the error corpus | (unstated) | **6 more rows fail, same `AttributeError`** |
+
+The second symptom is one cause, not two: Rust's origin lives on Rust's
+`Parser` (`Parser::origin_template_name`), and the host's `Parser` is built with
+`UNKNOWN_ORIGIN`, so `do_extends`/`do_include` die on `parser.origin.template_name`
+(`loader_tags.py:305`, `:362`) *before* any rule they own is reached — including
+the duplicate scan this step named. So the half-fix does not "accept" anything
+silently; it makes seven rows report Django's own `AttributeError` text. That is
+a *stronger* cost than predicted, and the reason it is worth writing down is that
+the predicted version was checkable and wrong: the duplicate row fails for a
+reason one line above the check it was supposed to exercise.
 
 - [ ] **Step 9: Commit**
 

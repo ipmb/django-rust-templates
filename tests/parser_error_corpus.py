@@ -404,7 +404,7 @@ ERRORS = [
     #       and with debug, position (26, 39) — the `now` block, not `div`'s
     #
     # Rust has the matching guard (`Error::error`'s `token.or_else`,
-    # `parser/mod.rs:424-428`) and is inert without this: the token never
+    # `parser/mod.rs:434-439`) and is inert without this: the token never
     # crosses the seam, so the guard sees `None` and attaches the **outer**
     # token — `(2, 'div', 1, None)`. Both assertions of
     # `test_every_case_carries_the_same_token*` fail without the transport, and
@@ -523,6 +523,41 @@ ERRORS = [
         "The relative path './x.html' cannot be evaluated due to an "
         "unknown template origin.",
     ),
+    # --- M7: `{% include %}` -------------------------------------------------
+    # Four rows, one per arm of `do_include`'s option loop (`LT:333-358`), and
+    # all three messages interpolate with `%r` — so the quoting is Django's,
+    # not the template's, and each row is a check on `py_repr` as much as on
+    # the arm. The first is the arity refusal and is the one that does **not**
+    # go through `%r` on the tag name alone: `bits[0]` is `include`, so `%r`
+    # adds the quotes and the rest of the sentence is literal.
+    #
+    # The duplicate is checked *before* the option is interpreted (`if option in
+    # options`), which is why the fourth row is an unknown argument and the
+    # third is a duplicate rather than a second interpretation — and why
+    # `{% include "a" nope nope %}` would report the duplicate.
+    (
+        "{% include %}",
+        "'include' tag takes at least one argument: the name of the template "
+        "to be included.",
+    ),
+    (
+        '{% include "a" with %}',
+        '"with" in \'include\' tag needs at least one keyword argument.',
+    ),
+    ('{% include "a" only only %}', "The 'only' option was specified more than once."),
+    ('{% include "a" nope %}', "Unknown argument for 'include' tag: 'nope'."),
+    # `token_kwargs`'s `support_legacy=False` (`LT:341`) is what leaves `nope`
+    # in place to *become* that unknown argument. Under `{% with %}`'s `True`
+    # the same bits are a legacy assignment and compile.
+    ('{% include "a" with b=1 nope %}', "Unknown argument for 'include' tag: 'nope'."),
+    # And the same unknown-origin arm `{% extends %}` has, reached by the same
+    # `./` prefix, because `construct_relative_path` runs before the flag is
+    # consulted at all.
+    (
+        "{% include './x.html' %}",
+        "The relative path './x.html' cannot be evaluated due to an "
+        "unknown template origin.",
+    ),
 ]
 
 # Rows whose message can be produced only by an origin that **names a
@@ -555,5 +590,15 @@ ORIGIN_ERRORS = [
         "/index.html",
         "The relative path ''./index.html'' was translated to template name "
         "'/index.html', the same template in which the tag appears.",
+    ),
+    # The same escaping path through `{% include %}`, which is the row that
+    # shows `allow_recursion=True` does **not** disable the check: the flag
+    # guards the *third* failure only. Single quotes here, matching the
+    # `{% extends %}` row above, so the two are diffable.
+    (
+        "{% include '../../x.html' %}",
+        "index.html",
+        "The relative path ''../../x.html'' points outside the file hierarchy "
+        "that template 'index.html' is in.",
     ),
 ]

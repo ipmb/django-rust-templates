@@ -13,6 +13,25 @@ attribute of another name, or to nothing at all)?
 is a different question, and this script is what turns "the same set" from an
 assertion into a count.
 
+**The population is import-bounded, and the number is only meaningful with its
+imports named.** `Node.__subclasses__` is transitive but not global, so a class
+in a module nobody imported is not in the list. `base` + `defaulttags` +
+`loader_tags` — and everything those import, which includes `library` — is
+**34**; adding the tag libraries (`cache`, `i18n`, `static`, `tz`, `l10n`) makes
+it **44**, and the ten extra are the i18n and cache nodes. `IfNode` is the only
+property either way, so the verdict is stable under the widening — but "34
+subclasses in the pinned tree" is a bound stated as a total, and this line is the
+correction.
+
+**The third shape is the one the first two categories cannot hold**: a class that
+*stores* a nodelist it does not declare. `SimpleBlockNode` (`library.py:334`)
+sets `self.nodelist = nodelist` (`:337`) and inherits `child_nodelists = ()` from
+`SimpleNode` (`:317`), so Django does **not** descend into a `simple_block_tag`'s
+body — the inverse of `IfNode`. The `PROPERTY`/class-attr/instance-attr/absent
+classification is blind to it, because it only classifies the names a class
+*declares*; a class that declares `()` has no names to classify. Hence the second
+pass below.
+
 Run: .venv/bin/python -I .review/m7-measurements/m7_measure_child_nodelists.py
 """
 
@@ -44,6 +63,28 @@ def subclasses(root):
                 seen.append(sub)
                 stack.append(sub)
     return seen
+
+
+# `__subclasses__` is transitive but not *global*: the population is whatever has
+# been imported. Measured here rather than asserted, because the two numbers are
+# both right and the difference is the whole of the sentence `desc.rs` had to
+# correct — 34 from the three modules above, 44 once the tag libraries are in.
+NARROW = len(subclasses(base.Node))
+
+import importlib  # noqa: E402
+
+for _name in (
+    "django.templatetags.cache",
+    "django.templatetags.i18n",
+    "django.templatetags.static",
+    "django.templatetags.tz",
+    "django.templatetags.l10n",
+    "django.template.library",
+):
+    _module = importlib.import_module(_name)
+    SOURCES[_name] = Path(_module.__file__).read_text(encoding="utf-8")
+
+WIDE = len(subclasses(base.Node))
 
 
 def is_property(cls, attr):
@@ -90,6 +131,8 @@ def defined_in(cls):
 
 print(f"{'class':<24} {'child_nodelists':<34} {'resolves to':<30} where")
 print("-" * 108)
+print(f"population: {NARROW} with base+defaulttags+loader_tags, {WIDE} after "
+      f"importing the tag libraries — both correct, and the difference is imports")
 
 rows = []
 for cls in subclasses(base.Node):
@@ -111,3 +154,42 @@ print(f"{len(rows)} Node subclass(es); {len(properties)} whose child_nodelists "
       f"names a property: {[r[0] for r in properties]}")
 print("A property is the divergence: it has no stored attribute for a "
       "name-driven walk to find.")
+
+
+# --- the third shape -------------------------------------------------------
+#
+# A class that *stores* a nodelist it does not declare. The pass above cannot
+# see one, because it classifies only the names in `child_nodelists` — and this
+# shape is exactly "a name that is not there". Django's walk declines to descend
+# into it (`child_nodelists` is what it iterates), so the question it answers is
+# the *inverse* of `IfNode`'s and it is invisible to the same table.
+def stored_nodelists(cls):
+    """Every `self.<attr> = <value>` in `cls`'s own `__init__` whose name says nodelist."""
+    init = cls.__dict__.get("__init__", cls.__init__)
+    try:
+        body = inspect.getsource(init)
+    except (OSError, TypeError):
+        return []
+    return [
+        (attr, value)
+        for attr, value in re.findall(r"self\.(\w+)\s*=\s*(\w+)", body)
+        if "nodelist" in attr
+    ]
+
+
+print()
+undeclared = []
+for cls in subclasses(base.Node):
+    names = getattr(cls, "child_nodelists", None) or ()
+    for attr, value in stored_nodelists(cls):
+        if attr not in names:
+            undeclared.append((cls.__name__, attr, value, repr(getattr(cls, "child_nodelists", None))))
+
+for cls_name, attr, value, declared in sorted(undeclared):
+    print(f"{cls_name:<24} stores self.{attr} = {value}, declares child_nodelists = {declared}")
+print(f"{len(undeclared)} class(es) store a nodelist they do not declare — "
+      "Django's walk does not descend into these, and neither does a walk "
+      "driven by a descriptor's nodelists.")
+print("`IfNode` shows the same split from the other side: it stores "
+      "`conditions_nodelists` and declares `nodelist`, which it synthesises.")
+

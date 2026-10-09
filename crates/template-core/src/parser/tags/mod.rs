@@ -28,6 +28,7 @@ pub mod for_tag;
 #[path = "if.rs"]
 pub mod if_tag;
 pub mod ifchanged;
+pub mod include;
 pub mod lorem;
 pub mod now;
 pub mod partial;

@@ -548,22 +548,60 @@ impl NodeListDesc {
     /// exists to catch.
     ///
     /// **And `IfNode` is the only such class, which is measured rather than
-    /// generalised from.** All 34 `Node` subclasses in the pinned tree were
-    /// classified by where each `child_nodelists` name resolves
+    /// generalised from — over a population larger than the first sweep's.**
+    /// Every `Node` subclass reachable from the pinned tree's template modules
+    /// was classified by where each `child_nodelists` name resolves
     /// (`.review/m7-measurements/m7_measure_child_nodelists.py`): **exactly one
     /// names a property** — `IfNode` — and the rest name either an instance
     /// attribute set in `__init__` or an attribute the class never sets at all.
-    /// The second group is the other half of the equivalence and is worth
-    /// naming, because it is where the two walks *look* different without
-    /// differing: Django reads `getattr(self, attr, None)` and then tests
-    /// **truthiness** (`base.py:1079-1080`), so a class whose `child_nodelists`
-    /// names an attribute it never assigns — `CycleNode`, `DebugNode`,
-    /// `FirstOfNode`, `IncludeNode`, `LoremNode`, `NowNode`, `PartialNode`,
-    /// `PrefixNode`, `RegroupNode`, `ResetCycleNode`, `TagHelperNode`,
-    /// `TemplateTagNode`, `VerbatimNode`, `WidthRatioNode` — contributes
-    /// nothing to Django's walk and has no such nodelist in Rust for this one to
-    /// descend into. An absent nodelist and an empty one are the same to *this*
-    /// function's result for the same reason: both contribute no nodes.
+    ///
+    /// **The count is 34 or 47 depending on what is imported, and both are
+    /// right answers to different questions.** `Node.__subclasses__` is
+    /// transitive but not global, so the population is whatever the sweep's
+    /// imports pulled in: `base` + `defaulttags` + `loader_tags` — which
+    /// *includes* `library`, via `defaulttags` — is **34**; adding the tag
+    /// libraries (`cache`, `i18n`, `static`, `tz`, `l10n`) is **47**, and the
+    /// extra ones are the i18n and cache nodes (`BlockTranslateNode`,
+    /// `TranslateNode`, `CacheNode`, `StaticNode`, …). The verdict survives the
+    /// widening: `IfNode` is still the only property. The script prints both
+    /// numbers, because "all 34 subclasses in the pinned tree" is a *bound
+    /// stated as a total*, and a reader who imports one more module finds a
+    /// number the sentence cannot explain.
+    ///
+    /// The class-attribute/absent split is the other half of the equivalence and
+    /// is worth naming, because it is where the two walks *look* different
+    /// without differing: Django reads `getattr(self, attr, None)` and then
+    /// tests **truthiness** (`base.py:1079-1080`), so a class whose
+    /// `child_nodelists` names an attribute it never assigns — `CycleNode`,
+    /// `DebugNode`, `FirstOfNode`, `IncludeNode`, `LoremNode`, `NowNode`,
+    /// `PartialNode`, `PrefixNode`, `RegroupNode`, `ResetCycleNode`,
+    /// `TagHelperNode`, `TemplateTagNode`, `VerbatimNode`, `WidthRatioNode` —
+    /// contributes nothing to Django's walk and has no such nodelist in Rust for
+    /// this one to descend into. An absent nodelist and an empty one are the
+    /// same to *this* function's result for the same reason: both contribute no
+    /// nodes.
+    ///
+    /// **There is a third shape, and the two groups above cannot hold it: a
+    /// class that *stores* a nodelist it does not declare.** `SimpleBlockNode`
+    /// (`library.py:334`) sets `self.nodelist = nodelist` in `__init__` (`library.py:337`)
+    /// and inherits `child_nodelists = ()` from `SimpleNode` (`library.py:317`), so
+    /// **Django does not descend into a `simple_block_tag`'s body** — the
+    /// inverse of `IfNode`, which declares a name it synthesises. Rust does not
+    /// descend either, and the measurement says why, because "both decline" is
+    /// two answers that would be indistinguishable from the outside: the
+    /// descriptor for `{% wrap %}x{% endwrap %}` is
+    /// `('HostNode', (('node', NodeRef 0),), (), …)` — the nodelist tuple is
+    /// **empty**, and the ref is a real `SimpleBlockNode` holding its body.
+    /// So the two sides agree *by accident*: Django declines on the class's
+    /// declaration, Rust declines because a host node carries no nodelists at
+    /// all. Neither reason is the other's, and either side can move — if a host
+    /// node class declared `('nodelist',)` Django would start descending while
+    /// this still would not, and if host bodies were ever materialised into
+    /// descriptors this would start descending while Django still would not.
+    /// The agreement is not observable today, because this function's only
+    /// production caller is `{% extends %}`'s duplicate scan (`extends.rs:71`)
+    /// and `ExtendsNode.blocks` is Django's own walk over *materialised* nodes.
+    /// A future caller inherits the accident rather than the equivalence.
     ///
     /// **One recorded divergence, measured zero in the pinned suite.** A
     /// descriptor whose `class_name` is [`HOST_NODE`] carries no nodelists at

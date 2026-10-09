@@ -331,6 +331,18 @@ TEMPLATES = [
     # here while Django finds the block — silently, in `ExtendsNode.blocks`.
     "{% if x %}{% block a %}x{% endblock %}{% endif %}",
     "{% extends \"base.html\" %}{% block a %}A{% endblock %}{% if x %}{% block b %}B{% endblock %}{% endif %}",
+    # --- M7: `{% include %}` ------------------------------------------------
+    # Unlike `{% extends %}`, this one **stops at its own token**: no trailing
+    # parse, so what follows is a sibling. The four option shapes are here
+    # because they are four different descriptor bodies — no options, `with`,
+    # `only`, and both — and the second is the one whose *value* is a compiled
+    # `FilterExpression` rather than text.
+    "{% include \"a.html\" %}",
+    "{% include \"a.html\" with b=1 %}",
+    "{% include \"a.html\" with b=1 only %}",
+    # The variable form, which is why this tag splits with `split_contents()`
+    # too.
+    "{% include template_name %}",
 ]
 
 

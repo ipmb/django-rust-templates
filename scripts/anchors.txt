@@ -11,12 +11,13 @@ desc.rs:407	crates/template-core/src/parser/desc.rs	407	-	pub must_be_first: boo
 desc.rs:445	crates/template-core/src/parser/desc.rs	445	-	must_be_first: false,	-
 error.rs:292-293	crates/template-core/src/parser/error.rs	292	293	str.replace	-
 parser/mod.rs:321	crates/template-core/src/parser/mod.rs	321	-	NodeDesc::new("VariableNode")	-
-crates/template-core/src/parser/mod.rs:395	crates/template-core/src/parser/mod.rs	395	-	self.extend_nodelist(&mut nodelist, node, &token)?;	-
-parser/mod.rs:424-428	crates/template-core/src/parser/mod.rs	424	428	token.or_else	-
-crates/template-core/src/parser/mod.rs:483	crates/template-core/src/parser/mod.rs	483	-	pub fn extend_nodelist(	-
-parser/mod.rs:489	crates/template-core/src/parser/mod.rs	489	-	if node.must_be_first && nodelist.contains_nontext {	-
-tags/mod.rs:182	crates/template-core/src/parser/tags/mod.rs	182	-	Ok(NodeDesc::with_nodelist(	-
-parser/tags/mod.rs:197	crates/template-core/src/parser/tags/mod.rs	197	-	fn standin_first	-
+crates/template-core/src/parser/mod.rs:408	crates/template-core/src/parser/mod.rs	408	-	self.extend_nodelist(&mut nodelist, node, &token)?;	-
+parser/mod.rs:434-439	crates/template-core/src/parser/mod.rs	434	439	token.or_else	-
+crates/template-core/src/parser/mod.rs:496	crates/template-core/src/parser/mod.rs	496	-	pub fn extend_nodelist(	-
+parser/mod.rs:502	crates/template-core/src/parser/mod.rs	502	-	if node.must_be_first && nodelist.contains_nontext {	-
+extends.rs:71	crates/template-core/src/parser/tags/extends.rs	71	-	if !nodelist.get_nodes_by_type("ExtendsNode").is_empty() {	-
+tags/mod.rs:183	crates/template-core/src/parser/tags/mod.rs	183	-	Ok(NodeDesc::with_nodelist(	-
+parser/tags/mod.rs:198	crates/template-core/src/parser/tags/mod.rs	198	-	fn standin_first	-
 url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
 with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
 filters.rs:69-71	crates/template-py/src/filters.rs	69	71	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
@@ -452,11 +453,15 @@ defaulttags.py:1682-1684	django/template/defaulttags.py	1682	1684	"%r received a
 defaulttags.py:1683	django/template/defaulttags.py	1683	-	remaining_bits[0]	-
 defaulttags.py:1687	django/template/defaulttags.py	1687	-	return WithNode(None, None, nodelist, extra_context=extra_context)	-
 engine.py:7	django/template/engine.py	7	-	from .base import Template	-
+engine.py:14-18	django/template/engine.py	14	18	"django.template.loader_tags",	-
 engine.py:15-16	django/template/engine.py	15	16	filters	-
 engine.py:63	django/template/engine.py	63	-	self.template_builtins = self.get_template_builtins(self.builtins)	-
 engine.py:194	django/template/engine.py	194	-	-	-
 library.py:85	django/template/library.py	85	-	for attr in ("expects_localtime", "is_safe", "needs_autoescape"):	-
 library.py:211-212	django/template/library.py	211	212	delete_first_token	-
+library.py:317	django/template/library.py	317	-	child_nodelists = ()	-
+library.py:334	django/template/library.py	334	-	class SimpleBlockNode(SimpleNode):	-
+library.py:337	django/template/library.py	337	-	self.nodelist = nodelist	-
 library.py:388-473	django/template/library.py	388	473	def parse_bits(	return args, kwargs
 library.py:421	django/template/library.py	421	-	-	-
 library.py:454	django/template/library.py	454	-	parser.compile_filter	-
@@ -485,8 +490,13 @@ loader_tags.py:296-299	django/template/loader_tags.py	296	299	may be used in two
 loader_tags.py:305	django/template/loader_tags.py	305	-	bits[1] = construct_relative_path(parser.origin.template_name, bits[1])	-
 loader_tags.py:307	django/template/loader_tags.py	307	-	nodelist = parser.parse()	-
 loader_tags.py:308	django/template/loader_tags.py	308	-	if nodelist.get_nodes_by_type(ExtendsNode):	-
+loader_tags.py:316	django/template/loader_tags.py	316	-	def do_include(parser, token):	-
+loader_tags.py:334-337	django/template/loader_tags.py	334	337	"%r tag takes at least one argument: the name of the template to "	-
+loader_tags.py:339-358	django/template/loader_tags.py	339	358	value = token_kwargs(remaining_bits, parser, support_legacy=False)	-
 loader_tags.py:347	django/template/loader_tags.py	347	-	-	-
 loader_tags.py:356	django/template/loader_tags.py	356	-	"Unknown argument for %r tag: %r." % (bits[0], option)	-
+loader_tags.py:360	django/template/loader_tags.py	360	-	namemap = options.get("with", {})	-
+loader_tags.py:361-365	django/template/loader_tags.py	361	365	allow_recursion=True,	-
 smartif.py:22-26	django/template/smartif.py	22	26	-	-
 smartif.py:40-42	django/template/smartif.py	40	42	def __repr__(self):	return "(" + " ".join(out) + ")"
 smartif.py:51	django/template/smartif.py	51	-	class Operator(TokenBase):	-

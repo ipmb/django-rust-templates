@@ -15,8 +15,12 @@ for `delete_first_token` (`base.py:564-569`), so a callback that does
 Every one of Django's built-ins is in that dict, so Rust would be told to compile
 nothing and the host would run Django's `do_for` etc. The identity clause below is
 the whole of the discrimination: a name is the host's to compile when its entry is
-*not* the callable `django.template.defaulttags` registered for it, or when it is a
-built-in Rust does not own (`block`, `extends`, `include`, `load`, `querystring`).
+*not* the callable Django itself registered for it. Until M7 an exception list of
+three names sat in front of that clause; M7 deleted it, and the deletion is what
+makes the clause whole rather than the last of three rules — a name in Rust's
+registry reaches it and is declined, and the two built-ins Rust still does not own
+(`load`, `querystring`) are answered by the registry's absence one clause earlier,
+neither by a list.
 
 Measured on the pinned tree before the identity clause was written down, since it
 is the one fact the whole predicate rests on: with
@@ -28,33 +32,22 @@ is the one fact the whole predicate rests on: with
 from __future__ import annotations
 
 from django.template import defaulttags as _defaulttags
+from django.template import loader_tags as _loader_tags
 from django.template.base import Token, TokenType
 
 from django_rust_templates import _native
 
 __all__ = ("ShellHost",)
 
-# A5: M7's three. They are Django's builtins and not Rust's, so without this they
-# would reach the host. The ordering check itself is *not* the reason — Rust
-# ports `extend_nodelist` itself (`crates/template-core/src/parser/mod.rs:483`) and
-# runs it for a host descriptor like any other block node. The reason is that
-# `NodeDesc.must_be_first` does not cross the seam, so `{% extends %}` would be
-# accepted *and* uncheckable — and accepting a tag whose render path is M7's is
-# worse than today's honest `Invalid block tag`. Measured:
-# `ExtendsNode.must_be_first is True` (`BlockNode`/`IncludeNode` are `False`) and
-# `{{ x }}{% extends "y" %}` raises under stock Django. M7 removes this, carries
-# `must_be_first` with the node — one `bool` — and gets `parser.__loaded_blocks`
-# for free, since the handle *is* Django's `Parser`.
-_M7_OWNED = frozenset({"block", "extends", "include"})
-
 
 def django_own_tags():
-    """The tag callables Rust ports — read from the module it ports, once.
+    """The tag callables Rust ports — read from the modules it ports, once.
 
     The predicate's question is *"is this callable the one Rust implements?"*,
-    and the only configuration-independent answer names the module Rust ports:
-    `django.template.defaulttags`. Frozen at import, so neither a `{% load %}`
-    nor a caller mutating `defaulttags.register` mid-parse can move it.
+    and the only configuration-independent answer names the modules Rust ports:
+    `django.template.defaulttags` and `django.template.loader_tags`. Frozen at
+    import, so neither a `{% load %}` nor a caller mutating either `register`
+    mid-parse can move it.
 
     **This replaced a snapshot of `parser.tags`, and the reason is measured.**
     The snapshot was taken at `ShellHost` construction, which is *after*
@@ -72,12 +65,27 @@ def django_own_tags():
     `template_tests` is a *filter* library in `test_parser.py`), but
     `OPTIONS["builtins"]` is public, documented Django and M9 ships it.
 
-    `loader_tags` is not here because its three names are `_M7_OWNED` and are
-    refused before the identity clause; `load`/`querystring` are not in
-    `_rust_owned` and return True before it. Measured: the 22 Rust-owned names
-    are exactly `defaulttags.register.tags` minus `load` and `querystring`.
+    **M7 widened this to two modules, and it is the second one that matters.**
+    A predicate that read only `defaulttags` answered "not mine" for
+    `block`/`extends`/`include`, because those three are `loader_tags`' — so
+    until M7 an exception list in front of the clause refused them by name. The
+    measured facts that retire the list: `loader_tags.register.tags`'s keys are
+    exactly `['block', 'extends', 'include']`, disjoint from `defaulttags`';
+    and the three arrive in `parser.tags` at all only because
+    `Engine.default_builtins` (`engine.py:14-18`) lists
+    `django.template.loader_tags` third and `add_library` (`base.py:668-670`)
+    merges it in. So for all three the clause reads `None` against a `func` that
+    is not `None` — `func is not None` is True — and declines them as Rust's.
+
+    The list was not merely redundant, it was **wrong in the direction that does
+    not fail loudly**: it was consulted *before* identity, so a `{% load %}`ed
+    library registering `block` lost (measured: the parser's `block` *is* the
+    loaded callable, and `has_tag` returned `False`). `load`/`querystring` are
+    the two names still not here; they are answered by Rust's registry not
+    containing them, and by nothing else. Measured: the 25 Rust-owned names are
+    exactly the union of these two tables.
     """
-    return dict(_defaulttags.register.tags)
+    return {**_defaulttags.register.tags, **_loader_tags.register.tags}
 
 
 def _wire_token(token):
@@ -113,12 +121,6 @@ class ShellHost:
     def has_tag(self, command):
         func = self.parser.tags.get(command)
         if func is None:
-            return False
-        if command in _M7_OWNED:
-            # A5. Excluded until M7, which must also carry `must_be_first`
-            # across the seam — `NodeDesc.must_be_first` defaults false and is
-            # not on the wire, so reaching the host would *accept*
-            # `{% extends %}` in a position Django rejects.
             return False
         if command not in self._rust_owned:
             # `load`, `querystring`, and everything a `{% load %}` brought in.
