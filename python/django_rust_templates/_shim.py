@@ -490,13 +490,50 @@ def unshimmed() -> list[str]:
     if not installed():
         raise ShimError("not installed; call install() first")
 
-    assert _installed_finder is not None
     ours = _dotted_module_names(_IMPL_DIR)
-    theirs: set[str] = set()
-    for real_path in _installed_finder.real_paths:
-        theirs |= _dotted_module_names(Path(real_path))
+    return sorted(f"{TARGET}.{name}" for name in django_modules() - ours)
 
-    return sorted(f"{TARGET}.{name}" for name in theirs - ours)
+
+def django_modules() -> set[str]:
+    """Every name Django's own template package defines.
+
+    The universe both the meter and the ownership table are counted over — 26
+    names at 6.0.9. Read from Django's directories rather than from a list here,
+    because the failure it exists to catch is a name nobody thought about:
+    `autoreload`, `context_processors` and `loader` were absent from every
+    milestone row precisely because no list mentioned them
+    (`.review/m10-recon.md` §2).
+
+    Callable before ``install()``, which is what lets
+    `tests/test_milestone_ownership.py` state the partition without depending on
+    the order the suite happens to install the shim in: `_django_template_dirs`
+    falls back to `_real_search_paths`, which is the same set of paths the finder
+    captures at install.
+    """
+    names: set[str] = set()
+    for real_path in _django_template_dirs():
+        names |= _dotted_module_names(Path(real_path))
+    return names
+
+
+def dotted_suffix(relative: str) -> str:
+    """``_impl``-relative posix path → the dotted suffix it is served under.
+
+    ``base.py`` → ``base``; ``loaders/__init__.py`` → ``loaders``;
+    ``loaders/base.py`` → ``loaders.base``; ``__init__.py`` → ``""``, the
+    package itself, which is the one name no table in this tree carries.
+
+    One function rather than four spellings: the file path is how a table finds
+    the file, the dotted name is how :func:`unshimmed` and the ownership table
+    count it, and a derivation written twice is how ``loaders/base.py`` becomes
+    ``loaders.base.py`` in one of them.
+    """
+    parts = relative.split("/")
+    if parts[-1] == "__init__.py":
+        parts = parts[:-1]
+    else:
+        parts[-1] = parts[-1][: -len(".py")]
+    return ".".join(parts)
 
 
 def _dotted_module_names(root: Path) -> set[str]:
@@ -504,24 +541,18 @@ def _dotted_module_names(root: Path) -> set[str]:
 
     ``root/base.py`` yields ``base``; ``root/loaders/app_directories.py`` yields
     ``loaders.app_directories``; ``root/loaders/__init__.py`` makes ``loaders`` a
-    package rather than a module, but either way the name is ``loaders``.
+    package rather than a module, but either way the name is ``loaders``. The
+    derivation is :func:`dotted_suffix`'s, so the walk and the tables agree by
+    construction.
     """
     names: set[str] = set()
     if not root.is_dir():
         return names
 
     for path in root.rglob("*.py"):
-        relative = path.relative_to(root)
-        parts = list(relative.parts)
-
-        if parts[-1] == "__init__.py":
-            parts = parts[:-1]
-        else:
-            parts[-1] = parts[-1][: -len(".py")]
-
-        if not parts:
+        name = dotted_suffix(path.relative_to(root).as_posix())
+        if name:
             # The root package itself, which is ours by construction.
-            continue
-        names.add(".".join(parts))
+            names.add(name)
 
     return names
