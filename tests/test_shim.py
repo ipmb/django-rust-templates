@@ -601,6 +601,18 @@ class NamespaceTests(unittest.TestCase):
         self.assertEqual(_shim.unshimmed(), _shim.unshimmed(scope="django.template"))
         self.assertEqual(len(_shim.unshimmed()), 11)
         self.assertEqual(_shim.unshimmed(scope="django.templatetags"), [])
+        # **The zero above needs a denominator, and the line beneath is it.**
+        # `unshimmed` is `django_modules(scope) - ours`, and `django_modules`
+        # reads Django's own directories — so an empty *universe* satisfies the
+        # zero just as well as the five libraries being ours, and the `== 11`
+        # control two lines up is drawn from a **different population**.
+        # Measured, not argued: forcing the lookup empty left both assertions
+        # green. Written out as the set rather than counted, so the row fails if
+        # the scope ever names a module this milestone has not decided about.
+        self.assertEqual(
+            sorted(_shim.django_modules("django.templatetags")),
+            ["cache", "i18n", "l10n", "static", "tz"],
+        )
 
     def test_a_namespaces_files_are_not_everything_under_its_root(self):
         """The label against the measurement, staged on a real tree.

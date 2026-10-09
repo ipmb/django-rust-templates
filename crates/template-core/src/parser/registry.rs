@@ -282,10 +282,13 @@ pub fn library_tag(command: &str) -> Option<CompileFn> {
 /// library tags Rust actually compiles has to come from Rust.
 ///
 /// **All 18 as of M12 Task 6b**, the last name-adding task: `blocktranslate` and
-/// `blocktrans` joined the sixteen Task 6a left, so this table and
-/// `django_own_tags()` now hold the same set — the `245 failures` defect is
-/// closed for the library scope. The list stays derived from this table rather
-/// than hardcoded, because it is still the *Rust* answer the shell must ask for.
+/// `blocktrans` joined the sixteen Task 6a left, so this table and the *library
+/// scope* of `django_own_tags()` now agree — its 18 library entries against
+/// these 18. The function itself holds 45, `defaulttags`' 24 and `loader_tags`'
+/// 3 included, and this table claims none of those. With the library scope
+/// covered, the `245 failures` defect is closed for that scope. The list stays
+/// derived from this table rather than hardcoded, because it is still the
+/// *Rust* answer the shell must ask for.
 ///
 /// Three of the entries share [`tags::static_tag::compile`], which is
 /// Django's own shape rather than a shortcut here — `do_static`,

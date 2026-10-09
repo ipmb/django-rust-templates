@@ -82,20 +82,27 @@ MARKER_WINDOW = 4
 # re-runs the instrument and fails if the two disagree. A pinned table with a
 # live re-measurement behind it is the same shape as the module meter.
 #
-# 29 functions, spanning 116-1200 in a file of 1200 lines — nearly the whole
+# 29 functions, spanning 116-1214 in a file of 1214 lines — nearly the whole
 # file, which is the finding.
 # A guard that checked only the named target's own lines would miss a region
 # declared in any of the other 28.
 #
 # **These are the transcription's line numbers, so an insertion moves them, and
-# M11 Task 2's is why eleven of them are not what M10 pinned.** The filter seam
-# adds nineteen lines to `FilterExpression.resolve` (815-833, declared above),
-# which shifts every function below it by nineteen: `args_check` 827-844 →
-# 846-863 through `token_kwargs` 1137-1181 → 1156-1200. Re-measured with the
+# M11 Task 2's is why ten of them are not what M10 pinned.** That commit
+# (`679e315`) inserted thirty-three lines into `FilterExpression.resolve` — the
+# region `DECLARED` records below as `(815, 847)`, of which the routing arm is
+# nineteen and the comment and lazy imports above it the other fourteen — which
+# shifts every function below it by thirty-three: `args_check` 827-844 → 860-877
+# through `token_kwargs` 1137-1181 → 1170-1214. Re-measured with the
 # instrument rather than computed, because the instrument is the evidence; the
 # shift is arithmetic anyone can check, and the *set* of functions is the part
 # that could have moved for a real reason (the routing arm is on `resolve`'s own
 # lines, and `resolve` is not in this table — the parse harness never renders).
+# The arithmetic was wrong here once, in the direction this block exists to warn
+# about: it counted the region someone had named (the arm, nineteen lines)
+# rather than what the commit did (thirty-three), and the pin was right
+# throughout. A shift belongs to the commit, not to the block you have in mind;
+# `git show <commit> -- <file> | grep '^@@'` is the measurement.
 # The stale pin did not fail quietly: clause (4) read the old `args_check` span
 # against the new region and reported an overlap that was not there, which is
 # the false *positive* half of the same staleness the re-measurement row catches

@@ -2419,9 +2419,9 @@ class I18nInterpositionTests(unittest.TestCase):
     node that carries the token stream rather than a nodelist — so it is 6b that
     takes the meter's second scope to zero and completes the library.
 
-    **The five filters the same file registers — ``language_name``,
-    ``language_name_translated``, ``language_name_local``, ``language_bidi`` and
-    ``i18n.py:293,298,304,309`` — are Task 7's.** This task transcribes their
+    **The four filters the same file registers — ``language_name``,
+    ``language_name_translated``, ``language_name_local`` and ``language_bidi``
+    (``i18n.py:293,298,304,309``) — are Task 7's.** This task transcribes their
     Python (the file is the unit of transcription) and writes no Rust filter
     body, so a row demanding ``_native``'s filter registry carry these names
     belongs to Task 7; their absence here is a division of labour, not an
