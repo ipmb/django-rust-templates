@@ -273,7 +273,7 @@ defaulttags.py:323-333	django/template/defaulttags.py	323	333	for condition, nod
 defaulttags.py:326	django/template/defaulttags.py	326	-	condition.eval(context)	-
 defaulttags.py:403	django/template/defaulttags.py	403	-	tzinfo = timezone.get_current_timezone() if settings.USE_TZ else None	-
 defaulttags.py:439	django/template/defaulttags.py	439	-	-	-
-defaulttags.py:611-702	django/template/defaulttags.py	611	702	len(args) < 2	-
+defaulttags.py:611-701	django/template/defaulttags.py	611	701	@register.tag	return node
 defaulttags.py:612	django/template/defaulttags.py	612	-	-	-
 defaulttags.py:657	django/template/defaulttags.py	657	-	args = token.split_contents()	-
 defaulttags.py:659-660	django/template/defaulttags.py	659	660	if len(args) < 2:	raise TemplateSyntaxError("'cycle' tag requires at least two arguments")

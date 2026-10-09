@@ -1,4 +1,4 @@
-//! `{% cycle %}` — `defaulttags.cycle` (`defaulttags.py:611-702`).
+//! `{% cycle %}` — `defaulttags.cycle` (`defaulttags.py:611-701`).
 //!
 //! # Five shapes, and the two-bit `as`
 //!
