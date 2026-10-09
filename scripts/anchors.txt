@@ -280,7 +280,7 @@ defaultfilters.py:965-966	django/template/defaultfilters.py	965	966	if "," not i
 defaultfilters.py:984-987	django/template/defaultfilters.py	984	987	def phone2numeric_filter(value):	return phone2numeric(value)
 defaultfilters.py:990-996	django/template/defaultfilters.py	990	996	def pprint(value):	return "Error in formatting: %s: %s" % (e.__class__.__name__, e)
 defaultfilters.py:996	django/template/defaultfilters.py	996	-	"Error in formatting: %s: %s" % (e.__class__.__name__, e)	-
-defaulttags.py:97	django/template/defaulttags.py	97	-	-	-
+defaulttags.py:99	django/template/defaulttags.py	99	-	def __init__(self, cyclevars, variable_name=None, silent=False):	-
 defaulttags.py:106-112	django/template/defaulttags.py	106	112	# First time the node is rendered in template	if self.silent:
 defaulttags.py:176-179	django/template/defaulttags.py	176	179	if nodelist_empty is None:	self.nodelist_empty = nodelist_empty
 defaulttags.py:262	django/template/defaulttags.py	262	-	-	-
@@ -402,7 +402,7 @@ smartif.py:149-150	django/template/smartif.py	149	150	-	-
 smartif.py:153	django/template/smartif.py	153	-	EndToken = EndToken()	-
 smartif.py:157	django/template/smartif.py	157	-	ValueError	-
 smartif.py:159-173	django/template/smartif.py	159	173	-	-
-smartif.py:160-171	django/template/smartif.py	160	171	-	-
+smartif.py:164-173	django/template/smartif.py	164	173	while i < num_tokens:	i += 1
 smartif.py:179-185	django/template/smartif.py	179	185	-	-
 smartif.py:179-183	django/template/smartif.py	179	183	OPERATORS[token]	-
 smartif.py:198-200	django/template/smartif.py	198	200	-	-
@@ -470,10 +470,9 @@ text.py:471-481	django/utils/text.py	471	481	str(value)	-
 text.py:473-476	django/utils/text.py	473	476	-	-
 text.py:480	django/utils/text.py	480	-	-	-
 timesince.py:28	django/utils/timesince.py	28	-	-	-
-timesince.py:60-73	django/utils/timesince.py	60	73	now.astimezone(d.tzinfo)	-
-timesince.py:60-70	django/utils/timesince.py	60	70	-	-
 timesince.py:62	django/utils/timesince.py	62	-	d = datetime.datetime(d.year, d.month, d.day)	-
 timesince.py:67-68	django/utils/timesince.py	67	68	-	-
+timesince.py:67-70	django/utils/timesince.py	67	70	if not now:	now = now.astimezone(d.tzinfo)
 timesince.py:83	django/utils/timesince.py	83	-	total_months = (now.year - d.year) * 12 + (now.month - d.month)	-
 timesince.py:138-143	django/utils/timesince.py	138	143	timeuntil	-
 timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)

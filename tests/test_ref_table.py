@@ -105,7 +105,7 @@ def cycle_definition(slot, name="c", token=None):
     `cyclevars` is `[]` rather than real `FilterExpression`s: this file is about
     the table, and building a `FilterExpr` would need a parser and a filter
     lookup that the rule under test never reads. The parameter names are
-    `CycleNode.__init__`'s own (`defaulttags.py:97`), not a paraphrase.
+    `CycleNode.__init__`'s own (`defaulttags.py:99`), not a paraphrase.
     """
     return (
         "CycleNode",

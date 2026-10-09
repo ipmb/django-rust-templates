@@ -674,7 +674,7 @@ pub trait FilterHost {
     ///
     /// `timeuntil` is not `timesince` with the arguments swapped: Django's
     /// `timesince(d, now, reversed=False)` swaps `d` and `now` *after*
-    /// normalising the timezones (`timesince.py:60-73`), so
+    /// normalising the timezones (`timesince.py:67-70`), so
     /// `now.astimezone(d.tzinfo)` expresses one operand in the other's zone and
     /// the calendar fields `total_months` reads (`timesince.py:83`) are zone-dependent. A
     /// caller-side swap normalises the opposite way and reports different months

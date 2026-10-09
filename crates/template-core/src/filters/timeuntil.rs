@@ -16,7 +16,7 @@
 //! (`timesince.py:138-143`), a one-line delegation to the same host helper
 //! ([`FilterHost::timesince`]) with the flag set. **The flag is a flag and not
 //! an operand swap**: Django swaps `d` and `now` *after* normalising the
-//! timezones (`timesince.py:60-70`), so a caller-side swap normalises the other
+//! timezones (`timesince.py:67-70`), so a caller-side swap normalises the other
 //! way and reports different calendar months for two aware datetimes in
 //! different zones — a difference the corpus's `timeuntil B o=A` /
 //! `timesince B o=A` pair reads out loud (`'1\xa0hour, 21\xa0minutes'` against

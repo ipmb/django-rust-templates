@@ -551,7 +551,7 @@ impl IfParser {
 }
 
 /// `IfParser.__init__`'s token merge: `is`+`not` -> `is not`, `not`+`in` ->
-/// `not in`, and nothing else (`smartif.py:160-171`).
+/// `not in`, and nothing else (`smartif.py:164-173`).
 fn merge_tokens(tokens: &[String]) -> Vec<String> {
     let mut out = Vec::with_capacity(tokens.len());
     let mut i = 0;
