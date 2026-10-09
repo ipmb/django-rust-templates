@@ -424,10 +424,11 @@ the case that looks wrong and is right.
 - Create: `scripts/gen_python_case_fixups.py`
 - Create: `tests/test_pyunicode_case_parity.py`
 - Modify: `crates/template-core/src/pyunicode.rs` (add `pub mod case;` and re-export)
+- Modify: `crates/template-py/src/lib.rs` (one `#[pyfunction]`: `python_upper`, returning `String`)
 
 **Interfaces:**
 - Consumes: nothing from earlier milestones.
-- Produces: `template_core::pyunicode::case::upper(ch: char) -> impl Iterator<Item = char> + '_`, `upper_str(&str) -> String`, and `const UNCASED: [char; 28]`. **No `lower`.** The `lower` filter delegates (Task 4) and `slugify`'s `.lower()` goes through the host (Task 9), so a per-code-point `lower` would have no consumer — and it would be *silently wrong* for the strings that reach it, since Python's `str.lower()` applies Final_Sigma and a `char`-level table cannot. Shipping a function that exists, looks right, and is wrong at its obvious call site is worse than shipping none; the generator still measures the lower divergence and records it in the module doc as the reason there is no `lower`.
+- Produces: `template_core::pyunicode::case::upper(ch: char) -> impl Iterator<Item = char>`, `upper_str(&str) -> String`, and `const UNCASED: [char; 28]`. **No `lower`.** The `lower` filter delegates (Task 4) and `slugify`'s `.lower()` goes through the host (Task 9), so a per-code-point `lower` would have no consumer — and it would be *silently wrong* for the strings that reach it, since Python's `str.lower()` applies Final_Sigma and a `char`-level table cannot. Shipping a function that exists, looks right, and is wrong at its obvious call site is worse than shipping none; the generator still measures the lower divergence and records it in the module doc as the reason there is no `lower`.
 
 **Why this is a task and not a step.** It is the only part of M4 whose correctness
 is a *table*, it has its own generator, and a reviewer could reasonably accept
@@ -549,11 +550,15 @@ Expected: FAIL — `_native` has no `python_upper`.
 
 - [ ] **Step 3: Write the Rust table and the accessors**
 
-Run `python scripts/gen_python_case_fixups.py` and commit its output. Then the
+Run `.venv/bin/python -I scripts/gen_python_case_fixups.py` and commit its
+output — the interpreter is part of the measurement, and the generator refuses
+if the counts move (see Step 1's table). It applies `rustfmt` to its output, so
+the committed file is fmt-clean by construction rather than by a template that
+predicts rustfmt's layout for this table's length. Then the
 accessors in `case.rs`:
 
 ```rust
-pub fn upper(ch: char) -> impl Iterator<Item = char> + '_ {
+pub fn upper(ch: char) -> impl Iterator<Item = char> {
     let mapped = if UNCASED.binary_search(&ch).is_ok() {
         // Python leaves this one alone; Rust would map it. Yield the code point
         // itself, and only it — a `char`'s own iterator is `once`-like but the
@@ -577,24 +582,62 @@ allocation. Then add `pub mod case;` to `pyunicode.rs` and one `#[pyfunction]`
 Run: `maturin develop && .venv/bin/python -m unittest tests.test_pyunicode_case_parity -v`
 Expected: PASS, 2 tests, the first over 1,112,064 code points.
 
-- [ ] **Step 5: Observe the guard failing**
+- [ ] **Step 5: Observe each guard failing, for its own reason**
 
-Delete `U+A7D3` from `UNCASED`, `cargo test -p template-core` and
-`maturin develop`, and re-run the parity test. Expected:
-`upper differs at U+A7D3` — `U+A7D2` against `U+A7D3`. Restore.
+Three observations, and the *third* is the one that decides this step's design.
+The first two were run and are recorded here as they came out; the second and
+third are the pair that shows why a property assertion beats a checksum.
 
-Then observe a *different* failure: the test must be sensitive to the Rust table
-moving. Change one `UNCASED` entry to a code point Rust already maps to itself
-(e.g. `U+0041`), rebuild, and confirm the test still passes — **that is the wrong
-result and it is the point of the step**: the table is a *suppression* list, so a
-stray entry is harmless and the test cannot catch it. Record that in the test's
-docstring, and add an assertion that `UNCASED` is exactly the generated set, by
-count and by hash of its contents, so an edit that changes its meaning without
-changing its length is still caught.
+**A missing entry fails the parity test.** Drop `U+A7D3` (its length is in the
+type, so `[char; 28]` becomes `[char; 27]` — the entry cannot be removed without
+that), rebuild, and the parity test fails with `upper differs at U+A7D3`: Rust
+returns `U+A7D2`, Python returns `U+A7D3`. Over-suppression of this kind is
+always loud, which is the consolation §D2 records.
 
-Then the second guard: add a `python_lower` `#[pyfunction]` returning `String`,
-rebuild, and confirm `test_there_is_no_lower_accessor` fails. That is the
-observation that the closed half of the obligation is live; delete it again.
+**A bogus entry does not — and that is the silent direction.** This is where the
+step as first written was wrong twice. Substituting `U+0041` for the `U+A7CF`
+entry does not isolate anything: it adds an inert entry *and* removes real
+coverage, so the parity test fails at `U+A7CF` and tells you nothing about the
+inert entry. The isolated experiment is to **add** `U+0041` alongside every real
+entry (`[char; 29]`, all 28 kept), and then the parity test passes all four of
+its tests while the Rust-side property assertion fails. Both halves matter: it is
+the evidence that an inert entry is invisible to the only test that runs on every
+`cargo test`, and therefore that something else has to see it.
+
+**So the guard is a property, not a count and a hash.** An entry is *inert* when
+Rust maps the code point to itself, and an inert entry changes nothing —
+suppressing a code point that Rust already leaves alone is a no-op — so the
+parity test cannot look at it and a hash of the contents would only say "this
+changed", not "this is wrong" (and would have to be regenerated by hand every
+time the table legitimately moves, fighting the generator). Instead
+`case.rs` asserts `every_entry_is_one_rust_would_map`, which names the offending
+code point and the reason. The two tables of edits are then covered between them:
+
+| edit | caught by | how it reads |
+|---|---|---|
+| an entry removed | the parity test | `upper differs at U+A7D3` |
+| an entry that Rust maps to itself | the property assertion | `U+0041 is inert` |
+| an entry Rust and Python both move | the parity test | `upper differs at U+…` |
+
+That is a closed argument: any edit either changes behaviour (parity) or does
+not (property). It is also why the assertion lives in `case.rs` and not in the
+parity test — it is a property of the Rust table alone, and the Python half is
+the only part that needs both languages present.
+
+**The closed half of the obligation is live.** Add a `python_lower`
+`#[pyfunction]` returning `String`, rebuild, and `test_there_is_no_lower_accessor`
+fails. Delete it again. That is the guard against someone helpfully restoring the
+per-code-point `lower` §D2 removed.
+
+**And a trap for the generator's own output, which cost a pass.** `cargo fmt`
+silently *skips* a `.rs` file that is not reachable from the crate root, so
+`cargo fmt --all -- --check` reporting this file clean meant nothing until
+`pub mod case;` existed — the file was formatted for the first time only when it
+was wired in, and then rustfmt wanted a diff. Two consequences, both now in the
+generator: it runs its output through `rustfmt` (applied, not checked) so the
+layout cannot be wrong for a different table length, and Step 6's gate is what
+confirms the file is reachable. Do not "verify" formatting of a generated file
+before it is wired in.
 
 - [ ] **Step 6: Run the gate and commit**
 

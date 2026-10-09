@@ -1,4 +1,14 @@
-//! Python's whitespace table, which is not Rust's.
+//! Python's tables, which are not Rust's.
+//!
+//! Two of them live here, and both are **two-version artifacts**: each is built
+//! from a Unicode release that moves independently of the other, Rust's tracking
+//! the toolchain and CPython's being compiled into the interpreter. So neither
+//! may be computed from one side and asserted; each is generated from the two
+//! live implementations and pinned by a test that compares them exhaustively
+//! (see the design spec's §4 rule). The instances are this module's whitespace
+//! table and the `case` submodule's uppercase mapping.
+//!
+//! ## Whitespace
 //!
 //! Django trims tag contents with `token_string[2:-2].strip()` and splits them
 //! with `smart_split`, whose pattern is written using `\s`/`\S`. All three
@@ -34,6 +44,10 @@
 //! This is observable rather than theoretical. `{% \u{1c} if x %}` trims to
 //! `if x` in Python and to `\u{1c} if x` in Rust, so the two engines disagree
 //! about the tag's contents, and therefore about which tag it is.
+
+pub mod case;
+
+pub use case::{upper, upper_str, UNCASED};
 
 /// Whether Python's `str.isspace()` is true for `c`.
 pub fn is_space(c: char) -> bool {

@@ -67,6 +67,22 @@ fn whitespace_codepoints() -> Vec<u32> {
         .collect()
 }
 
+/// Python's `str.upper()` for a one-code-point string.
+///
+/// Exposed for the same reason `whitespace_codepoints` is: Rust's and CPython's
+/// case tables are built from different Unicode releases, and nothing in
+/// `cargo test` can compare the two. `tests/test_pyunicode_case_parity.py`
+/// compares this against `chr(cp).upper()` for every code point.
+///
+/// Takes `&str` rather than a `u32` because the comparison on the Python side is
+/// `_native.python_upper(ch) == ch.upper()` with `ch = chr(cp)`. A lone surrogate
+/// cannot be passed — a Rust `&str` cannot hold one, so PyO3 raises — which is
+/// why the test skips the surrogate range explicitly instead of relying on it.
+#[pyfunction]
+fn python_upper(s: &str) -> String {
+    template_core::pyunicode::upper_str(s)
+}
+
 /// Split template-tag contents into arguments.
 ///
 /// Raises `StopIteration` where Django's implementation would — its inner
@@ -1314,6 +1330,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(engine_version, m)?)?;
     m.add_function(wrap_pyfunction!(whitespace_codepoints, m)?)?;
     m.add_function(wrap_pyfunction!(decimal_digit_codepoints, m)?)?;
+    m.add_function(wrap_pyfunction!(python_upper, m)?)?;
     m.add_function(wrap_pyfunction!(split_contents, m)?)?;
     m.add_function(wrap_pyfunction!(lex, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
