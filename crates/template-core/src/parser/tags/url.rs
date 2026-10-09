@@ -2,11 +2,12 @@
 //!
 //! # Compile calls no reversal
 //!
-//! The view name and every argument are `compile_filter`ed and nothing is
-//! resolved (`:1565`, `:1574-1584`). `ViewDoesNotExist` and `NoReverseMatch` are
-//! `URLNode.render`'s, and are unported here. A body that looked the view name
-//! up at parse time would diverge on the first template whose URLconf is not yet
-//! loaded, which is every template during a `manage.py` startup check.
+//! The view name and every argument are `compile_filter`ed and nothing is resolved
+//! (`defaulttags.py:1565`, `defaulttags.py:1574-1584`). `ViewDoesNotExist` and
+//! `NoReverseMatch` are `URLNode.render`'s, and are unported here. A body that
+//! looked the view name up at parse time would diverge on the first template whose
+//! URLconf is not yet loaded, which is every template during a `manage.py` startup
+//! check.
 //!
 //! # Each bit is classified by `kwarg_re.match`, and `as` is read from the end
 //!
@@ -24,19 +25,19 @@
 //! # The "Malformed" branch is unreachable from a token, and is kept anyway
 //!
 //! `if not match: raise TemplateSyntaxError("Malformed arguments to url tag")`
-//! (`:1575-1577`) cannot fire: `kwarg_re`'s value group is `(.+)` and Python's
-//! `.` does not cross `\n`, so `match` fails only for an empty or
+//! (`defaulttags.py:1575-1577`) cannot fire: `kwarg_re`'s value group is `(.+)`
+//! and Python's `.` does not cross `\n`, so `match` fails only for an empty or
 //! `\n`-leading bit, and no bit `token.split_contents` produces is either
 //! ([`match_kwarg`] carries the measurement). The branch is ported because it is
-//! in Django's source and its message is part of the tag's surface; the test
-//! below drives [`classify_bits`] with a `\n`-leading bit, which no template can
-//! reach, so the branch is exercised rather than merely written.
+//! in Django's source and its message is part of the tag's surface; the test below
+//! drives [`classify_bits`] with a `\n`-leading bit, which no template can reach,
+//! so the branch is exercised rather than merely written.
 //!
 //! # The descriptor is positional, and `asvar` is always present
 //!
-//! `URLNode(view_name, args, kwargs, asvar)` (`:479-483`) — all four are plain
-//! attributes, and `:1585` passes `asvar` on both paths, so it is emitted as
-//! `AttrValue::None` when there is no `as`.
+//! `URLNode(view_name, args, kwargs, asvar)` (`defaulttags.py:479-483`) — all four
+//! are plain attributes, and `:1585` passes `asvar` on both paths, so it is
+//! emitted as `AttrValue::None` when there is no `as`.
 
 use crate::parser::desc::{AttrValue, NodeDesc};
 use crate::parser::error::Error;
@@ -50,8 +51,8 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
 
     if bits.len() < 2 {
         // `"'%s' takes at least one argument, a URL pattern name." % bits[0]`
-        // (`:1562-1564`) — the quotes are literal in the format string and `%s`
-        // of the command name adds no escaping of its own.
+        // (`defaulttags.py:1562-1564`) — the quotes are literal in the format
+        // string and `%s` of the command name adds no escaping of its own.
         return Err(Error::syntax(format!(
             "'{}' takes at least one argument, a URL pattern name.",
             bits[0],
@@ -82,8 +83,8 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
         .attr("asvar", asvar))
 }
 
-/// Django's classification loop (`:1574-1584`): each bit becomes a kwarg or a
-/// positional, and the first bit `kwarg_re.match` refuses raises.
+/// Django's classification loop (`defaulttags.py:1574-1584`): each bit becomes a
+/// kwarg or a positional, and the first bit `kwarg_re.match` refuses raises.
 ///
 /// Split out from [`compile`] for one reason: the `None` arm is unreachable
 /// through a token (see the module docs), and a private function taking the bits
