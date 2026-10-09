@@ -35,6 +35,21 @@ lets a row be `mark_safe("AbC")` — and the safety rows are the point of this
 file. A textual format would have needed a second, private encoding for
 `safestring` and then a reason to trust it.
 
+**Two optional keys change what the row is, and both exist because the default
+would quietly score a different question.** `value_factory` replaces `value` for
+a **one-shot** input — a generator is consumed by whichever side reads it first,
+so a shared one makes the second side's answer a statement about an exhausted
+iterator; see [`case_value`]. `context` overrides the `Context` the loop reads
+`autoescape` and `use_tz` off, which is how the `needs_autoescape` filters get
+both branches: `join` with and without escaping answers different text from the
+same input, so nothing but the key can tell the two rows apart.
+
+**A row cannot express an exception.** `resolve` propagates it rather than
+returning it, so a case whose *point* is that Django raises is a Rust body test,
+not a corpus row — `first(5)`'s `TypeError` and `random({...})`'s `KeyError` live
+in their modules. Rows that survive a filter's own `try` are fine and common: the
+`dictsort` rows that end in `""` are three different caught arms.
+
 Rows for a filter arrive in **the commit that lands its group** (§D6), so the
 set of filters named here is a statement about M4's progress as well as about
 correctness — which is why `test_filter_parity.py` checks both directions of it
@@ -62,6 +77,66 @@ from django.utils.safestring import mark_safe
 # rather than the contract. It constructs with settings unconfigured, which is
 # what lets it live at module scope here.
 LAZY_SAFE_PROXY = lazy(lambda: mark_safe("AbC"), str)()
+
+
+class DOT_ATTR:
+    """An object with an attribute and **no** `__getitem__`.
+
+    `dictsort`'s resolver tries `value[part]` first and falls back to `getattr`,
+    so the fallback is only reachable by an object whose subscript *raises* — a
+    dict and a list both answer the first branch. Measured: `dictsort` over these
+    sorts by `.x`, so a body that never fell back would raise `TypeError` here.
+    """
+
+    def __init__(self, x):
+        self.x = x
+
+    def __repr__(self):
+        return f"DOT_ATTR({self.x!r})"
+
+    def __eq__(self, other):
+        return isinstance(other, DOT_ATTR) and other.x == self.x
+
+
+class STR_NOT_REPR:
+    """An object whose `__str__` is not its `__repr__`.
+
+    `unordered_list`'s escaper is `"%s" % item`, which is `__str__`. A body that
+    rendered the `repr` — or that escaped the `Value` rather than its string —
+    answers `REPR-SENTINEL` here. Django's own `test_ulitem` is this row.
+    """
+
+    def __str__(self):
+        return "STR-SENTINEL"
+
+    def __repr__(self):
+        return "REPR-SENTINEL"
+
+    def __eq__(self, other):
+        return isinstance(other, STR_NOT_REPR)
+
+
+def case_value(case):
+    """The row's input, **built fresh for each side**.
+
+    A row declares `value_factory` instead of `value` when the input cannot be
+    shared, and there is exactly one such input class: **a one-shot iterator**.
+    A generator is consumed by whichever side reads it first, so handing the same
+    object to Django and then to Rust makes the second side's answer a statement
+    about an exhausted generator rather than about the filter — measured, and it
+    cost a false divergence report: `["a", (x for x in ["b"])]` nests under
+    Django and, with the *same spent object*, does not under ours. The filter was
+    right the whole time; the row was the bug.
+
+    `value_factory` rather than "call `value` if it is callable", because a
+    callable is a legitimate filter *input* — `x|default:func` resolves a
+    function — and a row that meant to test one would be silently read as a
+    factory. The two are different keys so they cannot be confused.
+    """
+    if "value_factory" in case:
+        return case["value_factory"]()
+    return case["value"]
+
 
 # `lower` is `is_safe=True` and `upper` is `is_safe=False` — measured, and the
 # reason the two are in this file together rather than one per group. Same
@@ -819,5 +894,477 @@ CASES: list[dict] = [
         "filter": "wordwrap",
         "value": mark_safe("a b c d"),
         "arg": 3,
+    },
+    # --- first (`:700`, `value[0]`, catching **only** IndexError) -----------
+    #
+    # `first` and `last` have the same body shape and **opposite** `is_safe`
+    # (`first` is `False`, `last` is `True`), so the pair is what catches a loop
+    # that read the flag off the result rather than the filter. The two raising
+    # rows each filter has — an `int`'s `TypeError`, a `dict`'s `KeyError` — are
+    # body tests: a corpus row has no exception path to compare.
+    {
+        "name": "first/list",
+        "filter": "first",
+        "value": ["a", "b"],
+    },
+    {
+        # The `except IndexError` arm: an empty sequence is `""`, not an error.
+        "name": "first/empty-list-is-the-empty-string",
+        "filter": "first",
+        "value": [],
+    },
+    {
+        "name": "first/string",
+        "filter": "first",
+        "value": "ab",
+    },
+    {
+        "name": "first/empty-string-is-the-empty-string",
+        "filter": "first",
+        "value": "",
+    },
+    {
+        # A first item that is **`None`** is returned as `None`, not `""` — so a
+        # body that answered `""` for anything falsy passes every row above and
+        # fails this one. Measured: `(NoneType, None)`.
+        "name": "first/none-item-is-not-the-empty-string",
+        "filter": "first",
+        "value": [None, 1],
+    },
+    {
+        # `is_safe=False`: the same `mark_safe`d operand the `last` row below
+        # keeps safe. One of the two rows is what catches the flag being read off
+        # the result.
+        "name": "first/safe-input-is-not-safe",
+        "filter": "first",
+        "value": mark_safe("ab"),
+    },
+    # --- last (`:706`, `value[-1]`, is_safe=True) --------------------------
+    {
+        "name": "last/list",
+        "filter": "last",
+        "value": ["a", "b"],
+    },
+    {
+        # The index is `-1` where `first`'s is `0`; this row and `last/list`
+        # together pin it, and a body that copied `first`'s index fails.
+        "name": "last/empty-list-is-the-empty-string",
+        "filter": "last",
+        "value": [],
+    },
+    {
+        "name": "last/safe-input-stays-safe",
+        "filter": "last",
+        "value": mark_safe("ab"),
+    },
+    # --- length (`:712`, `len(value)` on `(ValueError, TypeError)` -> 0) ---
+    {
+        "name": "length/list",
+        "filter": "length",
+        "value": [1, 2, 3],
+    },
+    {
+        "name": "length/string",
+        "filter": "length",
+        "value": "abc",
+    },
+    {
+        "name": "length/dict-counts-keys",
+        "filter": "length",
+        "value": {"a": 1, "b": 2},
+    },
+    {
+        "name": "length/int-is-zero",
+        "filter": "length",
+        "value": 5,
+    },
+    {
+        # `None` is the `TypeError` arm, `""` is a genuine `0`: two different
+        # nothings, and a body that answered `0` for anything falsy would pass
+        # the `None` row and this one alike while getting the reason wrong.
+        "name": "length/empty-string-is-zero",
+        "filter": "length",
+        "value": "",
+    },
+    {
+        # A generator has no `len` at all — `TypeError`, so `0`. This is the row
+        # that tells "asked the host for a length" from "iterated and counted",
+        # because the second answers 2. One-shot: built fresh per side.
+        "name": "length/generator-has-no-len",
+        "filter": "length",
+        "value_factory": lambda: (x for x in [1, 2]),
+    },
+    # --- slice (`:640`, Rust parses the bits, the host subscripts) ---------
+    #
+    # The **type** half of §D5 is the point of the first row: `"abcdef"|slice:":3"`
+    # is the *string* `"abc"`, where an index route (get + Rust slicing) yields a
+    # list. The two render alike and differ in everything downstream.
+    {
+        "name": "slice/stop-is-a-string-not-a-list",
+        "filter": "slice",
+        "value": "abcdef",
+        "arg": ":3",
+    },
+    {
+        # **This row is what pins that a lone component is the *stop*.** `"1"`
+        # splits to `["1"]` and reaches `slice(1)` = `slice(None, 1, None)`, so
+        # the answer is `"a"` — a body that read a single bit as `start` answers
+        # `"bcdef"`.
+        "name": "slice/single-component-is-the-stop",
+        "filter": "slice",
+        "value": "abcdef",
+        "arg": "1",
+    },
+    {
+        "name": "slice/two-indices",
+        "filter": "slice",
+        "value": "abcdef",
+        "arg": "2:5",
+    },
+    {
+        "name": "slice/negative-index",
+        "filter": "slice",
+        "value": "abcdef",
+        "arg": "-3:",
+    },
+    {
+        "name": "slice/step",
+        "filter": "slice",
+        "value": "abcdef",
+        "arg": "::2",
+    },
+    {
+        "name": "slice/negative-step",
+        "filter": "slice",
+        "value": "abcdef",
+        "arg": "::-1",
+    },
+    {
+        # A missing *middle* component is the only shape where a `None` bit is
+        # neither leading nor trailing.
+        "name": "slice/missing-middle-component",
+        "filter": "slice",
+        "value": "abcdef",
+        "arg": "1::2",
+    },
+    {
+        "name": "slice/three-components",
+        "filter": "slice",
+        "value": "abcdef",
+        "arg": "1:5:2",
+    },
+    {
+        "name": "slice/out-of-range-is-empty",
+        "filter": "slice",
+        "value": "abc",
+        "arg": "5:9",
+    },
+    {
+        # Every bit `None`, one step before the subscript.
+        "name": "slice/empty-arg-is-every-bit-none",
+        "filter": "slice",
+        "value": "abcdef",
+        "arg": "",
+    },
+    {
+        # **Two catch arms, and the plan ran them together.** Four *numeric*
+        # components reach `slice(*bits)` and raise `TypeError` there; a
+        # non-numeric one raises `ValueError` at `int(x)` and never gets that
+        # far. Both return `value`. A body that caught only one of the two passes
+        # one row and fails the other.
+        "name": "slice/four-components-is-a-caught-typeerror",
+        "filter": "slice",
+        "value": "abcdef",
+        "arg": "1:2:3:4",
+    },
+    {
+        "name": "slice/non-numeric-component-is-a-caught-valueerror",
+        "filter": "slice",
+        "value": "abcdef",
+        "arg": "x:3",
+    },
+    {
+        # The subscript itself refuses: `TypeError` again, and `value` comes
+        # back. This is the *third* catch site, in the same `except`.
+        "name": "slice/non-subscriptable-value-is-returned",
+        "filter": "slice",
+        "value": 5,
+        "arg": ":3",
+    },
+    # --- join (`:604`, needs_autoescape, is_safe=True) ---------------------
+    #
+    # The pair the per-row `context` key exists for. Both are `safe=True` and
+    # differ only in the text, so nothing but the key can tell them apart.
+    {
+        "name": "join/autoescape-true-escapes-items",
+        "filter": "join",
+        "value": ["a", "<b>"],
+        "arg": ", ",
+    },
+    {
+        "name": "join/autoescape-false-does-not-escape",
+        "filter": "join",
+        "value": ["a", "<b>"],
+        "arg": ", ",
+        "context": {"autoescape": False},
+    },
+    {
+        "name": "join/empty-list-is-the-empty-string",
+        "filter": "join",
+        "value": [],
+        "arg": ", ",
+    },
+    {
+        # **The group's trap**: on `TypeError` the filter returns **`value`, the
+        # unjoined operand**, not `""`. A body that returned `""` here passes
+        # every row above.
+        "name": "join/typeerror-returns-the-value",
+        "filter": "join",
+        "value": 5,
+        "arg": ", ",
+    },
+    {
+        "name": "join/typeerror-returns-the-value-not-escaping",
+        "filter": "join",
+        "value": 5,
+        "arg": ", ",
+        "context": {"autoescape": False},
+    },
+    {
+        # A non-string separator splits the two branches: escaping wraps it in
+        # `conditional_escape`, which is what gives it a `.join` at all. Without
+        # escaping it is a bare `5.join`, an `AttributeError` the body does *not*
+        # catch (it catches `TypeError`), so that half is a body test.
+        "name": "join/int-separator-escaping-makes-it-a-string",
+        "filter": "join",
+        "value": "abc",
+        "arg": 5,
+    },
+    {
+        # A `SafeString` item is not double-escaped even with autoescape on.
+        "name": "join/safe-items",
+        "filter": "join",
+        "value": [mark_safe("<b>"), "x"],
+        "arg": ", ",
+    },
+    {
+        "name": "join/safe-separator",
+        "filter": "join",
+        "value": ["a", "b"],
+        "arg": mark_safe("<i>"),
+    },
+    {
+        # A generator as the whole value, one-shot and so built per side.
+        "name": "join/generator-value",
+        "filter": "join",
+        "value_factory": lambda: (x for x in ["a", "b"]),
+        "arg": ", ",
+    },
+    # --- random (`:590`, `random.choice` on IndexError -> "") --------------
+    #
+    # **Membership, not equality** (Review Focus 4): the answer is chosen at
+    # random, so an equality row would be green roughly one time in three. The
+    # row says what it asserts in its name, and the harness checks both sides
+    # against the *population* rather than against each other.
+    {
+        "name": "random/result-is-a-member-of-the-population",
+        "filter": "random",
+        "value": ["a", "b", "c"],
+        "membership": True,
+    },
+    {
+        "name": "random/empty-list-is-the-empty-string",
+        "filter": "random",
+        "value": [],
+    },
+    {
+        # The `is_safe=True` half of `random`, and it is a membership row for the
+        # same reason the one above is: the answer is still chosen at random, so
+        # only the *safety* of it can be compared exactly.
+        "name": "random/safe-member-stays-safe",
+        "filter": "random",
+        "value": mark_safe("abc"),
+        "membership": True,
+    },
+    # --- dictsort / dictsortreversed (`:580`/`:560`) ----------------------
+    #
+    # One host call each, with `(AttributeError, TypeError)` -> `""`. The
+    # argument's *shape* decides the resolver, and this is the pair that shows it:
+    # a bare int reaches `float(1)` and becomes `itemgetter(1)` — a list index —
+    # where a quoted digit is a string key. Both are `float()`-convertible, so
+    # nothing but the token shape separates them.
+    {
+        "name": "dictsort/by-key",
+        "filter": "dictsort",
+        "value": [{"n": 2}, {"n": 1}],
+        "arg": "n",
+    },
+    {
+        "name": "dictsort/bare-int-arg-is-a-list-index",
+        "filter": "dictsort",
+        "value": [[9, "b"], [8, "a"]],
+        "arg": 1,
+    },
+    {
+        "name": "dictsort/quoted-digit-arg-is-a-string-key",
+        "filter": "dictsort",
+        "value": [{"1": "b"}, {"1": "a"}],
+        "arg": "1",
+    },
+    {
+        "name": "dictsort/dotted-path-into-a-dict",
+        "filter": "dictsort",
+        "value": [{"a": {"b": 2}}, {"a": {"b": 1}}],
+        "arg": "a.b",
+    },
+    {
+        # The `getattr` fallback, reachable only from an object whose subscript
+        # *raises* — a dict and a list both answer the first branch.
+        "name": "dictsort/getattr-when-subscript-raises",
+        "filter": "dictsort",
+        "value": [DOT_ATTR(2), DOT_ATTR(1)],
+        "arg": "x",
+    },
+    {
+        # The refusal is on **any** underscore-prefixed bit, not only a leading
+        # one: the test is `"._" in arg or arg[0] == "_"`, so `"a._b"` is refused
+        # exactly as `"_a"` is. Two rows, because a body that tested only `arg[0]`
+        # passes the first and fails the second.
+        "name": "dictsort/leading-underscore-arg-is-refused",
+        "filter": "dictsort",
+        "value": [{"_a": 1}],
+        "arg": "_a",
+    },
+    {
+        "name": "dictsort/internal-underscore-bit-is-refused",
+        "filter": "dictsort",
+        "value": [{"a": {"_b": 1}}],
+        "arg": "a._b",
+    },
+    {
+        # Three ways the sort refuses, all becoming `""` — the outer `try`'s
+        # not-iterable arm, and two from the resolver.
+        "name": "dictsort/non-iterable-is-the-empty-string",
+        "filter": "dictsort",
+        "value": 5,
+        "arg": "a",
+    },
+    {
+        "name": "dictsort/missing-key-is-the-empty-string",
+        "filter": "dictsort",
+        "value": [{"a": 1}, {"b": 2}],
+        "arg": "a",
+    },
+    {
+        "name": "dictsortreversed/by-key",
+        "filter": "dictsortreversed",
+        "value": [{"n": 1}, {"n": 2}],
+        "arg": "n",
+    },
+    {
+        "name": "dictsortreversed/getattr-when-subscript-raises",
+        "filter": "dictsortreversed",
+        "value": [DOT_ATTR(1), DOT_ATTR(2)],
+        "arg": "x",
+    },
+    {
+        "name": "dictsortreversed/leading-underscore-arg-is-refused",
+        "filter": "dictsortreversed",
+        "value": [{"_a": 1}],
+        "arg": "_a",
+    },
+    # --- unordered_list (`:669`, needs_autoescape, recursive, tabs) -------
+    {
+        "name": "unordered_list/single",
+        "filter": "unordered_list",
+        "value": ["a"],
+    },
+    {
+        "name": "unordered_list/empty-is-the-empty-string",
+        "filter": "unordered_list",
+        "value": [],
+    },
+    {
+        # **Four levels**: a one-level case passes with the recursion missing
+        # entirely, and the tab depth is what shows it.
+        "name": "unordered_list/nested-four-levels",
+        "filter": "unordered_list",
+        "value": ["a", ["b", ["c", ["d"]]]],
+    },
+    {
+        # The nesting test is `isinstance(next_item, (list, tuple,
+        # GeneratorType))` **and then** `iter()`, and both halves are
+        # load-bearing. A tuple is in the triple and nests; a dict iterates but
+        # is not in the triple, so it does not; `None` is neither, so it does not
+        # either and becomes a **second item** instead. Three rows, one per
+        # decision, and the `None` row is the one that separates "not nested" from
+        # "dropped".
+        "name": "unordered_list/tuple-nests",
+        "filter": "unordered_list",
+        "value": ["a", ("b", "c")],
+    },
+    {
+        "name": "unordered_list/dict-does-not-nest",
+        "filter": "unordered_list",
+        "value": ["a", {"b": 1}],
+    },
+    {
+        "name": "unordered_list/none-child-does-not-nest",
+        "filter": "unordered_list",
+        "value": ["a", None],
+    },
+    {
+        "name": "unordered_list/empty-list-child-does-not-nest",
+        "filter": "unordered_list",
+        "value": ["a", []],
+    },
+    {
+        # A generator as the **whole value** pins that the host's view of it is
+        # `list(v)`; a generator as an *element* takes the third arm of the
+        # isinstance test. Both are one-shot, so both are built per side.
+        "name": "unordered_list/generator-value",
+        "filter": "unordered_list",
+        "value_factory": lambda: (x for x in ["a", ["b", "c"]]),
+    },
+    {
+        "name": "unordered_list/nested-generator-nests",
+        "filter": "unordered_list",
+        "value_factory": lambda: ["a", (x for x in ["b", "c"])],
+    },
+    {
+        # **The row that forced `NestedSequence.truthy`.** `if children:` tests
+        # the *object*, and a generator is truthy even yielding nothing, so an
+        # empty nested generator gets an empty `<ul>` where an empty nested list
+        # gets none — the same emptiness, two answers. Measured Django:
+        # `"\t<li>a\n\t<ul>\n\n\t</ul>\n\t</li>"`.
+        "name": "unordered_list/empty-nested-generator-still-opens-a-ul",
+        "filter": "unordered_list",
+        "value_factory": lambda: ["a", (x for x in [])],
+    },
+    {
+        # `__str__` is not `__repr__`: the escaper is `"%s" % item`, so a body
+        # that escaped the `repr` answers `REPR-SENTINEL` here.
+        "name": "unordered_list/escapes-str-not-repr",
+        "filter": "unordered_list",
+        "value": [STR_NOT_REPR()],
+    },
+    {
+        "name": "unordered_list/int-item-is-stringified",
+        "filter": "unordered_list",
+        "value": [1, 2],
+    },
+    {
+        # The group's second `context` row, and the only one that shows the
+        # escaper being *chosen* rather than applied: nested, so the recursion
+        # must carry the choice down rather than re-deciding per level.
+        "name": "unordered_list/autoescape-false-nested",
+        "filter": "unordered_list",
+        "value": ["<a>", ["<b>"]],
+        "context": {"autoescape": False},
+    },
+    {
+        "name": "unordered_list/autoescape-true-nested",
+        "filter": "unordered_list",
+        "value": ["<a>", ["<b>"]],
     },
 ]

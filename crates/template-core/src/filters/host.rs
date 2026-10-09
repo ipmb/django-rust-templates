@@ -74,6 +74,38 @@ pub struct NumberFormatArgs<'a> {
     pub force_grouping: bool,
 }
 
+/// A nested container, as `walk_items` needs it: the materialised items **and**
+/// Django's truthiness of the *original object*.
+///
+/// The two are different questions, and the difference is the whole reason this
+/// is a struct rather than a bare `Vec`. Django's `list_formatter` tests
+/// `if children:` on the **container object** — a generator object is always
+/// truthy, even one that yields nothing, where a list or tuple is truthy exactly
+/// when it is non-empty. So `unordered_list(["a", empty_generator()])` builds a
+/// `<ul>` around nothing (measured `"\t<li>a\n\t<ul>\n\n\t</ul>\n\t</li>"`)
+/// while `["a", []]` gets no `<ul>` at all — and once the generator has been
+/// materialised to a `Vec<Value>` the two are indistinguishable. `truthy`
+/// carries the answer the object gave, so the Rust body can mirror `if children:`
+/// instead of approximating it with `!items.is_empty()`.
+#[derive(Clone, PartialEq, Debug)]
+pub struct NestedSequence {
+    /// The container's items, materialised — `list(item)`, which is also
+    /// Django's `iter(item)` half of the nesting test.
+    pub items: Vec<Value>,
+    /// Django's `if children:`, evaluated on the **original object**.
+    pub truthy: bool,
+}
+
+impl NestedSequence {
+    /// A **sized** container: truthy exactly when it holds something, which is
+    /// how a `list` or `tuple` answers `if children:`. A generator's answer does
+    /// not follow its items, so that case is written out in full instead.
+    pub fn sized(items: Vec<Value>) -> Self {
+        let truthy = !items.is_empty();
+        Self { items, truthy }
+    }
+}
+
 /// Everything a filter body can ask of Python.
 ///
 /// The methods return `Result<_, Error>` where Django's call can raise, and a
@@ -186,7 +218,11 @@ pub trait FilterHost {
     /// so [`FilterHost::iter_values`] must be `list(v)` and must not index — and
     /// `:150`'s `test_nested_generators` is a list whose **element** is a
     /// generator, which must nest rather than render flat.
-    fn as_nested_sequence(&self, value: &Value) -> Result<Option<Vec<Value>>, Error>;
+    ///
+    /// The returned [`NestedSequence`] carries Django's `if children:` for the
+    /// **object**, not for the items it materialises — the two differ for a
+    /// generator, which is truthy even when it yields nothing. See that type.
+    fn as_nested_sequence(&self, value: &Value) -> Result<Option<NestedSequence>, Error>;
 
     // --- CPython string-method semantics ------------------------------------
     /// `str.lower()`. **Not a per-code-point table**, and that is the finding:
@@ -396,7 +432,7 @@ impl FilterHost for NoFilterHost {
         Err(refused("sort_by_property"))
     }
 
-    fn as_nested_sequence(&self, _value: &Value) -> Result<Option<Vec<Value>>, Error> {
+    fn as_nested_sequence(&self, _value: &Value) -> Result<Option<NestedSequence>, Error> {
         Err(refused("as_nested_sequence"))
     }
 
@@ -548,9 +584,9 @@ pub struct TestFilterHost {
     pub sort_by_property: Option<Value>,
     /// `Some(None)` is a **scripted** "plain item"; `None` is "not scripted".
     /// The double `Option` is the trait's own shape —
-    /// `Result<Option<Vec<Value>>, Error>` — and the outer layer here is the
+    /// `Result<Option<NestedSequence>, Error>` — and the outer layer here is the
     /// scripted/unscripted question, not a third meaning.
-    pub as_nested_sequence: Option<Option<Vec<Value>>>,
+    pub as_nested_sequence: Option<Option<NestedSequence>>,
     pub str_lower: Option<String>,
     pub str_title: Option<String>,
     pub strip_tags: Option<String>,
@@ -734,7 +770,7 @@ impl FilterHost for TestFilterHost {
             .ok_or_else(|| refused("sort_by_property"))
     }
 
-    fn as_nested_sequence(&self, _value: &Value) -> Result<Option<Vec<Value>>, Error> {
+    fn as_nested_sequence(&self, _value: &Value) -> Result<Option<NestedSequence>, Error> {
         self.record("as_nested_sequence")?;
         self.as_nested_sequence
             .clone()

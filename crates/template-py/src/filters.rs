@@ -40,7 +40,7 @@ use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PySlice, PyString, PyTuple};
 use std::cell::RefCell;
 
-use template_core::filters::host::{FilterCall, FilterHost, NumberFormatArgs};
+use template_core::filters::host::{FilterCall, FilterHost, NestedSequence, NumberFormatArgs};
 use template_core::filters::value::{Value, ValueId};
 use template_core::parser::error::{Error, PyErrorKind};
 use template_core::pynum::IntValue;
@@ -671,7 +671,7 @@ impl FilterHost for PyFilterHost<'_> {
             .map_err(|e| self.host_error("sort_by_property", e))
     }
 
-    fn as_nested_sequence(&self, value: &Value) -> Result<Option<Vec<Value>>, Error> {
+    fn as_nested_sequence(&self, value: &Value) -> Result<Option<NestedSequence>, Error> {
         let py = self.py;
         let outcome = (|| {
             let object = self.object(value)?;
@@ -682,12 +682,19 @@ impl FilterHost for PyFilterHost<'_> {
             if !nested {
                 return Ok(None);
             }
+            // `if children:` tests the **object**, and it is evaluated here on
+            // the object rather than derived from the items — a generator is
+            // truthy even when it yields nothing, where a list or tuple is truthy
+            // exactly when it is non-empty. `bool()` does not consume a
+            // generator, so asking before materialising costs nothing and keeps
+            // Django's own order (`if children:` precedes `list_formatter`).
+            let truthy = object.is_truthy()?;
             // The second half of the test is `iter(item) does not raise`, which
             // `list(item)` answers by construction — and for a generator it is
             // also what the body is about to do, so consuming it here loses
             // nothing.
             match self.items_of(value) {
-                Ok(items) => Ok(Some(items)),
+                Ok(items) => Ok(Some(NestedSequence { items, truthy })),
                 Err(_) => Ok(None),
             }
         })();

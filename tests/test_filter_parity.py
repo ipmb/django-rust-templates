@@ -39,7 +39,7 @@ from django.utils.safestring import SafeData  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 
-from tests.filter_cases import CASES  # noqa: E402
+from tests.filter_cases import CASES, case_value  # noqa: E402
 
 _PROBE_SPEC = importlib.util.spec_from_file_location(
     "django_rust_templates.filter_probe",
@@ -123,14 +123,16 @@ class FilterParityTests(unittest.TestCase):
         token was the constant. Both sides now agree on what `x|cut:"b"` means.
         """
         given = probe.template_literal(case["arg"]) if "arg" in case else None
-        return probe.django_answer(case["filter"], case["value"], given)
+        return probe.django_answer(
+            case["filter"], case_value(case), given, case.get("context")
+        )
 
     def render_rust(self, case, context):
         return probe.rust_answer(
-            case["filter"], case["value"], case.get("arg"), context
+            case["filter"], case_value(case), case.get("arg"), context
         )
 
-    def assert_same(self, case, django_result, rust_result):
+    def assert_same(self, case, django_result, rust_result, membership=False):
         self.assertEqual(
             type(django_result).__name__,
             type(rust_result).__name__,
@@ -138,11 +140,28 @@ class FilterParityTests(unittest.TestCase):
             f"{type(django_result).__name__} and we say "
             f"{type(rust_result).__name__}",
         )
-        self.assertEqual(
-            django_result,
-            rust_result,
-            f"{case['name']}: value differs",
-        )
+        if membership:
+            # A row whose answer is chosen **at random** asserts membership and
+            # says so in its name (`random/`), because an equality row would be
+            # green about one time in three. The row's own value is the
+            # population, so both sides are checked against it rather than
+            # against each other — and a row that declared a `value_factory`
+            # could not do this without consuming a third one, so membership
+            # rows are list-valued only.
+            population = case["value"]
+            for side, result in (("Django", django_result), ("ours", rust_result)):
+                self.assertIn(
+                    result,
+                    population,
+                    f"{case['name']}: {side} answered {result!r}, which is not "
+                    f"in the population {population!r}",
+                )
+        else:
+            self.assertEqual(
+                django_result,
+                rust_result,
+                f"{case['name']}: value differs",
+            )
         self.assertEqual(
             isinstance(django_result, SafeData),
             isinstance(rust_result, SafeData),
@@ -166,7 +185,12 @@ class FilterParityTests(unittest.TestCase):
             with self.subTest(case=case["name"]):
                 django_result, expression, context = self.render_django(case)
                 rust_result = self.render_rust(case, context)
-                self.assert_same(case, django_result, rust_result)
+                self.assert_same(
+                    case,
+                    django_result,
+                    rust_result,
+                    membership=case.get("membership", False),
+                )
                 # The token is asserted to be what the row meant, so that a row
                 # whose `arg` fails to render (or renders as a variable rather
                 # than a constant) is a failure rather than a quietly different
@@ -210,7 +234,7 @@ class FilterParityTests(unittest.TestCase):
         The **count** is the deliberate-edit signal, and the filter names are
         printed rather than restated: a group landing moves both this number and
         the Rust list, in a commit that says which group it was. See
-        `implemented_filters` for why there is no Python list of 41 names.
+        `implemented_filters` for why there is no Python list of the stub names.
         """
         all_names = set(_native.filter_names())
         implemented = implemented_filters()
@@ -219,16 +243,18 @@ class FilterParityTests(unittest.TestCase):
         self.assertEqual(
             len(all_names), 57, "the registry itself is not Django's 57 filters"
         )
-        # 41: the 57 minus `lower` and `upper`, which Task 3 lands as the corpus's
+        # 32: the 57 minus `lower` and `upper`, which Task 3 lands as the corpus's
         # seed, minus Task 4's six — `capfirst`, `title`, `cut`, `addslashes`,
-        # `make_list`, `wordcount` — and minus Task 5's eight: `center`, `ljust`,
+        # `make_list`, `wordcount` — minus Task 5's eight: `center`, `ljust`,
         # `rjust`, `truncatechars`, `truncatechars_html`, `truncatewords`,
-        # `truncatewords_html`, `wordwrap`. Each group's commit decreases this by
-        # its own size and adds its rows to tests/filter_cases.py — one number and
-        # one list, edited together, in the commit that does the work.
+        # `truncatewords_html`, `wordwrap` — and minus Task 6's nine: `first`,
+        # `last`, `length`, `slice`, `join`, `random`, `dictsort`,
+        # `dictsortreversed`, `unordered_list`. Each group's commit decreases this
+        # by its own size and adds its rows to tests/filter_cases.py — one number
+        # and one list, edited together, in the commit that does the work.
         self.assertEqual(
             len(stubs),
-            41,
+            32,
             f"the stub count moved: {len(stubs)} left, {sorted(stubs)}. If a "
             f"group landed, this number and tests/filter_cases.py both move with "
             f"it; if nothing landed, a body has been reverted or a registry row "

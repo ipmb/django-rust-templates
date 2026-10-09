@@ -2124,8 +2124,16 @@ entirely the host's.
   be `get_index` plus Rust slicing: `"abcdef"|slice:":3"` is `"abc"`, a **string**,
   where the index route yields a list — the wrong *type*, which §D5's comparison
   is designed to catch. Rows: negative indices, a missing component, `"::2"`, and
-  a four-component `"a:b:c:d"` (which raises `TypeError` from `slice(*bits)` and
-  therefore returns `value`).
+  a four-component all-numeric arg (`"1:2:3:4"`, which gets past `int(x)` and
+  raises `TypeError` from `slice(*bits)`, returning `value`).
+
+  **The three catch arms are three rows, not one**, measured on the pinned
+  6.0.9: `"1:2:3:4"` reaches `slice(*bits)` and is the `TypeError` arm;
+  `"a:b:c:d"` raises `ValueError` at `int("a")` and never gets that far, so it is
+  the `ValueError` arm; `5|slice:":3"` is the `TypeError` arm again but from the
+  *subscript* rather than the slice call, and `KeyError` is unreachable from a
+  sequence. A body that caught one arm and not the others passes the rows for
+  the arm it caught, so each row is named for the arm it pins.
 - `join` (`:611-621`) — `needs_autoescape`, `is_safe=True`, and the group's
   trap: on `TypeError` it returns **`value`, the unjoined list**, not `""`. With
   `autoescape=True` it is `conditional_escape(arg).join([conditional_escape(v)
@@ -2173,8 +2181,10 @@ a green assertion.
   `VARIABLE_ATTRIBUTE_SEPARATOR`, routes a float-convertible `arg` to
   `itemgetter` and everything else to a `__getitem__`-then-`getattr` chain whose
   except clause names **five** classes, and raises
-  `AttributeError("Access to private variables is forbidden.")` for a
-  leading-underscore bit. Splitting that across the FFI would mean Rust
+  `AttributeError("Access to private variables is forbidden.")` for an
+  underscore-prefixed bit — and the test is `"._" in arg or arg[0] == "_"`, so
+  it is **not** only a *leading* underscore: `"a._b"` is refused exactly as
+  `"_a"` is, measured. Splitting that across the FFI would mean Rust
   reimplementing Python's exception classification, and `sorted` over `Opaque`
   values is not expressible in Rust at all. **What Rust owns is the filter's own
   behaviour**: the `(AttributeError, TypeError) → ""` catch, which is a match on
@@ -2195,6 +2205,71 @@ a green assertion.
   `list(v)`), `test_nested_generators` (`:150`, an element that is a generator and
   must nest), and `test_ulitem` (`:122`, an object whose `__str__` is not its
   `repr`, which pins that the escaper goes through `to_str`).
+
+**What Task 6's integration found, and the two corrections it makes to this
+section.** All three are measurements on the pinned 6.0.9, taken while landing the
+group; the first two were *wrong in this plan* and are corrected here rather than
+quietly fixed in code.
+
+1. **The `context` key's failure mode is *vacuous green*, not red.** The paragraph
+   above predicted that a row scored under the old fixed-context path would
+   "answer the escaped join … a different question rather than a crash". True, but
+   it is worse than that: because **both** sides read the context, a dropped key
+   makes both of them answer the escaped value and **agree**. Measured, with the
+   key ignored: `join/autoescape-false-does-not-escape` gives Django `'a, &lt;b&gt;'`
+   and ours `'a, &lt;b&gt;'` — a green row asserting nothing; and
+   `unordered_list/autoescape-false-nested` likewise. So there is no red row to
+   watch go green, and the key must be §11'd by *mutation or direct measurement*
+   instead. This is the same class the paragraph itself names — a row silently
+   scoring a different question — and it shows the class is not caught by
+   observing a failing row, because the failure is agreement.
+2. **A one-shot iterator cannot be a shared `value`.** A generator is consumed by
+   whichever side reads it first, so a row holding one scores the *other* side
+   against a spent iterator. Measured: `["a", (x for x in ["b"])]` nests under
+   Django (`"\t<li>a\n\t<ul>\n\t\t<li>b</li>\n\t</ul>\n\t</li>"`) and, with the
+   *same object* passed on, does not under ours; reversing the order flips which
+   side is wrong. This produced a **false divergence report** against
+   `unordered_list` mid-task — the filter was correct the whole time and the row
+   was the bug. The corpus therefore gained `case_value` and a `value_factory`
+   key, and the five generator rows use it. It is a distinct key rather than
+   "call `value` if it is callable", because a callable is a legitimate input
+   (`x|default:func`) that would otherwise be silently read as a factory.
+3. **A corpus row cannot express an exception** — `resolve` propagates it rather
+   than returning it. The two raising rows each of `first`/`last`/`random` has
+   (`first(5)`'s `TypeError`, `first({})`'s `KeyError`) are body tests, and
+   `join`'s `autoescape=False` non-str-separator `AttributeError` is too. Nine
+   candidate rows were measured and dropped for this reason.
+
+**And the one body this section got wrong, found by the same measurement.** The
+`if children:` rule above is **not** `!children.is_empty()`: Django tests the
+*object*, and a generator object is truthy even when it yields nothing, so a
+nested **empty** generator builds `<ul>\n\n\t</ul>` where a nested empty *list*
+builds nothing — the same emptiness, two answers (measured
+`unordered_list(["a", (x for x in [])])` is `"\t<li>a\n\t<ul>\n\n\t</ul>\n\t</li>"`).
+A materialised `Vec<Value>` cannot tell the two apart, so `as_nested_sequence`
+returns a `NestedSequence { items, truthy }` and the body tests `truthy`. It is
+reachable from a template (`["a", (y for y in [])]` is a legal value) and it is
+one corpus row: `unordered_list/empty-nested-generator-still-opens-a-ul`.
+
+**§11 for this group.** The observation for the `context` key is the 2×2 above —
+both sides agree on the escaped answer when the key is dropped, so the key's
+detector is that measurement and not a red row. The central mutation, counted:
+
+```text
+  rows moved
+      1   unordered_list: `if children.truthy` -> `!children.items.is_empty()`
+          (reverts the fix; moves empty-nested-generator-still-opens-a-ul)
+      1   slice: a lone component becomes the start
+          (moves slice/single-component-is-the-stop: 'a' vs 'bcdef')
+      1   join: element escaping forced on
+          (moves join/autoescape-false-does-not-escape)
+      2   join: TypeError returns "" instead of the value  <- the central one
+          (moves both join/typeerror-returns-the-value rows, the group's trap)
+```
+
+No mutation moved 0 rows, so no local pin is needed; each mutation asserted its
+pattern was found **and** the file's md5 changed before it ran, because a silent
+no-op mutation in this project already produced one false "passed".
 
 ### Task 7: numbers and logic — 10 filters
 

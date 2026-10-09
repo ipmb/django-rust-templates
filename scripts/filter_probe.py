@@ -128,14 +128,18 @@ def template_literal(value) -> str:
     )
 
 
-def django_answer(name: str, value, given: str | None):
+def django_answer(name: str, value, given: str | None, context_kwargs: dict | None = None):
     """Django's result for `value|name[:arg]`, through `resolve`'s loop.
 
     The `FilterExpression` is built from the same token text a template would
     carry, so the parse and the arity check (`args_check`, `base.py:819`) are
     Django's. `Context()` defaults to `autoescape=True, use_tz=True`, which is
     what `_native.filter` defaults to as well; both are read off the context by
-    the loop, not passed by it.
+    the loop, not passed by it. `context_kwargs` is a row's `context` key
+    (`{"autoescape": False}`), and it is the only way a corpus row can reach the
+    other branch of a `needs_autoescape` filter — the flag is read off the
+    context rather than passed as an argument, so a row cannot express it any
+    other way. Absent means `Context()`'s defaults, as every earlier row wants.
 
     Returns the result, the expression and the context — the expression so the
     caller can print the token Django's own `filter_re` actually matched rather
@@ -151,7 +155,7 @@ def django_answer(name: str, value, given: str | None):
     )
     token = f"x|{name}" if given is None else f"x|{name}:{given}"
     expression = FilterExpression(token, parser)
-    context = Context({"x": value})
+    context = Context({"x": value}, **(context_kwargs or {}))
     return expression.resolve(context), expression, context
 
 

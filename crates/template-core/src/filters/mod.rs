@@ -640,58 +640,51 @@ mod tests {
         "yesno",
     ];
 
-    /// The filters whose bodies are still stubs: the 41 of the 57 that M4 has
+    /// The filters whose bodies are still stubs: the 32 of the 57 that M4 has
     /// not landed yet.
     ///
     /// A literal rather than an alias of [`MEASURED_NAMES`] now that groups have
     /// landed, because the two are no longer the same set and an alias would have
-    /// to be trimmed in place to say so. The 41 are the 57 minus `lower` and
+    /// to be trimmed in place to say so. The 32 are the 57 minus `lower` and
     /// `upper` (Task 3's corpus seed), minus Task 4's six — `capfirst`,
-    /// `title`, `cut`, `addslashes`, `make_list`, `wordcount` — and minus
-    /// Task 5's eight: `center`, `ljust`, `rjust`, `truncatechars`,
-    /// `truncatechars_html`, `truncatewords`, `truncatewords_html`, `wordwrap`.
+    /// `title`, `cut`, `addslashes`, `make_list`, `wordcount` — minus Task 5's
+    /// eight: `center`, `ljust`, `rjust`, `truncatechars`, `truncatechars_html`,
+    /// `truncatewords`, `truncatewords_html`, `wordwrap` — and minus Task 6's
+    /// nine: `first`, `last`, `length`, `slice`, `join`, `random`, `dictsort`,
+    /// `dictsortreversed`, `unordered_list`.
     ///
     /// **The central commit that lands a group moves that group's names out of
     /// this list**, in the same commit — and the assertion below is what makes
     /// forgetting fail rather than pass.
-    const STILL_STUBBED: [&str; 41] = [
+    const STILL_STUBBED: [&str; 32] = [
         "add",
         "date",
         "default",
         "default_if_none",
-        "dictsort",
-        "dictsortreversed",
         "divisibleby",
         "escape",
         "escapejs",
         "escapeseq",
         "filesizeformat",
-        "first",
         "floatformat",
         "force_escape",
         "get_digit",
         "iriencode",
-        "join",
         "json_script",
-        "last",
-        "length",
         "linebreaks",
         "linebreaksbr",
         "linenumbers",
         "phone2numeric",
         "pluralize",
         "pprint",
-        "random",
         "safe",
         "safeseq",
-        "slice",
         "slugify",
         "stringformat",
         "striptags",
         "time",
         "timesince",
         "timeuntil",
-        "unordered_list",
         "urlencode",
         "urlize",
         "urlizetrunc",
