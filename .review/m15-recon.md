@@ -17,10 +17,19 @@ criterion, recorded here so the reviewer can overrule it before a plan is writte
 
 **The reading I am adopting:**
 
-> **Margin is how much could be false while the gate still passes.** §2 is "met
-> with margin" when each of its clauses is a condition the gate *refuses* on
-> rather than a sentence a human reads, and each instrument that establishes a
-> clause has been shown to fail when the clause is false.
+> **Margin is how much could be false while the gate still passes**, and it is a
+> *set*, not a predicate. M15's work is to shrink that set and enumerate what
+> remains. A clause leaves the set when the gate **refuses** on it *and* the
+> refusing instrument has been **shown to fail** when the clause is false.
+
+The set form is the review's correction to a first draft that read as a
+predicate ("§2 is met with margin when *each* of its clauses…"), and the
+correction is right for a reason worth keeping: this milestone carries a ranked
+residue it will not close, and a binary reading can only file that residue as
+failure — which would make §5, the milestone's most useful artefact, read as an
+admission instead of as the deliverable. The predicate survives inside the set as
+its membership test, and the second half of that test ("shown to fail") is the
+half this project has spent thirteen milestones on.
 
 The word is doing real work in that sentence: margin is a **distance**, and the
 milestone is hard iff it can say how wide the distance is and narrow it. A green
@@ -67,7 +76,7 @@ without (a) is a wish list.
 |---|---|---|---|
 | 1547 run; 1541 pass; exactly 6 skip | 31 | **nothing** (§3.1) | whole clause |
 | zero failures, zero errors | 33 | the suite's exit status (`check.sh:139`, `set -e`) | zero |
-| zero `xfail`ed | 33 | exit status, incidentally — an xfail is not a failure | **unmeasured** |
+| zero `xfail`ed | 33 | **nothing, and the exit status is actively misleading** (§3.3) | whole clause |
 | zero edited tests; the checkout is never modified | 33–34 | **nothing** (§3.2) | whole clause |
 | the 6 skips are the enumerated structural ones | 35–45 | **nothing** (§3.1) | whole clause |
 | any *new* skip is a regression and a failure | 66 | **nothing** (§3.1) | whole clause |
@@ -76,17 +85,20 @@ Everything else §2 says (the M0 baseline is not validation; the mechanism is
 evidenced by `tests/test_shim.py` and the pre-flight) is already an instrument
 with a control — M0 and M14 built those, and §2 says so.
 
-### 2.1 The `xfail` row is a fourth unenforced clause, and cheaper than it looks
-
-"zero `xfail`ed" is not implied by a green exit: `unittest` reports
-`expected failures=1` in its summary and still exits 0. Nothing pins it. It is
-listed separately from §3.1 only because a reader would not expect it there —
-the same read that parses the skip lines gets it for free, which is the argument
-for doing 3.1 as a **parser over the run's transcript** rather than a count.
+Three of those rows are not three holes but **one**, and the review is what named
+it: §2:31's two facts, §2:33's two, and §2:33's "zero `xfail`ed" are each a
+property of the same string — the run's summary line — and no instrument reads
+that line. An exact comparison of that line therefore settles **five facts**
+(1547 run, zero failures, zero errors, zero expected failures, `skipped=6`)
+while being one assertion, which is the argument for §7's deliverable 1 pinning
+the line *whole* rather than its count. Two of §2's rows stay outside it: the six
+*identities* (§2:35-45) are not in the line at all, and §2:66's "any *new* skip"
+is only mostly in it — a swap that keeps the total at 6 leaves the line
+untouched, so the identity check is what closes that one.
 
 ---
 
-## 3. The two clauses with no enforcement at all
+## 3. The three clauses with no enforcement at all
 
 ### 3.1 The acceptance run does not pin its own outcome
 
@@ -115,9 +127,20 @@ measured: a run that is ours and has quietly grown a skip.
 -v 2 template_tests`, 2026-10-09, exit 0):
 
 ```
-Ran 1547 tests in 3.5s
+Ran 1547 tests in 3.611s
 OK (skipped=6)
+Destroying test database for alias 'default' ('default_1.sqlite3')...
+Destroying test database for alias 'default' ('default_2.sqlite3')...
+... 9 more
 ```
+
+Two measurements in that block, both of which the gate's shape depends on. The
+elapsed time varies (`3.603s` and `3.611s` across two runs) while the count does
+not, so the `Ran` line is pinned as a **prefix**. And the summary is **not the
+transcript's last line**: `runtests.py` tears down its parallel workers'
+databases after printing it, so eleven `Destroying test database for alias …`
+lines follow. A gate that reads `lines[-1]` fails on a healthy run; the verdict
+is the last line *that matches the verdict's shape*.
 
 and, at verbosity 2, the six by name:
 
@@ -201,6 +224,58 @@ This is the highest-value clause to close, because it is the one where a
 deliberate, well-intentioned edit produces a fully green, fully meaningless gate.
 It is also the cheapest: two assertions, both already measured above.
 
+### 3.3 Zero `xfail`ed — the clause the exit status is actively wrong about
+
+§2:33's "zero `xfail`ed" is the third clause carried only by prose, and the worst
+of the three: the mechanism that carries the other two (the exit status) does not
+merely say nothing here, it **reports the wrong answer**. Measured, independently
+of the review that raised it:
+
+```
+$ .venv/bin/python -I -m unittest discover -s "$D/probe" -t "$D/probe" -p 'xfail_probe.py' -v
+test_that_fails (xfail_probe.T.test_that_fails) ... expected failure
+test_that_passes (xfail_probe.T.test_that_passes) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+OK (expected failures=1)
+exit=0
+```
+
+(`$D` is a scratch directory outside the repo; the probe is two rows — one
+`@unittest.expectedFailure` wrapping `assertEqual(1, 2)`, one passing. `-I`
+because it is a probe, and `discover` because `-I` closes the route to a
+path-argument import; `-m unittest` is also what `check_suite_counts.py` reads as
+this transcript's provenance.)
+
+`unittest` prints `expected failures=N` and exits 0, so one decorator turns a
+**failing** Django test green. The other two clauses mean a test vanished; this
+one means a test is failing while the gate says `OK`.
+
+The clause is true today, and that is measured too:
+`grep -rn expectedFailure .django/tests/template_tests/` is **0**. It is not
+exotic in the tree at large — the same grep over `.django/tests/` hits
+`sessions_tests`, `queries`, `postgres_tests`, `test_runner_apps` and
+`model_inheritance_regress`, suites we do not run — so the regression is one
+decorator away.
+
+**Why this decides deliverable 1's shape.** §3.2's checkout check catches an
+`xfail` introduced by editing `.django/` — the realistic path — and nothing else:
+not a `conftest`, not a runner change, not a Django that ships one. Reading the
+summary line catches all of them. So the assertion is the line, not the count —
+the two strings `scripts/run_django_suite.sh` ends on, as the acceptance run
+prints them:
+
+```
+Ran 1547 tests in 3.5s      <- the prefix is pinned; the elapsed time varies
+OK (skipped=6)              <- pinned exactly
+```
+
+Two comparisons, and five of §2's clauses leave the set at once. The six
+*identities* remain their own mechanism, because the line says `skipped=6` and
+not which six.
+
 ---
 
 ## 4. Rows that assert an absence with no failure arm
@@ -213,14 +288,19 @@ These are **not** defects — each row's claim is true today. They are margin: t
 row would stay green if its population emptied, which is the class
 `[[control-over-the-same-population]]` names.
 
+Ordered by blast radius, which is the review's ranking and is right: the two
+`test_anchor_manifest.py` rows are the guard-of-guards — a hole in the thing that
+checks the checkers propagates to everything it checks — so they come first, and
+`test_filter_parity.py`'s documented vacuity comes last.
+
 | row | claim | the missing control |
 |---|---|---|
+| `tests/test_anchor_manifest.py:465` | `set(MANIFEST) - cited_in_tree == []` | `scan_tree()` yields > 0 |
+| `tests/test_anchor_manifest.py:416` | `shadows == {}` (`OUR_OWN` basenames under `.django/`) | a positive `rglob` hit, proving the denominator is non-empty |
 | `tests/test_materialise.py:1223` | `dead == set()` over `NODE_CLASSES` | a fabricated class name in the subtraction, shown to land in `dead` |
 | `tests/test_materialise.py:1219` | `missing == set()` over `tag_emitted_class_names()` | same shape; the stripper row at `:1207` guards only `TEST_ONLY_CLASSES` |
 | `tests/test_filter_inventory.py:1238` | neither flag on any of the 66 filters | a positive `hasattr` on a tag-side object, proving the loop can see one |
 | `tests/test_pyunicode_case_parity.py:91` | `not hasattr(_native, "python_lower")` | `hasattr(_native, "python_upper")` — one line, same instrument |
-| `tests/test_anchor_manifest.py:416` | `shadows == {}` (`OUR_OWN` basenames under `.django/`) | a positive `rglob` hit, proving the denominator is non-empty |
-| `tests/test_anchor_manifest.py:465` | `set(MANIFEST) - cited_in_tree == []` | `scan_tree()` yields > 0 |
 | `tests/test_filter_parity.py:430` | `stubs == set()` | **already documented as vacuous by construction** (`.review/m4-summary.md:386-389`); do not "fix" — it is the deliberate-edit signal |
 
 The audit also flagged `tests/test_interposition.py:1808` and `:2237` (registry
@@ -306,12 +386,15 @@ because the two instances have *different* causes and the same symptom.
 Three deliverables, in this order — the first two are §2 clauses becoming
 refusals, the third is the record:
 
-1. **The acceptance run pins its own outcome.** It parses the transcript it
-   already produces and refuses unless: `1547` ran, `0` failures, `0` errors,
-   `0` expected failures, and the set of skipped tests equals the six named in
-   §2 — *by identity*, not by count, because §2:31 says "each of the 6 skips is
-   one of the structural cases enumerated below", and a swap that keeps the count
-   at 6 satisfies a count.
+1. **The acceptance run pins its own outcome.** The transcript
+   `scripts/run_django_suite.sh` already produces is now parsed, and the run is
+   refused unless the summary line is exactly
+   `OK (skipped=6)`, the `Ran` line starts `Ran 1547 tests in `, and the set of
+   skipped tests equals the six named in §2 — *by identity*, not by count,
+   because §2:31 says "each of the 6 skips is one of the structural cases
+   enumerated below", and a swap that keeps the count at 6 satisfies a count.
+   The summary is pinned as a whole string rather than dissected: §2's five
+   summary-line facts (§2 above) come free with that one comparison.
 2. **The checkout is pinned and unmodified.** `git -C .django status --porcelain`
    empty ∧ `HEAD` equals `django.lock`'s `sha`. Both true today (§3.2), neither
    asserted.
@@ -331,3 +414,15 @@ names. My read is that the literal belongs on the **instrument** (the gate's
 declared set, with a control row driving its refusal on a fabricated seventh
 skip) and the *tie* to §2 belongs on a row that asserts each component name
 appears in the §2 frame — the split M14's review settled. Confirm or overrule.
+
+**The review's answer: confirmed, and generalised into the rule.** It named the
+split ***"parse when the document lists; pin when the document composes"*** — the
+same rule that decides §3's ten names (a backticked list → parsed) against §2's
+six (a class name plus parenthesised methods → a declared literal, tied back by a
+frame reader). The fabricated seventh skip carries the `unregistered_` prefix,
+per `[[negative-fixtures-expire]]`, so a later milestone that ports that name
+cannot flip the row's meaning by accident. The review then turned the rule on
+this milestone's own literals, which is the sharper half: the summary line is an
+**instrument** fact — Django's output format, which §2 describes in prose and
+never spells — so it is pinned whole, while §2's six identities are the
+**subject** and are tied to the document.
