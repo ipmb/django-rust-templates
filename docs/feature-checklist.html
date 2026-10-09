@@ -286,8 +286,8 @@
       <span class="cap">tests in Django's template suite, all passing — 6 skipped</span>
     </div>
     <div class="stat is-done">
-      <span class="num">57 / 57</span>
-      <span class="cap">built-in filters answered by Rust</span>
+      <span class="num">66 / 66</span>
+      <span class="cap">filters answered by Rust — the 57 built-ins, plus the 9 Django's five tag libraries register</span>
     </div>
     <div class="stat is-open">
       <span class="num">23 / 27</span>
@@ -444,7 +444,7 @@
       </li>
       <li class="done">
         <span class="name">Tags in Django's own libraries<span>{% translate %}, {% blocktranslate %}, {% static %}, {% timezone %}, {% localize %}, {% cache %}</span></span>
-        <span class="why">All eighteen registered tags in the five <code>django.templatetags</code> libraries are compiled and rendered by Rust, and the libraries' own filters run on the Rust path. The registration <em>API</em> above is still Django's — that is why this line reads as done while its neighbour does not, and why <code>{% load %}</code> still enters through Django's code.</span>
+        <span class="why">All eighteen registered tags in the five <code>django.templatetags</code> libraries are compiled and rendered by Rust, and the nine filters those libraries register — <code>localize</code>, <code>unlocalize</code>, the four <code>language_*</code>, and <code>localtime</code>, <code>utc</code>, <code>timezone</code> — are on the Rust path too. Those last three hand off to the port's own Python transcription of <code>do_timezone</code>, which is one function serving all three names. The registration <em>API</em> above is still Django's — that is why this line reads as done while its neighbour does not, and why <code>{% load %}</code> still enters through Django's code.</span>
       </li>
     </ul>
   </section>
@@ -513,7 +513,7 @@
       Django's five template-tag libraries are tracked as a <b>second scope</b> beside the
       eleven modules above — <code>django.templatetags.cache</code>, <code>.i18n</code>,
       <code>.l10n</code>, <code>.static</code> and <code>.tz</code>, the eighteen registered
-      tags and the filters that go with them. That scope is <b>empty</b>: no module under
+      tags and the nine filters that go with them. That scope is <b>empty</b>: no module under
       <code>django.templatetags</code> is still served by Django, so the meter that counts it
       reads zero while the eleven above are what remains of <code>django.template</code>.
     </p>
