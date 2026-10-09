@@ -76,17 +76,22 @@ code.
    `ShellHost.has_tag("block") is False` against a parser whose `tags` hold
    `loader_tags.do_block`,** which is the only way the identity clause can be
    seen to have been reached.
-2. **`{% extends %}`'s must-be-first check depends on an origin, and three
-   shell call sites pass none.** `do_extends` reads
-   `parser.origin.template_name` (`loader_tags.py:305`) and `extend_nodelist`
-   renders the origin into its message; today `render.parser_for` builds its
-   `Parser` with no `origin` (so `parser.origin is None`) and
-   `compile_template` passes `py.None()` as the materialisation origin. A
-   `{% extends %}` row therefore raises `AttributeError: 'NoneType' object has
-   no attribute 'template_name'` **before** any of M7's code is wrong.
-   **Owned by Task 2; pinned by an error-corpus row whose expected message is
-   the full `must be the first tag in <origin>` string**, which can only match
-   if the origin travelled.
+2. **`{% extends %}`'s behaviour depends on an origin, and the shell passes
+   none.** Every `Origin` Django builds without a loader has
+   `template_name = None`, so that `None` **is** the unknown-origin state and a
+   *relative* `{% extends %}` under it must raise
+   `The relative path … cannot be evaluated due to an unknown template origin.`
+   (`loader_tags.py:266-269`) rather than parse on. Today `render.parser_for`
+   builds its `Parser` with `origin=None` — a state Django's own `Parser` never
+   has — and `compile_template` passes `py.None()` as the materialisation
+   origin. **Two distinct repairs, and conflating them is the trap**: the
+   *host* `Parser` needs a real `Origin(UNKNOWN_SOURCE)` (because Django's own
+   `do_extends` can still be reached through a host tag's nested parse), while
+   Rust's `origin_template_name` needs the *attribute*, whose value is `None`
+   either way. **Owned by Task 2; pinned by an error-corpus row whose expected
+   message is the full `must be the first tag in <origin>` string and by a
+   relative-`{% extends %}` row carrying the unknown-origin message verbatim**,
+   which can only match if the origin travelled.
 3. **A nodelist the host returned has no descriptor children to walk.** Django's
    `do_extends` asks the just-parsed nodelist `get_nodes_by_type(ExtendsNode)`
    (`loader_tags.py:308`) to reject a second `{% extends %}`. Under the host
@@ -94,10 +99,13 @@ code.
    Rust cannot walk it. M7's three take the Rust path, so the walk is over
    `NodeDesc`s and is exact — but a host block tag wrapping an `{% extends %}`
    still hides one, and the failure is silent acceptance rather than a wrong
-   tree. **Owned by Task 3; the divergence is recorded, not fixed** (it is the
-   same class as M6's Review Focus item 1), and the test asserts the *reachable*
-   half: a second `{% extends %}` at top level is rejected with Django's exact
-   message.
+   tree. **Measured zero in the pinned suite** — `{% extends %}` nested inside a
+   host-owned block-level tag occurs 0 times over 1046 literals and 62 fixture
+   templates (`/tmp/m7_measure_nest2.py`), and no library returns an
+   `ExtendsNode` subclass. **Owned by Task 3; the divergence is recorded, not
+   fixed** (it is the same class as M6's Review Focus item 1), and the test
+   asserts the *reachable* half: a second `{% extends %}` at top level is
+   rejected with Django's exact message.
 4. **`{% include %}`'s cache key is the node object, and a second parse makes
    two.** `IncludeNode.render` does
    `cache = context.render_context.dicts[0].setdefault(self, {})`
@@ -115,7 +123,12 @@ code.
    empty `Vec`, and the append must sit after the check or a *third* `{% block %}`
    of the same name would report the second as the first. The state is also the
    parser's, not the node's, so it must survive across a `{% block %}` nested in
-   another tag's body. **Owned by Task 1; pinned by the error-corpus rows for
+   another tag's body — but only for tags Rust owns, which is A5's recorded
+   divergence: a `{% block %}` inside a *host* tag's body is counted by Django,
+   not here. **That case is reached once in the pinned suite** (A5's measurement)
+   and is harmless there, so the requirement is that the counter survives a
+   nested `{% block %}` under a Rust-owned tag, which the error corpus can
+   exercise. **Owned by Task 1; pinned by the error-corpus rows for
    `{% block a %}…{% block a %}…` and for the `{% endblock %}` forms**, whose
    exact strings were measured against the pinned tree.
 
@@ -166,15 +179,36 @@ label and this plan's D4, in its fourth appearance, and it is the one class of
 defect this project has paid for most.
 
 Design B's price is one clause in `ShellHost.has_tag` (A2). Design A's price is
-that the milestone cannot be measured. **The measured size of what is at stake**
-— and the granularity matters, because a number here has already travelled
-wrongly: `unittest.TestLoader` over
-`template_tests.syntax_tests.{test_extends,test_include,test_block,test_blocktrans}`
-is **85 test cases**; over every file under `template_tests/` that mentions one
-of the three tags or `BlockNode`/`ExtendsNode` it is **373**, across 13 files;
-and the three tags *occur* **205** times under `template_tests/`. Three right
-answers to three questions; the reviewer's "176" matches none of them and is
-recorded here as unreproduced rather than adopted.
+that the milestone cannot be measured.
+
+**The measured size of what is at stake — and the granularity, because a number
+here has already travelled wrongly.** Four counts, each with its unit and its
+population named, each reproduced on the pinned tree through
+`scripts/run_django_suite.sh` (2026-10-09); they are four right answers to four
+questions and none of them is a correction of another:
+
+| unit | population | count |
+|---|---|---|
+| test cases | the five modules that exist to test these three tags | **115** |
+| test cases | recon §4.1's two groups, `80 + 96` | **176** |
+| test cases | every module under `template_tests/` whose source mentions one of the tags (13 modules) | **373** |
+| tag occurrences | those same 13 modules | **205** |
+
+The five modules of the first row are `test_extends` (10),
+`test_extends_relative` (15), `syntax_tests/test_extends` (46),
+`syntax_tests/test_include` (37) and `syntax_tests/test_named_endblock` (7).
+The "**176**" is this plan's own: recon §4.1's `test_extends` +
+`test_extends_relative` + `test_loaders` + `tests` is 80, and
+`syntax_tests/{test_extends,test_include,test_named_endblock,test_exceptions}`
+is 96.
+
+**Withdrawn: the "85" that stood here, and which the reviewer adopted.** It
+named `template_tests.syntax_tests.{...,test_block,test_blocktrans}`, and the
+pinned tree has neither module — the `{% blocktrans %}` module is
+`syntax_tests/i18n/test_blocktranslate.py`. It was unmeasurable as written. The
+other three reproduce exactly, and the earlier claim that "176 matches none of
+them" was wrong for the reason this project keeps re-learning: the numbers
+differ because the *populations* differ, not because any of them is false.
 
 Design B is chosen. It also shrinks M6's Review Focus item 1 by one tag: after
 Task 1, a `{% block %}` body is parsed by Rust, and its nested tags are Rust's.
@@ -255,11 +289,47 @@ already exists for exactly this purpose — `Parser::py_repr` (`mod.rs:167-169`)
 `lib.rs:1336`). The `py_repr_str`/`NoHost` fallback is exact on ASCII only, which
 is the same caveat `Host::repr`'s doc already carries.
 
+**The field is the attribute, never the object — and that distinction is the
+correction this section carries.** The reviewer read `origin=None` as
+manufacturing a state Django cannot reach, on the argument that `do_extends`
+raises `AttributeError` where Django reads `"<unknown source>"` and parses on.
+The hazard is real and the mechanism is not, and the difference changes what
+Task 2 must do. Measured (`/tmp/m7_measure_origin.py`):
+
+```text
+Origin(UNKNOWN_SOURCE).name            = '<unknown source>'
+Origin(UNKNOWN_SOURCE).template_name   = None          <-- the field Rust holds
+construct_relative_path(None, './x')   -> TemplateSyntaxError:
+    The relative path './x' cannot be evaluated due to an unknown template origin.
+construct_relative_path(None, "b.html") -> "'b.html'"   (returns before the None check)
+```
+
+`do_extends` passes `parser.origin.**template_name**`
+(`loader_tags.py:305`), and for the no-origin `Origin` Django itself builds
+(`base.py:151-152`) that attribute is `None` — not the string. So `None` **is**
+Django's unknown-origin state, `Option<String>` is the faithful encoding of it,
+and a relative `{% extends %}` under it **raises** rather than parsing on. The
+reviewer's `dirname("…lstrip('/')") == ""` never runs, because the string never
+reaches `construct_relative_path`.
+
+**So `Parser::origin_template_name` stays `Option<String>`, and Task 2's port of
+`construct_relative_path` must implement the `current_template_name is None`
+branch with Django's message verbatim.** That branch is what `None` means here;
+without it, `None` would be a silent "no check" rather than the refusal.
+
 **Plumbing, and all three call sites are load-bearing:**
 
 - `render.parser_for` (`render.py:127-131`) builds its `Parser` with no `origin`,
-  so `parser.origin` is `None` and `do_extends`'s read would raise
-  `AttributeError`. It gains an `origin=None` parameter and passes it through.
+  so the **host** `Parser.origin` is `None`. Under Design B no Rust-owned tag
+  reads it, but a *host-compiled* block tag's nested `parser.parse()` reaches
+  Django's own `do_extends` and `extend_nodelist`, which read
+  `parser.origin.template_name` — and Django never has `None` there, because
+  every `Parser` Django builds itself comes from `Template.__init__`, which
+  guarantees `Origin(UNKNOWN_SOURCE)` at `base.py:151-152`. So `parser_for`
+  gains `origin=Origin(UNKNOWN_SOURCE)` as its default rather than `None`,
+  which is one line and is `base.py:151-152`'s own value. **The Rust value is
+  the same either way** — `Origin(UNKNOWN_SOURCE).template_name` is `None`, so
+  the host-side object only has to be real for Django's own code to read.
 - `_native.parse`'s `origin_template_repr` keyword (`lib.rs:1532-1537`) is renamed
   to `origin_template_name`; `parse_source` (`:1442-1464`) and
   `Parser::with_origin_template_repr` (`mod.rs:108-112`) follow.
@@ -312,13 +382,45 @@ the append, which is Django's order.
 
 Two things a task will trip over, both recorded rather than fixed:
 
-- The check straddles a `{% load %}`. Under Design B the state is Rust's, so a
-  `{% block %}` body handled by a *host* tag's nested `parser.parse` (a
-  `simple_block_tag`, `library.py:211-212`) accumulates in Django's
-  `parser.__loaded_blocks` while every Rust-compiled `{% block %}` accumulates in
-  `Parser::loaded_blocks` — two counters that cannot see each other. This is the
-  same class as M6's Review Focus item 1 and is *unreachable in the pinned
-  suite*, which registers no library tag named `block`.
+- **The check straddles any host-compiled block tag, and the predicate is
+  measured.** Under Design B the state is Rust's, so a `{% block %}` inside a
+  *host* tag's body is compiled by Django's `do_block` — the nested
+  `parser.parse()` is the handle's, so it dispatches through Django's registry —
+  and accumulates in Django's `parser.__loaded_blocks`, while every
+  Rust-compiled `{% block %}` accumulates in `Parser::loaded_blocks`. **No
+  library tag named `block` is needed for this**, which is what this bullet
+  said before the reviewer corrected it: the trigger is any `{% block %}` whose
+  enclosing block-level tag Rust does not own.
+
+  The predicate — *does any `{% block %}` sit inside a body Django parses?* —
+  had not been run, and it returns **one**, not zero. Measured by walking every
+  string literal under `tests/template_tests` with `ast`, tokenizing each with
+  Django's own `Lexer` and tracking the open-tag stack
+  (`/tmp/m7_measure_nesting.py`; 1046 literals, 1046 tokenized), plus the 62
+  fixture templates under `templates/`: the only hit in either is
+  `syntax_tests/i18n/test_blocktranslate.py`'s `test_with_block` —
+
+  ```text
+  {% load i18n %}{% blocktranslate %}{% block b %} {% endblock %}{% endblocktranslate %}
+  ```
+
+  — which expects a `TemplateSyntaxError` from `blocktranslate` itself
+  (`"'%s' doesn't allow other block tags (seen 'block b') inside it"`). **So the
+  divergence is reached and is harmless there**, for a reason that is not the
+  one first written: the host raises before any duplicate-name check runs, and
+  the one `{% block %}` it sees is not a duplicate. The fixture scan's single
+  hit is a scanner artifact (`{% endbadtag %}` is not a known end tag), not a
+  second case.
+
+  **And the divergence is one message wide, not structural.**
+  `ExtendsNode.__init__` builds `self.blocks` from
+  `nodelist.get_nodes_by_type(BlockNode)` (`LT:94`) over *materialised* nodes,
+  which both parsers produce, so a block compiled by either is visible to the
+  other at render time. What the split can change is exactly the parse-time
+  `'block' tag with name '…' appears more than once` refusal — a duplicate split
+  across the two counters — and nothing about the rendered tree. Saying what
+  does **not** diverge is what makes a recorded divergence usable; "two counters
+  that cannot see each other" read as though the tree differed too.
 - `do_block` uses `token.contents.split()`, **not** `split_contents()`, and
   Django's own comment says why (`LT:218-219`: the tag "doesn't accept variable as
   arguments"). Rust must call `crate::pyunicode::split`
@@ -374,9 +476,14 @@ because it is a real M6 defect independent of which design wins: a library tag
 returning a `must_be_first` node is accepted today, in a position Django
 refuses.
 
-**D3 — the spec's §10.4 cites `parser/mod.rs:336` for `extend_nodelist`; the
-port is at `:429`.** A vintage, not a claim; recorded so the next reader does not
-go looking.
+**D3 — the spec's §10.4 cited `parser/mod.rs:336` for `extend_nodelist`; the
+check is at `:435`, inside the function ported at `:429`.** A vintage, not a
+claim. **Fixed rather than only recorded**, in `7ac772e`: the spec is a living
+document under the anchor guard now, so a number left as a vintage would be a
+number the guard re-checks forever. Found by reading the 29 unmanifested spec
+anchors against the pinned tree one at a time — the widening's first catch, and
+the second was `base.py:948-1000`, twelve lines short of `_resolve_lookup`'s
+end.
 
 **D4 — the spec's §10.3 M7 row names `test_include_cache` as the gate, and as
 written that gate is vacuous.** The `.django/` row runs on stock Django's parser
@@ -904,14 +1011,23 @@ mod tests {
         );
     }
 
+    /// `None` is Django's *unknown origin*, not "no origin object" (A3): the
+    /// value it stands for is `Origin(UNKNOWN_SOURCE).template_name`, which is
+    /// `None` on every `Template` Django builds without a loader. So the
+    /// message is asserted, not just the kind — a `None` that fell through to
+    /// "no check" would still be an `ErrorKind::Syntax` only by accident, and
+    /// this is the branch that makes `None` mean something.
     #[test]
     fn the_three_failures_carry_djangos_exact_text() {
         let unknown = construct_relative_path(None, "'./base.html'", false).unwrap_err();
+        assert_eq!(unknown.kind, ErrorKind::Syntax);
+        // Verbatim (`loader_tags.py:266-269`); note it does **not** quote
+        // `relative_name`, unlike the other two. The literal is long on purpose:
+        // rustfmt does not wrap it, and a wrapped literal would hide the space
+        // this message's line break sits on.
         assert_eq!(
-            unknown.kind,
-            ErrorKind::Syntax,
-            // The message, verbatim (`loader_tags.py:266-269`); note it does not
-            // quote `relative_name`.
+            unknown.message(),
+            "The relative path './base.html' cannot be evaluated due to an unknown template origin."
         );
 
         let outside = construct_relative_path(Some("index.html"), "'../../x.html'", false)
@@ -1018,13 +1134,19 @@ In `crates/template-py/src/lib.rs`: rename the `parse` keyword and
 — and pass it where `py.None()` is today (`:2169`), so the materialiser's
 `origin` is a `Bound<'_, PyAny>` or `None`.
 
-In `render.py`: `parser_for(source, engine=None, origin=None)`, passing
-`origin=origin` to `Parser(...)`; `parse_template(source, engine=None,
-origin=None)` forwarding it both to `parser_for` and to `compile_template`'s new
-keyword; `render_string(source, context, engine=None, origin=None)` forwarding
-it. **`compile_template`'s materialisation origin is the same object**, so
-`ExtendsNode.render`'s `[self.origin]` and `IncludeNode.render`'s
+In `render.py`: `parser_for(source, engine=None, origin=UNKNOWN_ORIGIN)`, where
+`UNKNOWN_ORIGIN = Origin(UNKNOWN_SOURCE)` is a module constant — **not `None`**,
+per A3: the host `Parser` Django's own code may read must carry a real `Origin`,
+and `Origin(UNKNOWN_SOURCE).template_name` is `None`, so the Rust side is
+unchanged. Then `parse_template(source, engine=None, origin=UNKNOWN_ORIGIN)`
+forwarding it both to `parser_for` and to `compile_template`'s new keyword, and
+`render_string(source, context, engine=None, origin=UNKNOWN_ORIGIN)`
+forwarding it. **`compile_template`'s materialisation origin is the same
+object**, so `ExtendsNode.render`'s `[self.origin]` and `IncludeNode.render`'s
 `self.origin.template_name` both read a real `Origin`.
+
+`origin` reaches Rust as `origin.template_name`, i.e. `origin.template_name if
+origin is not None else None` — the *attribute*, never the object (A3).
 
 - [ ] **Step 8: Run the guards, then the gates**
 
@@ -1105,9 +1227,14 @@ impl NodeListDesc {
     /// [`HOST_NODE`] names a Python node Rust must not read, so it is neither
     /// matched nor descended into. A host tag returning an `ExtendsNode`
     /// *subclass* would match Django's `isinstance` and not this — and so would
-    /// a host block tag whose body contains a second `{% extends %}`. Both are
-    /// unreachable in the pinned suite, which registers no library tag named
-    /// `block` or `extends`; see the plan's Review Focus item 3.
+    /// a host block tag whose body contains a second `{% extends %}`. **Both
+    /// are measured zero in the pinned suite**, not assumed: no
+    /// `class <name>(ExtendsNode|BlockNode|IncludeNode)` exists anywhere under
+    /// `tests/template_tests`, and `{% extends %}` nested inside a
+    /// host-owned block-level tag occurs 0 times, over 1046 string literals and
+    /// 62 fixture templates (`/tmp/m7_measure_nest2.py`). The *neighbouring*
+    /// case is not zero — a nested `{% block %}` occurs once, in
+    /// `test_blocktranslate.py`; see A5. Review Focus item 3.
     pub fn get_nodes_by_type(&self, class_name: &str) -> Vec<&NodeDesc> {
         let mut found = Vec::new();
         for node in &self.nodes {
@@ -1721,13 +1848,24 @@ number only for as long as the thing it numbered holds still." Take each number
 from the command that produces it in this step; do not restate a number measured
 in an earlier session.
 
+**And copy the measurement scripts A3/A4/A5 cite into `.review/` beside the
+seams file, under their `/tmp` names.** They are evidence for four claims that
+no test carries — the two-clause predicate's matrix, the origin's unknown-source
+value, the inbound `must_be_first`, and A5's nesting predicate — and `/tmp` does
+not survive. `.review/` is the dated-record home for exactly this, and a
+divergence recorded with an unrunnable argument is one nobody re-examines.
+
 - [ ] **Step 2: Update the spec**
 
 §10.3's M7 row: the gate is `tests/test_inheritance_gate.py`, and
 `test_include_cache` is named as the *shape* copied rather than the suite row
-that runs. §10.4's M7 paragraph: the `parser/mod.rs:336` citation becomes a
-symbol (`Parser::extend_nodelist`) rather than a line, per the project's
-pointer-not-snapshot rule. Record D1–D6 as corrections in the spec's own voice,
+that runs. §10.4's M7 paragraph: **already done** — `parser/mod.rs:336` was
+corrected to `:435` and the spec was put under the anchor guard in the commit
+before this plan's first task (`7ac772e`), so the citation is now *checked*
+rather than merely written. That is stronger than the symbol this step
+originally asked for, and it is why the step no longer asks for it: a symbol
+carries no anchor, and the guard is what keeps the other 38 from rotting the
+same way. Record D1–D6 as corrections in the spec's own voice,
 and add §10.3's vacuity rule (D5) beside the table rather than as prose about
 M7: the next milestone's gate is checked by the rule, not by re-reading this
 plan.
