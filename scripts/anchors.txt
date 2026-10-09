@@ -150,7 +150,7 @@ defaultfilters.py:182	django/template/defaultfilters.py	182	-	return input_val	-
 defaultfilters.py:184-192	django/template/defaultfilters.py	184	192	if not m and p <= 0:	-
 defaultfilters.py:184	django/template/defaultfilters.py	184	-	if not m and p <= 0:	-
 defaultfilters.py:185	django/template/defaultfilters.py	185	-	return mark_safe(	-
-defaultfilters.py:186	django/template/defaultfilters.py	186	-	-	-
+defaultfilters.py:186	django/template/defaultfilters.py	186	-	formats.number_format(	-
 defaultfilters.py:187	django/template/defaultfilters.py	187	-	"%d" % (int(d)),	-
 defaultfilters.py:194-205	django/template/defaultfilters.py	194	205	exp = Decimal(1).scaleb(-abs(p))	-
 defaultfilters.py:194	django/template/defaultfilters.py	194	-	exp = Decimal(1).scaleb(-abs(p))	-

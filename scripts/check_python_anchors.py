@@ -42,6 +42,16 @@ is there — detects nothing, because at `defaulttags.py:1037` (cited for
 `condition.eval(context)`, which is at `:326`) the text at the cited line is a
 perfectly real line of Django.
 
+**An anchor's granularity follows the sentence's subject, so one call can carry
+two correct numbers.** A claim about a *call* cites the call head: `host.rs`
+lists `defaultfilters.py:186`, `:214` and `:912` as the three
+`formats.number_format(` call sites, and 912 is a one-liner where head and
+argument share a line. A claim about an *argument* cites the argument line:
+`floatformat.rs` compares `number` against `"%d" % int(d)`, which is 187's
+shape, so it cites `:215` where the call head is `:214`. Both files are right —
+the test is which line holds the text the sentence names — and a sweep that
+makes them agree is unmaking a measurement.
+
     python -I scripts/check_python_anchors.py --check            # gate, exit 1 on drift
     python -I scripts/check_python_anchors.py --check --frozen   # also fails on shorthand
     python -I scripts/check_python_anchors.py --triage           # suspicion list, exit 0
