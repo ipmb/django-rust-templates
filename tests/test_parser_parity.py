@@ -35,9 +35,17 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
+# `.django/tests` as well, since `LIBRARIES` names `template_tests.*` and
+# `Engine(libraries=…)` resolves those lazily through `import_module`. It was
+# already on `sys.path` during a full discovery run because `test_host_tags`
+# inserts it and sorts earlier — so the corpus only failed when this module ran
+# alone, which is exactly the kind of ordering dependence a test module should
+# not have.
+DJANGO_TESTS = DJANGO_CHECKOUT / "tests"
 
-if str(DJANGO_CHECKOUT) not in sys.path:
-    sys.path.insert(0, str(DJANGO_CHECKOUT))
+for _path in (DJANGO_CHECKOUT, DJANGO_TESTS):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 from django.template.base import (  # noqa: E402
     DebugLexer,
@@ -51,8 +59,10 @@ from django.template.engine import Engine  # noqa: E402
 from django.template import smartif  # noqa: E402
 from django.utils.safestring import SafeData  # noqa: E402
 
-from django_rust_templates import _native  # noqa: E402
+from django_rust_templates import _native, render  # noqa: E402
+from django_rust_templates.host import ShellHost  # noqa: E402
 from tests.parser_corpus import (  # noqa: E402
+    LIBRARIES as TEMPLATE_LIBRARIES,
     RANDOM_CASES,
     RANDOM_SEED,
     TEMPLATES,
@@ -79,15 +89,40 @@ materialise = materialise_module.materialise
 # token from either side.
 IGNORED_ATTRIBUTES = ("token", "origin")
 
+# The libraries come from the corpus, beside the rows that name them, so the
+# parity module and the error module cannot drift into two different engines.
+# Reached by *path* and not by building a `Library` here, and that is load-bearing
+# rather than tidy: `Engine(libraries=…)` resolves each path through `find_library`
+# → `import_module(...).register`, so both sides get the **same module-level
+# `Library` instance**. A `SimpleNode` holds `func` — a live function object — and
+# `describe` compares it by identity, so two separately-built libraries would
+# differ in `func` and the failure would read like a bug in a seam that works.
+LIBRARIES = TEMPLATE_LIBRARIES
+
+
+def _library_engine():
+    """The engine whose `libraries` the corpus's `{% load %}` rows resolve through.
+
+    A fresh `Engine` per call, which is safe for the reason above: the `Library`
+    objects come from the modules, not from the engine.
+    """
+    return Engine(libraries=LIBRARIES)
+
 
 def django_parse(source, debug=False):
     lexer = DebugLexer(source) if debug else Lexer(source)
     # `builtins` is not optional: a bare `Parser` knows no tags at all.
-    return Parser(lexer.tokenize(), builtins=Engine().template_builtins).parse()
+    # `libraries` is not either, as of M6's Task 5 — `{% load %}` reads
+    # `parser.libraries`, which `Parser.__init__` fills from
+    # `Engine.template_libraries`.
+    engine = _library_engine()
+    return Parser(
+        lexer.tokenize(), engine.template_libraries, engine.template_builtins
+    ).parse()
 
 
 def filter_parser():
-    """A `Parser` carrying Django's **filter** registry, for materialisation.
+    """The one `Parser` the parse uses, built by the shell's own factory.
 
     M3's corpus contains `{{ … }}`, and every variable materialises to a
     `FilterExpression` — even `{{ x }}`, which has no filters — because Django's
@@ -97,12 +132,15 @@ def filter_parser():
     `LookupError` by design (`python/django_rust_templates/_impl/parser.py:285`),
     which is what the corpus hit the moment variables were added to it.
 
-    Same construction as `tests/test_materialise.py:71`: a bare
-    `Parser(tokens)` registers nothing (`base.py:518-519`), and the libraries
-    live on an `Engine` **instance** (`engine.py:62-63`), not the class.
+    **This delegates to `render.parser_for` as of M6's Task 5, rather than
+    re-spelling the construction.** The two used to be separate spellings of
+    `Parser(tokens, engine.template_libraries, engine.template_builtins)` and
+    they drifted: `render.py`'s copy gained `libraries=` in Task 3 and this one
+    did not, so the corpus graded a parser with no libraries — a `{% load %}`
+    row raised `'custom' is not a registered tag library` here while the render
+    path was fine. One construction site is the fix.
     """
-    engine = Engine()
-    return Parser([], engine.template_libraries, engine.template_builtins)
+    return render.parser_for("", _library_engine())
 
 
 def ours_parse(source, debug=False):
@@ -118,9 +156,19 @@ def ours_parse(source, debug=False):
     # render path uses. `check_filter` is deliberately not passed: it is a
     # different seam, and leaving it `None` keeps every earlier row's
     # filter-error ordering exactly as it was measured.
+    #
+    # `host` arrived with M6's Task 5. Without it no corpus row can contain a
+    # tag the *host* compiles — `{% load %}` among them, and `{% load %}` is how
+    # every host row reaches its library — because Rust's registry does not have
+    # those names and raises `Invalid block tag` before the host is consulted.
+    # Measured: `_native.parse("{% load custom %}{% no_params %}")` without a
+    # host is `ParseError("Invalid block tag on line 1: 'load'. …")`.
     parser = filter_parser()
     tree = _native.parse(
-        source, debug, compile_filter=materialise_module.compile_filter(parser)
+        source,
+        debug,
+        compile_filter=materialise_module.compile_filter(parser),
+        host=ShellHost(parser),
     )
     return materialise(tree, parser=parser)
 
@@ -321,6 +369,37 @@ def outcome(parse, source, debug):
         return ("error", str(exc), token_shape(getattr(exc, "token", None)))
 
 
+def descriptors(source, debug=False):
+    """Rust's node descriptors, **before** materialisation.
+
+    The only place a host node is visible *as* a host node. After
+    materialisation both kinds are ordinary Django classes — the host node is
+    whatever its compile function returned — so the tree cannot be asked where a
+    node came from. `_native.parse` returns
+    `(nodelist, contains_nontext, …)` and a descriptor is
+    `(class_name, attrs, nodelists, token, origin)`.
+    """
+    parser = filter_parser()
+    tree = _native.parse(
+        source,
+        debug,
+        compile_filter=materialise_module.compile_filter(parser),
+        host=ShellHost(parser),
+    )
+    return tree[0]
+
+
+def contains_host_node(descriptor_list):
+    """Whether any descriptor, at any depth, is a `HOST_NODE`."""
+    for desc in descriptor_list:
+        if desc[0] == materialise_module.HOST_NODE:
+            return True
+        nodelists = desc[2] if len(desc) > 2 else ()
+        if any(contains_host_node(nodelist) for nodelist in nodelists):
+            return True
+    return False
+
+
 class CorpusParityTests(unittest.TestCase):
     def assert_trees_match(self, source, debug):
         theirs = django_parse(source, debug)
@@ -349,6 +428,73 @@ class CorpusParityTests(unittest.TestCase):
     def test_the_corpus_is_not_trivially_small(self):
         self.assertGreaterEqual(len(TEMPLATES), 40)
         self.assertGreaterEqual(len(set(TEMPLATES)), 40, "duplicate corpus entries")
+
+    def test_a_host_tag_parses_to_the_same_tree_as_django(self):
+        """The first corpus row whose tree contains a host node, named.
+
+        Named rather than left to the loop above because this is the row that
+        says the seam produces a *comparable* tree at all, and because the
+        comparison here is the one that rests on a subtlety: `describe`'s `Node`
+        arm compares `vars()` recursively, and a `SimpleNode` holds `func` — a
+        live function object, compared by identity because it is neither a
+        `Node` nor a `FilterExpression`. So the two sides must be given the
+        **same** `Library` instance, which is what `LIBRARIES` being dotted
+        paths buys: `Engine(libraries=…)` resolves them to the module's own
+        `register`, once. Two separately-built libraries would differ in `func`
+        and this row would fail looking like a Rust bug in a working seam.
+        """
+        source = "{% load custom %}{% no_params %}"
+        self.assert_trees_match(source, debug=False)
+        self.assert_trees_match(source, debug=True)
+
+    def test_the_corpus_has_a_row_whose_tree_contains_a_host_node(self):
+        """`builtin_tag_names()` is Rust's registry, so the coverage gate is
+        structurally blind to every tag the *host* compiles — including both of
+        M6's, and `{% load %}` itself.
+
+        That is not a hypothetical: the gate derives its demand from
+        `builtin_tag_names() - builtin_tag_stubs()`, so when `load` and
+        `querystring` left the stub set in Task 3 it demanded nothing new, and
+        M6 could have closed with its whole mechanism ungraded and every
+        coverage assertion green. This row is what makes that impossible, and it
+        asserts the *descriptor*, since materialisation erases the distinction.
+        """
+        rows = [row for row in TEMPLATES if "{% load" in row]
+        self.assertTrue(rows, "no corpus row loads a library")
+        self.assertTrue(
+            any(contains_host_node(descriptors(row)) for row in rows),
+            "every `{% load %}` row materialised without a host node, so the "
+            "corpus proves nothing about the seam",
+        )
+
+    def test_a_host_node_carries_the_token_rust_attached(self):
+        """Review Focus 4: the host node must be token-bearing *by the same route*
+        as every other node, which is the thing Task 2's arm can quietly break.
+
+        Rust ports `extend_nodelist` (`crates/template-core/src/parser/mod.rs:392-418`)
+        and calls it at `:304` for a host descriptor exactly as for a Rust-built
+        block node, so the token reaches the descriptor either way. The failure
+        mode is therefore not "Django forgot to attach it" but "the
+        `materialise_node` arm returned the stored object before the attachment
+        ran", leaving a user tag's node the one shape that renders tokenless in
+        the debug traceback path. Both nodes below are compared for that reason:
+        asserting only that the *host* node has a token would pass for a node the
+        host had already stamped itself.
+        """
+        tree = ours_parse("{% load testtags %}{% echo x %}{% csrf_token %}", debug=True)
+        # Positional, not by class name: `tree[1]` is the host's `{% echo %}` and
+        # `tree[2]` is Rust's `{% csrf_token %}`. Selecting by class would be
+        # circular here — the node's class is the thing the host chose.
+        host, rust = tree[1], tree[2]
+
+        self.assertEqual(host.token.contents, "echo x")
+        self.assertEqual(rust.token.contents, "csrf_token")
+        # `position` is the field that separates a token Rust stamped from one
+        # rebuilt from `contents` alone: `Token.__init__` defaults it to `None`
+        # (`base.py:472`) and the debug lexer always fills it. Measured on the
+        # pinned tree: `(19, 31)`, with `(0, 19)` for the `{% load %}` before it.
+        self.assertEqual(host.token.position, (19, 31))
+        self.assertIsNotNone(rust.token.position)
 
     def test_the_corpus_covers_every_implemented_tag_with_a_success_path(self):
         """Every tag the engine can *parse* has a happy-path corpus row.

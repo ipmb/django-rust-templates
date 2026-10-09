@@ -323,4 +323,77 @@ ERRORS = [
         "{% autoescape on %}\n{% now a b %}\n{% endautoescape %}",
         "'now' statement takes one argument",
     ),
+    # --- M6: the messages only the *host* can raise -------------------------
+    # Every message above is a string Rust ports; these are not, and that is the
+    # point. Each is raised *inside* a compile function the host runs, against
+    # the parser the shell handed it, so a row here is evidence that the seam
+    # carries a live Django parser rather than that Rust copied a literal.
+    #
+    # `{% load %}` is the tag that proves it on its own: `find_library` reads
+    # `parser.libraries` (`defaulttags.py:1065-1075`) and the message embeds
+    # `"\n".join(sorted(parser.libraries))` — the caller's library set, not a
+    # constant. Ours matches Django's only because both sides are given the same
+    # `Engine.template_libraries`; see `parser_corpus.LIBRARIES`.
+    (
+        "{% load nope %}",
+        "'nope' is not a registered tag library. "
+        "Must be one of:\ncustom\ntag_27584\ntesttags",
+    ),
+    # A second name in the same tag, reaching the same raise site: `do_load`
+    # treats every bit after the command as a library name when there is no
+    # `from` (`defaulttags.py:1099-1105`), so `custom` resolves and `no_params`
+    # does not.
+    (
+        "{% load custom no_params %}",
+        "'no_params' is not a registered tag library. "
+        "Must be one of:\ncustom\ntag_27584\ntesttags",
+    ),
+    # The *other* raise site, which the `from` form is the only way to reach
+    # (`load_from_library`, `defaulttags.py:1086-1095`) — and it is a different
+    # sentence, which is why both rows exist.
+    (
+        "{% load nope from custom %}",
+        "'nope' is not a valid tag or filter in tag library 'custom'",
+    ),
+    # `parse_bits` (`library.py:392-480`) is where a `simple_tag`'s arguments are
+    # bound, and all of its messages are built from the *function's* signature
+    # and the caller's tokens. Four spellings, four messages, one of which names
+    # the parameter the caller omitted. The plan counted five branches; four
+    # carry distinct text, and the fifth (the keyword-only check with no
+    # keyword-only parameter declared) is unreachable from a library that
+    # registers none.
+    ("{% load custom %}{% no_params x %}", "'no_params' received too many positional arguments"),
+    (
+        "{% load custom %}{% one_param %}",
+        "'one_param' did not receive value(s) for the argument(s): 'arg'",
+    ),
+    ("{% load custom %}{% one_param x y %}", "'one_param' received too many positional arguments"),
+    (
+        "{% load custom %}{% one_param x y=1 %}",
+        "'one_param' received unexpected keyword argument 'y'",
+    ),
+    # The `command_stack` row, and it is one of the five the reviewer named as
+    # surviving to M9: a `simple_block_tag` whose body is unclosed re-enters
+    # Django's parse, runs out of tokens, and `Parser.unclosed_block_tag` pops
+    # `parser.command_stack` (`base.py:651`) — a stack Django's own `Parser.parse`
+    # maintains and Rust, driving the outer loop, does not. Measured before
+    # `ShellHost` maintained it: `ParseError('pop from empty list')`.
+    (
+        "{% load custom %}{% div %}a",
+        "Unclosed tag on line 1: 'div'. Looking for one of: enddiv.",
+    ),
+    # --- and one row that is not an M6 tag, because grading the corpus is the
+    # task and the gap is in it ---------------------------------------------
+    # The only input that reaches `loopvar_split` on an *empty* haystack, and
+    # nothing in either corpus reached it. `reversed` appears once in the success
+    # corpus and that is the happy path; the two `for` error rows above both fail
+    # the `bits[in_index] != "in"` test instead. With four bits and
+    # `is_reversed`, `in_index` is 1, `bits[1]` *is* "in", so that check passes
+    # and `bits[1..1]` is empty: `re.split(r" *, *", "")` runs and Django rejects
+    # the empty loop variable. One row pins the `in_index == 1` arithmetic, the
+    # empty haystack, and `is_invalid_loopvar` at once.
+    (
+        "{% for in y reversed %}x{% endfor %}",
+        "'for' tag received an invalid argument: for in y reversed",
+    ),
 ]

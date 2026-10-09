@@ -21,14 +21,19 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 
-if str(DJANGO_CHECKOUT) not in sys.path:
-    sys.path.insert(0, str(DJANGO_CHECKOUT))
+DJANGO_TESTS = DJANGO_CHECKOUT / "tests"
+
+for _path in (DJANGO_CHECKOUT, DJANGO_TESTS):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 from django.template import defaulttags  # noqa: E402
 from django.template.base import DebugLexer, Lexer, Parser  # noqa: E402
 from django.template.engine import Engine  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
+from django_rust_templates.host import ShellHost  # noqa: E402
+from tests.parser_corpus import LIBRARIES  # noqa: E402
 from tests.parser_error_corpus import ERRORS  # noqa: E402
 from tests.test_tag_inventory import M5_TAGS  # noqa: E402
 
@@ -41,7 +46,13 @@ from tests.test_tag_inventory import M5_TAGS  # noqa: E402
 # (The plan's helper omitted the libraries; corrected against Django 6.0.9,
 # `base.py:522-523` — `for builtin in builtins: self.add_library(builtin)`,
 # with `builtins=None` defaulting to `[]`.)
-_ENGINE = Engine()
+#
+# `libraries=` is the second half of the same omission and arrived with M6's
+# Task 5: `Parser.__init__` stores `libraries` without merging it (`base.py:521`)
+# and only `{% load %}` reads it, so a row that loads a library needs the engine
+# to name one. The dict is `parser_corpus.LIBRARIES`, shared with the success
+# corpus, because two spellings of it is how one of them stops being updated.
+_ENGINE = Engine(libraries=LIBRARIES)
 
 
 def lexer(source, debug):
@@ -75,6 +86,12 @@ def ours_failure(source, debug=False):
     The parser is a filter registry and nothing else: Rust owns the tokens, so
     the ones this `Parser` is built over are irrelevant, and the same
     construction as `django_failure`'s is the one that has the engine's filters.
+
+    `host` arrived with M6's Task 5, for the reason `ours_parse` in
+    `test_parser_parity` records: without it `{% load %}` is not a tag Rust
+    knows, so every M6 error row would fail with `Invalid block tag on line 1:
+    'load'` instead of the message under test — a corpus that agrees with itself
+    about the wrong thing.
     """
     parser = Parser(
         lexer(source, debug).tokenize(),
@@ -82,7 +99,9 @@ def ours_failure(source, debug=False):
         _ENGINE.template_builtins,
     )
     try:
-        _native.parse(source, debug, compile_filter=parser.compile_filter)
+        _native.parse(
+            source, debug, compile_filter=parser.compile_filter, host=ShellHost(parser)
+        )
     except Exception as exc:  # noqa: BLE001
         return exc
     return None

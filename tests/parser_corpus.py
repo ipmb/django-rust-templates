@@ -11,6 +11,20 @@ Task 10 gives: ``{{ … }}`` is the input that sets ``contains_nontext``.
 Each entry below the first block pins one behaviour, named in its comment.
 """
 
+# The libraries the `{% load %}` rows reach, by dotted path into `.django`'s own
+# `template_tests`. Declared here, beside the rows that name them, rather than
+# once per test module — **two spellings is how a corpus stops grading the
+# engine**: `tests/test_parser_parity.py` and `tests/test_parser_errors.py` each
+# build the `Engine` the two sides parse through, and until M6's Task 5 only the
+# render path knew about `libraries=`, so the corpus graded a parser that could
+# not resolve a single `{% load %}`.
+LIBRARIES = {
+    "custom": "template_tests.templatetags.custom",
+    "testtags": "template_tests.templatetags.testtags",
+    "tag_27584": "template_tests.templatetags.tag_27584",
+}
+
+
 TEMPLATES = [
     # --- text, and the things that are not tags ----------------------------
     "",
@@ -230,6 +244,45 @@ TEMPLATES = [
     "{{ 5 }}",
     "{{ a.0|join:', ' }}",  # a quoted argument containing the filter separator
     "{{ x }}{{ y }}",
+    # --- M6: the tags the *host* compiles -----------------------------------
+    # Every row above is compiled by Rust's own registry, so before this block
+    # the corpus had no tree containing a host node at all — and the coverage
+    # test below cannot demand one, because it derives its demand from
+    # `builtin_tag_names()`, which is Rust's registry and structurally blind to
+    # every tag the host owns. `{% load %}` is how these rows reach their
+    # library, and it is itself host-owned (`defaulttags.py:1099`).
+    #
+    # The libraries are `LIBRARIES` below, by dotted path into `.django`'s own
+    # `template_tests`, and they must stay that way: `Engine(libraries=…)`
+    # resolves a path to `import_module(...).register`, so both sides get the
+    # *same* `Library` object, and a `SimpleNode` holds `func` compared by
+    # identity.
+    #
+    # `extra_data` writes `parser.extra_data["extra_data"]` and returns a
+    # `TextNode` (`custom.py:396-399`); its tree is unremarkable on purpose —
+    # the state it writes is Task 4's, and this row is here so that a host
+    # compile function *may* touch the parser without breaking the tree.
+    "{% load custom %}{% extra_data %}",
+    "{% load custom %}{% no_params %}",
+    "{% load custom %}{% no_params %}x",
+    "{% load custom %}{% one_param x %}",
+    # A `simple_block_tag`: `library.py:211-212` re-enters Django's own
+    # `Parser.parse` for the body, and `delete_first_token` removes the end tag
+    # `parse` left on the stack.
+    "{% load custom %}{% div %}a{% enddiv %}",
+    "{% load custom %}{% div %}a{% enddiv %}extra",
+    # A second library, so a row cannot pass by reaching `custom` through some
+    # accident of the first.
+    "{% load testtags %}{% echo x %}ok",
+    "{% load custom %}{% no_params %}{% load testtags %}{% echo y %}",
+    # The re-entrant one: `badtag` calls `parser.parse(("endbadtag",))` and
+    # `delete_first_token` (`tag_27584.py:8-9`). It raises at *render* time
+    # (`BadNode.render`), so the parse succeeds and the tree is comparable —
+    # which is what makes it a success row rather than one for the error corpus.
+    "{% load tag_27584 %}{% badtag %}{% endbadtag %}",
+    # The host-owned builtin: `querystring` is Django's `simple_tag`
+    # (`defaulttags.py:1349`) and not in Rust's registry at all.
+    "{% querystring page=2 %}",
 ]
 
 
