@@ -89,11 +89,13 @@ exercise. Each is pinned by a test in the task that owns the code.
    reads `settings.URLIZE_ASSUME_HTTPS`, `timesince`/`timeuntil` read the wall
    clock and `gettext`. The plan's answer is §D2, and §D2 was **corrected after
    review**: this is a *permanent* delegation, not a stage that M10 ends, and the
-   set is **21 filters, derived** — see §D2 for the derivation, the second
-   independent metric (`lower` and `title`, via CPython's context-sensitive case
-   methods), the third (`phone2numeric`, via a helper's result-changing
-   decorator), and the three neighbouring counts that are each a right answer to
-   a different question.
+   set is **derived, not stated** — see §D2 for the four metrics (the first
+   reads the `django.utils` utilities, widened to CPython's stdlib for
+   `pprint`/`random`/`urlencode`; the second catches the context-sensitive case
+   methods `lower` and `title`; the third `phone2numeric`'s result-changing
+   decorator; the fourth reads our own Rust bodies and is the only one that
+   reddens when a body is edited), and the three neighbouring counts that are
+   each a right answer to a different question.
    **Pinned by Task 3's derivation test** (which computes the set rather than
    trusting it) and Task 10's corpus, which renders the settings-sensitive ones
    under two settings states and asserts both sides move together.
@@ -245,15 +247,23 @@ Django for everything else" — so it is the spec working as written; §6 has be
 corrected, because it said Rust owns "all built-in tags and filters" and that was
 too strong.
 
-**The set is derived rather than enumerated**, by three metrics, because this
-project has now had seven count disputes that were each two right answers to two
-unstated questions. The first metric, which Task 3's `test_filter_inventory.py`
-computes:
+**The set is derived rather than enumerated**, by four metrics, because this
+project has now had thirteen count disputes that were each two right answers to
+two unstated questions. The first metric, which Task 3's
+`test_filter_inventory.py` computes:
 
 > a filter delegates iff the utility its body references bottoms out, within that
 > utility's own module, in runtime state Rust cannot hold (settings, locale, the
 > active language, the clock) or in a Python-stdlib table-or-parser port
 > (`HTMLParser`, `textwrap`, `json`, `unicodedata`, `pprint`, `urllib.parse`).
+
+**The metric names `pprint` and `urllib.parse`, and the first instrument could
+not see them**, because it reads a utility's own module and scans only `django.*`
+imports — while three filters reach their engine without passing through
+`django.utils` at all (`defaultfilters.py:3`, `:10`, `:11`: `random`,
+`pprint`, `urllib.parse.quote`). Metric D, below, is what found them, and the
+three are the reason a metric's *statement* and its *instrument* have to be
+checked against each other rather than only against the tree.
 
 **A second, independent metric, because this one measures references to
 `django.utils` and a filter can rest on a CPython string method instead:**
@@ -262,7 +272,7 @@ computes:
 > function of the code point alone.
 
 The review asked for this as a pre-fan-out verification and it found two more, so
-the set is **20**, not 18. It is the fifth Unicode finding in this project, and the
+the set grew past 18. It is the fifth Unicode finding in this project, and the
 first that is **not a table**: after `\w`, whitespace, `combining` and this
 milestone's own per-code-point case fixup, `str.lower()` turns out to depend on
 what surrounds the code point.
@@ -274,7 +284,7 @@ change the answer without appearing anywhere in the body:**
 > a filter delegates iff its body **reproduces** a helper whose `def` carries a
 > result-changing decorator, rather than calling it.
 
-It found **one more**, `phone2numeric`, so the set is **21**. Wave A is what
+It found **one more**, `phone2numeric`, so the set grew again. Wave A is what
 produced it: the body was written as Rust — the 26-entry a–z table, plus a
 delegated `.lower()` for Final_Sigma — and the corpus then showed a `lazy(…)`
 argument coming back as a `__proxy__` and a `dict` argument refused as
@@ -313,9 +323,33 @@ Measured against `.django` @ 6.0.9: **18** by the first metric — `date`,
 `filesizeformat`, `floatformat`, `iriencode`, `json_script`, `slugify`,
 `striptags`, `time`, `timesince`, `timeuntil`, `truncatechars`,
 `truncatechars_html`, `truncatewords`, `truncatewords_html`, `urlize`,
-`urlizetrunc`, `wordwrap`, `yesno` — **2** more by the second, `lower` and
-`title`, and **1** more by the third, `phone2numeric`, for **21**. `slugify` was
-already in the 18 and its `.lower()` now goes through `str_lower` as well.
+`urlizetrunc`, `wordwrap`, `yesno` — **3** more by the first metric's own
+statement once the scope is widened to CPython's stdlib, `pprint`, `random` and
+`urlencode`; **2** more by the second, `lower` and `title`; and **1** more by
+the third, `phone2numeric`. `slugify` was already in the 18 and its `.lower()`
+now goes through `str_lower` as well.
+
+**A fourth metric, because the first three are all read off `defaultfilters.py`
+and so answer a question about *Django* rather than about the code that ships:**
+
+> a filter delegates iff its body calls a host method declared in a delegating
+> section of `FilterHost`'s trait.
+
+It is the only one of the four that reddens when someone **edits a Rust body** to
+stop delegating, which is the event the set exists to catch — and it is what
+checks the three stdlib-engine filters the first instrument missed. Its whole
+content is *which sections count*, so `tests/test_filter_inventory.py` asserts
+the trait's marker list against the constant before using it; the
+`// --- operand conversions … ---` section exists because four arithmetic
+methods were sitting inside "locale, language and the clock" with `gettext`, and
+a rule stated as though the sections were already clean would have swept
+`divisibleby` in.
+
+**So the set is not written here.** Task 3's
+`test_the_delegation_set_is_derived` derives all four and asserts the union
+against the Rust-derived set in both directions; a number in this plan is a
+number that can go stale, and this paragraph carried `18`, then `20`, then `21`
+before the fourth metric existed.
 
 The three neighbouring counts for the *first* metric, each correct for its own
 question and each wrong for this one: **57** registered filters; **31** reference
@@ -1604,11 +1638,15 @@ inventory found and it is free to pin.
 The same file carries `DELEGATING_FILTERS` and the test that **computes** it, in
 the shape `test_tag_inventory.py` uses for 27. The reviewer's brief for M4 was
 explicit that the deliverable is not the number but the test that says the number,
-because this project has had seven count disputes and every one was two right
-answers to two unstated questions. **Two metrics, because the first one measures
-references to `django.utils` and cannot see a filter built on a CPython string
-method** — the second is what found `lower` and `title`. They are computed and
-asserted separately, so the failure message names which filter moved:
+because this project has had count disputes and every one was two right answers to
+two unstated questions. **Four metrics, each blind to what the next one sees** —
+the first reads `django.utils` references and cannot see a filter built on a
+CPython string method (`lower`, `title`) nor one that never passes through
+`django.utils` at all (`pprint`, `random`, `urlencode`); the second catches the
+string methods; the third catches a helper's result-changing decorator
+(`phone2numeric`); and the fourth reads our own Rust bodies and is the only one
+that reddens when a body is edited. They are computed and asserted separately, so
+the failure message names which filter moved:
 
 ```python
 def delegating_filters_by_utils():
@@ -1617,12 +1655,18 @@ def delegating_filters_by_utils():
     The metric, written down because three neighbouring ones are each correct
     for a different question: 57 filters are registered; 31 reference *any*
     django.utils name (that sweeps in `mark_safe`, a primitive we reimplement
-    as Value::Safe); 26 reference a utility in a module that imports something
+    as Value::Safe); 27 reference a utility in a module that imports something
     stateful (that wrongly sweeps in escape/join/escapeseq/force_escape/
     linenumbers/linebreaks, because strip_tags shares django/utils/html.py with
     them). A filter delegates iff the utility its body references bottoms out,
     within that utility's own module, in state Rust cannot hold (settings,
     locale, the active language, the clock) or a stdlib table-or-parser port.
+
+    Scope note: this instrument scans only `django.*` imports, so it cannot see
+    `pprint`, `random` and `urllib.parse.quote`, which three filters reach
+    directly (`defaultfilters.py:3`, `:10`, `:11`). Their metric is stated in
+    `DELEGATING_BY_STDLIB_ENGINE`, and `delegating_filters_in_rust` is what
+    checks it.
 
     Classification is per-UTILITY, not per-module. Two resolver traps are
     load-bearing and both were hit while measuring: `from django.utils import
@@ -1645,29 +1689,39 @@ def delegating_filters_by_string_method():
     delegate, and Task 1's per-code-point table is *not* their answer — there is
     deliberately no `lower` in `pyunicode::case` for them to reach for.
 
-    This is the metric that moved the set from 18 to 20 after the plan's first
-    review, which is why the two are counted separately rather than merged into
-    a hand-checked list of 20. A third metric was added later, for
-    `phone2numeric`, which this one and metric A both score clean.
+    This is the metric that first moved the set past 18 after the plan's first
+    review, which is why the metrics are counted separately rather than merged
+    into a hand-checked list. The third metric was added later, for
+    `phone2numeric`, which this one and metric A both score clean; the fourth
+    reads the Rust bodies.
+
+    The `str` methods are matched **across whitespace** and with `#[cfg(test)]`
+    cut, which is not cosmetic: `truncatewords` writes `call.host\n.truncate(…)`,
+    and the first version of the host-call parse used `host\.(\w+)\(`, which
+    cannot see it — reporting 22 where the answer is larger and mis-attributing
+    two filters. The parse is a claim of the same kind as any number it replaces.
     """
 ```
 
-`DELEGATING_FILTERS` is the union of the three, asserted to equal the literal
-**21**; each third is asserted separately against its own literal (18, 2 and 1),
-and the failure message prints the computed set plus each third, so a future
-drift reports "19 by utils, 2 by string method" rather than just red. The third
-metric's near-miss — the five filters that reach a lazy-decorated helper with no
-`@stringfilter` — has its own assertion, so its cut from five to one is derived
-rather than described. It also asserts
+`DELEGATING_FILTERS` is the union of the four, asserted from **both**
+directions: against the three Python-side metrics' literals, and against
+`delegating_filters_in_rust()`, which reads the trait's own section markers out
+of `host.rs`. The trait's marker list is itself asserted against a constant, and
+the filter module stems against `REGISTERED`, so metric D's answer cannot move
+because a section was renamed or a support module was read as a filter. The
+third metric's near-miss — the five filters that reach a lazy-decorated helper
+with no `@stringfilter` — has its own assertion, so its cut from five to one is
+derived rather than described. It also asserts
 that each delegating filter's `FilterHost` method is actually reached by the
 corpus, so a filter cannot be reclassified into or out of the set by editing one
 line.
 
 Run: `.venv/bin/python -m unittest tests.test_filter_inventory -v`
-Expected: FAIL — `_native` has no `filter_names`. Both derivations are Python-side
-and already run, and they print their counts (`utils=18`, `string_method=2`,
-`union=20`) before the attribute error, which is what makes the numbers visible
-while the Rust side is still a stub.
+Expected: FAIL — `_native` has no `filter_names`. The derivations are Python-side
+and already run, and they print their counts (`utils=18`, `stdlib_engine=3`,
+`string_method=2`, `lazy_decorator=1`, `union=24`, `rust_derived=24`) before the
+attribute error, which is what makes the numbers visible while the Rust side is
+still a stub.
 
 - [ ] **Step 2: Write the FFI**
 
@@ -1792,23 +1846,35 @@ central corpus addition, and one commit.
 **The split was re-derived after the case-method finding, and it holds.** The
 sizing input is not the filter count per task but **how many bodies are Rust's**
 — a delegating filter is a thin wrapper, its flags and its corpus rows, while a
-pure one is the work. Computed against §D2's 20 (the union of both metrics, not a
-hand-checked list):
+pure one is the work. The delegating set is the one Task 3's
+`test_the_delegation_set_is_derived` derives; the column below names each group's
+members rather than restating the set's size, so it cannot disagree with that
+test:
 
 | task | filters | delegated | **Rust-owned** |
 |---|---|---|---|
 | 4 case and simple text | 8 | `lower`, `title` | **6** |
 | 5 padding and truncation | 8 | the four `truncate*`, `wordwrap` | **3** |
-| 6 sequences | 9 | — | **9** |
+| 6 sequences | 9 | `random` | **8** |
 | 7 numbers and logic | 10 | `yesno`, `floatformat`, `filesizeformat` | **7** |
-| 8 escaping and safety | 12 | `striptags`, `iriencode` | **10** |
-| 9 URLs and markup | 6 | `urlize`, `urlizetrunc`, `json_script`, `slugify` | **2** |
+| 8 escaping and safety | 12 | `striptags`, `iriencode`, `urlencode` | **9** |
+| 9 URLs and markup | 6 | `urlize`, `urlizetrunc`, `json_script`, `slugify`, `pprint`, `phone2numeric` | **0** |
 | 10 dates and elapsed time | 4 | all four | **0** |
 
-Task 4 is the only group whose composition the finding changed — it went from
-eight ports to six plus two host calls — and the change *strengthens* it: it is
-still the group that proves the seam end-to-end, and now it does so on the same
-filters that used to be pure, with `"ΟΣ"` and `"ΟΣΑ"` side by side on one row.
+**The `filters` column is theme membership and sums to 57; the fan-out dispatched
+55, and the difference is two filters rather than a defect.** `upper` and `lower`
+shipped in **Task 3 Step 4b**, as the pair that proves the FFI end-to-end before
+any group is dispatched, so Task 4's dispatch was six filters and its heading
+below says six. An earlier revision of this table was read as a dispatch count of
+57 and reconciled to 55 by hand, which is the failure mode it now avoids: the
+column says what it counts (theme membership), and the two counts that differ are
+both written down with the reason.
+
+Task 4 is the only group whose composition the case-method finding changed — it
+went from eight ports to six plus two host calls — and the change *strengthens*
+it: it is still the group that proves the seam end-to-end, and now it does so on
+the same filters that used to be pure, with `"ΟΣ"` and `"ΟΣΑ"` side by side on
+one row.
 The remaining asymmetry between the groups is deliberate and is not a sizing
 error: Tasks 9 and 10 are nearly all delegation, but their cost is the corpus
 machinery, not the bodies — two settings states for `urlize`'s
@@ -3274,9 +3340,10 @@ the second wave's brief is written from this section.** Wave A —
 `slugify`, `phone2numeric`, `pprint` — landed in `055c6fc`, with `phone2numeric`
 later rewritten to delegate the helper whole (`09a7774`) once the corpus refuted
 the split the first attempt made; that rewrite is what added §D2's third metric
-and moved the delegating set from 20 to 21. Wave B — `urlize`, `urlizetrunc`,
+and moved the delegating set past 20 (the fourth metric, reading the Rust bodies,
+came after). Wave B — `urlize`, `urlizetrunc`,
 `json_script` — is unlanded, and its brief is the first one in the milestone
-written from a §D2 that has all three metrics in it. The reason for two waves and
+written from a §D2 that has all four metrics in it. The reason for two waves and
 not one is the reason this whole milestone is serial: wave A's finding changed
 the **shared surface** (a new `FilterHost` method) and the delegating set, and a
 wave running concurrently would have written its bodies against a seam that was
@@ -3344,7 +3411,8 @@ about to change.
   called it pure, so the table would be Rust's and the module would hold it. The
   table is pure. The helper is not, because it is `@keep_lazy_text`-decorated
   (`text.py:313`) and the wrapped function is the decorated one — §D2's third
-  metric, and the reason the set there is 21. Wave A wrote the split version and
+  metric, and the measurement that made the delegating set larger than the first
+  two metrics could see. Wave A wrote the split version and
   the corpus is what refuted it: `5`, `True`, `5.0`, `None`, a list, a dict and a
   tuple all raise `AttributeError: '<own class>' object has no attribute 'lower'`
   where a Rust-side classification can only say `'object'`, because
@@ -3472,10 +3540,13 @@ M10. Both are corrected in the spec, because a reader at M10 would otherwise hun
 for filter bodies nobody scheduled. (e) **The delegation count had no derivation**
 and was given three different values across two sessions before being measured;
 Task 3 Step 1b computes it — and computing it found a **second metric the first
-one cannot see**, which moved the set from 18 to 20 (`lower` and `title`, via
-CPython's context-sensitive case methods), and later a **third**, which moved it
-to 21 (`phone2numeric`, via a helper's result-changing decorator). Each is
-asserted separately.
+one cannot see**, which moved the set past 18 (`lower` and `title`, via
+CPython's context-sensitive case methods); later a **third**, for
+`phone2numeric`'s result-changing decorator; and a **fourth**, which reads the
+Rust bodies and is the only one that reddens when a body is edited. Its
+instrument also missed three filters the metric's own statement named, which is
+how a metric's *statement* and its *instrument* came to be checked against each
+other. Each is asserted separately.
 
 **Five things in this plan were wrong on first writing, and review caught all
 five.** The M10 `utils` claim in §D2 was a factual error about which module a

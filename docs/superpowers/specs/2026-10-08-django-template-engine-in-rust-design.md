@@ -419,24 +419,37 @@ That is §3 working as written — "We depend on the real Django for everything 
 — not a hole in the plan, and it needs to be stated here so that a reader at M10
 does not go looking for filter bodies nobody scheduled.
 
-Measured, and **derived in a test rather than enumerated** the way §10.3's tag
-inventory derives 27: a filter delegates when the utility its body calls bottoms
-out, within its own module, in runtime state Rust cannot hold (settings, locale,
-the active language, the clock) or in a Python-stdlib table-or-parser port
-(`HTMLParser`, `textwrap`, `json`, `unicodedata`). **18 of the 57**:
-`date`, `filesizeformat`, `floatformat`, `iriencode`, `json_script`, `slugify`,
-`striptags`, `time`, `timesince`, `timeuntil`, `truncatechars`,
-`truncatechars_html`, `truncatewords`, `truncatewords_html`, `urlize`,
-`urlizetrunc`, `wordwrap`, `yesno`.
+Measured, and **derived in tests rather than enumerated** the way §10.3's tag
+inventory derives 27. There are **four** delegating metrics, because the first
+one is not the question: a filter delegates when (A) the utility its body calls
+bottoms out, within its own module, in runtime state Rust cannot hold (settings,
+locale, the active language, the clock) or in a Python-stdlib table-or-parser
+port (`HTMLParser`, `textwrap`, `json`, `unicodedata`, and — outside
+`django.utils` — `pprint`, `random`, `urllib.parse`); (B) its body calls a `str`
+method whose result is not a function of the code point alone (`lower`, via
+Final_Sigma, and `title`); or (C) its body **reproduces** a helper whose `def`
+carries a result-changing lazy decorator (`phone2numeric`'s `@keep_lazy_text`),
+where the wrapped function is the *decorated* one rather than the `def` body.
+The metric that matters most is (D), which asks our own Rust bodies the same
+question by reading which trait sections their host calls sit in, because A–C
+are read off `defaultfilters.py` and so answer a question about Django; only D
+reddens when a body is rewritten to stop delegating.
+
+**The sets are asserted, not restated here** —
+`tests/test_filter_inventory.py::test_the_delegation_set_is_derived` derives each
+metric and asserts the union against the Rust-derived set in both directions, so
+this paragraph does not carry a number that can go stale. It carried `26` for the
+module-granularity count and `18` for the set; the module count is **27**, and
+the set is larger than 18 for the reasons above.
 
 The neighbouring counts are each a right answer to a different question, which is
 why the metric is written down: 57 registered filters; **31** reference *any*
 `django.utils` name (which includes `mark_safe`, a primitive Rust reimplements as
-`Value::Safe`); **26** reference a utility in a module that *imports* something
+`Value::Safe`); **27** reference a utility in a module that *imports* something
 stateful (which wrongly sweeps in `escape`, `join` and `linenumbers` because
-`strip_tags` lives in the same file); **18** delegate by the metric above.
+`strip_tags` lives in the same file).
 
-For those 18 the filter **layer** is still Rust's (dispatch, `FilterFlags`, the
+For every delegating filter the filter **layer** is still Rust's (dispatch, `FilterFlags`, the
 `safe` marking, the `int(arg)` conversions and the failure paths) and the
 **body's answer** comes from Django. The parity target at M4 is that the
 delegation is *correct*, not that the logic is Rust's. One consequence, written
@@ -741,7 +754,7 @@ the highest-risk milestone, and §5.5 is where the answer to it lives.
 | M1 | Rust lexer, `Token` + `Token.split_contents`, `smart_split`, `TokenType`, `DebugLexer`, `_native.lex` | ✅ token-stream parity with Django's real `Lexer`/`DebugLexer` over `tests/lexer_corpus.py` (51 sources × both lexers), debug character positions included, plus `split_contents` parity and the 3000-source randomised pass; progress meter unchanged from M0 at 25 |
 | M2 | Rust parser, node AST and descriptor format — `Parser`, `NodeList`, `extend_nodelist`, the error protocol, tag dispatch, `_native.parse`, and the materialisation of descriptors into real Django nodes. Compile functions for the **nine** built-in tags that need no `FilterExpression`; syntax-error parity with Django's parser. The other eighteen built-in tags are scheduled with their dependencies (M3, M6, M7, M13) — see the M2 plan's scope note for the mapping. | Awaiting review: parity with Django's real `Parser` over a 59-source corpus and 400 seeded random templates in both lexer modes, compared node for node after materialisation; syntax-error parity over a 32-case corpus; `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; progress meter unchanged at 25 |
 | M3 | `FilterExpression`, `Variable`, `smartif`, primitive resolver | ✅ `{{ … }}` parses and materialises into Django's own `Variable`/`FilterExpression` over a 72-source corpus and 400 seeded random templates in both lexer modes; `_native.resolve` and the first `_native.render`; `token_kwargs`/`kwarg_re` for M5–M7; `smartif` ported with one bounded divergence on nesting depth. `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; progress meter unchanged at 25. **One deliberate deviation from §10.4's gate**, corrected and approved at the M3 round: what moves to M7 is Django's `{% extends %}` message and the one real `must_be_first` tag, **not** the refusal rule, which ships and is exercised against a stand-in — see that entry |
-| M4 | All 57 built-in filters | ✅ all 57 names have Rust bodies, asserted as a *set* by `tests/test_filter_inventory.py` (`STILL_STUBBED` is the empty array); corpus parity over `tests/filter_cases.py` — 539 `CASES` + 40 `ERROR_CASES`, every `expected` verified against Django as well as against the engine; `FilterFlags` round-tripping against the pinned registry; the 21 delegating bodies derived from the source, not counted by hand. `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; progress meter unchanged at 25. **The 1547-test gate cannot see a single filter body** — its only route into the Rust filter layer is `check_filter`'s name-and-arity check — so the corpus, not the acceptance criterion, is what separates a landed body from a verified one; see the M4 summary's "acceptance blind spot" |
+| M4 | All 57 built-in filters | ✅ all 57 names have Rust bodies, asserted as a *set* by `tests/test_filter_inventory.py` (`STILL_STUBBED` is the empty array); corpus parity over `tests/filter_cases.py` — 539 `CASES` + 40 `ERROR_CASES`, every `expected` verified against Django as well as against the engine; `FilterFlags` round-tripping against the pinned registry; the delegating bodies derived by `tests/test_filter_inventory.py`'s four metrics — the set is not stated here, because the only assertion that keeps it current is the one that derives it from both the source and the Rust bodies. `scripts/check.sh` green with the suite at `Ran 1547 tests … OK (skipped=6)`; progress meter unchanged at 25. **The 1547-test gate cannot see a single filter body** — its only route into the Rust filter layer is `check_filter`'s name-and-arity check — so the corpus, not the acceptance criterion, is what separates a landed body from a verified one; see the M4 summary's "acceptance blind spot" |
 | M5 | Remaining built-in tags (`for`, `if`, `with`, `cycle`, …) | Syntax corpus parity |
 | M6 | `Library`, extension host callbacks | Python-defined tags/filters work through the engine, incl. re-entrant `ParserHandle.parse` |
 | M7 | Inheritance: `block`, `extends`, `include` | Inheritance corpus parity; **`test_include_cache` passes**, proving the shadow tree is materialised once and node identity is stable (§5.5) |

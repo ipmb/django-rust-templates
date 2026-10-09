@@ -28,9 +28,9 @@
 //! the helper then fills `now` from `d.tzinfo` itself (`timesince.py:67-68`) —
 //! `timesince:0` and `timesince:""` are the same answer as no argument. `now` is
 //! an `Option<&Value>` and **`None` is the right value**; passing
-//! `timezone.now()` instead is the measured `TypeError` the seam's `now` doc
-//! carries, and it turns a real answer into `''` through this filter's own
-//! `except`.
+//! `timezone.now()` instead is a measured `TypeError` — it is aware where a naive
+//! `d` is not, so it takes the `elif is_aware(now) and is_aware(d)` branch — and
+//! it turns a real answer into `''` through this filter's own `except`.
 //!
 //! **It catches `(ValueError, TypeError)` and lets `AttributeError` escape**,
 //! and the two classes leave the *same* filter in opposite directions:

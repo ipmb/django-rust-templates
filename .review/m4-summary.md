@@ -20,8 +20,13 @@ see "The plan-vs-tree defect rate".
    signal** rather than a count: the zero is the milestone, so re-adding a stub
    fails the test by name.
 2. **Each body owns the filter's control flow and delegates the algorithm**
-   where §D2's three metrics say the answer lives outside the template — 21
-   filters, derived from the source and asserted, not counted by hand.
+   where §D2's **four** metrics say the answer lives outside the template. The
+   set is **derived, not stated** — `test_filter_inventory.py`'s
+   `test_the_delegation_set_is_derived` computes it from the source (three
+   metrics) and from the Rust bodies (the fourth), and asserts the two agree in
+   both directions. This line said "21 filters" and `DELEGATING_BY_UTILS` then
+   undercounted its own metric by three; the derivation, not the number, is what
+   is carried forward.
 3. **`Value`, `ValueId`, `FilterFlags`, `FilterHost` and the registry are the
    design gate's settled interface**, written once and never edited by a fan-out
    agent. An agent that needs a new host operation stops and reports (§D7).
@@ -65,12 +70,12 @@ listed with the task they correct.
 
 | Check | Result |
 |---|---|
-| `cargo test --workspace` | 560 passed, 0 failed |
+| `cargo test --workspace` | 561 passed, 0 failed (560 at the M4 review round; +1 for the trait's refusal-completeness test) |
 | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
 | `cargo fmt --all -- --check` | exit 0 |
-| Python unit tests (`tests/`) | 173 tests, OK |
+| Python unit tests (`tests/`) | 176 tests, OK (173 at the M4 review round; +3 for the metric-D tests) |
 | `tests.test_filter_parity` | 539 `CASES` + 40 `ERROR_CASES`, every `expected` checked against Django and the engine |
-| `tests.test_filter_inventory` | 57 registry names, 21 delegating, the three metrics, the flag round-trip |
+| `tests.test_filter_inventory` | 57 registry names, the four delegating metrics (union = 24, asserted against the Rust bodies too), the flag round-trip |
 | `scripts/differential.py` | 48 cases, identical |
 | `scripts/check.sh` (full) | exit 0, `Ran 1547 tests … OK (skipped=6)` |
 | Progress meter | **25** modules still Django's — unchanged from M3 |
@@ -95,10 +100,18 @@ is the Python nodelist. Filters resolve inside Python's own
 `FilterExpression.resolve`.
 
 The consequence is the milestone's central fact: **at M4 the Rust filter bodies
-are a parallel implementation whose only verification is the corpus.** The suite
-validates the parse and the host's callbacks; it cannot redden for a wrong body,
-a missing body, or a body whose rows are too thin to reach the branch a defect
-is in.
+are a parallel implementation whose only verification *against Django* is the
+corpus.** That precision matters, because "the only instrument" would understate
+what M4 has: 173 per-body `#[cfg(test)]` tests exist and run in the bare shell,
+and `NoFilterHost` refuses every host call precisely so a body that needs the
+host cannot pass one by accident. What those tests cannot do is falsify the
+*reading* they encode — a body and its tests can agree perfectly and both be
+wrong, and only a cross-language row says otherwise. So the exposure is not "no
+tests"; it is that the unit tests compare a body against its author, and the
+corpus is the only one that compares it against Django. The suite likewise
+validates the parse and the host's callbacks, but cannot redden for a wrong body,
+a missing body, or a body whose rows are too thin to reach the branch a defect is
+in.
 
 Measured, while every one of them was still a stub: `template_tests` names
 `urlize` 88×, `date` 34×, `time` 32×, `timesince` 20×, `timeuntil` 16×,
@@ -106,12 +119,13 @@ Measured, while every one of them was still a stub: `template_tests` names
 `pprint` 0× — and under the shim `{{ x|pprint }}`, `{{ x|urlize }}` and
 `{{ x|slugify }}` all render correctly with every one of them stubbed.
 
-So **"landed" and "verified" are different states at M4, and only the corpus
-separates them.** That is why rows land in the same commit as the body
+So **"landed" and "verified against Django" are different states at M4, and only
+the corpus separates them.** That is why rows land in the same commit as the body
 (`713fc19`), and why `scripts/filter_probe.py` (§D6) is not a convenience but
-the only source of truth for a body's expected answers. The blind spot is
-transitional — it closes when `_native.render` stops delegating to Python's node
-rendering — and it is not closed today.
+the only instrument that pins a body's expected answers against the pinned
+Django rather than against the body's author. The blind spot is transitional — it
+closes when `_native.render` stops delegating to Python's node rendering — and it
+is not closed today.
 
 ## The design gate: the trait, the seam rule, and the six defects
 
@@ -130,7 +144,9 @@ turned up more:
   divergent string method — and is still not Rust's, because `@keep_lazy_text`
   sits between the registry and the `def` and changes the *result*. §D2 gained a
   third clause, and the general rule: **the wrapped function is the *decorated*
-  one, not the `def` body.** The set moved 18 → 20 → **21**.
+  one, not the `def` body.** The set moved 18 → 20 → 21 → **24**; the last step
+  is metric D, which reads the Rust bodies and found three filters metric A's
+  instrument could not see (`pprint`, `random`, `urlencode`).
 - `%`-formatting had no expressible method: `"%" + spec` cannot carry
   `gettext("%s KB") % x` (`36b9e85`).
 
@@ -234,18 +250,27 @@ at `:72-73` and stopped before it.
 ## The `safe_input` collapse — a decision, recorded here on purpose
 
 `Urlizer.__call__` computes `safe_input = isinstance(text, SafeData)`
-(`html.py:319`), and `handle_word` (`:337-405`) uses it in exactly four places:
-two `if autoescape and not safe_input:` guards and two `if safe_input: return
-mark_safe(word)` branches.
+(`html.py:319`). **The metric is six occurrences, three of them behavioural
+branches.** The name appears six times in the function: the assignment (`:319`),
+two plumbing sites that thread it into `handle_word` (`:328` passes it, `:341` is
+the parameter), and three branches — `if autoescape and not safe_input:`
+(`:387`, escaping `lead`/`trail`/`trimmed`), and two `if`/`elif safe_input:
+return mark_safe(word)` arms (`:397`, `:401`). "Exactly the four uses" was
+defensible only if the assignment counts as a use and the two plumbing sites do
+not; an earlier draft of this section said four and then named three ranges,
+which is the unstated-metric failure this milestone spent eleven disputes
+removing, appearing in the artifact that describes the milestone.
 
 The seam takes `&str`, so the marker cannot cross it. **Both `urlize.rs` and
 `urlizetrunc.rs` pass `call.autoescape && !call.host.is_safe(&value)`, collapsing
-the pair in the body.** That is text-equivalent for every input: the first pair
-is the substitution verbatim, and the second pair differ only in *safety* at the
-word level, which `"".join(urlized_words)` discards for either — and the filter's
-final safety is the `def` body's own `mark_safe` regardless. Measured over 32
-cases (`{plain, mark_safe} × {autoescape on, off} × 8` inputs, one with all four
-of `<`, `&`, `'`, `"`), the collapse changes no answer.
+the pair in the body.** That is text-equivalent for every input: `:387` is the
+substitution verbatim, and `:397`/`:401` are the same text and differ only in
+*safety* at the word level — which `"".join(urlized_words)` discards for either,
+because the filter's final safety is the outer `mark_safe` (`defaultfilters.py:386`)
+regardless. `:401` collapses by `:397`'s argument exactly: identical arm, marker
+supplied by that same outer call. Measured over 32 cases (`{plain, mark_safe} ×
+{autoescape on, off} × 8` inputs, one with all four of `<`, `&`, `'`, `"`), the
+collapse changes no answer.
 
 **Decision: keep the collapse in the body; do not widen the seam.** The
 alternative — a `safe_input` flag on the trait — would put a Django-internal
@@ -275,21 +300,37 @@ second axis.** The four-method exhaustive diff the reviewer asked for is what
 found it; the plan had sized the case operations for a table.
 
 **MAJOR — `phone2numeric` is not Rust's. Accepted as a ruling, and it corrected
-the reviewer's own sweep, not just the plan (`09a7774`, `713fc19`).** The
-reviewer's sweep bounded the class at one by a mechanism that was wrong in both
-count and reason: fourteen helpers is fifteen, and "every other such filter has
-`str(first)` run first" is not the cut, because **five** filters reach a
-lazy-decorated helper with no `@stringfilter`. Four are safe for a *different*
-reason — `mark_safe` is a host method calling Django's own decorated function,
-so `keep_lazy` rides along. The bound survives, the reason is better, and the
-five are now derived and asserted so a Django bump moves a test rather than a
-paragraph.
+the reviewer's own sweep, not just the plan (`09a7774`, `713fc19`).** The ruling
+is `(a)` — delegate the helper whole — **with the `Markup` leg removed**, which
+matters for the record: the case for delegating rests on the two *reachable*
+legs, the `Value::Opaque` class name and the lazy `__proxy__` result that the
+corpus sees as a type difference, not on the unreachable `markupsafe` input
+(deleted below). The reviewer's sweep bounded the class at one by a mechanism
+that was wrong in both count and reason: fourteen helpers is fifteen, and "every
+other such filter has `str(first)` run first" is not the cut, because **five**
+filters reach a lazy-decorated helper with no `@stringfilter`. Four are safe for
+a *different* reason — `mark_safe` is a host method calling Django's own
+decorated function, so `keep_lazy` rides along. The bound survives, the reason is
+better, and the five are now derived and asserted so a Django bump moves a test
+rather than a paragraph.
 
 **MAJOR — `date_format`/`time_format` and `now` (`c4027d0`, `cf8d69a`).** Both
 accepted; the signatures changed rather than the docs, because the divergence is
 reachable.
 
 **MINOR — `localtime`'s doc. Accepted; doc corrected.**
+
+**MAJOR — the `quote` seam. The reviewer's ruling was that the change was
+admissible *and forced*, not merely permitted** (`urlencode.rs`). An earlier
+revision had Rust classify `safe` and hand the host a `(&str, &str)` pair; the
+agent's classifier **refused three inputs Django answers** (`safe=[1]`,
+`safe=b'/'`, `safe=bytearray(b'/')` — every all-int container, and both byte
+types), which is the `percent_format` shape: a seam that computed what Python
+would have computed, and diverged exactly there. So this is not a permitted
+simplification that happened to be fine; it is a defect the seam *had* to lose,
+and "admissible" would have understated it. Recorded at the reviewer's
+volunteering, because a disposition that reads weaker than the ruling is its own
+kind of drift.
 
 **MINOR — `index_of`'s synthesised `IndexError` message. The reviewer ruled the
 fix was to the *claim*, not the string** (`template-py/src/filters.rs`). The
@@ -315,18 +356,25 @@ equality" reading; the three declared `TestFilterHost` coverage gaps.**
 **Accepted with push-back — the reviewer's wave-B scoping conclusion**, corrected
 by the `host.rs` origin finding above.
 
-**Carried, not fixed — the five `needs_autoescape` collisions.** `base.py:813`
-passes `autoescape` as a keyword *before* `*arg_vals`, so a filter whose own
-second parameter is named `autoescape` cannot be given an argument at all:
-`linebreaks`, `linebreaksbr`, `linenumbers`, `unordered_list`, `urlize`. Our
-engine takes `autoescape` as a *value*, so there is no keyword to collide with
-and the argument would otherwise be silently ignored — answering where Django
-raises, which this project treats as a defect. **Decided to document rather than
-synthesise** — it is CPython's binding of the call, not a body's decision, and
-the message needs the *callable's* Python name, which a name-keyed seam does not
-have. `urlize`'s body refuses anyway, because its collision is reachable through
-the same call; the other four are recorded on `filter` in `lib.rs`. M9 inherits
-this exactly when the shim exposes our filters as Python functions with Django's
+**Carried, not fixed — the five `needs_autoescape` collisions, and the ruling was
+reversed.** `base.py:813` passes `autoescape` as a keyword *before* `*arg_vals`,
+so a filter whose own second parameter is named `autoescape` cannot be given an
+argument at all: `linebreaks`, `linebreaksbr`, `linenumbers`, `unordered_list`,
+`urlize`. Our engine takes `autoescape` as a *value*, so there is no keyword to
+collide with and the argument would otherwise be silently ignored — answering
+where Django raises, which this project treats as a defect. The reviewer first
+ruled **"document, not synthesise"**, on the reasoning that the message is
+CPython's binding of the call rather than a body's decision, and that a
+name-keyed seam has no way to compose the *callable's* Python name. I showed that
+the message is nonetheless a **per-filter constant** — `linebreaks_filter() got
+multiple values for argument 'autoescape'` is one string, written in one module,
+keyed to one filter — and the reviewer **reversed to "refuse"** (`fe1e749`). The
+reversal is the record, and it is worth keeping as a reversal: the first reason
+proved too much, since it would equally forbid `center`'s `too_many_digits`, which
+is the same shape of per-filter constant reached the same way. So the five bodies
+carry the constant and refuse, and five `ERROR_CASES` rows assert it — a pin bump
+that renames a callable fails a test rather than a paragraph. M9 inherits this
+exactly when the shim exposes our filters as Python functions with Django's
 signatures.
 
 ## Guards made to fail, not just read
@@ -371,7 +419,7 @@ adds **fifteen**, and the shape has shifted again: the largest class here is
 
 | # | Task | What it believed | What is true |
 |---|---|---|---|
-| 1 | plan | the delegating set is 7 | **18**, derived; then 20, then **21** |
+| 1 | plan | the delegating set is 7 | **derived** by four metrics: 18 by the first, +3 stdlib engines, +2 string methods, +1 decorator = **24**, and metric D is what keeps it true of the Rust bodies |
 | 2 | plan | `FilterHost` expressible from a reading of the 57 bodies | **five filters had no method** |
 | 3 | Task 1 | the case divergence is a table | **two methods are context-sensitive** |
 | 4 | Task 9 | `json_dumps`' kwargs | **wrong; see above** |
@@ -391,16 +439,27 @@ adds **fifteen**, and the shape has shifted again: the largest class here is
 table (§"Tasks 4–10", the artifact a reader uses to check the fan-out) sums to 57
 by counting each filter under its *theme*; the task headings sum to 55 by
 counting what each task *dispatched*. Both numbers are right and neither says
-which question it is answering, so the table lists `lower` under Task 4's
+which question it is answering, so the table listed `lower` under Task 4's
 delegated filters when Task 3 landed it. **Swept every task heading against its
 own filter listing before writing this: all seven match** (6+8+9+10+12+6+4 =
 55), so #15 is the only place the two granularities disagree — which is what
 makes it a reconciliation and not a wrong count. This is the same defect as #12
-one layer up — and it is the reason I re-measured every count in this summary
+one layer up, and it is the reason I re-measured every count in this summary
 rather than transcribing the plan's: **a document that reviews a count-error
-record has to expect one in itself.** The plan is left as-is and the
-reconciliation is written here, because a plan edited during its own milestone
-review makes the review target move.
+record has to expect one in itself.**
+
+**Disposition (the reviewer's rule, applied in the dispositions commit): the
+table now says what each column counts.** The `filters` column is labelled as
+theme membership, the two sums are both written down with the reason for the
+difference, and the `delegated` column names each group's members rather than
+restating the set's size — so it cannot disagree with
+`test_the_delegation_set_is_derived`, which is where the set actually lives. My
+first instinct was to leave the plan untouched ("a plan edited during its own
+milestone review makes the review target move"); the reviewer's counter is the
+better one — the plan is a **forward** artifact that M5's author reads, and a
+derivable value written into prose goes stale for them regardless of who moved
+it. The generalisation: **publish the derivation or the pointer, never the
+value.**
 
 **#12 is the eleventh count dispute in this project and the shape is now
 boring, which is the point**: a number derived from a structure nobody asked the
@@ -502,13 +561,58 @@ the `phone2numeric` ruling's first leg is the *reachable* one.
    synthesised, because the message needs the callable's Python name and a
    name-keyed seam does not have it. Is documenting right, or should the seam
    carry the callable name now so M9 does not inherit a silent divergence?
+   **Answered: reversed to "refuse"** — the message is a per-filter constant, so
+   the seam does not need the callable name after all. Recorded above.
 5. **`FilterHost::now()` has no caller.** The seam carries a method the filter
    layer must not use, and its doc now says so. Should it be removed and re-added
-   when `{% now %}` needs it, or kept with the warning?
+   when `{% now %}` needs it, or kept with the warning? **Answered: removed** —
+   the third `repr`, and its stated caller (`timeuntil`) is one that must not use
+   it. The `{% now %}` measurement M5 needs is in `.review/m4-seams.md`.
 6. **The fifteen plan defects.** #1/#2/#3 are one class — a count or an
    interface published from a reading and later moved by a derivation — and #15
    is #12 one layer up. Is that a process failure with a fix, or the irreducible
-   cost of planning before measuring?
+   cost of planning before measuring? **Answered: the fix is to publish the
+   derivation, not the value.** Every instance in that class was a *derivable*
+   value written into prose; "the delegating set is derived by
+   `test_filter_inventory.py`" carries the same information as "18 delegate" and
+   cannot go stale, and a group-sizing table is seven such values at a
+   granularity the table does not state. Applied to the plan's sizing table in
+   the dispositions commit. It would not have caught the wrong *claims*
+   (`json_dumps`, the `now` doc), which are a different class.
+7. **The delegating set is three short, and I found it building the reviewer's
+   cross-check.** The rule the reviewer proposed — parse the trait's section
+   markers, classify a body that calls a method in a delegating section — does not
+   reproduce `DELEGATING_FILTERS`; it gives 25 against 21, with no member missing
+   and four extra. Three of the four (`pprint`, `random`, `urlencode`) are real
+   delegations metric A cannot see, because `_import_map()` records only
+   `django.*` imports and their engines arrive through `from pprint import
+   pformat`, `import random as random_module` and `from urllib.parse import
+   quote` — `pprint` and `urllib.parse` are named in metric A's own prose. The
+   fourth (`divisibleby`) is the rule flagging `int_modulo`, mis-shelved under
+   "locale, language and the clock" when it is an operand conversion. So
+   `DELEGATING_BY_UTILS` is 18 where its own question says 21, and the union is 24
+   rather than 21.
+
+   **Resolved.** The first derivation was also wrong in its *instrument*: `host\.(\w+)\(`
+   cannot see `call.host\n.truncate(…)`, so it reported 22 where the answer is 24
+   and mis-attributed `truncatewords`/`truncatewords_html` — the first count
+   dispute whose ambiguity was in the measuring tool rather than the metric. With
+   a whitespace-tolerant match, `trait_method_sections()` over `host.rs` and
+   `#[cfg(test)]` cut, metric D derives exactly 24 and equals `DELEGATING_FILTERS`
+   with no member on either side. The four arithmetic methods — including
+   `divisibleby`'s `int_modulo` — were moved out of "locale, language and the
+   clock" into their own trait section with a written rule (`divisibleby` keeps
+   its `== 0`; the conversion is bundled to avoid a second `int()`), so the
+   mis-shelving is fixed rather than special-cased. `test_the_delegation_set_is_derived`
+   now asserts the union against the Rust-derived set in both directions, and
+   `test_the_trait_sections_are_the_delegation_boundary` asserts the marker list,
+   so the rule can no longer inherit the failure it replaces. Verified failing
+   both ways: renaming a section and making `lower`'s body stop calling
+   `str_lower` each redden it by name.
+
+   The generalisation this is the instance of: **a derivation is only as good as
+   its parse, and the parse is a claim of the same kind as the number it
+   replaces** — better-placed, not self-justifying.
 
 Ask for executable findings where you can — a command and its expected output
 rather than prose. Where a finding is about a number, please name the metric and

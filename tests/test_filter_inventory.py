@@ -16,7 +16,7 @@ Five things are pinned here:
    `defaultfilters.escape` **is not** the registered `escape` (it is the raw
    `django.utils.html.escape`, which takes no `arg` and does not mark safe) — the
    trap the plan's own review found;
-3. the three delegating metrics of §D2, **derived here rather than transcribed**;
+3. the four delegating metrics of §D2, **derived here rather than transcribed**;
    the third was added after `phone2numeric` scored clean on the first two and
    was still not Rust's — a helper's result-changing decorator is invisible to a
    metric that measures what the body references;
@@ -26,6 +26,12 @@ Five things are pinned here:
    place the 29 can be disagreed with, since a Rust-side test of that column
    would be the same list read twice.
 
+Metrics A–C are read off `defaultfilters.py` and so answer a question about
+**Django**; metric D reads our own bodies and is the only one that reddens when
+a body is rewritten to stop delegating. The delegating set is 24, and it is
+asserted from both directions (`test_the_delegation_set_is_derived`), so the
+number cannot be right about the source and wrong about the thing that ships.
+
 Django is pinned at 6.0.9 under `.django/`. These assertions are meant to fail
 loudly on a pin bump that adds or removes a filter — otherwise §10.3's milestone
 table goes stale in silence, which is how the tag table got to three corrections.
@@ -33,6 +39,7 @@ table goes stale in silence, which is how the tag table got to three corrections
 
 import ast
 import inspect
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -119,6 +126,32 @@ DELEGATING_BY_UTILS = {
     "urlizetrunc", "wordwrap", "yesno",
 }
 
+# Metric A's **scope**, made explicit rather than left implicit in
+# `_import_map()`. Metric A decides by reading a utility's own module to see
+# where it bottoms out, and it scans only `django.*` imports — so three filters
+# reach their engine without passing through `django.utils` at all:
+#
+#   defaultfilters.py:3    import random as random_module
+#                 :10   from pprint import pformat
+#                 :11   from urllib.parse import quote
+#
+# `pprint` and `urllib.parse` are named in metric A's own docstring as
+# Python-stdlib ports, and `random.choice` is stateful, so all three are the
+# question metric A asks. They were missed because the *instrument* is scoped to
+# a namespace, not because the answer is no — measured by building metric D
+# below, which asks the Rust bodies instead and finds all three.
+#
+# Hand-typed rather than derived, and the reason belongs beside the set:
+# extending metric A's own method to CPython's stdlib means reading each stdlib
+# module to see where *it* bottoms out, which is a far bigger instrument than
+# the question warrants. `delegating_filters_in_rust()` is what checks it, so it
+# cannot rot silently.
+DELEGATING_BY_STDLIB_ENGINE = {
+    "pprint": "`pprint.pformat` — `from pprint import pformat`",
+    "random": "`random.choice` — `import random as random_module`",
+    "urlencode": "`urllib.parse.quote` — `from urllib.parse import quote`",
+}
+
 # Metric B: the body calls a `str` method whose result is not a function of the
 # code point alone. `lower` and `title`, and *not* `upper`/`capfirst`: Task 1's
 # exhaustive diff shows `str.upper()` is code-point-local (the same 28 code points
@@ -191,7 +224,10 @@ LAZY_HELPER_VERDICTS = {
 }
 
 DELEGATING_FILTERS = (
-    DELEGATING_BY_UTILS | DELEGATING_BY_STRING_METHOD | DELEGATING_BY_LAZY_DECORATOR
+    DELEGATING_BY_UTILS
+    | set(DELEGATING_BY_STDLIB_ENGINE)
+    | DELEGATING_BY_STRING_METHOD
+    | DELEGATING_BY_LAZY_DECORATOR
 )
 
 # The neighbouring counts for metric A — each correct for its own question, each
@@ -275,6 +311,55 @@ DELEGATING_LAZY_DECORATORS = {
 # `str` methods checked by metric B that do **not** delegate, listed so the
 # exclusion is a decision rather than an omission.
 CODE_POINT_LOCAL_STR_METHODS = {"upper"}
+
+# --- Metric D: the same question asked of our Rust bodies --------------------
+
+# Metrics A–C are derived from `defaultfilters.py` because at planning time the
+# Rust bodies did not exist. Metric D asks the bodies directly, and is the only
+# one of the four that fails when someone *edits a body* — which is the claim
+# the delegating set is for.
+HOST_RS = PROJECT_ROOT / "crates/template-core/src/filters/host.rs"
+FILTER_MODULES = HOST_RS.parent
+NON_FILTER_MODULES = {"host", "mod", "html_escape", "padding", "value"}
+
+# The trait's section markers, in order. Metric D's entire content is *which of
+# these sections count*, so the list is asserted against the trait rather than
+# trusted: a section renamed, moved or added must fail a test before it can
+# change metric D's answer. `// --- operand conversions … ---` was added for the
+# reason the assertion exists — the rule was first proposed on the assumption
+# that the sections were already clean, and four arithmetic methods were sitting
+# inside "locale, language and the clock" with `gettext`.
+TRAIT_SECTIONS = (
+    "the Python value protocol",
+    "the escaping protocol: one call, four branches",
+    "the one ordering operation Rust cannot express",
+    "the type questions Rust cannot answer",
+    "CPython string-method semantics",
+    "engines whose state is not the filter's argument",
+    "locale, language and the clock",
+    "operand conversions at the source's own statement boundary",
+)
+
+# Which sections make a body delegating. The last is deliberately absent: each
+# of its four methods sits where the source's own statement does, so a body that
+# calls one has not handed its *algorithm* over — `divisibleby` keeps its
+# `== 0`, and `int_modulo` is the conversion `int(a) % int(b)` bundled to avoid
+# a second `int()` on an object whose `__int__` may have side effects.
+DELEGATING_SECTIONS = frozenset(
+    {
+        "CPython string-method semantics",
+        "engines whose state is not the filter's argument",
+        "locale, language and the clock",
+    }
+)
+
+# A host call, matched **across whitespace**: `truncatewords` writes
+# `call.host\n            .truncate(…)`, and the first version of this
+# derivation used `host\.(\w+)\(`, which cannot see it — reporting 22 where the
+# answer is 24 and mis-attributing two filters to the wrong side. The parse is a
+# claim of the same kind as any number it replaces; this one is written down.
+_HOST_CALL = re.compile(r"\bhost\s*\.\s*(\w+)\s*\(")
+_SECTION_MARKER = re.compile(r"^\s*// --- (.+?) -+$", re.MULTILINE)
 
 
 def _tree():
@@ -561,6 +646,80 @@ def filters_in_a_stateful_module():
     }
 
 
+def trait_sections():
+    """The trait's `// --- … ---` markers, in order, read off the pinned file."""
+    return tuple(_SECTION_MARKER.findall(HOST_RS.read_text(encoding="utf-8")))
+
+
+def trait_method_sections():
+    """Trait method name -> the section marker above it.
+
+    Derived from `host.rs`, so a method that moves between sections changes
+    metric D's answer rather than silently changing what the rule means.
+    """
+    lines = HOST_RS.read_text(encoding="utf-8").splitlines()
+    start = next(
+        i for i, line in enumerate(lines) if line.startswith("pub trait FilterHost")
+    )
+    markers = [
+        (i, m.group(1))
+        for i, line in enumerate(lines)
+        if (m := _SECTION_MARKER.match(line))
+    ]
+    sections = {}
+    for i in range(start, len(lines)):
+        if lines[i] == "}":
+            break
+        method = re.match(r"    fn (\w+)\s*\(", lines[i])
+        if method:
+            above = [title for index, title in markers if index < i]
+            sections[method.group(1)] = above[-1] if above else None
+    return sections
+
+
+def filter_module_sources():
+    """Module stem -> its source, for the 57 filter bodies.
+
+    The support modules are named rather than counted, so 57 stays a fact about
+    the filter set rather than an arithmetic accident of a `glob`.
+    """
+    return {
+        path.stem: path.read_text(encoding="utf-8")
+        for path in FILTER_MODULES.glob("*.rs")
+        if path.stem not in NON_FILTER_MODULES
+    }
+
+
+def host_calls(source):
+    """The host methods a filter module's non-test, non-comment code calls.
+
+    `#[cfg(test)]` is cut first, or a module's own test — `host.str_lower("ΟΣ")`
+    — reads as a call the body makes, which is the same class of parse claim as
+    the whitespace above.
+    """
+    body = source.split("#[cfg(test)]")[0]
+    body = "\n".join(
+        line for line in body.splitlines() if not line.lstrip().startswith("//")
+    )
+    return set(_HOST_CALL.findall(body))
+
+
+def delegating_filters_in_rust():
+    """Metric D — the delegating set, derived from our bodies.
+
+    A filter delegates iff its body calls a host method declared in a
+    delegating section of the trait. This is the same question metrics A–C ask
+    of `defaultfilters.py`, asked of the thing that actually ships; it is the
+    only one of the four that reddens when a body is rewritten.
+    """
+    sections = trait_method_sections()
+    return {
+        name
+        for name, source in filter_module_sources().items()
+        if any(sections.get(call) in DELEGATING_SECTIONS for call in host_calls(source))
+    }
+
+
 class FilterInventoryTests(unittest.TestCase):
     def test_the_registry_is_exactly_these_names(self):
         self.assertEqual(set(defaultfilters.register.filters), REGISTERED)
@@ -634,16 +793,24 @@ class FilterInventoryTests(unittest.TestCase):
         )
 
     def test_the_delegation_set_is_derived(self):
-        """18 by utilities, 2 by string method, 1 by lazy decorator, 21 in union.
+        """18 by utilities, 3 by stdlib engine, 2 by string method, 1 by lazy
+        decorator, 24 in union — and metric D, asked of our own bodies, agrees.
 
         Each third is asserted separately against its own literal, and the failure
         message prints the computed sets, so a future drift reports "19 by utils,
         2 by string method" rather than just red.
+
+        The last assertion is the one that makes the set a claim about the code
+        that ships. A–C are read off `defaultfilters.py`, so all three of them
+        answer a question about *Django*; only D reddens when a body is rewritten
+        to stop delegating, which is exactly the event the set exists to catch.
         """
         by_utils = delegating_filters_by_utils()
+        by_stdlib = set(DELEGATING_BY_STDLIB_ENGINE)
         by_method = delegating_filters_by_string_method()
         by_decorator = delegating_filters_by_lazy_decorator()
-        union = by_utils | by_method | by_decorator
+        in_rust = delegating_filters_in_rust()
+        union = by_utils | by_stdlib | by_method | by_decorator
         # Printed, not just asserted. The plan's Task 3 Step 1 runs this file
         # while the Rust side is still a stub, so the run ends in an
         # `AttributeError` from `_native.filter_names` — these four lines are
@@ -651,13 +818,18 @@ class FilterInventoryTests(unittest.TestCase):
         # reason that has nothing to do with the derivation.
         print(
             f"\n  utils={len(by_utils)} {sorted(by_utils)}"
+            f"\n  stdlib_engine={len(by_stdlib)} {sorted(by_stdlib)}"
             f"\n  string_method={len(by_method)} {sorted(by_method)}"
             f"\n  lazy_decorator={len(by_decorator)} {sorted(by_decorator)}"
-            f"\n  union={len(union)}"
+            f"\n  union={len(union)} rust_derived={len(in_rust)}"
         )
         self.assertEqual(
             by_utils, DELEGATING_BY_UTILS,
             f"by utils: {sorted(by_utils)} ({len(by_utils)})",
+        )
+        self.assertEqual(
+            by_stdlib, set(DELEGATING_BY_STDLIB_ENGINE),
+            f"by stdlib engine: {sorted(by_stdlib)} ({len(by_stdlib)})",
         )
         self.assertEqual(
             by_method, DELEGATING_BY_STRING_METHOD,
@@ -671,7 +843,80 @@ class FilterInventoryTests(unittest.TestCase):
             union, DELEGATING_FILTERS,
             f"union: {sorted(union)} ({len(union)})",
         )
-        self.assertEqual(len(DELEGATING_FILTERS), 21)
+        self.assertEqual(
+            in_rust, DELEGATING_FILTERS,
+            "the Rust bodies and the Python source disagree about who delegates:"
+            f" only in Rust: {sorted(in_rust - DELEGATING_FILTERS)};"
+            f" only in Python: {sorted(DELEGATING_FILTERS - in_rust)}",
+        )
+        self.assertEqual(len(DELEGATING_FILTERS), 24)
+
+    def test_the_trait_sections_are_the_delegation_boundary(self):
+        """Metric D's whole content, asserted against the trait it reads.
+
+        The rule is "a body delegates iff it calls a method declared in a
+        delegating section". The list of sections is therefore the rule, and a
+        section renamed, moved or added must fail here before it can silently
+        change metric D's answer — which is not hypothetical: the
+        `// --- operand conversions … ---` section was created because four
+        arithmetic methods were sitting inside "locale, language and the clock"
+        with `gettext`, and the rule was first stated as though the sections were
+        already clean.
+        """
+        self.assertEqual(
+            trait_sections(), TRAIT_SECTIONS,
+            f"the trait's markers: {trait_sections()}",
+        )
+        # Every section must have a verdict: a new section that is not named in
+        # `DELEGATING_SECTIONS` would silently read as non-delegating.
+        self.assertTrue(
+            DELEGATING_SECTIONS <= set(TRAIT_SECTIONS),
+            f"delegating sections with no such marker: "
+            f"{sorted(DELEGATING_SECTIONS - set(TRAIT_SECTIONS))}",
+        )
+        sections = trait_method_sections()
+        called = [s for s in sections.values() if s is not None]
+        self.assertEqual(
+            set(called) - set(TRAIT_SECTIONS), set(),
+            "a method sits under a marker that is not in the list",
+        )
+
+    def test_the_filter_modules_are_the_registered_filters(self):
+        """Metric D reads 57 bodies; this is what says they are the 57.
+
+        Without it, a support module added to `filters/` (`mod`, `padding`, …)
+        would be read as a filter and could only move metric D's answer in the
+        direction of a false delegation.
+        """
+        self.assertEqual(
+            set(filter_module_sources()), REGISTERED,
+            f"modules: {sorted(filter_module_sources())}",
+        )
+
+    def test_host_calls_ignore_test_code(self):
+        """The parse metric D rests on, checked on the shape that broke it.
+
+        `#[cfg(test)]` cut first, or a module's own `host.str_lower("ΟΣ")` reads
+        as a call its body makes; and the match is across whitespace, because
+        `truncatewords` writes `call.host\\n            .truncate(…)`. The first
+        version of this derivation used `host\\.(\\w+)\\(` and reported 22 where
+        the answer is 24, mis-attributing `truncatewords` and
+        `truncatewords_html` to the wrong side — the first count dispute whose
+        ambiguity was in the measuring instrument rather than the metric.
+        """
+        self.assertEqual(host_calls("call.host.truncate(x)"), {"truncate"})
+        self.assertEqual(
+            host_calls("call.host\n            .truncate(x)"), {"truncate"}
+        )
+        self.assertEqual(
+            host_calls("call.host.f(a);\n#[cfg(test)]\nmod t { host.g(b) }"),
+            {"f"},
+        )
+        self.assertEqual(host_calls("// host.h(x)\ncall.host.k(y)"), {"k"})
+        # And both multi-line truncators are in the derived set, which is what
+        # the whitespace-tolerant match buys.
+        for name in ("truncatewords", "truncatewords_html"):
+            self.assertIn(name, delegating_filters_in_rust())
 
     def test_the_lazy_decorator_metric_cuts_its_five_to_one(self):
         """Metric C's candidates, its verdicts, and the cut from 5 to 1.

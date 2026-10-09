@@ -690,6 +690,19 @@ pub trait FilterHost {
     /// signature, and the bound is written here rather than left to be
     /// re-derived — a wider caller would have to widen this first.
     fn ngettext(&self, singular: &str, plural: &str, n: u64) -> String;
+    /// `formats.number_format(round(value, 1), 1)` whole (`:911-912`).
+    ///
+    /// A host call rather than [`FilterHost::number_format`] over a Rust-rounded
+    /// argument, because Python's two-argument `round` on a **float** rounds
+    /// against the exact binary value: measured `round(0.35, 1)` is `0.3` (the
+    /// exact value is `0.34999999999999997780…`) where the decimal tie-break
+    /// gives `0.4`. A Rust `round` over the decimal text — what the rest of this
+    /// crate does — would answer `0.4`.
+    fn filesize_number_format(&self, value: f64) -> String;
+    // --- operand conversions at the source's own statement boundary --------
+    // Not a delegating section: each of these sits where the source's own
+    // statement does, and a body that calls one has not thereby handed its
+    // *algorithm* over. See `.review/m4-seams.md`.
     /// `Decimal(str(value))`, then Django's `Decimal(str(float(value)))` retry
     /// (`defaultfilters.py:152-159`) — `floatformat`.
     ///
@@ -700,6 +713,7 @@ pub trait FilterHost {
     /// Task 7 amendment — and this method and the next are the two halves it
     /// crosses the seam as.
     fn decimal_parse(&self, value: &Value) -> Result<DecimalParse, Error>;
+
     /// `:194-205`: `exp = Decimal(1).scaleb(-abs(p))`, the `prec` computation and
     /// `d.quantize(exp, ROUND_HALF_UP, Context(prec=prec))`, as **one** call.
     ///
@@ -720,15 +734,7 @@ pub trait FilterHost {
         places: u64,
         integral: bool,
     ) -> Result<DecimalTuple, Error>;
-    /// `formats.number_format(round(value, 1), 1)` whole (`:911-912`).
-    ///
-    /// A host call rather than [`FilterHost::number_format`] over a Rust-rounded
-    /// argument, because Python's two-argument `round` on a **float** rounds
-    /// against the exact binary value: measured `round(0.35, 1)` is `0.3` (the
-    /// exact value is `0.34999999999999997780…`) where the decimal tie-break
-    /// gives `0.4`. A Rust `round` over the decimal text — what the rest of this
-    /// crate does — would answer `0.4`.
-    fn filesize_number_format(&self, value: f64) -> String;
+
     /// `bytes_ / (1 << shift)` — the division half of `filesizeformat`
     /// (`defaultfilters.py:914-925`), where `bytes_` is the already-converted
     /// `int`, `KB = 1 << 10` and the branches `MB`, `GB`, `TB`, `PB` are
@@ -779,6 +785,7 @@ pub trait FilterHost {
     /// and the source itself keeps them apart, inline in each branch against a
     /// nested `def`. Folding them would merge what Python separates.
     fn int_divide_by_power_of_two(&self, value: &IntValue, shift: u32) -> Result<f64, Error>;
+
     /// `int(a) % int(b)` — `divisibleby` (`:854-858`), which has **no** `try`, so
     /// `b == 0` is a `ZeroDivisionError` and a non-numeric operand a `ValueError`
     /// or `TypeError`; all three escape the filter.
@@ -786,34 +793,6 @@ pub trait FilterHost {
     /// Rust compares the answer to zero, which is a `Small(0)` test: an
     /// `IntValue::Big` is canonical decimal text and never zero.
     fn int_modulo(&self, a: &Value, b: &Value) -> Result<IntValue, Error>;
-    /// `django.utils.timezone.now`, and **no filter or tag in this engine may
-    /// call it**.
-    ///
-    /// `timeuntil` is the caller the previous doc named, and following it is
-    /// wrong: `timeuntil_filter` is `timesince(d, now, reversed=True)` with `now`
-    /// filled **inside** `timesince` (`timesince.py:67-68`) from `d.tzinfo`. A
-    /// caller supplying this value instead takes the `elif is_aware(now) and
-    /// is_aware(d)` branch and raises, and the filter catches `(ValueError,
-    /// TypeError)` and answers `""` — so the documented caller turns a real
-    /// answer into an empty string. Measured under `USE_TZ=True` with a naive `d`:
-    ///
-    /// ```text
-    /// timesince(naive, None,           reversed=True) = '2 hours, 59 minutes'
-    /// timesince(naive, timezone.now(), reversed=True) = TypeError: can't subtract
-    ///                                                   offset-naive and offset-aware datetimes
-    /// {{ naive_dt|timeuntil }}                        = '2 hours, 59 minutes'
-    /// ```
-    ///
-    /// **`{% now %}` must not call it either**, which is the half that is easy to
-    /// miss: `NowNode.render` (`defaulttags.py:402-404`) is
-    /// `datetime.now(tz=get_current_timezone() if settings.USE_TZ else None)`, and
-    /// `timezone.now()` is UTC-based. Measured with `TIME_ZONE="Europe/Paris"`,
-    /// `USE_TZ=True`: `{% now "H:i:s" %}` answers `07:28:58` where
-    /// `time_format(timezone.now(), "H:i:s")` answers `05:28:58`. So the tag's
-    /// task needs a *different* method — the engine's current time in the current
-    /// timezone — and this one stays the faithful wrapper of `timezone.now()` it
-    /// is, with no caller in the filter layer and none owed to it.
-    fn now(&self) -> Result<Value, Error>;
 }
 
 /// The refusal [`NoFilterHost`] gives, and the one [`TestFilterHost`] gives for an
@@ -827,7 +806,7 @@ fn refused(operation: &'static str) -> Error {
     Error::host(format!("no host answers `{operation}`"))
 }
 
-/// The panic the 17 non-`Result` operations give when nobody answers them.
+/// The panic the 14 non-`Result` operations give when nobody answers them.
 ///
 /// Those methods cannot return the refusal as a value, so the refusal is the
 /// panic's message — and it is the same text [`refused`] produces, so "the host
@@ -1053,10 +1032,6 @@ impl FilterHost for NoFilterHost {
     fn int_modulo(&self, _a: &Value, _b: &Value) -> Result<IntValue, Error> {
         Err(refused("int_modulo"))
     }
-
-    fn now(&self) -> Result<Value, Error> {
-        Err(refused("now"))
-    }
 }
 
 /// A scripted host for a filter module's own `#[cfg(test)] mod tests`.
@@ -1070,14 +1045,14 @@ impl FilterHost for NoFilterHost {
 /// [`TestFilterHost::calls`] can be reimplemented in Rust and still pass.
 ///
 /// The field order is the trait's order, so a reader can walk the two together.
-/// Non-`Result` operations (the 17 that return a bare `String`, `bool` or
+/// Non-`Result` operations (the 14 that return a bare `String`, `bool` or
 /// `Value`) panic when unset rather than defaulting, for the same reason: a
 /// sentinel could silently satisfy an assertion.
 ///
 /// `#[cfg(test)]`, because the only thing that needs it is a test: this crate's
 /// `cargo test` compiles every `#[cfg(test)] mod tests` in `filters/<name>.rs`
 /// against the same crate, so it is visible everywhere an agent's filter tests
-/// live. Shipping it in the library would put 43 `Option` fields and two
+/// live. Shipping it in the library would put 45 `Option` fields and two
 /// `RefCell`s in the real build, reachable from a non-test path with nothing to
 /// stop it. The one cost is that a *doc* test cannot demonstrate it — doc tests
 /// link against the crate compiled normally — so its demonstrations live in the
@@ -1088,7 +1063,7 @@ pub struct TestFilterHost {
     // Crate-visible rather than private, and the reason is a Rust rule worth
     // stating: functional-update syntax (`..TestFilterHost::default()`) requires
     // *every* field to be visible at the construction site, so two private fields
-    // here would stop a filter module's test from scripting any of the 43 answers
+    // here would stop a filter module's test from scripting any of the 45 answers
     // — the struct's whole purpose. `pub(crate)` is the narrowest visibility that
     // restores it, and it costs nothing in this struct's case, since the struct is
     // itself `#[cfg(test)]` and so unconstructible from outside the crate anyway.
@@ -1154,7 +1129,6 @@ pub struct TestFilterHost {
     pub filesize_number_format: Option<String>,
     pub int_divide_by_power_of_two: Option<f64>,
     pub int_modulo: Option<IntValue>,
-    pub now: Option<Value>,
 }
 
 #[cfg(test)]
@@ -1536,11 +1510,6 @@ impl FilterHost for TestFilterHost {
         self.record("int_modulo")?;
         self.int_modulo.clone().ok_or_else(|| refused("int_modulo"))
     }
-
-    fn now(&self) -> Result<Value, Error> {
-        self.record("now")?;
-        self.now.clone().ok_or_else(|| refused("now"))
-    }
 }
 
 #[cfg(test)]
@@ -1603,76 +1572,159 @@ mod tests {
         );
     }
 
+    /// Every `Result` operation of `NoFilterHost`, as `(name, refusal)`.
+    ///
+    /// A free function rather than a local, so the completeness test below can
+    /// walk the same list against the trait that declares the methods. The
+    /// pairing is explicit because the list used to carry the name only inside a
+    /// `.map(|_| "to_str")` for the panic message, which left nothing for a
+    /// completeness check to compare with.
+    fn refused_result_operations() -> Vec<(&'static str, Error)> {
+        let host = &NoFilterHost;
+        let v = Value::None;
+        vec![
+            ("to_str", host.to_str(&v).unwrap_err()),
+            ("to_int", host.to_int(&v).unwrap_err()),
+            ("to_float", host.to_float(&v).unwrap_err()),
+            ("is_true", host.is_true(&v).unwrap_err()),
+            ("len", host.len(&v).unwrap_err()),
+            ("iter_values", host.iter_values(&v).unwrap_err()),
+            ("get_index", host.get_index(&v, 0).unwrap_err()),
+            (
+                "get_slice",
+                host.get_slice(&v, None, None, None).unwrap_err(),
+            ),
+            ("add_values", host.add_values(&v, &v).unwrap_err()),
+            ("percent_format", host.percent_format("%s", &v).unwrap_err()),
+            (
+                "percent_mapping",
+                host.percent_mapping("%(size)d", "size", &v).unwrap_err(),
+            ),
+            (
+                "conditional_escape",
+                host.conditional_escape(&v).unwrap_err(),
+            ),
+            (
+                "sort_by_property",
+                host.sort_by_property(&v, &v, false).unwrap_err(),
+            ),
+            (
+                "as_nested_sequence",
+                host.as_nested_sequence(&v).unwrap_err(),
+            ),
+            ("comma_bits", host.comma_bits(&v, true).unwrap_err()),
+            ("strip_tags", host.strip_tags("x").unwrap_err()),
+            ("phone2numeric", host.phone2numeric(&v).unwrap_err()),
+            ("quote", host.quote("x", None).unwrap_err()),
+            ("json_dumps", host.json_dumps(&v).unwrap_err()),
+            ("pformat", host.pformat(&v).unwrap_err()),
+            ("random_choice", host.random_choice(&v).unwrap_err()),
+            ("localtime", host.localtime(v.clone(), false).unwrap_err()),
+            ("date_format", host.date_format(&v, Some("Y")).unwrap_err()),
+            ("time_format", host.time_format(&v, Some("H")).unwrap_err()),
+            (
+                "dateformat_format",
+                host.dateformat_format(&v, &v).unwrap_err(),
+            ),
+            (
+                "dateformat_time_format",
+                host.dateformat_time_format(&v, &v).unwrap_err(),
+            ),
+            ("timesince", host.timesince(&v, None, false).unwrap_err()),
+            ("decimal_parse", host.decimal_parse(&v).unwrap_err()),
+            (
+                "decimal_quantize",
+                host.decimal_quantize(&v, 2, false).unwrap_err(),
+            ),
+            (
+                "int_divide_by_power_of_two",
+                host.int_divide_by_power_of_two(&IntValue::Small(1), 1)
+                    .unwrap_err(),
+            ),
+            ("int_modulo", host.int_modulo(&v, &v).unwrap_err()),
+        ]
+    }
+
     /// Every `Result` operation of `NoFilterHost` refuses, and refuses under its
     /// own name.
     ///
-    /// The whole 25 rather than a sample: a single method that accidentally
+    /// The whole list rather than a sample: a single method that accidentally
     /// returned `Ok` would be a filter body silently reaching a default, and the
     /// per-method name is what makes a wrong dispatch visible.
     #[test]
     fn no_filter_host_refuses_every_result_operation() {
-        let host = &NoFilterHost;
-        let v = Value::None;
-        let names = [
-            host.to_str(&v).map(|_| "to_str").unwrap_err(),
-            host.to_int(&v).map(|_| "to_int").unwrap_err(),
-            host.to_float(&v).map(|_| "to_float").unwrap_err(),
-            host.is_true(&v).map(|_| "is_true").unwrap_err(),
-            host.len(&v).map(|_| "len").unwrap_err(),
-            host.iter_values(&v).map(|_| "iter_values").unwrap_err(),
-            host.get_index(&v, 0).map(|_| "get_index").unwrap_err(),
-            host.get_slice(&v, None, None, None)
-                .map(|_| "get_slice")
-                .unwrap_err(),
-            host.add_values(&v, &v).map(|_| "add_values").unwrap_err(),
-            host.percent_format("%s", &v)
-                .map(|_| "percent_format")
-                .unwrap_err(),
-            host.percent_mapping("%(size)d", "size", &v)
-                .map(|_| "percent_mapping")
-                .unwrap_err(),
-            host.decimal_parse(&v).map(|_| "decimal_parse").unwrap_err(),
-            host.decimal_quantize(&v, 2, false)
-                .map(|_| "decimal_quantize")
-                .unwrap_err(),
-            host.int_modulo(&v, &v).map(|_| "int_modulo").unwrap_err(),
-            host.conditional_escape(&v)
-                .map(|_| "conditional_escape")
-                .unwrap_err(),
-            host.sort_by_property(&v, &v, false)
-                .map(|_| "sort_by_property")
-                .unwrap_err(),
-            host.as_nested_sequence(&v)
-                .map(|_| "as_nested_sequence")
-                .unwrap_err(),
-            host.comma_bits(&v, true).map(|_| "comma_bits").unwrap_err(),
-            host.json_dumps(&v).map(|_| "json_dumps").unwrap_err(),
-            host.pformat(&v).map(|_| "pformat").unwrap_err(),
-            host.random_choice(&v).map(|_| "random_choice").unwrap_err(),
-            host.localtime(v.clone(), false)
-                .map(|_| "localtime")
-                .unwrap_err(),
-            host.date_format(&v, Some("Y"))
-                .map(|_| "date_format")
-                .unwrap_err(),
-            host.time_format(&v, Some("H"))
-                .map(|_| "time_format")
-                .unwrap_err(),
-            host.now().map(|_| "now").unwrap_err(),
-        ];
-        assert_eq!(
-            names.len(),
-            25,
-            "the Result half of the trait is 25 methods"
-        );
-        for error in names {
+        let names = refused_result_operations();
+        for (name, error) in names {
             match error.kind {
                 ErrorKind::Host(message) => {
-                    assert!(message.starts_with("no host answers `"), "{message}");
+                    assert!(
+                        message.starts_with("no host answers `"),
+                        "{name}: {message}"
+                    );
                 }
-                other => panic!("NoFilterHost must refuse with ErrorKind::Host, got {other:?}"),
+                other => {
+                    panic!("NoFilterHost must refuse {name} with ErrorKind::Host, got {other:?}")
+                }
             }
         }
+    }
+
+    /// The list above **is** the trait's `Result` half — derived from the trait,
+    /// not counted.
+    ///
+    /// The length assertion this replaced checked the list against the list, so
+    /// it could never see an omission, and it did not: the list was seven entries
+    /// short of the trait's 31 `Result` methods while the docstring above it read
+    /// "the whole 25 rather than a sample". A count produced by the structure it
+    /// describes is the one kind of count no assertion on that structure can
+    /// falsify; this one asks `host.rs` itself.
+    #[test]
+    fn the_refusal_list_covers_every_result_operation() {
+        let mut declared: Vec<String> = Vec::new();
+        let mut signature = String::new();
+        let mut in_trait = false;
+        for line in include_str!("host.rs").lines() {
+            if line.starts_with("pub trait FilterHost") {
+                in_trait = true;
+                continue;
+            }
+            if !in_trait {
+                continue;
+            }
+            if line == "}" {
+                break;
+            }
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("fn ") {
+                signature = rest.to_string();
+            } else if signature.is_empty() {
+                continue;
+            } else {
+                signature.push_str(trimmed);
+            }
+            if trimmed.ends_with(';') {
+                if signature.contains("Result<") {
+                    declared.push(
+                        signature
+                            .split('(')
+                            .next()
+                            .expect("a signature always has a name")
+                            .to_string(),
+                    );
+                }
+                signature.clear();
+            }
+        }
+        let listed: Vec<String> = refused_result_operations()
+            .into_iter()
+            .map(|(name, _)| name.to_string())
+            .collect();
+        assert_eq!(
+            listed, declared,
+            "the refusal list and the trait's `Result` methods must be the same \
+             names in the same order"
+        );
+        assert_eq!(declared.len(), 31, "the `Result` half of the trait is 31");
     }
 
     /// The other two property: a scripted answer comes back, and a scripted

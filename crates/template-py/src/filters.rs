@@ -1365,18 +1365,6 @@ impl FilterHost for PyFilterHost<'_> {
         })();
         outcome.map_err(|e| self.host_error("int_modulo", e))
     }
-
-    fn now(&self) -> Result<Value, Error> {
-        let py = self.py;
-        let outcome = (|| {
-            let now = py
-                .import("django.utils.timezone")?
-                .getattr("now")?
-                .call0()?;
-            self.classify(&now)
-        })();
-        outcome.map_err(|e| self.host_error("now", e))
-    }
 }
 
 impl PyFilterHost<'_> {

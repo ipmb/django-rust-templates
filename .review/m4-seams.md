@@ -20,7 +20,7 @@ reading.
 | `json_dumps` | **defect, fixed** `ece8a3b` |
 | `date_format` | **defect**: `&str` cannot express Django's `None`; the substitute diverges |
 | `time_format` | **defect**, same shape |
-| `now` | **defect**: the doc names a caller, and following it reddens |
+| `now` | **defect, and the method is deleted** — see below: the doc named a caller, and following it reddens |
 | `localtime` | call clean, **doc wrong** |
 | `slugify` | clean |
 | `urlize` | clean |
@@ -55,7 +55,7 @@ checks is true, which is the `json_dumps` shape exactly.
 The doc: "`django.utils.timezone.now`, for `timeuntil`'s default argument."
 
 `timeuntil_filter` → `timeuntil(value, arg)` → `timesince(d, now,
-reversed=True)`, and `timesince` fills `now` **internally** (`timesince.py:66`)
+reversed=True)`, and `timesince` fills `now` **internally** (`timesince.py:67-68`)
 as `datetime.datetime.now(d.tzinfo if is_aware(d) else None)`. A caller that
 supplies `host.now()` instead takes the `elif is_aware(now) and is_aware(d)`
 branch:
@@ -79,6 +79,18 @@ needs `datetime.now(tz=get_current_timezone() if settings.USE_TZ else None)` —
 {% now "H:i:s" %}                     = 07:28:58
 time_format(timezone.now(), "H:i:s")  = 05:28:58
 ```
+
+**Disposition: the method is deleted, not carried.** The reviewer's argument is
+the one that settles it — this is the third `repr`. `repr` and
+`unicode_normalize_nfkd` were both removed for having no caller in a §D7-frozen
+trait, and `now`'s only *stated* caller turned out to be one that must not use
+it. Its real caller is `{% now %}`, which belongs to a tag host that does not
+exist yet; carrying it into M5 would mean M4 shipping a method whose whole
+documentation is a caller that measurement refuted. The measurement above is
+what M5 needs and it is recorded here, so M5 writes `now` against the tag's own
+requirement rather than inheriting a wrapper of `timezone.now()` that answers
+five timezones' worth of wrong. `host.rs` drops from 46 methods to 45; the
+`Result` half of the trait in `TestFilterHost`'s refusal test drops 25 → 24.
 
 ## `localtime` — clean call, wrong doc
 
