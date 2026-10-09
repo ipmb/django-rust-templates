@@ -740,9 +740,10 @@ pub trait FilterHost {
     /// `defaultfilters.py:194-205`: `exp = Decimal(1).scaleb(-abs(p))`, the `prec` computation and
     /// `d.quantize(exp, ROUND_HALF_UP, Context(prec=prec))`, as **one** call.
     ///
-    /// Not three, because `prec = max(getcontext().prec, abs(p) + units + 1)`
-    /// (`defaultfilters.py:200`) is a read of thread-local state that *bounds the quantize three
-    /// lines below it*: splitting the method would invite a Rust caller to
+    /// Not three, because `prec = max(getcontext().prec, prec)`
+    /// (`defaultfilters.py:200`) is a read of thread-local state that *bounds the
+    /// quantize at `defaultfilters.py:204`*: splitting the method would invite a
+    /// Rust caller to
     /// compute its own `prec`, which is the divergence this seam exists to
     /// prevent. The context does reach the answer, measurably — below
     /// `2*(Emax + prec)` the `scaleb` clamps to `Decimal('0E-' + Etiny)` (so the
