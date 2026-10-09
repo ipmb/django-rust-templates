@@ -144,6 +144,23 @@ SHADOWING = {
     "loaders/filesystem.py": "transcribed",
     "loaders/locmem.py": "transcribed",
     "smartif.py": "transcribed",
+    # M12's two, and the first keys under the second namespace — the
+    # `templatetags/` directory `NAMESPACE_ROOTS` serves. Both transcribed: the
+    # two modules are the pin plus a marker, because the four tags Rust compiles
+    # out of them never reach these bodies.
+    #
+    # **No `templatetags/__init__.py` row, and that is measured rather than an
+    # omission.** The plan called for one. `_is_foreign_package` declines
+    # `django.templatetags` — the package — on purpose: we serve only files
+    # *inside* it, so a library we do not provide keeps resolving against
+    # Django's tree. A `_impl/templatetags/__init__.py` would therefore never be
+    # served by the finder, while `shadowing_files()` would still report it and
+    # `test_the_shadowing_files_are_the_declared_ones` would compare it against
+    # `django.templatetags` — a name the milestone table must not call
+    # interposed. Upstream's `__init__.py` is 0 bytes, so there is no behaviour
+    # in it to transcribe and nothing is lost by leaving the package Django's.
+    "templatetags/cache.py": "transcribed",
+    "templatetags/static.py": "transcribed",
     "utils.py": "transcribed",
 }
 
@@ -182,6 +199,14 @@ def shadowing_files() -> list[str]:
     Paths are relative to ``_impl`` and posix-style, so a subpackage reports
     ``loaders/__init__.py`` and a library ``templatetags/i18n.py``. ``__pycache__``
     is skipped: it holds no module anyone wrote.
+
+    **Sorted across namespaces, not just within one.** The walk is per namespace
+    and there are two of them, so the concatenation is *not* in `_impl`-relative
+    order once a file lives under ``templatetags/`` — ``templatetags/cache.py``
+    sorts before ``utils.py`` while the second namespace is walked last.
+    Callers treat the answer as a set (`test_the_shadowing_files_are_the_declared_ones`
+    compares it against ``sorted(SHADOWING)``), so the order is sorted here
+    rather than left to whichever namespace happened to be visited first.
     """
     clashes = []
     for namespace, root in NAMESPACE_ROOTS.items():
@@ -202,7 +227,7 @@ def shadowing_files() -> list[str]:
                 continue
             if any(Path(real).joinpath(inner).is_file() for real in real_paths):
                 clashes.append(path.relative_to(_IMPL_DIR).as_posix())
-    return clashes
+    return sorted(clashes)
 
 
 class ShimError(RuntimeError):

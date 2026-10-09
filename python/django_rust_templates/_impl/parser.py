@@ -54,6 +54,8 @@ from django.template.defaulttags import (
     WithNode,
 )
 from django.template.loader_tags import BlockNode, ExtendsNode, IncludeNode
+from django.templatetags.cache import CacheNode
+from django.templatetags.static import PrefixNode, StaticNode
 from django.utils.safestring import mark_safe
 
 from django_rust_templates import _native
@@ -119,6 +121,16 @@ NODE_CLASSES = {
     "TextNode": TextNode,
     "AutoEscapeControlNode": AutoEscapeControlNode,
     "BlockNode": BlockNode,
+    # M12's three, and the first entries from outside `django.template`: they are
+    # `django.templatetags.static`'s and `django.templatetags.cache`'s, which is
+    # why the import block above reaches past the package. All three are ordinary
+    # keyword constructors — `PrefixNode.__init__(self, varname=None, name=None)`
+    # (`static.py:15`), `StaticNode.__init__(self, varname=None, path=None)`
+    # (`static.py:98`), `CacheNode.__init__(self, nodelist, expire_time_var,
+    # fragment_name, vary_on, cache_name)` (`cache.py:9`) — so no factory is
+    # needed and the bare class is the factory, as it is for every entry but
+    # `IfChangedNode` below.
+    "CacheNode": CacheNode,
     "CommentNode": CommentNode,
     "CsrfTokenNode": CsrfTokenNode,
     "CycleNode": CycleNode,
@@ -132,9 +144,11 @@ NODE_CLASSES = {
     "IncludeNode": IncludeNode,
     "LoremNode": LoremNode,
     "NowNode": NowNode,
+    "PrefixNode": PrefixNode,
     "RegroupNode": RegroupNode,
     "ResetCycleNode": ResetCycleNode,
     "SpacelessNode": SpacelessNode,
+    "StaticNode": StaticNode,
     "TemplateTagNode": TemplateTagNode,
     "URLNode": URLNode,
     "VerbatimNode": VerbatimNode,

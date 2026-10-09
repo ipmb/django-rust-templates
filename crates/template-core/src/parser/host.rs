@@ -37,6 +37,44 @@ pub trait Host {
     /// `p.add_library(lib)` for a library registering `comment` it is `False`.
     fn has_tag(&self, command: &str) -> bool;
 
+    /// Whether `command` is a **library** tag the template has loaded — the one
+    /// question [`has_tag`]'s `false` cannot be asked twice for.
+    ///
+    /// `has_tag` answers `false` for two different situations and the parser has
+    /// to tell them apart since M12:
+    ///
+    /// - the command is **not** in the host's parser at all — `{% static %}` with
+    ///   no `{% load static %}`. Django refuses it, so Rust must report
+    ///   `Invalid block tag`;
+    /// - the command **is** there, is a library tag Rust compiles, and the
+    ///   registered function is still Django's own — `{% load static %}` then
+    ///   `{% static %}`. Rust compiles it.
+    ///
+    /// Without this method the parser cannot distinguish them, and
+    /// [`library_tag`](crate::parser::registry::library_tag) alone would compile
+    /// the *unloaded* tag — measured, Django raises
+    /// `Invalid block tag on line 1: 'static'. Did you forget to register or load
+    /// this tag?` and a Rust that compiled anyway would render a URL instead.
+    ///
+    /// **Defaulted to `false`**, which is the right answer for a host with no
+    /// library concept: [`NoHost`] and the test hosts compile no library tags, so
+    /// the branch below them is dead and `cargo test -p template-core` stays
+    /// runnable with no Python in the process (§10.4) — the same argument
+    /// [`Host::check_filter`]'s default rests on.
+    ///
+    /// It is *not* "is this name in the host's tag dict": returning `true` for
+    /// every loaded name would claim the 14 library tags Rust does not compile
+    /// (`trans`, `timezone`, `localize`, …) and send them to
+    /// `Invalid block tag`. The caller consults this and then asks the *registry*,
+    /// which is what makes the pair safe. The shell's implementation is a bare
+    /// `command in self.parser.tags` for that reason: the second half of the
+    /// question is Rust's to answer.
+    ///
+    /// [`has_tag`]: Host::has_tag
+    fn library_tag_loaded(&self, _command: &str) -> bool {
+        false
+    }
+
     /// Compile `command` in Python, against the parser's remaining tokens.
     ///
     /// `tokens` is everything the caller has not consumed, **in parse order**.

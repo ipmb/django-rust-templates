@@ -998,6 +998,15 @@ BASENAMES = {
     "tests.py": "tests/template_tests/tests.py",
     "test_base.py": "tests/template_tests/test_base.py",
     "test_partials.py": "tests/template_tests/test_partials.py",
+    # M12's two, and the first rows here whose basename has a *near* neighbour
+    # under `.django/` rather than only far ones: `cache.py` matches five files
+    # (`views/decorators/cache.py`, `utils/cache.py`, `middleware/cache.py`,
+    # `contrib/sessions/backends/cache.py`) and `static.py` two. Ours is the
+    # templatetags one in both cases, because that is the module the citation is
+    # about — `cache.rs` and `static.rs` say so in their first line — and the
+    # other four are reachable from no template tag at all.
+    "cache.py": "django/templatetags/cache.py",
+    "static.py": "django/templatetags/static.py",
 }
 
 MANIFEST = load_manifest()

@@ -70,6 +70,25 @@ fn builtin_tag_stub_names() -> Vec<&'static str> {
     template_core::parser::registry::builtin_tag_stub_names()
 }
 
+/// Every **library** tag this engine compiles, ascending — the Rust library
+/// registry's names.
+///
+/// Exposed because the shell cannot derive it. `ShellHost._rust_owned` has to
+/// name the library tags Rust owns in order to answer `has_tag` for them the way
+/// it answers for a built-in, and the natural-looking source — the tag tables of
+/// the five `django.templatetags` modules — holds **all 18** library tags. Seven
+/// of those Rust does not compile, and claiming them would send `trans`,
+/// `timezone` and the rest to `Invalid block tag` instead of to the host that
+/// compiles them. That is the same shape as the `245 failures of the 1547`
+/// measurement recorded on `builtin_tag_names_including_stubs`, one scope over.
+///
+/// The doc on `template_core::parser::registry::library_tag_names` carries the
+/// argument; this is only the wire.
+#[pyfunction]
+fn library_tag_names() -> Vec<&'static str> {
+    template_core::parser::registry::library_tag_names()
+}
+
 /// Engine version, so the Python shell can assert it is talking to the build it
 /// expects rather than a stale `.so` left in the tree.
 #[pyfunction]
@@ -1215,6 +1234,23 @@ impl Host for FilterCheckHost<'_> {
         host.call_method1("has_tag", (command,))
             .and_then(|answer| answer.extract::<bool>())
             .expect("ShellHost.has_tag raised or did not return a bool")
+    }
+
+    fn library_tag_loaded(&self, command: &str) -> bool {
+        let Some(host) = &self.host else {
+            // No host means no parser and no dict of loaded tags, which is
+            // `NoHost`'s answer and this method's default. `false` rather than a
+            // panic, unlike `call_tag`: nothing is *expected* to be here, and a
+            // bare membership question with nothing to be a member of is `false`.
+            return false;
+        };
+        // A raise here is a shell integration bug for `has_tag`'s reason, and the
+        // trait has nowhere to put it, so it panics loudly rather than answering
+        // `false` — which would report `Invalid block tag` for a tag the host was
+        // ready to hand to Rust's registry.
+        host.call_method1("library_tag_loaded", (command,))
+            .and_then(|answer| answer.extract::<bool>())
+            .expect("ShellHost.library_tag_loaded raised or did not return a bool")
     }
 
     fn call_tag(
@@ -2553,6 +2589,7 @@ fn compile_template(
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(builtin_tag_names_including_stubs, m)?)?;
     m.add_function(wrap_pyfunction!(builtin_tag_stub_names, m)?)?;
+    m.add_function(wrap_pyfunction!(library_tag_names, m)?)?;
     m.add_function(wrap_pyfunction!(engine_version, m)?)?;
     m.add_function(wrap_pyfunction!(filter_names, m)?)?;
     m.add_function(wrap_pyfunction!(stringfilter_filters, m)?)?;

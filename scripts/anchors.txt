@@ -1,7 +1,19 @@
+cache.py:9	django/templatetags/cache.py	9	-	-	-
+cache.py:84-85	django/templatetags/cache.py	84	85	-	-
+cache.py:84	django/templatetags/cache.py	84	-	-	-
+cache.py:86-88	django/templatetags/cache.py	86	88	-	-
+cache.py:88	django/templatetags/cache.py	88	-	-	-
+cache.py:89	django/templatetags/cache.py	89	-	-	-
+cache.py:90	django/templatetags/cache.py	90	-	-	-
+cache.py:91	django/templatetags/cache.py	91	-	-	-
+cache.py:93	django/templatetags/cache.py	93	-	-	-
+cache.py:96-98	django/templatetags/cache.py	96	98	-	-
+cache.py:97	django/templatetags/cache.py	97	-	-	-
 center.rs:86	crates/template-core/src/filters/center.rs	86	-	arg.unwrap_or(Value::None)	-
 center.rs:90	crates/template-core/src/filters/center.rs	90	-	text.starts_with('-')	-
 get_digit.rs:108	crates/template-core/src/filters/get_digit.rs	108	-	text.chars().rev().nth(index)	-
 get_digit.rs:153	crates/template-core/src/filters/get_digit.rs	153	-	fn invalid_literal(c: char) -> Error {	-
+crates/template-core/src/filters/host.rs:44-46	crates/template-core/src/filters/host.rs	44	46	The `autoescape` in force, which the seven `needs_autoescape` filters	-
 filters/host.rs:195	crates/template-core/src/filters/host.rs	195	-	-	-
 filters/host.rs:519-526	crates/template-core/src/filters/host.rs	519	526	-	-
 filters/host.rs:576-739	crates/template-core/src/filters/host.rs	576	739	-	-
@@ -17,16 +29,16 @@ error.rs:292-293	crates/template-core/src/parser/error.rs	292	293	str.replace	-
 parser/host.rs:22	crates/template-core/src/parser/host.rs	22	-	-	-
 parser/mod.rs:321	crates/template-core/src/parser/mod.rs	321	-	NodeDesc::new("VariableNode")	-
 parser/mod.rs:394-403	crates/template-core/src/parser/mod.rs	394	403	Err(error) => Err(error)	-
-crates/template-core/src/parser/mod.rs:408	crates/template-core/src/parser/mod.rs	408	-	self.extend_nodelist(&mut nodelist, node, &token)?;	-
-parser/mod.rs:434-439	crates/template-core/src/parser/mod.rs	434	439	token.or_else	-
-crates/template-core/src/parser/mod.rs:496	crates/template-core/src/parser/mod.rs	496	-	pub fn extend_nodelist(	-
-parser/mod.rs:502	crates/template-core/src/parser/mod.rs	502	-	if node.must_be_first && nodelist.contains_nontext {	-
+crates/template-core/src/parser/mod.rs:430	crates/template-core/src/parser/mod.rs	430	-	-	-
+parser/mod.rs:459-464	crates/template-core/src/parser/mod.rs	459	464	token.or_else	-
+crates/template-core/src/parser/mod.rs:518	crates/template-core/src/parser/mod.rs	518	-	pub fn extend_nodelist(	-
+parser/mod.rs:524	crates/template-core/src/parser/mod.rs	524	-	if node.must_be_first && nodelist.contains_nontext {	-
 resolve.rs:28	crates/template-core/src/parser/resolve.rs	28	-	pub enum Step {	-
 parser/resolve.rs:156	crates/template-core/src/parser/resolve.rs	156	-	pub trait LookupTarget {	-
 resolve.rs:253	crates/template-core/src/parser/resolve.rs	253	-	pub enum LookupOutcome {	-
 extends.rs:71	crates/template-core/src/parser/tags/extends.rs	71	-	if !nodelist.get_nodes_by_type("ExtendsNode").is_empty() {	-
-tags/mod.rs:183	crates/template-core/src/parser/tags/mod.rs	183	-	Ok(NodeDesc::with_nodelist(	-
-parser/tags/mod.rs:198	crates/template-core/src/parser/tags/mod.rs	198	-	fn standin_first	-
+tags/mod.rs:189	crates/template-core/src/parser/tags/mod.rs	189	-	Ok(NodeDesc::with_nodelist(	-
+parser/tags/mod.rs:204	crates/template-core/src/parser/tags/mod.rs	204	-	fn standin_first	-
 url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
 with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
 filters.rs:69-71	crates/template-py/src/filters.rs	69	71	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
@@ -34,8 +46,8 @@ crates/template-py/src/filters.rs:248-257	crates/template-py/src/filters.rs	248	
 crates/template-py/src/filters.rs:871	crates/template-py/src/filters.rs	871	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
 template-py/src/filters.rs:1587-1589	crates/template-py/src/filters.rs	1587	1589	Some(host.classify(&args.get_item(0)?)?)	-
 crates/template-py/src/filters.rs:1644-1645	crates/template-py/src/filters.rs	1644	1645	host.take_raised()	-
-template-py/src/lib.rs:125	crates/template-py/src/lib.rs	125	-	fn filter_flags	-
-template-py/src/lib.rs:673	crates/template-py/src/lib.rs	673	-	fn if_condition_to_py	-
+template-py/src/lib.rs:144	crates/template-py/src/lib.rs	144	-	fn filter_flags	-
+template-py/src/lib.rs:692	crates/template-py/src/lib.rs	692	-	fn if_condition_to_py	-
 crates/template-py/src/lib.rs:1104	crates/template-py/src/lib.rs	1104	-	-	-
 crates/template-py/src/lib.rs:1251	crates/template-py/src/lib.rs	1251	-	-	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
@@ -131,7 +143,10 @@ base.py:803-819	django/template/base.py	803	819	expects_localtime	-
 base.py:804-809	django/template/base.py	804	809	arg_vals = []	arg_vals.append(arg.resolve(context))
 base.py:805-820	django/template/base.py	805	820	if getattr(func, "expects_localtime", False):	-
 base.py:806-807	django/template/base.py	806	807	-	-
+base.py:810-811	django/template/base.py	810	811	if getattr(func, "expects_localtime", False):	-
+base.py:810-815	django/template/base.py	810	815	if getattr(func, "needs_autoescape", False):	-
 base.py:811	django/template/base.py	811	-	obj = template_localtime(obj, context.use_tz)	-
+base.py:812-815	django/template/base.py	812	815	new_obj = func(obj, autoescape=context.autoescape, *arg_vals)	-
 base.py:813	django/template/base.py	813	-	func(obj, autoescape=context.autoescape, *arg_vals)	-
 base.py:815	django/template/base.py	815	-	new_obj = func(obj, *arg_vals)	-
 base.py:816	django/template/base.py	816	-	-	-
@@ -315,6 +330,7 @@ defaultfilters.py:457-461	django/template/defaultfilters.py	457	461	-	-
 defaultfilters.py:457-459	django/template/defaultfilters.py	457	459	@register.filter("escape", is_safe=True)	def escape_filter(value):
 defaultfilters.py:464-471	django/template/defaultfilters.py	464	471	escapeseq	-
 defaultfilters.py:474-482	django/template/defaultfilters.py	474	482	force_escape	-
+defaultfilters.py:474-476	django/template/defaultfilters.py	474	476	def force_escape(value):	-
 defaultfilters.py:485-494	django/template/defaultfilters.py	485	494	def linebreaks_filter(value, autoescape=True):	return mark_safe(linebreaks(value, autoescape))
 defaultfilters.py:486	django/template/defaultfilters.py	486	-	-	-
 defaultfilters.py:493	django/template/defaultfilters.py	493	-	-	-
@@ -597,6 +613,7 @@ html.py:103-105	django/utils/html.py	103	105	json.dumps(value, cls=encoder or Dj
 html.py:106-110	django/utils/html.py	106	110	-	-
 django/utils/html.py:115-127	django/utils/html.py	115	127	isinstance(text, Promise)	-
 html.py:115-127	django/utils/html.py	115	127	def conditional_escape(text):	return escape(text)
+utils/html.py:115-125	django/utils/html.py	115	125	if hasattr(text, "__html__"):	-
 html.py:124-125	django/utils/html.py	124	125	if hasattr(text, "__html__"):	return text.__html__()
 html.py:130-140	django/utils/html.py	130	140	-	-
 html.py:140	django/utils/html.py	140	-	-	-
@@ -652,12 +669,24 @@ django/utils/timezone.py:146-161	django/utils/timezone.py	146	161	settings.USE_T
 timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)
 python/django_rust_templates/_impl/base.py:1161	python/django_rust_templates/_impl/base.py	1161	-	-	-
 python/django_rust_templates/_impl/parser.py:285	python/django_rust_templates/_impl/parser.py	285	-	-	-
-_impl/parser.py:501	python/django_rust_templates/_impl/parser.py	501	-	func = parser.find_filter(name)	-
-_impl/parser.py:602	python/django_rust_templates/_impl/parser.py	602	-	func = resolve_ref(handle.index)	-
+_impl/parser.py:515	python/django_rust_templates/_impl/parser.py	515	-	func = parser.find_filter(name)	-
+_impl/parser.py:616	python/django_rust_templates/_impl/parser.py	616	-	func = resolve_ref(handle.index)	-
 _shim.py:75	python/django_rust_templates/_shim.py	75	-	TARGET = "django.template"	-
-_shim.py:521	python/django_rust_templates/_shim.py	521	-	if installed():	-
-python/django_rust_templates/host.py:422	python/django_rust_templates/host.py	422	-	func is not self._django_tags.get(command)	-
-python/django_rust_templates/host.py:508	python/django_rust_templates/host.py	508	-	self.last_error = error	-
+_shim.py:546	python/django_rust_templates/_shim.py	546	-	if installed():	-
+python/django_rust_templates/host.py:422	python/django_rust_templates/host.py	422	-	-	-
+python/django_rust_templates/host.py:547	python/django_rust_templates/host.py	547	-	self.last_error = error	-
+static.py:15	django/templatetags/static.py	15	-	-	-
+static.py:26-41	django/templatetags/static.py	26	41	-	-
+static.py:29-31	django/templatetags/static.py	29	31	-	-
+static.py:35-37	django/templatetags/static.py	35	37	-	-
+static.py:74	django/templatetags/static.py	74	-	-	-
+static.py:92	django/templatetags/static.py	92	-	-	-
+static.py:98	django/templatetags/static.py	98	-	-	-
+static.py:123-141	django/templatetags/static.py	123	141	-	-
+static.py:126	django/templatetags/static.py	126	-	-	-
+static.py:129-131	django/templatetags/static.py	129	131	-	-
+static.py:135-138	django/templatetags/static.py	135	138	-	-
+static.py:171	django/templatetags/static.py	171	-	-	-
 tests/parity_target.py:62	tests/parity_target.py	62	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
 tests/parity_target.py:170	tests/parity_target.py	170	-	So this is the replacement Python side	-
 filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-
@@ -680,6 +709,8 @@ tag_27584.py:13-15	tests/template_tests/templatetags/tag_27584.py	13	15	class Ba
 tests/template_tests/test_nodelist.py:44-86	tests/template_tests/test_nodelist.py	44	86	def test_correct_exception_index(self):	debug = e.template_debug
 test_parser.py:36	tests/template_tests/test_parser.py	36	-	-	-
 test_parser.py:49	tests/template_tests/test_parser.py	49	-	<Lexer template_string="{% for i in 1 %}{{ a...", verbatim=False>	-
+test_parser.py:207	tests/template_tests/test_parser.py	207	-	FilterExpression(f"0|default:{num}", p).resolve({})	-
+.django/tests/template_tests/test_parser.py:207	tests/template_tests/test_parser.py	207	-	FilterExpression(f"0|default:{num}", p).resolve({})	-
 test_partials.py:171	tests/template_tests/test_partials.py	171	-	def test_template_without_extra_data_attribute(self):	-
 tests/template_tests/tests.py:12-13	tests/template_tests/tests.py	12	13	if TYPE_CHECKING:	type AnnotatedKwarg = str
 .django/tests/template_tests/tests.py:114-123	tests/template_tests/tests.py	114	123	assertRaises(RuntimeError)	-
@@ -690,11 +721,3 @@ tests/test_host_tags.py:32-37	tests/test_host_tags.py	32	37	PROJECT_ROOT = Path(
 test_render_parity.py:533	tests/test_render_parity.py	533	-	def test_a_silent_variable_failure_is_substituted(self):	-
 test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
 .django/tests/utils_tests/test_html.py:204-217	tests/utils_tests/test_html.py	204	217	-	-
-utils/html.py:115-125	django/utils/html.py	115	125	if hasattr(text, "__html__"):	-
-defaultfilters.py:474-476	django/template/defaultfilters.py	474	476	def force_escape(value):	-
-base.py:810-811	django/template/base.py	810	811	if getattr(func, "expects_localtime", False):	-
-base.py:812-815	django/template/base.py	812	815	new_obj = func(obj, autoescape=context.autoescape, *arg_vals)	-
-base.py:810-815	django/template/base.py	810	815	if getattr(func, "needs_autoescape", False):	-
-test_parser.py:207	tests/template_tests/test_parser.py	207	-	FilterExpression(f"0|default:{num}", p).resolve({})	-
-.django/tests/template_tests/test_parser.py:207	tests/template_tests/test_parser.py	207	-	FilterExpression(f"0|default:{num}", p).resolve({})	-
-crates/template-core/src/filters/host.rs:44-46	crates/template-core/src/filters/host.rs	44	46	The `autoescape` in force, which the seven `needs_autoescape` filters	-

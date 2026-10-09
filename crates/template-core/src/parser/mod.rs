@@ -400,6 +400,28 @@ impl<'a> Parser<'a> {
                         }
                     } else if let Some(compile) = registry::builtin_tag(&command) {
                         compile(self, &token)
+                    } else if self.host.library_tag_loaded(&command) {
+                        // A **library** tag — `{% load static %}` then
+                        // `{% static %}`. The host said `false` to `has_tag`
+                        // because the registered function is still Django's own
+                        // and the name is one Rust compiles, so the remaining
+                        // question is whether Rust has a body for it, and that
+                        // one is the registry's (M12).
+                        //
+                        // `library_tag_loaded` alone must never be enough: it is
+                        // `true` for all 18 library tags, and 14 of them are
+                        // Python's — so `library_tag_loaded(name) &&
+                        // library_tag(name).is_none()` must be `Invalid block
+                        // tag`, not a panic and not an `Unimplemented`. (Those 14
+                        // never reach here at all, since `has_tag` is `true` for
+                        // them; the arm is what keeps the ordering an invariant
+                        // rather than a coincidence.)
+                        match registry::library_tag(&command) {
+                            Some(compile) => compile(self, &token),
+                            None => {
+                                return Err(self.invalid_block_tag(&token, &command, parse_until))
+                            }
+                        }
                     } else {
                         return Err(self.invalid_block_tag(&token, &command, parse_until));
                     };

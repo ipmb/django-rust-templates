@@ -370,6 +370,25 @@ COMPARED_PATH = {
         (1612, 1652, "widthratio"),
         (1655, 1689, "do_with"),
     ],
+    # 0 functions each, and the zero is the measurement rather than a blank left
+    # to be filled in: `.review/m9-measurements/m9_measure_parse_path.py` reports
+    # 0 of 3 for `cache.py` and 0 of 15 for `static.py` over both corpora. The
+    # reason is the corpora's — a parity source reaches a library's tag bodies
+    # only by writing `{% load <library> %}` first, and `tests/parser_corpus.py`
+    # loads the `template_tests.*` libraries and never `cache` or `static`. So
+    # `do_cache`, `do_static` and the two `PrefixNode`/`StaticNode.handle_token`s
+    # are defined and simply not entered, which is `smartif.py`'s ordinary
+    # meaning of "compared path" above: nothing is hidden by the zero, because
+    # clause (4) protects only code the comparison actually runs.
+    #
+    # The two are present rather than absent for the key-set-equality clause —
+    # an entry missing here is a guard failure, not a silent pass — and the
+    # re-measurement row is what keeps the zero honest: a corpus that grew a
+    # `{% load static %}` row would move these entries and
+    # `test_the_compared_path_is_the_measured_one` would fail in the commit that
+    # added it.
+    "templatetags/cache.py": [],
+    "templatetags/static.py": [],
 }
 
 # module -> (upstream path relative to the checkout, [(ours, theirs, snippet)])
@@ -832,6 +851,48 @@ DECLARED = {
                 (1, 2),
                 None,
                 "# TRANSCRIBED: django/template/defaulttags.py (Django 6.0.9)",
+            ),
+        ],
+    ),
+    # M12's first two, and the first rows here whose upstream module is
+    # `django/templatetags/…` rather than `django/template/…` — which is why
+    # every value above this comment is `"django/template/" + key` and these
+    # two are not. The *shape* of the transcription is unchanged: the pin plus
+    # a two-line marker, `None` on the upstream side, and the whole of the
+    # difference. Both open with imports rather than a docstring, so the marker
+    # is a comment on line 1 and the region is `(1, 2)` — the
+    # `loader_tags.py`/`loaders/base.py` form.
+    #
+    # **`templatetags/__init__.py` is deliberately absent.** The plan listed it,
+    # and the shim's `_is_foreign_package` is why it cannot be a transcription:
+    # it declines to serve the `django.templatetags` package itself — we serve
+    # only files inside it — so our `__init__.py` would never be loaded while
+    # `shadowing_files()` still reported it. Upstream's is 0 bytes and defines
+    # nothing; there is no behaviour to transcribe and none to get wrong.
+    #
+    # Verbatim is the right claim for both tag modules even though the four tags
+    # Rust now compiles out of them are unreachable through the host: `has_tag`
+    # answers False for a Rust-owned name the template loaded, so `do_cache`,
+    # `do_static` and the two `handle_token`s are bodies nothing calls. The case
+    # that needs them right is a library rebinding one of the four names, which
+    # is the same case `defaulttags.py` above is kept verbatim for.
+    "templatetags/cache.py": (
+        "django/templatetags/cache.py",
+        [
+            (
+                (1, 2),
+                None,
+                "# TRANSCRIBED: django/templatetags/cache.py (Django 6.0.9)",
+            ),
+        ],
+    ),
+    "templatetags/static.py": (
+        "django/templatetags/static.py",
+        [
+            (
+                (1, 2),
+                None,
+                "# TRANSCRIBED: django/templatetags/static.py (Django 6.0.9)",
             ),
         ],
     ),

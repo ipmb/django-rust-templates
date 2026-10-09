@@ -13,6 +13,7 @@
 
 pub mod autoescape;
 pub mod block;
+pub mod cache;
 pub mod comment;
 pub mod csrf_token;
 pub mod cycle;
@@ -36,6 +37,11 @@ pub mod partialdef;
 pub mod regroup;
 pub mod resetcycle;
 pub mod spaceless;
+// `static` is a Rust keyword in edition 2018+ positions (`pub mod static`), so
+// this is the `for_tag`/`if_tag` idiom: the module name differs, the file keeps
+// the command's name.
+#[path = "static.rs"]
+pub mod static_tag;
 pub mod templatetag;
 pub mod url;
 pub mod verbatim;
@@ -360,6 +366,90 @@ pub(crate) mod support {
     pub(crate) fn parse_with(source: &str, host: &dyn crate::parser::host::Host) -> NodeListDesc {
         let mut parser = Parser::new(Lexer::new(source).tokenize(), host);
         parser.parse(&[]).expect("expected a successful parse")
+    }
+
+    /// A host that reports every **library** tag as loaded.
+    ///
+    /// The library tags (`{% cache %}`, `{% static %}`, the two prefix tags) are
+    /// reachable in Rust only behind [`Host::library_tag_loaded`], so
+    /// [`compile`]/[`failure`] — which use [`NoHost`], whose answer is the trait
+    /// default `false` — cannot reach them at all: `{% static %}` under `NoHost`
+    /// is `Invalid block tag on line 1: 'static'.`, which is *correct* and is the
+    /// unloaded case. These tests are about the loaded one, so they need a host
+    /// that says yes.
+    ///
+    /// It says yes by consulting
+    /// [`registry::library_tag_names`](crate::parser::registry::library_tag_names)
+    /// rather than unconditionally, which makes it the real host's shape and
+    /// gives the pair of questions the dispatch asks its two answers. Under it,
+    /// `{% not_a_library_tag %}` still fails with `Invalid block tag` — that is
+    /// the `library_tag_loaded && library_tag(name).is_none()` arm, and
+    /// `load_tag_interposition.rs`-style rows in the modules that use this host
+    /// pin it rather than leaving it to the comment on `parser/mod.rs`'s
+    /// dispatch.
+    ///
+    /// [`Host::library_tag_loaded`]: crate::parser::host::Host::library_tag_loaded
+    #[cfg(test)]
+    pub(crate) struct LibraryLoadedHost;
+
+    #[cfg(test)]
+    impl crate::parser::host::Host for LibraryLoadedHost {
+        fn has_tag(&self, _command: &str) -> bool {
+            // The library tags Rust compiles are *not* host tags — that is what
+            // `ShellHost.has_tag`'s identity clause decides for the real host,
+            // and it is why these four names needed a second registry table
+            // rather than a host body.
+            false
+        }
+
+        fn call_tag(
+            &self,
+            _command: &str,
+            _token: &Token,
+            _tokens: &[Token],
+        ) -> Result<(NodeDesc, Vec<Token>), Error> {
+            unreachable!(
+                "LibraryLoadedHost::call_tag is never reached: has_tag returns false \
+                 for every command"
+            )
+        }
+
+        fn library_tag_loaded(&self, command: &str) -> bool {
+            crate::parser::registry::library_tag_names().contains(&command)
+        }
+
+        fn alloc_slot(&self) -> usize {
+            // `NoHost`'s answer, and honest here for the same reason: no library
+            // tag allocates a slot, and nothing parsed under this host is
+            // materialised.
+            0
+        }
+
+        fn compile_filter(&self, _token: &str) -> Result<NodeRef, Error> {
+            // `NoHost`'s answer, and *not* a gap for these four tags: each
+            // compiles its operands to `AttrValue::FilterExpr` descriptors
+            // through `Parser::compile_filter`, which does not cross this seam at
+            // all. The seam method is `{% if %}`'s operand handle.
+            Ok(NodeRef(0))
+        }
+    }
+
+    /// [`compile`], against [`LibraryLoadedHost`] — the loaded-library case.
+    pub(crate) fn compile_loaded(source: &str) -> NodeDesc {
+        let mut parser = Parser::new(Lexer::new(source).tokenize(), &LibraryLoadedHost);
+        let nodelist = parser.parse(&[]).expect("expected a successful parse");
+        assert_eq!(
+            nodelist.nodes.len(),
+            1,
+            "expected exactly one top-level node in {source:?}",
+        );
+        nodelist.nodes.into_iter().next().expect("checked above")
+    }
+
+    /// [`failure`], against [`LibraryLoadedHost`] — the loaded-library case.
+    pub(crate) fn failure_loaded(source: &str) -> Error {
+        let mut parser = Parser::new(Lexer::new(source).tokenize(), &LibraryLoadedHost);
+        parser.parse(&[]).expect_err("expected a parse failure")
     }
 }
 

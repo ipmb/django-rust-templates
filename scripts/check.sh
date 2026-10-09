@@ -52,10 +52,16 @@ step "python anchor manifest"
 # `--check --frozen`, which the migration has now earned: `unmigrated` reached 0
 # when the last three bare `:N` citations were named, so the two things `--frozen`
 # adds — a shorthand, and a row the tree no longer cites — can now only come from
-# an edit being written, which is what a gate is for. The 104 unquoted rows are
+# an edit being written, which is what a gate is for. The unquoted rows are
 # *not* failed on: an unquoted row records no claim to falsify, and the ones left
 # are cited only from files that never held a shorthand, so no naming pass will
-# come back for them.
+# come back for them. They stood at 104 when `--frozen` was earned and are **145**
+# after M12 Task 3, whose 23 `cache.py`/`static.py` anchors seed unquoted by
+# design: `_seed_snippet` requires the quoted span to occur on exactly *one* line
+# of the file, and the spans our two new modules quote beside their anchors
+# (`tokens[-1]`, `split_contents`) recur throughout theirs. The number in this
+# comment is a measurement and moves with the tree; the property that matters is
+# that `--check` counts them out loud rather than passing them as verified.
 "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_python_anchors.py" --check --frozen
 
 step "suite counts carry their provenance"

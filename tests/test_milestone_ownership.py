@@ -15,26 +15,72 @@ assertion under it cannot do either.
 import unittest
 
 from django_rust_templates import _shim
+from django_rust_templates._shim import NAMESPACE_ROOTS
 from tests.milestone_ownership import (
     INTERPOSED,
     OWNERS,
     UNDECIDED,
     interposed,
+    owned,
     spec_milestones,
 )
 
 TARGET = "django.template"
+# The second population, the one M12 Task 1 gave the meter. Named rather than
+# spelled: `NAMESPACE_ROOTS` is the shim's table of which scope lives where.
+TEMPLATETAGS = "django.templatetags"
+TEMPLATETAGS_ROOT = NAMESPACE_ROOTS[TEMPLATETAGS]
 
 
-def suffixes(names) -> set:
-    """Dotted suffixes of full ``django.template.x`` names.
+def suffixes(names, scope=TARGET) -> set:
+    """Dotted suffixes of full ``<scope>.x`` names.
 
     `unshimmed()` answers in full dotted names because that is what a reader of
     the progress meter wants; the table is keyed by suffix because that is what
     `dotted_suffix()` produces from a file path, and comparing two spellings of
     the same name would be the drift this module exists to catch.
     """
-    return {name[len(TARGET) + 1 :] for name in names}
+    return {name[len(scope) + 1 :] for name in names}
+
+
+def table_spelling(names, scope) -> set:
+    """A scope's suffixes, in the ``_impl``-relative spelling the tables use.
+
+    The two scopes differ and that is the whole of it: `django.template`'s root
+    is `""`, so `base` is already the key, while `django.templatetags`'s files
+    live under `_impl/templatetags/` and its keys carry that prefix — the same
+    relation `dotted_suffix` inverts from a path. Derived from
+    `NAMESPACE_ROOTS` rather than a literal, so the prefix cannot drift from the
+    root the shim actually serves.
+    """
+    root = NAMESPACE_ROOTS[scope]
+    return {f"{root}.{name}" if root else name for name in names}
+
+
+def the_universe() -> set:
+    """Every name the table partitions, in the tables' spelling — both scopes."""
+    return table_spelling(_shim.django_modules(TARGET), TARGET) | table_spelling(
+        _shim.django_modules(TEMPLATETAGS), TEMPLATETAGS
+    )
+
+
+def the_meter() -> set:
+    """``unshimmed()`` over both scopes, in the tables' spelling.
+
+    Both, because the table partitions both: M12 made the meter a count over two
+    populations and a row that read only the first would report agreement while
+    the second scope's names sat in a bucket the meter never reached.
+
+    The meter answers in *full dotted names* (`django.templatetags.tz`), so the
+    scope prefix comes off first and the `_impl`-relative root goes on — two
+    steps, because the two spellings differ in exactly that way and skipping
+    either is how `templatetags.django.templatetags.tz` gets built.
+    """
+    return table_spelling(
+        suffixes(_shim.unshimmed(TARGET), TARGET), TARGET
+    ) | table_spelling(
+        suffixes(_shim.unshimmed(TEMPLATETAGS), TEMPLATETAGS), TEMPLATETAGS
+    )
 
 
 class OwnershipTableTests(unittest.TestCase):
@@ -46,15 +92,16 @@ class OwnershipTableTests(unittest.TestCase):
         """Both directions, and this is the row that makes the table binding.
 
         `django_modules()` is every name Django's template package defines — 26
-        at 6.0.9, of which 23 are still Django's and 3 are ours. A name in the
-        tree and in no bucket is a module no milestone has agreed to take, which
-        is the failure §2 found three of. A name in a bucket that is not in the
-        tree is a row about nothing — `origin`, as M10's row had it, and as this
-        row would have caught.
+        at 6.0.9 for `django.template` and 5 for `django.templatetags`, the two
+        populations M12's meter counts. A name in the tree and in no bucket is a
+        module no milestone has agreed to take, which is the failure §2 found
+        three of. A name in a bucket that is not in the tree is a row about
+        nothing — `origin`, as M10's row had it, and as this row would have
+        caught.
         """
         self.assertEqual(
             set(OWNERS) | set(UNDECIDED) | interposed(),
-            _shim.django_modules(),
+            the_universe(),
         )
 
     def test_no_name_is_both_owned_and_taken(self):
@@ -76,9 +123,9 @@ class OwnershipTableTests(unittest.TestCase):
         `unshimmed()` is the count every milestone is accepted on. If it can
         drift from the table, the table is decoration — and if the table can
         drift from it, the next reader plans against a schedule that is wrong.
+        Both scopes, since M12: `the_meter()` is the two counts in one spelling.
         """
-        expected = (set(OWNERS) | set(UNDECIDED)) - interposed()
-        self.assertEqual(suffixes(_shim.unshimmed()), expected)
+        self.assertEqual(the_meter(), owned() - interposed())
 
     def test_interposed_is_the_shadowing_table(self):
         """`INTERPOSED` adds the milestone attribution and no new membership.

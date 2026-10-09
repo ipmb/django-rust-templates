@@ -378,9 +378,11 @@ class ShellHost:
 
     def __init__(self, parser):
         self.parser = parser
-        # `builtin_tag_names_including_stubs()` minus
-        # `builtin_tag_stub_names()`: the names Rust has a
-        # real compile function for. The first alone is the registry's *keys*,
+        # The names Rust has a real compile function for, which as of M12 is the
+        # registry in *two* tables: `builtin_tag_names_including_stubs()` minus
+        # `builtin_tag_stub_names()` — the built-ins — unioned with
+        # `library_tag_names()`, the four `django.templatetags` tags Rust
+        # compiles. The first alone is the built-in registry's *keys*,
         # and a stub is a key with a body that raises `Unimplemented`, so taking
         # it whole claims `partial` and `partialdef` for Rust and the identity
         # clause below then declines them on the host's behalf — measured, that
@@ -395,9 +397,20 @@ class ShellHost:
         # set(builtin_tag_stub_names())`, and
         # `tests/test_tag_inventory.py` pins the stub set to those two names. The
         # host was the one place that read the keys as the registry.
-        self._rust_owned = set(_native.builtin_tag_names_including_stubs()) - set(
-            _native.builtin_tag_stub_names()
-        )
+        # M12 widens this with the four `django.templatetags` names Rust has a
+        # real body for — `cache`, `static` and the two prefix tags. **The four,
+        # not the 18 the five libraries register**, and the difference is a
+        # correctness boundary rather than bookkeeping: `library_tag_loaded`
+        # below is `command in parser.tags`, which is true for *every* name a
+        # loaded library contributes, and the Rust arm it feeds refuses a name
+        # `LIBRARY_REGISTRY` has no body for. Claiming `trans` here would route
+        # a loaded `{% trans %}` past `has_tag`'s "the registered callable is
+        # still Django's, so the host compiles it" clause and into Rust's
+        # `Invalid block tag` — a template Django renders, refused by us.
+        self._rust_owned = (
+            set(_native.builtin_tag_names_including_stubs())
+            - set(_native.builtin_tag_stub_names())
+        ) | set(_native.library_tag_names())
         self._django_tags = django_own_tags()
         # The exception object `call_tag` last let past, for the shell to
         # re-raise by identity. `None` until one does. See `call_tag`.
@@ -420,6 +433,32 @@ class ShellHost:
         # `OPTIONS["builtins"]` wins at construction, which is the case the
         # parser-snapshot predicate got backwards. See `django_own_tags`.
         return func is not self._django_tags.get(command)
+
+    def library_tag_loaded(self, command):
+        """Whether the template loaded a library that provides `command`.
+
+        The second half of a two-part answer, and it exists because `has_tag`'s
+        `False` conflates two situations whose correct outcomes are opposite:
+
+        * **No such tag.** Nothing registered `command`, so Django raises
+          ``Invalid block tag on line 1: 'static'. Did you forget to register
+          or load this tag?`` — and Rust must refuse it too, because a Rust body
+          that ran here would render a template Django rejects.
+        * **A library tag Rust owns, and the template loaded it.**
+          ``{% load static %}`` then ``{% static %}``: the registered callable
+          is still ``static.py``'s own, so `has_tag` compares it equal to
+          `django_own_tags()` and answers `False` — the same `False` as above,
+          but Rust must compile this one.
+
+        ``parser.tags`` is what tells them apart, and it is the *live* parser's:
+        `add_library` merges a loaded library's tags into it
+        (`base.py:668-670`), so the name is present in exactly the second case.
+        Answering from `_library_tag_tables()` instead would say `True` for all
+        18 library names, 14 of which are Python's — see `__init__` for why
+        `_rust_owned` carries the four that have Rust bodies and this method is
+        the coarser question that only the Rust arm may narrow.
+        """
+        return command in self.parser.tags
 
     def call_tag(self, command, token_wire, tokens):
         """Run Django's own compile function for `command`.

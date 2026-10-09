@@ -170,7 +170,7 @@ class InterpositionTests(unittest.TestCase):
         ``{% if %}`` grammar into ``crates/template-core/src/parser/smartif.rs``,
         which the parse seam drives inside ``compile_template``, and the shell
         then materialises the resulting ``IfCondition`` tree into real
-        ``smartif`` objects (``template-py/src/lib.rs:673``). A row
+        ``smartif`` objects (``template-py/src/lib.rs:692``). A row
         named after the plan's premise would have asserted something untrue
         about a call that does not happen, so it is renamed and rewritten here;
         the substitution is recorded in the plan's Task 3 corrections.
@@ -1305,7 +1305,7 @@ class FilterRoutingTests(unittest.TestCase):
         """The premise, on its own, so a green counter cannot be the whole story.
 
         `Parser.find_filter(name)` is the handle the parse keeps
-        (`_impl/parser.py:501`) and the object the routing compares against, so
+        (`_impl/parser.py:515`) and the object the routing compares against, so
         this asserts the *identity* the routing will test — ours, from our file —
         rather than a name. Two claims, because interposing the file is not the
         same as the registry being the one the parser reads: `register` could be

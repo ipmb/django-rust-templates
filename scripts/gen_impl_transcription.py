@@ -60,6 +60,24 @@ MODULES = {
     "loaders/app_directories.py": "django/template/loaders/app_directories.py",
     "loaders/cached.py": "django/template/loaders/cached.py",
     "loaders/locmem.py": "django/template/loaders/locmem.py",
+    # M12's first, and the first row the sentence above stops holding for:
+    # this lives under `django/templatetags/`, not `django/template/`, which is
+    # why every value here is spelled out in full rather than derived. It is
+    # still the same *shape* of transcription — the pin plus a marker — because
+    # the four tags Rust compiles out of these two modules are unreachable
+    # through the host: `ShellHost.has_tag` answers False for a name Rust owns
+    # and the template has loaded, so `do_cache` and `do_static` are bodies
+    # nothing calls. Faithful is what a transcription is for; the case that needs
+    # these bodies right is a library that rebinds one of the four names.
+    #
+    # **`templatetags/__init__.py` is deliberately absent**, though the plan
+    # listed it. The shim's `_is_foreign_package` declines to serve the
+    # `django.templatetags` package itself — only files inside it — so an
+    # `_impl/templatetags/__init__.py` would never be served while
+    # `shadowing_files()` still reported it. Upstream's is 0 bytes: there is no
+    # behaviour in it to transcribe.
+    "templatetags/cache.py": "django/templatetags/cache.py",
+    "templatetags/static.py": "django/templatetags/static.py",
     # M11's first, and the only one this table names yet. Unlike M10's loader
     # files it is a module the tag and filter corpus renders through, so a
     # verbatim transcription here moves the *registry's* owner and the node

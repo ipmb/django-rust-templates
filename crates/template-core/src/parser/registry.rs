@@ -213,6 +213,63 @@ pub fn builtin_tag(command: &str) -> Option<CompileFn> {
         .map(|(_, compile)| *compile)
 }
 
+/// The **library** tags Rust compiles — `django.templatetags.*` — ascending.
+///
+/// A second table rather than rows in [`REGISTRY`], and the reason is the
+/// counting trap this module's doc opens with: `builtin_tag_names_including_stubs`
+/// is cross-checked against Django's real *built-in* registry by
+/// `tests/test_tag_inventory.py`, and none of these four names is in it. They
+/// belong to `django/templatetags/cache.py` and `static.py`, they are reachable
+/// only after a `{% load %}`, and folding them in would make the engine claim to
+/// own four built-ins Django does not have.
+///
+/// **Reachability is the other half, and the host owns it.** A loaded library tag
+/// is not in [`REGISTRY`]'s sense of "ours" until the template loaded the
+/// library: `{% static %}` with no `{% load static %}` is *not a Rust tag*,
+/// Django refuses it, and the refusal is measured (`Invalid block tag on line 1:
+/// 'static'. Did you forget to register or load this tag?`). So this table is
+/// consulted only behind [`Host::library_tag_loaded`], which is the question a
+/// `Command` cannot answer from a token alone — the answer lives in the host's
+/// parser, which `{% load %}` mutates.
+///
+/// [`Host::library_tag_loaded`]: crate::parser::host::Host::library_tag_loaded
+const LIBRARY_REGISTRY: &[Entry] = &[
+    ("cache", tags::cache::compile),
+    ("get_media_prefix", tags::static_tag::compile),
+    ("get_static_prefix", tags::static_tag::compile),
+    ("static", tags::static_tag::compile),
+];
+
+/// The compile function Rust has for the **library** tag `command`, if it has
+/// one. See [`LIBRARY_REGISTRY`] for why this is a separate lookup rather than a
+/// second arm of [`builtin_tag`].
+pub fn library_tag(command: &str) -> Option<CompileFn> {
+    LIBRARY_REGISTRY
+        .iter()
+        .find(|(name, _)| *name == command)
+        .map(|(_, compile)| *compile)
+}
+
+/// Every command name in [`LIBRARY_REGISTRY`], ascending.
+///
+/// Consumed by the Python shell, which needs the set to answer
+/// `ShellHost.has_tag` for a library tag the way it answers for a built-in one —
+/// see `python/django_rust_templates/host.py`'s `_rust_owned`. The shell cannot
+/// derive it: the natural-looking source, `django_own_tags()`, holds **all 18**
+/// library tags, and claiming all 18 would send `trans`, `timezone` and the rest
+/// to `invalid_block_tag` instead of to the host that compiles them (the defect
+/// M12's `245 failures of the 1547` measurement is about). So the list of
+/// library tags Rust actually compiles has to come from Rust.
+///
+/// Three of the four entries share [`tags::static_tag::compile`], which is
+/// Django's own shape rather than a shortcut here — `do_static`,
+/// `get_static_prefix` and `get_media_prefix` are one class-method call with
+/// different arguments (`static.py:74`, `static.py:92`, `static.py:171`), and that function
+/// recovers the command from the token.
+pub fn library_tag_names() -> Vec<&'static str> {
+    LIBRARY_REGISTRY.iter().map(|(name, _)| *name).collect()
+}
+
 /// Every command name in the registry, ascending — **including the stubs**.
 ///
 /// The name says what the function answers, because the old one
@@ -485,6 +542,97 @@ mod tests {
         assert_eq!(
             both, names,
             "stubs and implementations do not partition the table"
+        );
+    }
+
+    #[test]
+    fn the_library_registry_is_sorted_and_has_no_duplicates() {
+        // Same promise as `REGISTRY`'s, for the same reason: a reader finds an
+        // entry without scanning all four, and the lookup is a linear scan over
+        // a known order.
+        let names = library_tag_names();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted, "LIBRARY_REGISTRY is not ascending");
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            names.len(),
+            "LIBRARY_REGISTRY has a duplicate"
+        );
+    }
+
+    #[test]
+    fn the_library_registry_holds_the_four_names_m12_task_three_lands() {
+        // The literal, because the *set* is a claim about Django's libraries and
+        // not a consequence of anything in this file. `tests/test_tag_inventory.py`
+        // cross-checks `REGISTRY` against Django's built-in registry; the library
+        // table has no such cross-check yet, because the modules it names are
+        // interposed one task at a time — so this row is what notices a fifth
+        // entry arriving without a task agreeing to it.
+        assert_eq!(
+            library_tag_names(),
+            ["cache", "get_media_prefix", "get_static_prefix", "static"],
+        );
+    }
+
+    #[test]
+    fn the_two_tables_are_disjoint_and_the_library_one_adds_nothing_to_the_builtins() {
+        // The invariant the dispatch depends on. `builtin_tag_names_including_stubs`
+        // is what `tests/test_tag_inventory.py` compares against Django's
+        // *built-in* registry, so a library name leaking into `REGISTRY` fails
+        // there; this asserts it here, where the mistake would be made.
+        let builtins = builtin_tag_names_including_stubs();
+        for name in library_tag_names() {
+            assert!(
+                !builtins.contains(&name),
+                "{name} is in both tables: it is a library tag, and REGISTRY is \
+                 cross-checked against Django's built-in registry",
+            );
+        }
+        assert_eq!(
+            builtin_tag_names_including_stubs().len(),
+            25,
+            "the library table must not change the built-in count",
+        );
+    }
+
+    #[test]
+    fn a_library_name_resolves_through_library_tag_and_not_through_builtin_tag() {
+        // The reachability contract, stated as the two lookups rather than as
+        // prose: a caller that asked `builtin_tag` would get `None` and then have
+        // to report `Invalid block tag` for a tag Rust compiles. The gate that
+        // decides *whether* to ask is `Host::library_tag_loaded` and is the
+        // host's; what is asserted here is only that whichever caller asks, the
+        // answer is on this side.
+        for name in library_tag_names() {
+            assert!(
+                library_tag(name).is_some(),
+                "{name} does not resolve through LIBRARY_REGISTRY",
+            );
+            assert!(
+                builtin_tag(name).is_none(),
+                "{name} resolves through builtin_tag: the tables overlap",
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_static_prefix_names_are_not_confused_with_the_tag_that_takes_a_path() {
+        // A cheap shape check on the four entries, because three of them share
+        // one compile function and a copy-paste slip there would be invisible:
+        // every row above passes if `get_media_prefix` were wired to `cache`'s
+        // function *and* the names were permuted to match. What is asserted is
+        // that each name resolves and that the answers are not all one function —
+        // the sharing itself is `static.rs`'s to state, and its own tests do.
+        assert!(library_tag("static").is_some());
+        assert!(library_tag("cache").is_some());
+        assert!(
+            !std::ptr::eq(
+                library_tag("cache").expect("resolves") as *const (),
+                library_tag("static").expect("resolves") as *const (),
+            ),
+            "`cache` is a different module and cannot share `static.rs`'s function",
         );
     }
 }
