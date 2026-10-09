@@ -52,7 +52,7 @@
 //! `strip_tags` is `utility_text_checked` → `host_error`, which keeps the live
 //! `PyErr`, and `run_filter`'s `report` returns that object rather than anything
 //! rebuilt from the class name
-//! (`crates/template-py/src/filters.rs:854`, `:248`, `:1528`). So a corpus row
+//! (`crates/template-py/src/filters.rs:871`, `:248`, `:1644-1645`). So a corpus row
 //! **can** pin it as a parity row — `raises: "SuspiciousOperation"`,
 //! `message: ""` — rather than a documented divergence: the exception's class
 //! name is `SuspiciousOperation` on both sides. (A Rust-synthesised class name
