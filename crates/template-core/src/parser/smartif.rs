@@ -368,16 +368,33 @@ impl IfParser {
     }
 
     /// `IfParser.expression(rbp=0)`.
+    ///
+    /// The counter is incremented and decremented **here and only here**, with
+    /// the fallible work in [`Self::expression_body`] so that the two are
+    /// structurally paired. The first version decremented on the guard path and
+    /// the success path but not on either `?` — four exits, two decrements — so
+    /// a parse that failed inside `nud` or `led` left the counter inflated.
+    /// Nothing recovered from an `IfError` within one parser, so it was
+    /// unobservable through `parse`; `the_nesting_counter_returns_to_zero_after_a_failed_parse`
+    /// now reads the field directly and pins it. Keeping the body a separate
+    /// method rather than an inner closure is what makes "no `?` in this
+    /// function" checkable by eye.
     fn expression(&mut self, rbp: u8) -> Result<NodeId, IfError> {
         self.depth += 1;
-        if self.depth > MAX_NESTING_DEPTH {
-            self.depth -= 1;
-            return Err(IfError::new(
+        let result = if self.depth > MAX_NESTING_DEPTH {
+            Err(IfError::new(
                 self.error_class,
                 format!("If expression is nested more than {MAX_NESTING_DEPTH} deep in if tag."),
-            ));
-        }
+            ))
+        } else {
+            self.expression_body(rbp)
+        };
+        self.depth -= 1;
+        result
+    }
 
+    /// `IfParser.expression`'s body, with the nesting counter left to its caller.
+    fn expression_body(&mut self, rbp: u8) -> Result<NodeId, IfError> {
         let t = self.current;
         self.current = self.next_token();
         let mut left = self.nud(t)?;
@@ -388,7 +405,6 @@ impl IfParser {
             left = self.led(t, left)?;
         }
 
-        self.depth -= 1;
         Ok(left)
     }
 
@@ -816,6 +832,41 @@ mod tests {
             IfToken::Operator(Operator::And),
             "left-associated chain roots at the last `and`",
         );
+    }
+
+    #[test]
+    fn the_nesting_counter_returns_to_zero_after_a_failed_parse() {
+        // The counter is private, so this test reaches for the field rather
+        // than driving `parse` — which is the only way to see the defect at
+        // all. It is reachable from here because a `#[cfg(test)] mod tests` is
+        // a child of this module.
+        //
+        // `["not"]` fails inside `nud`: the prefix operator calls `expression`
+        // again, and *that* call's `nud` on the `EndToken` is the error. So the
+        // counter is two when the error unwinds. Before `expression` was split
+        // from its body, both frames returned through `?` without decrementing
+        // and this read 2; every one of the four exits now leaves it at 0.
+        let mut parser = IfParser::new(tokens(&["not"]));
+        assert!(parser.parse().is_err(), "a lone `not` has no operand");
+        assert_eq!(parser.depth, 0, "a failed parse leaked nesting depth");
+
+        // A chain that fails at the *top* level, after several successful
+        // inner parses, is the other shape: `nud` succeeded each time and the
+        // error comes from `led` seeing no infix operator after a literal.
+        let mut parser = IfParser::new(tokens(&["not", "not", "not", "x", "y"]));
+        assert!(
+            parser.parse().is_err(),
+            "`x y` has no operator between them"
+        );
+        assert_eq!(parser.depth, 0, "a failed parse leaked nesting depth");
+
+        // And the refusal path, which the first version *did* decrement: depth
+        // is back to 0 after the guard fires, not left at the limit.
+        let mut deep: Vec<String> = vec!["not".to_string(); MAX_NESTING_DEPTH + 10];
+        deep.push("x".to_string());
+        let mut parser = IfParser::new(deep);
+        assert!(parser.parse().is_err(), "past the nesting limit");
+        assert_eq!(parser.depth, 0, "the guard leaked nesting depth");
     }
 
     #[test]
