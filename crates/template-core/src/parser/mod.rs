@@ -16,12 +16,13 @@
 pub mod desc;
 pub mod error;
 pub mod host;
+pub mod registry;
 pub mod tags;
 
 pub use desc::{AttrValue, NodeDesc, NodeListDesc, NodeRef, TokenDesc, TEXT_NODE};
 pub use error::{Error, ErrorKind};
 pub use host::{Host, NoHost};
-pub use tags::CompileFn;
+pub use registry::CompileFn;
 
 use std::collections::HashMap;
 
@@ -212,7 +213,7 @@ impl<'a> Parser<'a> {
                     // functions would never run.
                     let compiled = if self.host.has_tag(&command) {
                         self.host.call_tag(&command, &token)
-                    } else if let Some(compile) = tags::builtin_tag(&command) {
+                    } else if let Some(compile) = registry::builtin_tag(&command) {
                         compile(self, &token)
                     } else {
                         return Err(self.invalid_block_tag(&token, &command, parse_until));
@@ -458,6 +459,23 @@ mod tests {
             ),
         );
         assert_eq!(error.token.unwrap().contents, "nope");
+    }
+
+    #[test]
+    fn an_unimplemented_builtin_says_so_rather_than_denying_the_tag_exists() {
+        // The behaviour change M3 introduces. Before it, `{% for %}` fell through
+        // to `invalid_block_tag` and reported Django's "Did you forget to
+        // register or load this tag?" — a message that is *false* for a built-in
+        // tag, since the template is not missing anything. Now it is an
+        // `Unimplemented` naming the milestone that supplies it.
+        let error = failure("{% for x in y %}{% endfor %}");
+        assert_eq!(
+            error.kind,
+            ErrorKind::Unimplemented(
+                "'for' is a built-in tag this engine does not implement yet (M5)".to_string(),
+            ),
+        );
+        assert_eq!(error.token.unwrap().contents, "for x in y");
     }
 
     #[test]

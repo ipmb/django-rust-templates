@@ -5,6 +5,7 @@
 //! in the `template-py` binding crate, so that the engine's own semantics stay
 //! testable with plain `cargo test`.
 
+pub mod filters;
 pub mod lexer;
 pub mod parser;
 pub mod pyunicode;

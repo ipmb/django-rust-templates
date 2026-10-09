@@ -15,6 +15,18 @@ use template_core::parser::desc::{AttrValue, NodeDesc, NodeListDesc, TokenDesc};
 use template_core::parser::{Error, ErrorKind, NoHost, Parser as CoreParser};
 use template_core::token::{Token, TokenType};
 
+/// Every built-in tag command Rust owns a compile function for, ascending.
+///
+/// Exposed because the cross-check lives where both languages exist: Django's
+/// registry is only readable from Python, and a Rust test cannot see `.django`.
+/// The list is the `REGISTRY` table in `template_core::parser::registry`, which
+/// is written once and in full (§10.4) — a name missing here is a built-in tag
+/// this engine would report as unknown.
+#[pyfunction]
+fn builtin_tag_names() -> Vec<&'static str> {
+    template_core::parser::registry::builtin_tag_names()
+}
+
 /// Engine version, so the Python shell can assert it is talking to the build it
 /// expects rather than a stale `.so` left in the tree.
 #[pyfunction]
@@ -318,6 +330,7 @@ fn parse(
 
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(builtin_tag_names, m)?)?;
     m.add_function(wrap_pyfunction!(engine_version, m)?)?;
     m.add_function(wrap_pyfunction!(whitespace_codepoints, m)?)?;
     m.add_function(wrap_pyfunction!(split_contents, m)?)?;

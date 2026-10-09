@@ -186,5 +186,32 @@ class TagInventoryTests(unittest.TestCase):
         )
 
 
+class RustRegistryTests(unittest.TestCase):
+    """The Rust registry is Django's built-ins minus the three §6 assigns to Python.
+
+    M2 could assert the complement from Rust alone (`the_registry_holds_exactly_the_nine_m2_tags`
+    listed the 18 names that must *not* be registered), because a missing entry
+    and an absent tag were the same thing. From M3 they are not: the registry is
+    written once and in full, so an unimplemented tag has an entry whose compile
+    function returns `Unimplemented` rather than no entry at all. The set is
+    therefore only checkable where Django's registry is readable, which is here.
+    """
+
+    def test_the_rust_registry_matches_the_loader_tags_subtraction(self):
+        from django_rust_templates import _native
+
+        self.assertEqual(
+            sorted(_native.builtin_tag_names()),
+            sorted(REGISTERED - {"block", "extends", "include"}),
+        )
+
+    def test_the_three_loader_tags_are_absent_on_purpose(self):
+        from django_rust_templates import _native
+
+        for name in ("block", "extends", "include"):
+            with self.subTest(name=name):
+                self.assertNotIn(name, _native.builtin_tag_names())
+
+
 if __name__ == "__main__":
     unittest.main()
