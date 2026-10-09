@@ -458,7 +458,10 @@ Final_Sigma, so a per-code-point `lower` would be wrong for the strings that
 reach it, and `pyunicode::case` deliberately does not provide one. See Task 4
 and `FilterHost::str_lower`.
 
-Run this after a `rustc` upgrade or a Django pin bump. It writes
+Run this under `.venv/bin/python` — the numbers are a property of the
+interpreter's own Unicode tables as much as of Rust's, and the system python3 on
+this machine disagrees with the pinned 3.14.4 on 67 of them. Run it after a
+`rustc` upgrade or a Django pin bump. It writes
 `crates/template-core/src/pyunicode/case.rs`;
 `tests/test_pyunicode_case_parity.py` is what fails loudly if you forget.
 """
@@ -471,6 +474,25 @@ same comparison for lower into the doc comment's count.
 it**: emit a temporary Rust file, compile it with `rustc`, run it to a temp file,
 and diff. Reimplementing Rust's table in Python is the one thing that would make
 the generator agree with a wrong answer.
+
+**It must run under `.venv/bin/python`, and that is load-bearing rather than
+stylistic.** `str.upper()`'s answer comes from the interpreter's compiled-in
+Unicode tables, so the divergence count is a property of *two* version pairs, not
+one. Measured on this machine on 2026-10-08 with `rustc 1.98.0` fixed and only the
+interpreter varying:
+
+| interpreter | `unicodedata` | upper | lower |
+|---|---|---|---|
+| `.venv/bin/python` (CPython 3.14.4) | 16.0.0 | **28** | **28** |
+| the system `/usr/bin/python3` | 13.0.0 | 95 | 95 |
+
+Zero code points diverge the other way in either pairing — Rust is never *behind*
+Python here — so the table is a pure suppression list. Running the generator under
+the wrong interpreter emits 67 extra entries, and the parity test does catch it,
+because over-suppressing means Rust returns the code point itself where Python
+maps it away: `upper differs at U+A7CF`, which is a real failure and not a silent
+one. `tests/test_pyunicode_case_parity.py` is also what catches a `rustc` bump
+moving Rust's side of the same pair.
 
 The emitted module:
 
