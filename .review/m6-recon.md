@@ -293,18 +293,23 @@ wrong and green. That is not residue — it is the only instrument that fires on
 anchored-but-wrong rows cited exclusively from files that have finished.
 
 It fires when a *file* finishes, which is why its size says nothing. The whole
-history so far, as entries rather than as a count that went 76 -> 81 -> 76:
+history so far, as entries rather than as a count that returned to 76 four times:
 
 | entered at | file that went shorthand-free | rows that entered | read? |
 | --- | --- | --- | --- |
 | `0876b22` | `template-py/src/filters.rs`, `template-core/src/filters/mod.rs` | `html.py:246`, `html.py:412-415`, `defaultfilters.py:38-52`, `:48`, `:558-570` | 5 read; **2 wrong** (`:246` is a blank line; `:412-415` is `wrapping_punctuation_openings`, not `trim_url`) — fixed in `0876b22`, the three correct ones requoted in `a73dccb` |
-| `a3798f3` | `template-core/src/parser/resolve.rs` | `base.py:1014`, `:959-1029`, `:963-995`, `:972`, `:999`, `:999-1029` | 6 read; **5 wrong** (`959-1029` ends on a blank line; `963-995` runs past the arms it claims; `999` is not the callable arm's guard; `999-1029` misses two of its three branches and ends past the handler; `972` is right for the predicate but was cited for a `raise` at 980) — fixed in the commit that adds this table |
+| `a3798f3` | `template-core/src/parser/resolve.rs` | `base.py:1014`, `:959-1029`, `:963-995`, `:972`, `:999`, `:999-1029` | 6 read; **5 wrong** (`959-1029` ends on a blank line; `963-995` runs past the arms it claims; `999` is not the callable arm's guard; `999-1029` misses two of its three branches and ends past the handler; `972` is right for the predicate but was cited for a `raise` at 980) — fixed in `c24d657` |
+| the `lib.rs` `InvalidOperation` commit | `template-py/src/lib.rs` | `base.py:109-110`, `base.py:972-976`, `smartif.py:54-56` | 3 read; **0 wrong** — and the reason is worth keeping: `lib.rs`'s citations had already been read in context by its own naming pass, so by the time they were stranded they had been looked at once. This batch is the counter-example that shows the detector's ratio is about *which pass read the row first*, not about the bucket |
 
-Eleven rows have passed through; seven were wrong or cited for the wrong line.
-Both batches were found by reading the list as a list at the commit that
-stranded it — never by a count, and never by any earlier check, because
-"anchored" hides a row from the naming pass and "cited only from finished files"
-hides it from the migration's arithmetic.
+Fifteen rows have passed through; seven were wrong or cited for the wrong line.
+Four were wrong in a *span's* end (`base.py:959-1029` ends on a blank line,
+`:963-995` runs past the arms it claims, `:999-1029` misses two of its three
+branches, `html.py:412-415` is a neighbouring `@cached_property`) and three were
+wrong in the line itself (`html.py:246` is blank, `base.py:999` is not the guard
+it is cited as, `base.py:972` is right for one of its two sites and wrong for
+the other). All seven came from a file whose citations had never been read in
+context, and the span ones are invisible to a check that only asks whether some
+line inside the span exists.
 
 The order of the sweep decides when each row becomes visible: a row cited only
 from files swept last surfaces last. So the list still has to be read once, at

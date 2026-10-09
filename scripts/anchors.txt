@@ -1,8 +1,13 @@
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
+layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
+layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-
+humanize.py:3	django/contrib/humanize/templatetags/humanize.py	3	-	from decimal import Decimal, InvalidOperation	-
+humanize.py:80	django/contrib/humanize/templatetags/humanize.py	80	-	except (TypeError, ValueError, InvalidOperation):	-
+db/models/fields/__init__.py:1818	django/db/models/fields/__init__.py	1818	-	except (decimal.InvalidOperation, TypeError, ValueError):	-
 base.py:60	django/template/base.py	60	-	-	-
 base.py:75	django/template/base.py	75	-	-	-
 django/template/base.py:97-101	django/template/base.py	97	101	-	-
-base.py:109-110	django/template/base.py	109	110	-	-
+base.py:109-110	django/template/base.py	109	110	def __str__(self):	return self.msg % self.params
 base.py:198-200	django/template/base.py	198	200	parser.parse()	-
 django/template/base.py:390-403	django/template/base.py	390	403	-	-
 base.py:472	django/template/base.py	472	-	-	-
@@ -83,7 +88,7 @@ base.py:959-1028	django/template/base.py	959	1028	for bit in self.lookups:	retur
 base.py:960-992	django/template/base.py	960	992	try:  # dictionary lookup	)  # missing attribute
 base.py:963	django/template/base.py	963	-	hasattr(type(current), "__getitem__")	-
 base.py:968	django/template/base.py	968	-	except (TypeError, AttributeError, KeyError, ValueError, IndexError):	-
-base.py:972-976	django/template/base.py	972	976	-	-
+base.py:972-976	django/template/base.py	972	976	if isinstance(current, BaseContext) and getattr(	current = getattr(current, bit)
 base.py:972	django/template/base.py	972	-	if isinstance(current, BaseContext) and getattr(	-
 base.py:977	django/template/base.py	977	-	except (TypeError, AttributeError):	-
 base.py:979-980	django/template/base.py	979	980	if not isinstance(current, BaseContext) and bit in dir(current):	raise
@@ -112,7 +117,7 @@ base.py:1194	django/template/base.py	1194	-	-	-
 base.py:1200	django/template/base.py	1200	-	-	-
 base.py:1202	django/template/base.py	1202	-	kwargs[key] = parser.compile_filter(value)	-
 base.py:1203-1206	django/template/base.py	1203	1206	-	-
-defaultfilters.py:6	django/template/defaultfilters.py	6	-	-	-
+defaultfilters.py:6	django/template/defaultfilters.py	6	-	from decimal import ROUND_HALF_UP, Context, Decimal, InvalidOperation, getcontext	-
 defaultfilters.py:14	django/template/defaultfilters.py	14	-	-	-
 defaultfilters.py:38-52	django/template/defaultfilters.py	38	52	def stringfilter(func):	return _dec
 defaultfilters.py:46	django/template/defaultfilters.py	46	-	first = str(first)	-
@@ -141,6 +146,7 @@ defaultfilters.py:152-155	django/template/defaultfilters.py	152	155	try:	except 
 defaultfilters.py:153-154	django/template/defaultfilters.py	153	154	str(text)	-
 defaultfilters.py:153	django/template/defaultfilters.py	153	-	input_val = str(text)	-
 defaultfilters.py:155-159	django/template/defaultfilters.py	155	159	except InvalidOperation:	return ""
+defaultfilters.py:155	django/template/defaultfilters.py	155	-	except InvalidOperation:	-
 defaultfilters.py:157-159	django/template/defaultfilters.py	157	159	d = Decimal(str(float(text)))	return ""
 defaultfilters.py:158-159	django/template/defaultfilters.py	158	159	except (ValueError, InvalidOperation, TypeError):	-
 defaultfilters.py:158	django/template/defaultfilters.py	158	-	except (ValueError, InvalidOperation, TypeError):	-
@@ -363,7 +369,7 @@ loader_tags.py:347	django/template/loader_tags.py	347	-	-	-
 smartif.py:22-26	django/template/smartif.py	22	26	-	-
 smartif.py:40-43	django/template/smartif.py	40	43	-	-
 smartif.py:51	django/template/smartif.py	51	-	class Operator(TokenBase):	-
-smartif.py:54-56	django/template/smartif.py	54	56	-	-
+smartif.py:54-56	django/template/smartif.py	54	56	self.first = left	self.second = parser.expression(bp)
 smartif.py:81-83	django/template/smartif.py	81	83	-	-
 smartif.py:83	django/template/smartif.py	83	-	self.second = None	-
 smartif.py:115-116	django/template/smartif.py	115	116	-	-

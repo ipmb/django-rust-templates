@@ -239,10 +239,15 @@ fn filter(
 /// used to sit here was the *host* half — `InvalidOperation`, which `builtins`
 /// does not hold — and the host half no longer passes through this function at
 /// all. For the record, since it was the argument for calling that gap
-/// unreachable: on the pinned tree the name occurs at exactly three sites outside
-/// tests (`defaultfilters.py:6`, `:155`, `:181`), every one inside `floatformat`
-/// and all three inside an `except` clause that catches it (`:155`, `:158`,
-/// `:181`), so no filter let one escape even then.
+/// unreachable: outside the test suite the name occurs on nine lines, six of
+/// them in filter modules — two imports (`defaultfilters.py:6`,
+/// `humanize.py:3`) and four uses, each in an `except` clause that catches it.
+/// Three of the uses are `floatformat`'s (`defaultfilters.py:155`,
+/// `defaultfilters.py:158`, `defaultfilters.py:181`) and the fourth is
+/// `intcomma`'s (`humanize.py:80`), so no filter let one escape even then. The
+/// other three are outside the template engine (`layermapping.py:12` and
+/// `layermapping.py:419`, through its `DecimalInvalidOperation` alias, and
+/// `db/models/fields/__init__.py:1818`), none of them a filter.
 fn filter_py_error(py: Python<'_>, error: &Error) -> PyErr {
     let ErrorKind::FilterHost(inner) = &error.kind else {
         // An `Unimplemented` is a filter this engine has not built. Anything else
