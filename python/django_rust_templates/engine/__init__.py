@@ -26,11 +26,21 @@ file needs to change when that happens.
 # Multiple Template Engines
 
 from .engine import Engine
-from .utils import EngineHandler
 
-engines = EngineHandler()
+# **No registry here, and its absence is deliberate.** Upstream's
+# ``django/template/__init__.py`` — of which this file is the engine half —
+# also binds ``engines = EngineHandler()``, the per-project registry that
+# ``django.template.loader``, ``django.template.response`` and
+# ``django.template.autoreload`` all consult, and that
+# ``django.test.signals.reset_template_engines`` empties on every ``TEMPLATES``
+# change. All four of those are Django's, and they name *Django's* instance, so a
+# second handler built here would be a registry nothing resets: measured, as
+# ``test_response.TemplateResponseTest.test_render`` reading a backend built from
+# the settings a class-level ``override_settings`` had already replaced. Our
+# backend registers itself there like any other backend, by being named in
+# ``settings.TEMPLATES``; there is nothing for this package to keep.
 
-__all__ = ("Engine", "engines")
+__all__ = ("Engine",)
 
 
 # Django Template Language

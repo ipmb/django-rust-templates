@@ -2239,7 +2239,7 @@ impl LookupTarget for PyTarget {
 static BASE_CONTEXT: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 
 fn base_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
-    BASE_CONTEXT.import(py, "django.template.base", "BaseContext")
+    BASE_CONTEXT.import(py, "django_rust_templates.engine.base", "BaseContext")
 }
 
 /// Django's `VariableDoesNotExist`, cached for the same reason.
@@ -2256,13 +2256,17 @@ static VARIABLE_DOES_NOT_EXIST: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 /// inside a `{% for %}` fails once per iteration — and would produce a message
 /// Django never produces.
 ///
-/// The class comes from `django.template.base` through a `GILOnceCell` rather
-/// than from a Rust type, for the same reason `base_context` does: the class is
-/// Python's, and raising a *different* exception class would make a
-/// differential comparison fail on the class rather than on the message.
+/// The class comes from `django_rust_templates.engine.base` through a
+/// `GILOnceCell` rather than from a Rust type, for the same reason
+/// `base_context` does: the class is Python's, and raising a *different*
+/// exception class would make a differential comparison fail on the class
+/// rather than on the message.
 fn variable_does_not_exist(py: Python<'_>, bit: &str, container: Py<PyAny>) -> PyResult<PyErr> {
-    let class =
-        VARIABLE_DOES_NOT_EXIST.import(py, "django.template.base", "VariableDoesNotExist")?;
+    let class = VARIABLE_DOES_NOT_EXIST.import(
+        py,
+        "django_rust_templates.engine.base",
+        "VariableDoesNotExist",
+    )?;
     // A Rust 2-tuple becomes a Python tuple, which is the shape `params` needs:
     // `self.msg % self.params`.
     Ok(PyErr::from_value(class.call1((
@@ -2847,14 +2851,15 @@ impl LookupScope {
     }
 }
 
-/// `django.template.base.render_value_in_context`, fetched once per render.
+/// `django_rust_templates.engine.base.render_value_in_context`, fetched once per
+/// render.
 ///
 /// The function itself, not a Rust reimplementation of it: it is Django's —
-/// `template_localtime`, `localize`, `conditional_escape` — and both the shim and
-/// stock serve one, so an escaped variable is byte-identical to stock's on both
-/// sides by construction rather than by a test that has to keep pace with it.
+/// `template_localtime`, `localize`, `conditional_escape` — transcribed into this
+/// package, and the transcription is byte-identical to stock's by construction
+/// rather than by a test that has to keep pace with it.
 fn escape_fn<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    py.import("django.template.base")?
+    py.import("django_rust_templates.engine.base")?
         .getattr("render_value_in_context")
 }
 

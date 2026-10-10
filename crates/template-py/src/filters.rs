@@ -1198,12 +1198,13 @@ impl FilterHost for PyFilterHost<'_> {
                     None => py.None(),
                 },
             };
-            // **The transcribed Python body, under the seam**: `django.templatetags.tz`
-            // is served from `engine/templatetags/tz.py` by the shim, so this is
-            // the verbatim Task 4 transcription of `do_timezone`, not Django's.
-            // `ours/theirs` — the routing is Rust's, the algorithm is Python's.
+            // **The transcribed Python body, under the seam**:
+            // `django_rust_templates.engine.templatetags.tz` is the verbatim Task 4
+            // transcription of `do_timezone`, not one of Django's installed
+            // modules. `ours/theirs` — the routing is Rust's, the algorithm is
+            // Python's.
             let converted = py
-                .import("django.templatetags.tz")?
+                .import("django_rust_templates.engine.templatetags.tz")?
                 .getattr("do_timezone")?
                 .call1((self.object(&value)?, zone))?;
             self.classify(&converted)

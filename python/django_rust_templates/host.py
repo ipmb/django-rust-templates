@@ -34,25 +34,25 @@ from __future__ import annotations
 import importlib
 import sys
 
-from django.template import defaultfilters as _defaultfilters
-from django.template import defaulttags as _defaulttags
-from django.template import loader_tags as _loader_tags
-from django.template.base import PartialTemplate, Token, TokenType
-from django.template.exceptions import TemplateSyntaxError
 from django.utils.datastructures import DeferredSubDict
 
 from django_rust_templates import _native
+from django_rust_templates.engine import defaultfilters as _defaultfilters
+from django_rust_templates.engine import defaulttags as _defaulttags
+from django_rust_templates.engine import loader_tags as _loader_tags
+from django_rust_templates.engine.base import PartialTemplate, Token, TokenType
+from django_rust_templates.engine.exceptions import TemplateSyntaxError
 
 __all__ = ("ShellHost",)
 
 
 # The five `django.templatetags` libraries M12 interposes, as module paths.
 _LIBRARY_TAG_MODULES = (
-    "django.templatetags.cache",
-    "django.templatetags.i18n",
-    "django.templatetags.l10n",
-    "django.templatetags.static",
-    "django.templatetags.tz",
+    "django_rust_templates.engine.templatetags.cache",
+    "django_rust_templates.engine.templatetags.i18n",
+    "django_rust_templates.engine.templatetags.l10n",
+    "django_rust_templates.engine.templatetags.static",
+    "django_rust_templates.engine.templatetags.tz",
 )
 
 

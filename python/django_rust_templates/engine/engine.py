@@ -1,7 +1,5 @@
 # TRANSCRIBED: django/template/engine.py (Django 6.0.9)
 
-import functools
-
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.functional import cached_property
 from django.utils.module_loading import import_string
@@ -14,9 +12,9 @@ from .library import import_library
 
 class Engine:
     default_builtins = [
-        "django.template.defaulttags",
-        "django.template.defaultfilters",
-        "django.template.loader_tags",
+        "django_rust_templates.engine.defaulttags",
+        "django_rust_templates.engine.defaultfilters",
+        "django_rust_templates.engine.loader_tags",
     ]
 
     def __init__(
@@ -37,10 +35,14 @@ class Engine:
         if context_processors is None:
             context_processors = []
         if loaders is None:
-            loaders = ["django.template.loaders.filesystem.Loader"]
+            loaders = ["django_rust_templates.engine.loaders.filesystem.Loader"]
             if app_dirs:
-                loaders += ["django.template.loaders.app_directories.Loader"]
-            loaders = [("django.template.loaders.cached.Loader", loaders)]
+                loaders += [
+                    "django_rust_templates.engine.loaders.app_directories.Loader"
+                ]
+            loaders = [
+                ("django_rust_templates.engine.loaders.cached.Loader", loaders)
+            ]
         else:
             if app_dirs:
                 raise ImproperlyConfigured(
@@ -86,8 +88,27 @@ class Engine:
             repr(self.autoescape),
         )
 
+    # **Upstream caches this answer and this one deliberately does not**, and
+    # the difference is not an optimisation traded away. ``get_default`` reads
+    # ``settings.TEMPLATES`` through the engine registry, so its answer is a
+    # function of a setting; upstream can cache that because Django's own
+    # ``django.test.signals.reset_template_engines`` receiver calls
+    # ``django.template.engine.Engine.get_default.cache_clear()`` on every
+    # ``TEMPLATES``, ``DEBUG`` or ``INSTALLED_APPS`` change. That receiver names
+    # *Django's* class object, and this package's ``Engine`` is a different
+    # class object, so a cache here is one nothing can ever invalidate: it would
+    # hold the settings from the first call for the life of the process.
+    # Measured, as three red rows in ``test_engine.GetDefaultTests`` — with
+    # ``override_settings(TEMPLATES=[...])`` in force, ``get_default()`` returned
+    # the engine built from the *unoverridden* settings, and
+    # ``test_no_engines_configured`` could not raise because a previous answer
+    # was already memoised.
+    #
+    # The work it saves is ``EngineHandler.all()``, which is a dict lookup per
+    # configured backend against a registry that caches the backends themselves
+    # — so the uncached version is correct by construction and cheap by
+    # measurement, which is the right way round.
     @staticmethod
-    @functools.lru_cache
     def get_default():
         """
         Return the first DjangoTemplates backend that's configured, or raise
@@ -108,9 +129,25 @@ class Engine:
         from django.template import engines
         from django.template.backends.django import DjangoTemplates
 
+        from django_rust_templates.backends import RustTemplates
+
+        # **``RustTemplates`` is the second arm, and it is not decoration.** This
+        # method exists for the historical API that has no engine to hand —
+        # `Template(...)` at module scope, `{% extends %}` in code that never saw
+        # settings — and a caller who configured this package and then used it
+        # would otherwise be handed *stock Django's* engine: the loop would find
+        # no `DjangoTemplates` and raise, or find one configured alongside ours
+        # and return the wrong engine, in both cases without a traceback pointing
+        # anywhere near the cause. Upstream's loop is single-armed because upstream
+        # has one backend; the package ships a second.
         for engine in engines.all():
-            if isinstance(engine, DjangoTemplates):
+            if isinstance(engine, (DjangoTemplates, RustTemplates)):
                 return engine.engine
+        # Upstream's wording, and pinned as such: `template_tests.test_engine`
+        # asserts this exact string, so changing it to name both backends would
+        # buy a clearer message at the price of a red acceptance run. It is also
+        # reachable only when *neither* backend is configured, which is the case
+        # it describes.
         raise ImproperlyConfigured("No DjangoTemplates backend is configured.")
 
     @cached_property

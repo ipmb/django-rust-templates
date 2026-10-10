@@ -45,7 +45,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from django.template.base import (
+from django_rust_templates import _native
+from django_rust_templates.engine.base import (
     UNKNOWN_SOURCE,
     DebugLexer,
     Lexer,
@@ -54,11 +55,9 @@ from django.template.base import (
     Token,
     TokenType,
 )
-from django.template.context import Context
-from django.template.engine import Engine
-from django.template.exceptions import TemplateSyntaxError
-
-from django_rust_templates import _native
+from django_rust_templates.engine.context import Context
+from django_rust_templates.engine.engine import Engine
+from django_rust_templates.engine.exceptions import TemplateSyntaxError
 from django_rust_templates.host import ShellHost
 
 __all__ = (

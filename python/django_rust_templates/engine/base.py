@@ -58,7 +58,7 @@ import re
 import warnings
 from enum import Enum
 
-from django.template.context import BaseContext
+from .context import BaseContext
 from django.utils.deprecation import django_file_prefixes
 from django.utils.formats import localize
 from django.utils.html import conditional_escape
