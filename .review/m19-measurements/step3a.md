@@ -501,6 +501,20 @@ a quoted argument is `mark_safe`d into a `SafeString` and `int_of` cannot answer
 `int`, and `int()` stays in Rust.  The next question for this row is therefore the
 four crossings themselves, not the routing, which is now correct.
 
+**And that generalises off `floatformat`, so it is a property of the arm rather
+than of one filter.**  The same probe reads every int-argument filter both ways,
+bare number against the quoted string for the same value, and the surcharge is
+**exactly +1 every time**: `floatformat` 4→5, `truncatechars` 1→2,
+`truncatewords` 1→2, and `ljust` / `rjust` / `center` / `get_digit` **0→1**.  The
+last four are the point — their bodies never leave Rust when the argument is a
+bare number, so the quoted spelling of the same argument is the *only* thing that
+makes them cross at all.  The bare-number arm is therefore cheaper than the quoted
+spelling on seven filters, and on four of them the difference is the whole
+crossing.  **A shape added for correctness turns out to be a performance argument
+as well, and those two do not usually point the same way** — worth saying plainly,
+rather than letting the timing read as the reason the shape was added when the
+reason was the census row.
+
 The gate that keeps the fix fixed, in two places: the route table above (a
 regression flips those rows back to `delegated`, which is how the hole was found)
 and three unit rows in `tests/test_interposition.py` — the argument reaching the

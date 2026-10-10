@@ -1,4 +1,4 @@
-# commit dbce272 (main), artifact bc4c750a (release .so), 2026-10-10
+# commit 384dde8 (main), artifact bc4c750a (release .so), 2026-10-10
 
 iters=20, rust engine, render mode
 body xings: host crossings inside the body the walk applied
@@ -27,3 +27,21 @@ the input path.  They are the four host calls the body makes
 A *quoted* argument makes it 5: the extra one is `to_int`, which Rust
 answers for a bare number (`Value::Int`) and not for a `SafeString`.
 `upper` is 0 because Rust computes it; `lower`/`escape`/`add` are 1.
+
+
+=== the shape surcharge: a quoted argument against a bare number ===
+
+filter              bare    quoted    delta
+--------------------------------------------
+floatformat            4         5       +1
+truncatechars          1         2       +1
+truncatewords          1         2       +1
+ljust                  0         1       +1
+rjust                  0         1       +1
+center                 0         1       +1
+get_digit              0         1       +1
+
+The delta is +1 on every one: the quoted spelling pays a `to_int` the
+bare number does not.  Where `bare` is 0 the literal arm is the whole
+crossing — the body stays in Rust — and the quoted spelling is the only
+reason it does not.

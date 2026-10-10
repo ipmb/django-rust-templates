@@ -23,6 +23,13 @@ extra crossing is `to_int`, because Django `mark_safe`s a quoted argument into a
 free where it must cross for a `Value::Safe`.  So the bare-number arm is cheaper
 than the quoted spelling of the same argument — the literal keeps the `int`.
 
+**And that is the arm's property and not `floatformat`'s.**  The second table
+reads every int-argument filter both ways and the surcharge is **+1 every time**;
+on `ljust` / `rjust` / `center` / `get_digit` the bare number is **0** and the
+quoted spelling is the only reason the body crosses at all.  A shape added for
+correctness that turns out to be a performance argument as well — worth stating
+rather than letting the timing read as the reason the shape was added.
+
 `upper` and `add` are the contrast: `upper` is a Rust table over a `Value::Str`
 and reads **0**; `add` is a Python body and reads **1**.  Four is `floatformat`'s
 own, not the wrapper's — the wrapper's crossings are outside the window by
@@ -63,6 +70,24 @@ CASES = [
     ("lower           (Python body)", "{{ x|lower }}", {"x": "ABC"}),
     ("escape          (Python body)", "{{ x|escape }}", {"x": "<a>"}),
     ("add:2           (Python body)", "{{ x|add:2 }}", {"x": 5}),
+]
+
+# The same question one axis over: the argument's *shape*.  Each row is one filter
+# spelled with a bare number and with the quoted string for the same value, so the
+# delta is what the quoted spelling costs.  If the extra crossing is `to_int` (a
+# `Value::Safe` cannot be answered in Rust where a `Value::Int` can), it should be
+# +1 on every filter that reads its argument as an int — which makes this a check
+# on that account rather than a separate fact.  The rows where bare is **0** are
+# the interesting ones: there the literal arm is the difference between a body
+# that never leaves Rust and one that does.
+SHAPES = [
+    ("floatformat", "{{ x|floatformat:2 }}", '{{ x|floatformat:"2" }}', {"x": 1.2345}),
+    ("truncatechars", "{{ x|truncatechars:3 }}", '{{ x|truncatechars:"3" }}', {"x": "abcdefg"}),
+    ("truncatewords", "{{ x|truncatewords:3 }}", '{{ x|truncatewords:"3" }}', {"x": "a b c d e f"}),
+    ("ljust", "{{ x|ljust:10 }}", '{{ x|ljust:"10" }}', {"x": "ab"}),
+    ("rjust", "{{ x|rjust:10 }}", '{{ x|rjust:"10" }}', {"x": "ab"}),
+    ("center", "{{ x|center:10 }}", '{{ x|center:"10" }}', {"x": "ab"}),
+    ("get_digit", "{{ x|get_digit:2 }}", '{{ x|get_digit:"2" }}', {"x": 12345}),
 ]
 
 
@@ -115,6 +140,33 @@ def main() -> None:
         "A *quoted* argument makes it 5: the extra one is `to_int`, which Rust\n"
         "answers for a bare number (`Value::Int`) and not for a `SafeString`.\n"
         "`upper` is 0 because Rust computes it; `lower`/`escape`/`add` are 1."
+    )
+
+    # The shape axis, across every int-argument filter: the delta should be +1
+    # everywhere if the extra crossing is `to_int`.
+    print("\n\n=== the shape surcharge: a quoted argument against a bare number ===\n")
+    print(f"{'filter':16}  {'bare':>6}  {'quoted':>8}  {'delta':>7}")
+    print("-" * 44)
+    for name, bare, quoted, data in SHAPES:
+        counts = []
+        for source in (bare, quoted):
+            engine = bench_engines.build("rust", {"page.html": source}, {})
+            try:
+                handle = engine.get("page.html")
+                _, filters, xings, _ = census_render(
+                    engine, handle, engine.context(data)
+                )
+            finally:
+                engine.close()
+            counts.append((sum(n for _, n in filters) or 0, xings))
+        (bare_applied, bare_x), (quoted_applied, quoted_x) = counts
+        assert bare_applied == quoted_applied == 1, (name, counts)
+        print(f"{name:16}  {bare_x:>6g}  {quoted_x:>8g}  {quoted_x - bare_x:>+7g}")
+    print(
+        "\nThe delta is +1 on every one: the quoted spelling pays a `to_int` the\n"
+        "bare number does not.  Where `bare` is 0 the literal arm is the whole\n"
+        "crossing — the body stays in Rust — and the quoted spelling is the only\n"
+        "reason it does not."
     )
 
 
