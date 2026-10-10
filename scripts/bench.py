@@ -44,7 +44,22 @@ failure and exits non-zero: byte-identical output is the drop-in criterion this
 package exists to meet, and a timing table whose two sides render different bytes
 is not a comparison. `jinja2` differing is not a failure — it is a different
 template language — but it is printed, per row, and the report lists the rows
-where the corpus is *not* a byte-for-byte intersection.
+where the corpus is *not* a byte-for-byte intersection. The `compile` mode's
+identity gate rests on the corpus fixing its own output, which is a precondition
+rather than a fact: `nondeterministic_rows` scans for the constructs that would
+break it and says so on every run, so a row carrying the clock is named rather
+than read as a bug three modes deep.
+
+**`--compare` is the other half of the instrument.** A single run is a level;
+what a slice needs is a delta, and a delta taken by hand between two runs is
+where two of the last three slices entered a baseline error — a `before` column
+read off the wrong tree, and a `+2.3%` called a move against a 3.67% band.
+`--compare A.json B.json` prints the provenance of both runs (artifact, command,
+repeats), refuses two corpora or two engine sets, refuses two builds unless
+`--different-artifacts` states that is the intent, and prints each row's delta in
+the ratio unit. With `--band A B` — two payloads of *one* build — each delta is
+marked inside or outside its own row's scatter; without it, nothing is
+classified, because a delta with no band is a number and not a finding.
 
 **What is measured.** `perf_counter` around a tight inner loop; the reported
 figure is the **best** per-call time in microseconds, with the worst beside it so
@@ -71,7 +86,9 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shlex
+import statistics
 import sys
 import time
 from datetime import datetime, timezone
@@ -684,6 +701,202 @@ def mode_disagreements(records: list[dict]) -> list[str]:
     return out
 
 
+# --- comparing two runs ------------------------------------------------------------
+
+# DTL constructs whose output is **not a function of the source and the context**:
+# the clock, a fresh CSRF token, a random draw. `mode_disagreements` compares three
+# renders of one source and refuses when they differ, which is right for every row
+# that is deterministic — but on a row carrying one of these the three *should*
+# differ, so the gate would fire for a reason that is not a render bug. The scan is
+# lexical and deliberately so: it has one job, to let a failure name its own cause
+# at the point it prints, and a lexical miss still fails loudly (as a disagreement).
+NONDETERMINISTIC = (
+    (r"\{%\s*now\b", "{% now %} — reads the clock"),
+    (r"\{%\s*csrf_token\b", "{% csrf_token %} — a fresh token per render"),
+    (r"\{%\s*lorem\b", "{% lorem %} — random words"),
+    (r"\|\s*random\b", "|random — a fresh draw per render"),
+)
+
+
+def nondeterministic_rows() -> list[str]:
+    """Corpus rows carrying a construct whose output the source does not fix.
+
+    The precondition `mode_disagreements` rests on, made visible rather than
+    assumed: a row listed here is one where a mode disagreement is *expected*, so
+    the reader learns that from this line instead of from a refusal that reads
+    like a render bug.
+    """
+    out = []
+    for workload in bench_corpus.workloads():
+        for text in workload.templates.values():
+            for pattern, why in NONDETERMINISTIC:
+                if re.search(pattern, text):
+                    out.append(f"{workload.key}: {why}")
+    return out
+
+
+def load_payload(path: str) -> dict:
+    """A `--json` payload, with every field a comparison reads checked present."""
+    try:
+        pay = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"{path}: not readable as a bench.py payload ({exc})") from exc
+    for field in ("native", "args", "command", "ran", "modes", "records"):
+        if field not in pay:
+            raise SystemExit(f"{path}: not a bench.py payload — no {field!r}")
+    return pay
+
+
+def payload_sha(pay: dict) -> str:
+    return pay["native"].split("sha256:")[1].split()[0]
+
+
+def ratios_of(pay: dict) -> dict:
+    """`(key, mode) -> ours/stock` for one payload, the unit a delta is quoted in.
+
+    The ratio rather than the microsecond, for `bench_scatter`'s reason: stock's
+    own cell is a denominator shared by every ratio in its row, so its noise
+    cancels in a way a per-cell µs delta cannot show.
+    """
+    cells = {}
+    for rec in pay["records"]:
+        cells[(rec["key"], rec["mode"], rec["engine"])] = rec["best_us"]
+    out = {}
+    for (key, mode, engine), us in cells.items():
+        if engine != "rust":
+            continue
+        stock = cells.get((key, mode, "django"))
+        if stock:
+            out[(key, mode)] = us / stock
+    return out
+
+
+def scatter_band(band_a: dict, band_b: dict) -> tuple[dict, float, float]:
+    """Per-row and population scatter of one build, ratio against ratio.
+
+    Two runs of the *same* artifact, so the difference cannot be a change: what it
+    is, is how much a delta can be when nothing moved. Returns
+    `{(key, mode): |rel|}` plus the median and max over the rows both runs share.
+    """
+    ra, rb = ratios_of(band_a), ratios_of(band_b)
+    per_row = {}
+    for cell in set(ra) & set(rb):
+        if ra[cell]:
+            per_row[cell] = abs(rb[cell] - ra[cell]) / ra[cell]
+    mags = sorted(per_row.values())
+    median = statistics.median(mags) if mags else 0.0
+    return per_row, median, (mags[-1] if mags else 0.0)
+
+
+def compare(pay_a: dict, pay_b: dict, band: tuple | None, names: tuple, *,
+            artifacts_differ: bool = False) -> int:
+    """Print what moved from run A to run B, and refuse to call noise a move.
+
+    **This exists because the comparison was the step that failed.** Two of the
+    last three slices entered their record with a baseline error — a `before`
+    column read off the wrong tree, and a `+2.3%` called a move against a 3.67%
+    band — and both were made by hand at exactly this step. So the provenance
+    prints before the numbers (which tree, which command, which corpus), the
+    deltas print as a column, and each is marked against the scatter of *its own
+    row* rather than against a population figure borrowed from a summary.
+    """
+    name_a, name_b = names
+    sha_a, sha_b = payload_sha(pay_a), payload_sha(pay_b)
+
+    if sha_a != sha_b and not artifacts_differ:
+        print(
+            "REFUSING: the two payloads are different builds — "
+            f"sha256:{sha_a} and sha256:{sha_b}.\n"
+            "A comparison across two builds is the point of this mode, so it has\n"
+            "to be stated rather than assumed: pass --different-artifacts."
+        )
+        return 2
+
+    ra, rb = ratios_of(pay_a), ratios_of(pay_b)
+    only_a, only_b = sorted(set(ra) - set(rb)), sorted(set(rb) - set(ra))
+    if only_a or only_b:
+        print("REFUSING: the two runs do not measure the same rows, so a delta "
+              "between them is a delta between two corpora.\n")
+        for cell in only_a:
+            print(f"  {cell[0]} / {cell[1]}: in {name_a} only")
+        for cell in only_b:
+            print(f"  {cell[0]} / {cell[1]}: in {name_b} only")
+        return 2
+    if pay_a["ran"] != pay_b["ran"]:
+        print(f"REFUSING: different engines ran — {pay_a['ran']} against {pay_b['ran']}.")
+        return 2
+
+    print(f"before: {name_a}")
+    print(f"after:  {name_b}")
+    for pay, name in ((pay_a, name_a), (pay_b, name_b)):
+        print(f"  {name}: artifact sha256:{payload_sha(pay)}, "
+              f"repeats={pay['args']['repeats']} target={pay['args']['target']}")
+        print(f"  {name}: {pay['command']}")
+    print(f"  rows: {len(ra)} (key, mode) cells, engines {', '.join(pay_a['ran'])}")
+    print()
+
+    same_build = sha_a == sha_b
+    if same_build:
+        print("Both runs are the *same* build. Any delta below is scatter, not a "
+              "change — it is the band a later claim owes, not the claim.\n")
+
+    per_row_band = None
+    if band is not None:
+        band_a, band_b = band
+        if payload_sha(band_a) != payload_sha(band_b):
+            print("REFUSING: the --band pair are different artifacts "
+                  f"(sha256:{payload_sha(band_a)} and sha256:{payload_sha(band_b)}). "
+                  "A band is two runs of one build; across two builds it is the "
+                  "delta it was meant to bound.")
+            return 2
+        per_row_band, band_median, band_max = scatter_band(band_a, band_b)
+        print(f"band: two runs of sha256:{payload_sha(band_a)} — "
+              f"{len(per_row_band)} shared rows, median |rel| {band_median:.2%}, "
+              f"max {band_max:.2%}")
+        print("      (a row's own figure where the band pair has that row, the "
+              "band's max where it does not)")
+    else:
+        band_max = None
+        print("band: none supplied. The deltas below are printed unclassified — "
+              "nothing here says which of them are moves.")
+        print("      Measure the band with --band A.json B.json, two runs of one build.")
+    print()
+
+    print(f"{'row':<32} {'before':>8} {'after':>8} {'rel':>9} {'band':>8}  verdict")
+    print("-" * 74)
+    rows = []
+    for (key, mode) in ra:
+        delta = (rb[(key, mode)] - ra[(key, mode)]) / ra[(key, mode)] if ra[(key, mode)] else 0.0
+        rows.append((abs(delta), key, mode, delta))
+    outside = inside = unbanded = 0
+    for _, key, mode, delta in sorted(rows, key=lambda r: -r[0]):
+        if per_row_band is None:
+            band_cell, verdict = f"{'-':>8}", ""
+            unbanded += 1
+        else:
+            own = per_row_band.get((key, mode))
+            bound = own if own is not None else band_max
+            band_cell = f"{bound:>7.2%}"
+            if abs(delta) > bound:
+                verdict, outside = "outside", outside + 1
+            else:
+                verdict, inside = "inside", inside + 1
+            if own is None:
+                verdict += " (band max)"
+        print(f"{key + ' ' + mode:<32} {ra[(key, mode)]:>8.3f} {rb[(key, mode)]:>8.3f} "
+              f"{delta:>+8.2%} {band_cell}  {verdict}")
+
+    print()
+    if per_row_band is None:
+        print(f"{unbanded} row(s), none classified: supply --band to separate a move "
+              "from the instrument's own scatter.")
+    else:
+        print(f"{outside} outside its row's band, {inside} inside.")
+        print("A row marked `inside` is *not resolvable to better than the band* — that "
+              "is not the same finding as `did not move`.")
+    return 0
+
+
 # --- main --------------------------------------------------------------------------
 
 
@@ -705,7 +918,37 @@ def main() -> int:
     ap.add_argument("--count", action="store_true", help="print the FFI crossing census")
     ap.add_argument("--json", default=None, help="write the full payload here")
     ap.add_argument("--html", default=None, help="write a self-contained HTML report here")
+    ap.add_argument(
+        "--compare",
+        nargs=2,
+        metavar=("BEFORE.json", "AFTER.json"),
+        default=None,
+        help="print what moved between two --json payloads and stop",
+    )
+    ap.add_argument(
+        "--band",
+        nargs=2,
+        metavar=("A.json", "B.json"),
+        default=None,
+        help="two payloads of ONE build; their scatter bounds each delta "
+        "(without it the deltas print unclassified)",
+    )
+    ap.add_argument(
+        "--different-artifacts",
+        action="store_true",
+        help="allow --compare the two payloads to carry different sha256 values",
+    )
     args = ap.parse_args()
+
+    if args.compare:
+        pay_a, pay_b = (load_payload(p) for p in args.compare)
+        band = (
+            tuple(load_payload(p) for p in args.band) if args.band else None
+        )
+        return compare(
+            pay_a, pay_b, band, tuple(args.compare),
+            artifacts_differ=args.different_artifacts,
+        )
 
     if args.list:
         import runpy
@@ -780,11 +1023,24 @@ def main() -> int:
         print("\n".join(f"  {line}" for line in bad))
         return 2
 
+    # The precondition the mode gate below rests on, printed rather than assumed: a
+    # row carrying the clock or a random draw *should* disagree between modes, so on
+    # such a row a refusal would not be a render bug. Printed on every run, so the
+    # reader learns it from this line rather than from a refusal three modes deep.
+    suspects = nondeterministic_rows()
+    if suspects:
+        print("\nthe corpus carries constructs whose output the source does not fix, so the")
+        print("mode gate below is unsound on these rows — a green run does not clear them:")
+        print("\n".join(f"  {line}" for line in suspects))
+
     mixed = mode_disagreements(records)
     if mixed:
         print("\nREFUSING: one (row, engine)'s modes rendered different bytes from each")
         print("other, so the modes are not three timings of one template.\n")
         print("\n".join(f"  {line}" for line in mixed))
+        if suspects:
+            print("\n  and the corpus carries constructs whose output the source does not")
+            print("  fix, so a disagreement on these rows is expected rather than a bug.")
         return 2
 
     payload = build_payload(records, verdicts, engines, args, floor)

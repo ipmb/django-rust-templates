@@ -306,6 +306,7 @@ in no `render` row is the one a reader of the tables will not find.
 |---|---|
 | `bench_scatter.py` | the same-tree scatter band, with a `sha256:` guard against comparing two builds |
 | `compile_only.py` | what a `parse` row cannot separate and a `render` row cannot see: `from_string(source)` with no render, and so the slice's per-compile cost |
+| `compile_floor_parts.py` | what is *in* the compile floor on an empty source — the Python shell, not the plan, and `django_own_tags()` as the largest single part |
 | `node_census.py` | the structure behind the timings; its committed `.txt` is §1's `before` column |
 | `inheritance_share.py`, `lazy_size.py`, `step5_ceiling.py` | the prediction's inputs; unchanged |
 
@@ -349,8 +350,33 @@ the page the slice is about, `real-world/normal`
 compiles in 166.4 µs against stock's 122.6, a ratio of **1.36×** where the
 pre-slice tree's was 1.21×.
 
+**What is in the floor, and a correction to how it was read.** The floor is not
+the plan being built eagerly, which is how it was first read: an empty source has
+no nodes, so the planning pass has nothing to walk, and the historical check
+settles it — the same floor measured ~4.38 µs at `51dda9d`, before the walk
+existed. `compile_floor_parts.py` decomposes it instead. Our half of the compile
+is `render.parse_template("")` at **4.07 µs**, and its parts are `parser_for("")`
+**1.18** (stock's own `Parser("")` is 0.83, so the parser is not where the gap
+is), `ShellHost(parser)` **1.23**, `materialiser()` **0.03** — with
+`_native.compile_template("")`, its parser, host and materialiser built *outside*
+the timed loop, at **1.33 µs**. The correction that matters is one level down:
+`ShellHost` is ~1.23 and **`django_own_tags()` is 1.13 of it**, 92% — a *cached*
+call whose cache check rebuilds a seven-element tuple from five library
+registries and runs seven identity comparisons on every parse, building a table
+that on an empty template is never read at all. So the largest single part of the
+floor is a Python-side, per-parse, deferrable cost, and it is larger than the
+Rust round-trip that the lazy-materialisation hypothesis was aimed at. Not a
+claim that deleting it is free: the freshness check is what makes a *replaced*
+registry rebuild rather than serve stale, and deferring the call to first use
+keeps that property.
+
 The report is still a snapshot and not a differ: it shows the compile *level* per
 row, so the tax becomes visible by comparing this `docs/bench.html` with the
-previous one, not within a single page. A `--compare <payload.json>` that carries
-the band and prints the delta is the obvious next instrument and is not this one.
+previous one, not within a single page. **`bench.py --compare` is now that
+instrument** — two payloads in, provenance printed before the numbers, the
+scatter band carried from a `--band` pair so a delta inside its own row's band is
+called `inside` rather than a move. It exists because the manual comparison is
+where two of the three slices before this one entered a baseline error: a
+`before` column read off the wrong tree, and `real-world/large`'s +2.3% called a
+move against a 3.67% band.
 

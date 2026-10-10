@@ -1084,6 +1084,28 @@
       than a differ — <code>real-world/normal</code> compiles in <b>166 µs against stock's
       123 µs (1.36×)</b>, and the compile <i>floor</i> is <b>ours 4.6 µs / stock 1.5 / Jinja2
       56.3</b>, so on a small template most of our compile is fixed cost.
+      <b>The floor is the Python shell, not the plan — and the largest part of it is one
+      cached lookup.</b> The floor was first read as the plan being built eagerly, and an
+      empty source has no nodes to plan, so that reading is wrong; the historical check
+      agrees (this floor measured ~4.4 µs before the walk existed). Decomposed: our
+      <code>parse_template("")</code> is 4.07 µs, made of <code>parser_for("")</code> 1.18
+      (stock's own <code>Parser("")</code> is 0.83, so the parser is not the gap),
+      <code>ShellHost(parser)</code> 1.23, <code>materialiser()</code> 0.03, and
+      <code>_native.compile_template("")</code> 1.33 with its parts built outside the timed
+      loop. One level down again, <b><code>django_own_tags()</code> is 1.13 of
+      <code>ShellHost</code>'s 1.23</b> — a cached call whose cache check rebuilds a
+      seven-element tuple from five library registries and runs seven identity comparisons
+      on every parse, to build a table that on an empty template is never read. So the
+      largest single part of the floor is a Python-side, per-parse, deferrable cost, and it
+      is bigger than the Rust round-trip lazy materialisation targets. That is a candidate
+      for a later slice, not a deletion: the check is what makes a replaced registry rebuild
+      rather than serve stale.
+      <b>And the page can compare two runs now.</b> <code>bench.py --compare A.json B.json</code>
+      prints both runs' provenance (artifact, command, repeats) before any number, refuses two
+      corpora or two engine sets, refuses two builds unless <code>--different-artifacts</code>
+      says so, and marks each row's delta inside or outside its <i>own</i> scatter when given
+      a <code>--band</code> pair of one build — unclassified without one. It exists because
+      the hand comparison is where two of the last three slices entered a baseline error.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>One design change against its own prediction, made because the guard refused the

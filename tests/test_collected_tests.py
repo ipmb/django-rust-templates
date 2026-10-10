@@ -630,8 +630,23 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # (`test_collected_tests.py`'s own pin moves with it, which is this paragraph),
 # and no row is renamed or deleted — 491 + 3 = 494.
 #
-# Counts at close: 494 collected, proxy and discovery agreeing.
-PINNED = 494
+# 494 → 509 is **+15**, all in one new file, `tests/test_bench_compare.py`, and
+# they are the differ's refusals rather than its arithmetic. `bench.py --compare`
+# is the instrument that replaces the *manual* comparison step, which is where two
+# of the last three slices entered a baseline error; the rows are therefore about
+# what it will not do — refuse two builds unless `--different-artifacts` says so,
+# refuse two row sets, refuse two engine sets, refuse a band pair drawn from two
+# builds, and refuse to mark any delta inside or outside a band it was not given.
+# One row is the control for the scan the mode gate rests on
+# (`nondeterministic_rows` over the shipped corpus reads empty) and one is that
+# scan's positive control, so the empty reading is not vacuous.
+# Measured the other way, as this ledger's rule asks: `git diff -U0 tests/` adds
+# **15** `def test_` lines and removes none, no module gains a row but this one
+# (`test_collected_tests.py`'s own pin moves with it, which is this paragraph),
+# and no row is renamed or deleted — 494 + 15 = 509.
+#
+# Counts at close: 509 collected, proxy and discovery agreeing.
+PINNED = 509
 
 
 def collected() -> unittest.TestSuite:
