@@ -554,12 +554,15 @@ library.py:388-473	django/template/library.py	388	473	def parse_bits(	return arg
 library.py:421	django/template/library.py	421	-	-	-
 library.py:454	django/template/library.py	454	-	parser.compile_filter	-
 library.py:476-491	django/template/library.py	476	491	module = import_module(name)	-
+loader_tags.py:55	django/template/loader_tags.py	55	-	context["block"] = self	-
 loader_tags.py:63	django/template/loader_tags.py	63	-	block = type(self)(block.name, block.nodelist)	-
+loader_tags.py:65	django/template/loader_tags.py	65	-	context["block"] = block	-
 loader_tags.py:87	django/template/loader_tags.py	87	-	-	-
 loader_tags.py:94	django/template/loader_tags.py	94	-	self.blocks = {n.name: n	-
 loader_tags.py:118	django/template/loader_tags.py	118	-	parent = self.parent_name.resolve(context)	-
 loader_tags.py:121	django/template/loader_tags.py	121	-	self.parent_name.var	-
 loader_tags.py:197	django/template/loader_tags.py	197	-	cache = context.render_context.dicts[0].setdefault(self, {})	-
+loader_tags.py:214	django/template/loader_tags.py	214	-	@register.tag("block")	-
 loader_tags.py:215	django/template/loader_tags.py	215	-	def do_block(parser, token):	-
 loader_tags.py:219-220	django/template/loader_tags.py	219	220	# token.split_contents() isn't useful here because this tag doesn't accept	# variable as arguments.
 loader_tags.py:221-241	django/template/loader_tags.py	221	241	bits = token.contents.split()	parser.invalid_block_tag(endblock, "endblock", acceptable_endblocks)

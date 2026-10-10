@@ -462,10 +462,30 @@ the identity check are **not** re-specified here — §0's correction.
 1. **Where does the delegated set get pinned?** The benchmark corpus is written
    by the implementer; the acceptance suite is not. Should the pin be over
    `template_tests`' own templates instead, so it is not a set we chose?
-2. **Does the `{% block %}` carrier survive laziness?** M18 §4.1 measured that a
-   rendered block must put a Python carrier in the context, and that the
-   carrier's `super()` renders the parent body — a *re-entrant* call, the one
-   place the design has to make. Worth probing before step 2, not after.
+2. **Does the `{% block %}` carrier survive laziness? — measured, and yes.** M18
+   §4.1 established that a rendered block puts a Python carrier in the context and
+   that `{{ block.super }}` reaches it through variable resolution, which calls it
+   if it is callable. Laziness adds a narrower question: *what may be read off that
+   carrier*, since a lazily-built tree has no `BlockNode` to put there. Measured
+   (`.review/m19-measurements/block_carrier.py`, transcript beside it), on Django
+   6.0.9: in a real two-level render the carrier is placed four times and **exactly
+   one name is ever read off it — `super`, called with no arguments** — with the
+   rendered bytes identical under a delegating proxy that would have changed them
+   had it not been an observer. Django writes `context["block"]` twice
+   (`loader_tags.py:55`, `loader_tags.py:65`) and reads it **nowhere** in
+   `django/`; every other quoted `"block"` in the tree is the `@register.tag`
+   declaration (`loader_tags.py:214`). So the carrier's interface is entirely what
+   templates ask of it, and the acceptance suite asks for `block.super` 38 times
+   across 22 files — re-derived in both suite trees under four metrics, since a
+   count is only comparable to a count taken the same way — and for no other
+   attribute. **The carrier is one object per rendered block exposing a
+   zero-argument `super`; the block body stays in Rust.** The re-entrancy is real
+   and is the whole content of that callback; what this settles is that the
+   callback need not hold a node tree, which is the only thing step 2 was waiting
+   on. Note also that M18's own probe for §4.1 is **not in the tree** — `198fa27`
+   removed every `.review/m*-measurements/` directory and `bb5de99` restored the
+   specs but not the probes — so this file re-measures those four facts rather than
+   inheriting them, and the `38 across 22 files` reproduces exactly.
 3. **Is the culprit-span protocol per-node or per-descriptor?** §3.3 needs a span
    on every natively-rendered node; whether that is an `Option<(u32, u32)>` on
    the walk's frame or a table the walk indexes is an implementation choice with
