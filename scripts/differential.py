@@ -89,7 +89,7 @@ def render_all(mode: str) -> dict[str, str]:
 
     **Settings are configured, and until M19's `int` arm this harness ran with
     none.** That is the whole reason the line is here, and the measurement is
-    what makes it more than tidiness: of the **48** cases, **11** render a value
+    what makes it more than tidiness: of the **52** cases, **11** render a value
     whose type is `int` — `integer_literal`, `a_bare_number`, the three
     `for_*` loops (the counter), `length_filter` and `add_filter` (both return
     one), `ifchanged_tag`, `nested_for` and two more — and with settings
@@ -102,13 +102,22 @@ def render_all(mode: str) -> dict[str, str]:
     That is exactly what M19's `int` arm does: the arm reads
     `settings.USE_THOUSAND_SEPARATOR` *before* the slow path reaches
     `get_language()`'s `USE_I18N`, so the 11 reprs parted — `11 of 48 cases
-    differ`, both sides naming a setting rather than rendering a number. That
-    was the first thing the harness had ever said about those cases, and what it
-    said was that it had never been showing their output.
+    differ` **on the 48-case corpus this was measured on**, both sides naming a
+    setting rather than rendering a number. That was the first thing the harness
+    had ever said about those cases, and what it said was that it had never been
+    showing their output.
 
-    Configured, the same corpus is **48 of 48 identical**, and the 11 now compare
-    `'12345'` against `'12345'` instead of one error string against another. The
-    settings are the tree's shared helper rather than a local `configure(...)`,
+    Configured, the same corpus is **52 of 52 identical**, and the 11 now compare
+    `'12345'` against `'12345'` instead of one error string against another.
+
+    **48 → 52 is the four `{% cycle … as %}` rebinding rows**, added with the fix
+    for the sealed-loop frame rewrite: they render `str`, so the 11 above is
+    still 11 and the delta is entirely cases with no settings dependency. The
+    historical `11 of 48` is left standing rather than restated, because it is a
+    measurement of the corpus *as it was* and rewriting its denominator would
+    make the record say something nobody observed.
+
+    The settings are the tree's shared helper rather than a local `configure(...)`,
     for the reason `scripts/filter_probe.py` gives: `USE_I18N` and
     `django.setup()` are two separate requirements and a hand-built fixture got
     it wrong for the benchmark harness once already.

@@ -645,8 +645,26 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # (`test_collected_tests.py`'s own pin moves with it, which is this paragraph),
 # and no row is renamed or deleted — 494 + 15 = 509.
 #
-# Counts at close: 509 collected, proxy and discovery agreeing.
-PINNED = 509
+# 509 → 510 is **+1**, and it is not a new behaviour: it is the row the
+# adversarial reviewer asked for. The review found a *rendering* defect — a body
+# holding `{% cycle … as <loopvar> %}` moves the loop variable, so the walk's
+# rewrite of that read to a frame read goes stale — and the shipped suite could
+# not see it, because a wrong render is a wrong *string* and no byte comparison
+# lives here. `tests/differential/cases.py` gained the four templates that
+# reproduce it and this file gained the row that asserts the *decision* rather
+# than the bytes: the census shows the loop still seals (`ForNode` counted in
+# `handled`, absent from `delegated`) with only the `CycleNode` delegated, so the
+# fix is "the loop seals and the cycle runs as a delegate" and not "the loop gave
+# up and re-delegated", which renders correctly and loses the optimisation. Those
+# two are the same output and different performance, which is exactly why a
+# differential case cannot carry this row.
+# Measured the other way, as this ledger's rule asks: `git diff -U0 tests/` adds
+# **1** `def test_` line and removes none, no module gains a row but this one
+# (`test_collected_tests.py`'s own pin moves with it, which is this paragraph),
+# and no row is renamed or deleted — 509 + 1 = 510.
+#
+# Counts at close: 510 collected, proxy and discovery agreeing.
+PINNED = 510
 
 
 def collected() -> unittest.TestSuite:

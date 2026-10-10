@@ -185,6 +185,41 @@ CASES = [
         "template": "{% for a in outer %}{% for b in inner %}{{ a }}{{ b }}{% endfor %}{% endfor %}",
         "context": {"outer": ["x", "y"], "inner": [1, 2]},
     },
+    # **A body that can write the loop variable.**  The walk rewrites a read of
+    # the loop variable to a *frame* read — the value this iteration resolved —
+    # so a body that can move that name in the context makes the rewrite stale.
+    # `{% cycle … as s %}` is the one built-in that does it (`context.set_upward`
+    # in `CycleNode.render`), and the name it writes lands in the layer already
+    # holding `s`, i.e. the loop's own.  All four rendered Django's answer before
+    # the fix, and the nested pair is the shape M19 step 5 slice 3 opened: the
+    # first two rows fail on the *slice-2* tree as well, so they are older than
+    # the slice that made them visible.
+    {
+        "name": "cycle_rebinds_the_loop_variable",
+        "template": '{% for s in sections %}{% cycle "X" as s silent %}{{ s }}{% endfor %}',
+        "context": {"sections": ["old"]},
+    },
+    {
+        "name": "cycle_rebinds_the_loop_variable_and_survives_the_loop",
+        "template": '{% for s in sections %}{% cycle "X" as s silent %}{{ s }}{% endfor %}[{{ s }}]',
+        "context": {"sections": ["old"]},
+    },
+    {
+        "name": "nested_for_keeps_an_ancestor_rebinding",
+        "template": (
+            '{% for s in sections %}{% for l in s %}'
+            '{% cycle "X" as s silent %}{{ s }}{% endfor %}{{ s }}{% endfor %}'
+        ),
+        "context": {"sections": ["old"]},
+    },
+    {
+        "name": "cycle_then_nested_for_reads_the_rebound_name",
+        "template": (
+            '{% for s in sections %}{% cycle "X" as s silent %}'
+            "{% for l in s %}{{ l }}{% endfor %}{{ s }}{% endfor %}"
+        ),
+        "context": {"sections": ["old"]},
+    },
     {
         "name": "with_tag",
         "template": "{% with y=a %}{{ y }}{% endwith %}",

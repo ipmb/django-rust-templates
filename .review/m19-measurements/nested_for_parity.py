@@ -132,15 +132,24 @@ def main() -> int:
         loaders=[("django.template.loaders.locmem.Loader", tpl_map)],
     )
 
-    print(f"django {__import__('django').get_version()}, {len(TEMPLATES)} templates")
+    # **The subjects are the templates under test, not the dict's keys.**  The
+    # probe's `TEMPLATES` map carries `partials/cell.html` as well, because both
+    # engines have to be able to *resolve* it, and the loop below skips it — so a
+    # denominator of `len(TEMPLATES)` counted a row the probe had already decided
+    # not to render, and printed 17 for 16 rows.  Every number derived from that
+    # denominator was one too high.  Derived once, here, and used by all three
+    # (the header, the loop, and the failure line), because a count written out
+    # three times is a count that can disagree with itself.
+    subjects = [name for name in TEMPLATES if not name.startswith("partials/")]
+
+    print(f"django {__import__('django').get_version()}, {len(subjects)} templates "
+          f"({len(TEMPLATES) - len(subjects)} partial(s) resolved but not rendered)")
     print()
     header = f"{'template':28} {'stock len':>9} {'ours len':>9}  verdict"
     print(header)
     print("-" * len(header))
     bad = 0
-    for name in TEMPLATES:
-        if name.startswith("partials/"):
-            continue
+    for name in subjects:
         src = TEMPLATES[name]
         try:
             stock_out = stock.from_string(src).render(Context(DATA))
@@ -161,7 +170,7 @@ def main() -> int:
             print(f"    ours : {ours_out!r}")
     print()
     if bad:
-        print(f"VOID: {bad} of {len(TEMPLATES)} differ")
+        print(f"VOID: {bad} of {len(subjects)} differ")
         return 1
     print("every template rendered byte-identically under both engines")
     return 0

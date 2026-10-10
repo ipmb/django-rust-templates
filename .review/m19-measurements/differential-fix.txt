@@ -1,0 +1,32 @@
+=== differential.py on the PREFIX artifact sha256:e6a72702ba5877cb (the pre-fix tree)
+differential: 4 of 52 cases differ
+
+  cycle_rebinds_the_loop_variable
+    stock: 'X'
+    ours:  'old'
+  cycle_rebinds_the_loop_variable_and_survives_the_loop
+    stock: 'X[]'
+    ours:  'old[]'
+  nested_for_keeps_an_ancestor_rebinding
+    stock: 'XXXX'
+    ours:  'XXXold'
+  cycle_then_nested_for_reads_the_rebound_name
+    stock: 'XX'
+    ours:  'Xold'
+
+=== differential.py on the FIXED artifact sha256:b0c073c33ecdfe6c (the tree committed)
+differential: 52 cases, identical (django.template.engine vs django_rust_templates.engine.engine)
+
+=== differential.py on the SLICE-2 artifact sha256:1ec2563e926cb649 (tree 5a9d4ef)
+differential: 2 of 52 cases differ
+
+  cycle_rebinds_the_loop_variable
+    stock: 'X'
+    ours:  'old'
+  cycle_rebinds_the_loop_variable_and_survives_the_loop
+    stock: 'X[]'
+    ours:  'old[]'
+
+(Two, not four: the two shapes slice 3 added — a nested body rebinding an ancestor,
+and a rebound name read as an inner loop's sequence — need a nested `{% for %}` in
+the outer body to seal at all, which is what slice 3 made sealable.)

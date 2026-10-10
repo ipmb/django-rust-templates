@@ -3608,12 +3608,70 @@ fn emit_sealable(emit: &Emit, loopvar: &str) -> bool {
 /// makes the recursion honest — a nested `{% if %}` body is asked the same
 /// question as its parent, and asking it while rewriting would make the answer
 /// depend on the order the two ran in.
+/// **Whether rendering this body can write the context — and the rewrite below
+/// only happens when it cannot.** The two are one question and were two.
+///
+/// A frame read is `frame.item`, the value the loop resolved for this iteration.
+/// It is the right answer exactly while `context[loopvar]` would give the same
+/// thing, and the loop itself keeps that true: [`Walk::run_stated`] writes
+/// `context[loopvar] = frame.item` at the **top of every iteration**, so a write
+/// from an earlier iteration is gone before the next one reads. What survives
+/// that is a write made *inside this iteration, by this body* — and then a frame
+/// read downstream is stale where the context is right.
+///
+/// Three things can write, and only the first is not ruled out by construction:
+///
+/// * **A node this walk does not model.** `Act::Delegate` is arbitrary Python
+///   with the context in hand, and `{% cycle "X" as s silent %}` writes the
+///   loop variable *upward* — `CycleNode.render` calls `context.set_upward`
+///   (`defaulttags.py:104-114`), which lands the name in the innermost
+///   layer already holding it, i.e. the enclosing loop's own. So
+///   `{% for s in sections %}{% cycle "X" as s silent %}{{ s }}{% endfor %}` is
+///   `X` in Django and was `old` here: the read had been rewritten to the frame.
+///
+/// * **Not a filter.** `FilterExpression.resolve` hands a filter only
+///   `autoescape` and the arguments (`base.py:812-815`) — `takes_context`
+///   is `simple_tag`'s protocol, and a *filter* never receives the context, so a
+///   `{{ … }}` cannot write it however it refuses. That is what lets this
+///   predicate skip [`Act::Emit`] rather than descend into it.
+///
+/// * **Not a nested loop the walk runs.** Its own writes — its loop variable and
+///   its `forloop` — go into the layer *it* pushes and are popped with it, and
+///   its sequence is read, not written. So an `Act::For` matters here only for
+///   what its body can do, which is why this descends into one.
+///
+/// A body that fails this predicate is still **sealed** — it just keeps reading
+/// its loop variable out of the context, which the stated loop is maintaining
+/// anyway. What sealing still buys it is every other name in the body staying a
+/// frame read.
+fn may_write_context(body: &[Slot]) -> bool {
+    body.iter().any(|slot| match &slot.act {
+        Act::Delegate => true,
+        // The `{% empty %}` branch too: it renders while the enclosing loop is
+        // running and reads the enclosing loop's variables like any other part
+        // of the body, so a delegate in it is a writer in the same position.
+        Act::For(plan) => may_write_context(&plan.body) || may_write_context(&plan.empty),
+        Act::If(plan) => plan
+            .branches
+            .iter()
+            .any(|(_, body)| may_write_context(body)),
+        Act::Text(_) | Act::Emit(_) => false,
+    })
+}
+
 fn seal(body: &mut [Slot], loopvar: &str) -> bool {
     if !body.iter().all(|slot| sealable(&slot.act, loopvar)) {
         return false;
     }
-    for slot in body.iter_mut() {
-        rewrite(&mut slot.act, loopvar);
+    // **`sealable` says the body may be sealed; this says its reads may move to
+    // the frame, and they are not the same question.** A body holding a delegate
+    // is sealable — that is the whole of step 5 slice 2 — but its loop-variable
+    // reads must stay on the context, because the delegate may write that name
+    // where the frame cannot see it ([`may_write_context`]).
+    if !may_write_context(body) {
+        for slot in body.iter_mut() {
+            rewrite(&mut slot.act, loopvar);
+        }
     }
     true
 }
@@ -3681,9 +3739,16 @@ fn sealable(act: &Act, loopvar: &str) -> bool {
 ///
 /// Either way the answer is [`Walk::run_stated`]: Django's two writes per
 /// iteration, the loop variable and the `forloop` dict, so a reader of the
-/// context finds what `ForNode.render` would have left it. The nodes that read
-/// the frame still read the frame, which is why the state is written *beside*
-/// them and not instead of them.
+/// context finds what `ForNode.render` would have left it. **And that is now the
+/// only thing that answers them.** This docstring used to end "the nodes that
+/// read the frame still read the frame, which is why the state is written
+/// *beside* them and not instead of them" — and that sentence was false for
+/// exactly the bodies this predicate is about: `seal` moves a read to the frame
+/// only in a body that cannot write the context ([`may_write_context`]), so a
+/// stated body's loop-variable reads *are* context reads, and the state is
+/// written instead of them where it matters. Writing the state beside a frame
+/// read is not a semantics-preserving move when something in the body can change
+/// the state; it is a stale read.
 ///
 /// Every [`Act`] of a sealed body has already passed [`sealable`], so these two
 /// are the only ways in; [`Act::If`] is descended because a body under it is the

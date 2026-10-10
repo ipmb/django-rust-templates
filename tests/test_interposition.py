@@ -1806,6 +1806,59 @@ class FilterRoutingTests(unittest.TestCase):
         )
         self.assertEqual(crossed, [], "the filter was applied from Python too")
 
+    def test_a_loop_whose_body_can_write_the_context_still_seals(self):
+        """The seal decision, asserted where bytes cannot see it.
+
+        A body holding a delegate is sealable — M19 step 5 slice 2 — and the
+        delegate is what makes the loop **stated**: it writes Django's
+        per-iteration state, because a node the walk does not model reads the
+        context. What the body cannot have is a *frame* read of the loop
+        variable, because a delegate may write that name where the frame cannot
+        see it — `{% cycle "X" as s silent %}` does exactly that, through
+        `context.set_upward` (`CycleNode.render`).
+
+        So there are two ways to make the rebinding rows in
+        `tests/differential/cases.py` pass: keep the reads on the context, or
+        hand the loop back to Python. **Only the first is the port.** A
+        re-delegated loop renders Django's bytes and reads `delegated:
+        ForNode=1` here, which is why this row exists beside them and why its
+        assertion is the census rather than the output.
+        """
+        from django_rust_templates import _native
+        from django_rust_templates.engine import Context, Engine
+
+        source = '{% for s in sections %}{% cycle "X" as s silent %}{{ s }}{% endfor %}'
+        _native.census_start()
+        try:
+            rendered = Engine().from_string(source).render(Context({"sections": ["old"]}))
+        finally:
+            # In the `finally` for the reason `_render_with_both_meters` gives:
+            # the census is a process-global and a raising render must not leave
+            # it on for the next module's rows.
+            handled, delegated, _, _, _ = _native.census_take()
+
+        self.assertEqual(rendered, "X")
+        self.assertIn(
+            ("ForNode", 1),
+            handled,
+            "the walk did not run the loop: `ForNode` is missing from `handled`, "
+            "so `ForNode.render` was the one that rendered it",
+        )
+        self.assertNotIn(
+            ("ForNode", 1),
+            delegated,
+            "the loop was handed back to Python. The rebinding rows pass either "
+            "way, so this is the assertion that separates the fix from a "
+            "re-delegation",
+        )
+        self.assertEqual(
+            delegated,
+            [("CycleNode", 1)],
+            "`{% cycle %}` is the delegate this row is about; if it stopped "
+            "being delegated the body would be pure and the frame rewrite would "
+            "be sound, which is a different test",
+        )
+
     def test_the_parser_finds_our_defaultfilters(self):
         """The premise, on its own, so a green counter cannot be the whole story.
 

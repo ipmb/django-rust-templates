@@ -816,8 +816,9 @@
     </p>
     <p class="sub" style="margin-top:16px">
       <b>The differential harness was reporting a green it had not earned, and that is worth
-      a line more than the fix.</b> It renders 48 cases through both engines and compares the
-      results; <b>11 of the 48 resolve an <code>int</code></b>, and with settings
+      a line more than the fix.</b> It rendered <b>48</b> cases through both engines and compared
+      the results at the time of this finding (the corpus is <b>52</b> now, and the four added
+      rows are named in the fix's paragraph below); <b>11 of the 48 resolve an <code>int</code></b>, and with settings
       unconfigured both engines <i>refuse</i> to render one — so those 11 columns were two
       <code>ImproperlyConfigured</code> reprs, matching because both engines read the same
       setting first. The case was covering nothing, and it said so only when the first
@@ -1190,8 +1191,8 @@
     </p>
     <p class="sub" style="margin-top:16px">
       <b>Acceptance is unmoved, verified on this artifact by the full gate:</b> <b>1547 tests,
-      OK (skipped=6)</b> with the six skips checked by identity, <b>509</b> python unit tests and
-      <b>787</b> Rust tests, the differential harness's 48 cases identical, and the packaging
+      OK (skipped=6)</b> with the six skips checked by identity, <b>510</b> python unit tests and
+      <b>787</b> Rust tests, the differential harness's 52 cases identical, and the packaging
       banners green. Nothing the slice changes is on a path the vendored suite reaches
       differently — a seal decision and a boolean — and that is what makes the ratios above safe
       to read as a pure render saving.
@@ -1216,7 +1217,7 @@
     <p class="sub" style="margin-top:16px">
       <b>The win is small and the slice says why rather than rounding it up: the loop it
       un-delegated has 72 <code>{% include %}</code> tags in its body.</b> Cross-build the move is
-      render <b>0.613× → 0.599×</b> (−3.38%) and parse <b>0.694× → 0.673×</b> (−3.98%), both
+      render <b>0.618× → 0.597×</b> (−3.38%) and parse <b>0.702× → 0.674×</b> (−3.98%), both
       clearing a floor whose max is 2.51% over the 50 cells the change cannot reach — while the
       refusal that stays (<code>django-only/for-tags</code>, a body reading <code>forloop</code>)
       reads +0.14%/+0.27%, inside it. A construct ladder over the page is what explains the size:
@@ -1234,14 +1235,21 @@
       <b>The rename is load-bearing, and a mutant says so.</b> Keeping <code>sealable</code> as it
       is but dropping <code>Act::For</code> from <code>needs_context_state</code> produces a build
       that seals the outer loop without writing <code>context[loopvar]</code>, so the inner loop's
-      sequence resolves to nothing: <b>13 of 17</b> nested-loop shapes render <i>empty</i> instead
-      of raising, and the vendored suite catches it independently with <b>3 failures</b>, all
-      nested-<code>for</code> <code>regroup</code> sites. The parity probe that found them renders
-      17 nested-loop templates (direct nesting, <code>parentloop</code> two deep, an inner loop in
-      an <code>{% if %}</code>, an empty inner, a refused filter in the inner, three-deep nesting)
-      under stock and this build and requires byte-identical output; on the shipped artifact it is
-      <b>17/17 ok</b>. Its silent-truncation signature is the point: a regression here produces
-      empty output, not an exception, which an exception-based gate would miss.
+      sequence resolves to nothing: <b>13 of 16</b> nested-loop shapes render wrong instead of
+      raising — ten <i>empty</i>, and three that render <i>too little</i> (<code>sibling_loops</code>
+      keeps its outer headings, <code>empty_inner</code> falls through to <code>{% empty %}</code>,
+      <code>outer_empty_branch</code> renders <code>'EEE'</code>), which is the shape a "not empty"
+      assertion misses — and the vendored suite catches it independently with <b>3 failures</b>,
+      all nested-<code>for</code> <code>regroup</code> sites (<code>test_regroup01</code>,
+      <code>03</code> and <code>04</code>; <code>test_regroup02</code> renders with no data and
+      asserts <code>''</code>, so it is the one row of the four that <i>cannot</i> catch a silent
+      truncation). The parity probe that found them renders 16 nested-loop templates (direct
+      nesting, <code>parentloop</code> two deep, an inner loop in an <code>{% if %}</code>, an
+      empty inner, a refused filter in the inner, three-deep nesting) under stock and this build
+      and requires byte-identical output; on the shipped artifact it is <b>16/16 ok</b>, and the
+      probe's own header used to print 17 — <code>len(TEMPLATES)</code>, a denominator counting a
+      partial it deliberately skips. Its silent-truncation signature is the point: a regression
+      here produces empty output, not an exception, which an exception-based gate would miss.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>What this slice did not do, priced.</b> The per-render
@@ -1257,7 +1265,70 @@
       the report on this build reads render <b>0.39×</b>, parse <b>0.75×</b>, compile <b>1.36×</b>
       ours-vs-stock real-world, <b>39/39</b> three-engine rows byte-agreeing. Acceptance is
       unmoved: <b>1547 tests, OK (skipped=6)</b>, the six skips by identity, differential harness
-      48 cases identical.
+      52 cases identical.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>An adversarial review found a wrong render the whole suite was blind to, and the
+      reason it was blind is worth more than the fix.</b> Slice 2 made a loop seal with a
+      delegate <i>inside</i> it, and sealing rewrites every read of the loop variable in that
+      body onto the <i>frame</i> — the value the iteration resolved. That is sound only while
+      <code>context[loopvar]</code> would give the same thing, and a delegate is arbitrary
+      Python holding the context: <code>{% cycle "X" as s silent %}</code> writes the name
+      <i>upward</i> (<code>CycleNode.render</code> calls <code>set_upward</code>,
+      <code>defaulttags.py:104-114</code>), which lands it in the innermost layer already
+      holding it — the enclosing loop's own. So
+      <code>{% for s in sections %}{% cycle "X" as s silent %}{{ s }}{% endfor %}</code>
+      rendered <code>X</code> in Django and <code>old</code> here. <b>The repair separates two
+      questions that had been one.</b> <code>sealable</code> asks whether a body <i>may</i> be
+      sealed; the new <code>may_write_context</code> asks whether its reads may move to the
+      frame, and a body holding a delegate or a loop fails the second while passing the first —
+      it is still sealed, it just keeps reading its loop variable out of the context, which the
+      stated loop was maintaining anyway. Two candidate writers are ruled out by argument
+      rather than by code, and both were checked against Django rather than reasoned about: a
+      <i>filter</i> cannot write the context (<code>FilterExpression.resolve</code> hands it only
+      <code>autoescape</code> and the arguments, <code>base.py:812-815</code>), and a nested loop
+      the walk runs writes only into the layer it pushes. <b>The defect is older than the slice
+      that exposed it, and that is measured rather than argued</b>: the differential harness
+      reads <b>2 of 52 differing</b> on slice 2's own source, <b>4 of 52</b> on slice 3's, and
+      <b>52 identical</b> here — 2 → 4 → 0 over the three artifacts.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>And the differential corpus could not have carried the decision, which is why a census
+      row pins it.</b> Two ways make those four cases pass — keep the reads on the context (the
+      fix), or hand the loop back to Python — and they render byte-identical output while
+      costing differently, so a byte-comparing harness sees neither. The four added rows are
+      <code>cycle_rebinds_the_loop_variable</code>,
+      <code>cycle_rebinds_the_loop_variable_and_survives_the_loop</code> (the rebinding is still
+      <code>X</code> after <code>{% endfor %}</code>, because it was written past the loop),
+      <code>nested_for_keeps_an_ancestor_rebinding</code>, and
+      <code>cycle_then_nested_for_reads_the_rebound_name</code>, taking the corpus 48 → 52. What
+      separates the fix from a re-delegation is
+      <code>test_a_loop_whose_body_can_write_the_context_still_seals</code>, which asserts the
+      <i>census</i>: <code>ForNode</code> in <code>handled:</code> and absent from
+      <code>delegated:</code>, with <code>delegated == [("CycleNode", 1)]</code>. The python
+      unit-test pin moved <b>509 → 510</b>.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>What the fix costs, in the unit the fix is about.</b> A body that keeps the context
+      route pays <b>+0.2076 µs per loop-variable read</b> (render; the slope of a three-point
+      1 : 2 : 4 read family, +0.2418 reading the single point alone, and the 16% spread between
+      those two estimators is carried rather than averaged away). On the corpus that is
+      <code>django-only/realistic</code> <b>+25.58 µs = +2.57% render</b> and
+      <code>real-world/complex</code> <b>+8.40 µs = +1.63%</b>, against a control floor of
+      <b>0.745%</b> taken from the same runs over the four rows the change cannot reach —
+      3.5× and 2.2× the floor. <b>Compile pays nothing</b>: the family's per-read slope in
+      compile mode is <b>−0.0004 µs</b>, i.e. the predicate is a compile-time question about an
+      already-built plan and does not survive into the artifact. The measurement took four
+      instruments; the three that failed are recorded in the fix's own note, and the one that
+      worked alternates the two builds round by round so the cost is a <i>cross-build delta of
+      one template</i> with no subtraction of two baselines anywhere — the earlier attempt at
+      exactly that subtraction disagreed with itself by <b>7×</b> on a single artifact.
+      <b>The page's headline ratios are unaffected at the precision they print</b>: the three
+      <code>real-world</code> pages it geomeans move −0.29% / +1.63% / −0.74% render and
+      −0.21% / +1.28% / +0.31% parse under the fix, a +0.20% / +0.46% shift of the mean, so
+      <b>0.39×</b> and <b>0.75×</b> stand.
+      Acceptance is unmoved: <b>1547 tests, OK (skipped=6)</b>, <b>510</b> python unit tests,
+      <b>787</b> Rust tests, differential harness 52 cases identical.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>Until M18 it was a substitution, and that machinery is gone.</b> Earlier revisions of

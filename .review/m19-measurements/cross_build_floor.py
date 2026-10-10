@@ -70,12 +70,68 @@ REFUSAL_SLICE3 = {
     ("django-only/for-tags", "parse"): "same loop, must still refuse",
 }
 
-# Which slice's lists this run reports.  The two sets are kept rather than
-# overwritten because the slice-2 output beside it (`cross_build_floor.slice2.txt`)
-# is the record of a run this file made, and a file edited in place would leave
-# that record describing a script that no longer exists.
-SLICES = {"slice2": (SUBJECT_SLICE2, REFUSAL_SLICE2), "slice3": (SUBJECT_SLICE3, REFUSAL_SLICE3)}
-SLICE = "slice3"
+# **The fix's lists, and they are named by a predicate rather than by the census
+# — which is the one place this file departs from its own rule, so it says so.**
+# The rows above were read off the census partitions, because `sealable` is what
+# moved and the census counts `sealable`'s answer. The fix moves `seal`'s *write*
+# pass instead (`may_write_context` gates `rewrite`), and the census counts the
+# read pass only: the partition is identical on both sides of this change by
+# construction, so the census cannot name the subject and a run of it would print
+# the same rows twice. What names the subject is the predicate itself, localized
+# against the corpus source (`scripts/bench_corpus.py`): a *sealing* loop whose
+# body holds an `Act::Delegate` **and** has a walk-owned read of the loop
+# variable for the skipped `rewrite` to have moved. Two rows are that, and both
+# are named with their read:
+#
+#   * `real-world/complex`'s **outer** loop. Its body holds a nested `{% for %}`
+#     and an `{% if %}`; `may_write_context` descends into the nested `Act::For`,
+#     finds the `{% include %}` in *its* body, and answers true — so the outer
+#     body's `{{ s.title|title }}` and `{% if s.total %}{{ s.total }}` stay
+#     context reads (12 outer iterations, 2 reads each). The *inner* loop's own
+#     rewrite is skipped too, and costs nothing: its body is the include alone, so
+#     it had no loop-variable read to move.
+#
+#   * `django-only/realistic`'s loop. Body holds `{% blocktranslate %}`, and
+#     `{{ row.name }}` and `{{ row.value|floatformat:2 }}` are walk-owned reads of
+#     `row` (50 rows, 2 reads each).
+#
+# `django-only/i18n` is the pair's third case and is deliberately a *refusal*: its
+# loop body holds `{% blocktranslate %}` so the predicate is true and `rewrite` is
+# skipped, but every name the delegate reads (`count=r.value`) is read *inside*
+# the delegate, which resolves against the context either way — the walk owns no
+# read of `r` in that body, so the skip has nothing to skip. It is in this list
+# rather than left unclassified because "the predicate fired" and "the route
+# changed" are two statements, and a row that shows the first without the second
+# is the control that keeps them apart.
+SUBJECT_FIX = {
+    ("real-world/complex", "render"): "outer body holds a delegate one `{% for %}` deep, and reads `s.title`/`s.total`",
+    ("real-world/complex", "parse"): "same loop; parse is compile + a cold render, so it owes this too",
+    ("django-only/realistic", "render"): "loop body holds `{% blocktranslate %}`, and reads `row.name`/`row.value`",
+    ("django-only/realistic", "parse"): "same loop; parse is compile + a cold render, so it owes this too",
+}
+REFUSAL_FIX = {
+    ("django-only/filter-arg", "render"): "body reads `r.name`/`r.value` and holds **no** delegate -> the rewrite must still run",
+    ("django-only/filter-arg", "parse"): "same loop, must still rewrite",
+    ("real-world/normal", "render"): "body reads `r.*`; the one `{% include %}` is at block level, outside the loop",
+    ("real-world/normal", "parse"): "same loop, must still rewrite",
+    ("django-only/i18n", "render"): "predicate fires but the body has no walk-owned read of `r` -> nothing to lose",
+    ("django-only/i18n", "parse"): "same loop, same nothing to lose",
+    ("django-only/for-tags", "render"): "the loop refuses, so neither pass of `seal` reaches it",
+    ("django-only/for-tags", "parse"): "same loop, still refuses",
+}
+
+# Which slice's lists this run reports.  The sets are kept rather than
+# overwritten because each output beside it is the record of a run this file made
+# (`cross_build_floor.slice2.txt`, `cross_build_floor.slice3.txt`), and a file
+# edited in place would leave that record describing a script that no longer
+# exists.  `fix` is the default now, and the two earlier runs are reproducible by
+# setting `SLICE` back — the payload paths are arguments either way.
+SLICES = {
+    "slice2": (SUBJECT_SLICE2, REFUSAL_SLICE2),
+    "slice3": (SUBJECT_SLICE3, REFUSAL_SLICE3),
+    "fix": (SUBJECT_FIX, REFUSAL_FIX),
+}
+SLICE = "fix"
 SUBJECT, REFUSAL = SLICES[SLICE]
 
 

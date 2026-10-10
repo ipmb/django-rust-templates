@@ -24,10 +24,24 @@ walk's deferral and names its shape.  **`micro/extends` was predicted not to mov
 and does not** — it is the control that says the walk is still there.
 
 **The headline is a miss, and it is the miss the slice was built on.**  The
-prediction (`step5-slice3-prediction.md`, written and committed before the code)
-put `real-world/complex` render at **1.53× → 0.55×–0.65×**.  Measured on this
-build: **1.49× → 1.49×**, i.e. `ours/stock` 0.613 → 0.599, **−3.38%**, against a
-cross-build control floor whose max is 2.51% (§3).  The mechanism fired exactly
+prediction (`step5-slice3-prediction.md`) put `real-world/complex` render at
+**1.53× → 0.55×–0.65×**.  Measured on this build: **1.49× → 1.49×**, i.e.
+`ours/stock` 0.618 → 0.597, **−3.38%**, against a cross-build control floor whose
+max is 2.51% (§3).
+
+**Those are two pairs and the first draft of this line merged them.**  The
+`before`/`after` values here are the **two-run medians** of each side's payload
+pair, which is the unit §3.2's floor is computed in; the **single-run** pair
+`bench-slice2-after-a.json` → `bench-slice3-after-a.json` reads 0.613 → 0.599,
+**−2.29%**, and is the pair §3.1's `--compare` table prints.  Quoting `0.613 →
+0.599` beside `−3.38%` takes the numerator from one pair and the delta from the
+other; both are real and they are quoted in their own sections.  The first draft
+said the prediction was "written and committed before the code"; **the history
+cannot show that and this line does not claim it.**  What the repository does
+show is that the prediction *describes itself* as written before the code and
+pins its measurements to the slice-2 artifact (`sha256:1ec2563e926cb649`), and
+that both files first appear in `645ba9d` — the same commit — so a reader who
+wants the order has the file's own statement and nothing stronger.  The mechanism fired exactly
 as designed and the census proves it landed (§1).  The **price** the prediction
 attached to it did not survive, and §3 is that measurement: the loop this slice
 un-delegated is a loop whose body is **72 `{% include %}` tags**, and the
@@ -103,14 +117,24 @@ and §3 is what that costs.
 
 ## 2. Correctness — the parity probe, and the mutant that proves edit 2
 
-**The differential probe.**  `nested_for_parity.py` renders 17 nested-loop
+**The differential probe.**  `nested_for_parity.py` renders 16 nested-loop
 templates — direct nesting, `parentloop`, `parentloop` two deep, an inner loop
 inside an `{% if %}`, an outer var read in the inner body, an empty inner, a
 delegate inside the inner, `reversed`, sibling loops, an inner-over-outer-var, a
 refused filter in the inner, a pure-outer/stated-inner split, an inner that is
 only an include, `cycle` in the inner, an empty outer branch, three-deep nesting
 — under stock Django and this build, and asserts **byte-identical output**.  On
-the shipped build: **17/17 ok**, every template identical.
+the shipped build: **16/16 ok**, every template identical.
+
+**16, not 17, and the first draft of this paragraph said 17 twice.**  The probe's
+`TEMPLATES` map holds 17 keys because both engines have to be able to *resolve*
+`partials/cell.html`; the loop skips it, and both the header and the failure line
+printed `len(TEMPLATES)`, so the denominator counted a row the probe had decided
+not to render and **every number derived from it was one too high**.  The
+transcript below was the tell and the count was read instead: 16 rows print, and
+the mutant's failure line said "13 of 17" about the same 16.  Both denominators
+now come from one `subjects` list the loop is driven by, because a count written
+out in two places is a count that can disagree with itself.
 
 **The mutant for edit 2.**  Edit 1 alone cannot be mutated usefully — reverting
 `sealable(Act::For)` reproduces the *before* artifact exactly, so the whole
@@ -123,25 +147,43 @@ never got `s`.
 The mutant was built by copy-and-`cp`-back (`fanout-agents-share-one-tree`:
 never `git checkout` to restore after a mutation), and its result is:
 
-- **`nested_for_parity.py`: 13 of 17 differ**, and the failure is *silent* —
-  the inner loop renders **nothing** (`ours: ''` against `stock: 'a1a2a3b1b2'`),
-  not an exception.  `loopvar_in_inner_seq`, `delegate_in_inner`,
-  `inner_include_only`, `cycle_in_inner`, `nested_three_deep` and eight others go
-  empty.  The four that stay green are the ones whose inner sequence does not
-  come from the outer loopvar.
+- **`nested_for_parity.py`: 13 of 16 differ**, and the failure is *silent* — not
+  an exception.  The transcript is kept beside this file as
+  `nested_for_parity.mutant-edit2.txt`, because the first draft of this record
+  quoted numbers from a run whose output was preserved nowhere, and a number in a
+  record with **no transcript is a claim, not a measurement**.
+- **Not one signature but three, and the first draft flattened them.**  Ten rows
+  go **empty** (`loopvar_in_inner_seq`, `delegate_in_inner`, `inner_include_only`,
+  `cycle_in_inner`, `nested_three_deep` and five more render `ours: ''`), and
+  **three rows render *too little* rather than nothing**, which is the harder
+  shape to notice:
+  `sibling_loops` keeps its outer headings and loses only the nested loops
+  (`'alphabetagamma'` against `'alphaa1a2a3betab1b2gamma123'`),
+  `empty_inner` falls through to `{% empty %}` on every outer item
+  (`'none()none()none()'` against `'a1a2a3b1b2none()'`), and
+  `outer_empty_branch` renders `'EEE'` against `'a1a2a3b1b2E'`.  A gate that
+  asserts "not empty" passes all three.
+- **The three that stay green are the ones whose inner sequence does not come
+  from the outer loopvar**: `parentloop_counter`, `inner_over_outer_var` and
+  `outer_pure_inner_stated`.
 - **The vendored 1547 suite also catches it: 3 failures**, all nested-`for`
-  `regroup` sites (`test_regroup02/03/04`), e.g.
-  `'02:,07:,' != '02:1428,07:04,'`.
+  `regroup` sites — **`test_regroup01`, `test_regroup03`, `test_regroup04`**, e.g.
+  `'02:,07:,' != '02:1428,07:04,'`.  The first draft named `test_regroup02` in
+  place of `test_regroup01`, and that is the one row of the four that *cannot*
+  catch this mutant: it renders with no data at all and asserts `''`
+  (`django_suite/template_tests/syntax_tests/test_regroup.py:49-54`), which is
+  exactly what a silent truncation produces.  A negative fixture that agrees with
+  the failure it is supposed to find.
 
 So two independent instruments catch this mutant, and neither is redundant: the
-suite reaches **3** nested-`for` shapes, the parity probe reaches **17**, and the
-probe's silent-truncation signature is the one worth having in the record — a
-regression here produces empty output, not an error, which is exactly the kind of
-failure an exception-based gate misses.
+suite reaches **3** nested-`for` shapes, the parity probe reaches **13**, and the
+probe's partial-output signature is the one worth having in the record — a
+regression here can produce *less* output rather than an error, which is exactly
+the kind of failure an exception-based gate misses.
 
 The restore was verified end-to-end, not assumed: after `cp`-back and rebuild the
 live artifact is again `sha256:e6a72702ba5877cb` / 2720544 bytes and the parity
-probe is 17/17 ok.
+probe is 16/16 ok.
 
 ## 3. Timing — the differ, the floor, and why the win is small
 
@@ -241,6 +283,14 @@ The slice touches only the render walk, so compile must not move, and it does no
   byte-agree.  Geometric means: real-world render ours/stock 0.387, ours/jinja2
   **1.043**; parse ours/stock 0.747, ours/jinja2 0.254.  The six real-world
   render+parse rows run **0.30×–1.11×** stock.
+  **Those geometric means are the 11:02 report snapshot and §3's payloads are
+  10:55**, and the first draft let the two sit adjacent without saying so, so a
+  reader who recomputed 0.387 from `bench-slice3-after-{a,b}.json` found 0.380
+  and 0.382 and had no way to tell which file was wrong.  Both are right, and the
+  same build (`sha256:e6a72702ba5877cb`) measured twice: the pair reads 0.380 /
+  0.382 with ours/jinja2 1.026 / 1.033, the report reads 0.387 / 1.043.  The tiles
+  above are the report snapshot, which is why they and the means agree with each
+  other.
 
 ## 5. What this leaves
 

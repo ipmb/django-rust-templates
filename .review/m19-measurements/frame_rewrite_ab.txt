@@ -1,0 +1,101 @@
+########## family
+--- ours, render
+label                              prefix med us fixed med us  delta us   delta  p drift  f drift   (12 runs a side)
+A1                                       156.067      168.156   +12.090  +7.75%    3.44%    2.43%   MOVE
+A2                                       171.010      192.907   +21.897 +12.80%    4.52%    2.16%   MOVE
+A4                                       201.933      245.049   +43.116 +21.35%    2.95%    5.53%   MOVE
+B1                                        17.883       18.004    +0.120  +0.67%    2.73%    4.64%   
+B2                                        32.344       32.523    +0.179  +0.55%    6.44%    5.96%   
+B4                                        61.435       61.596    +0.161  +0.26%    3.24%    3.81%   
+C                                        138.921      138.467    -0.454  -0.33%    3.65%    3.81%   
+D                                          2.952        2.948    -0.004  -0.13%    3.18%    3.40%   
+   controls (must be 0): B1 +0.120  B2 +0.179  B4 +0.161  C -0.454  D -0.004
+   control |delta| max 0.454 us   subject min 12.090 us
+   per-read: A1/50 = +0.2418 us; slope over k = +0.2076 us/read; intercept +1.480 us (the include is in both builds)
+
+--- ours, parse
+label                              prefix med us fixed med us  delta us   delta  p drift  f drift   (12 runs a side)
+A1                                       188.003      198.666   +10.663  +5.67%    2.86%    4.75%   MOVE
+A2                                       206.481      228.499   +22.018 +10.66%    3.26%    2.70%   MOVE
+A4                                       245.828      286.639   +40.811 +16.60%    3.49%    3.60%   MOVE
+B1                                        36.736       37.177    +0.441  +1.20%    5.57%    3.24%   
+B2                                        56.067       56.045    -0.022  -0.04%    4.76%    3.83%   
+B4                                        92.391       92.690    +0.299  +0.32%    3.58%    2.62%   
+C                                        164.121      165.824    +1.703  +1.04%    2.67%    2.94%   
+D                                         17.700       17.977    +0.277  +1.56%    3.36%    4.17%   
+   controls (must be 0): B1 +0.441  B2 -0.022  B4 +0.299  C +1.703  D +0.277
+   control |delta| max 1.703 us   subject min 10.663 us
+   per-read: A1/50 = +0.2133 us; slope over k = +0.1991 us/read; intercept +1.267 us (the include is in both builds)
+
+--- ours, compile
+label                              prefix med us fixed med us  delta us   delta  p drift  f drift   (12 runs a side)
+A1                                        24.582       24.593    +0.011  +0.05%    3.61%    4.46%   
+A2                                        28.317       28.429    +0.112  +0.39%    3.59%    2.67%   
+A4                                        36.086       36.065    -0.021  -0.06%    2.42%    2.44%   
+B1                                        17.499       17.520    +0.022  +0.12%    2.64%    2.46%   
+B2                                        21.290       21.349    +0.059  +0.28%    3.30%    3.44%   
+B4                                        28.730       28.771    +0.041  +0.14%    2.17%    2.49%   
+C                                         20.366       20.406    +0.039  +0.19%    4.31%    3.01%   
+D                                         13.546       13.599    +0.052  +0.39%    3.23%    2.36%   
+   controls (must be 0): B1 +0.022  B2 +0.059  B4 +0.041  C +0.039  D +0.052
+   control |delta| max 0.059 us   subject min 0.011 us
+   per-read: A1/50 = +0.0002 us; slope over k = -0.0004 us/read; intercept +0.078 us (the include is in both builds)
+
+########## corpus
+--- ours, render
+label                              prefix med us fixed med us  delta us   delta  p drift  f drift   (12 runs a side)
+django-only/realistic                    995.547     1021.127   +25.579  +2.57%    4.39%    3.14%   MOVE
+real-world/complex                       514.355      522.758    +8.404  +1.63%    3.33%    4.49%   
+django-only/filter-arg                   483.633      485.019    +1.386  +0.29%    4.36%    2.67%   
+django-only/i18n                         384.290      384.146    -0.145  -0.04%    4.64%    2.55%   
+real-world/normal                        133.312      132.927    -0.385  -0.29%    5.16%    5.18%   
+real-world/large                         205.927      204.394    -1.533  -0.74%    5.62%    6.61%   
+
+--- ours, parse
+label                              prefix med us fixed med us  delta us   delta  p drift  f drift   (12 runs a side)
+django-only/realistic                   1148.337     1171.279   +22.942  +2.00%    4.24%    3.17%   
+real-world/complex                       662.821      671.295    +8.475  +1.28%    2.00%    4.60%   
+django-only/filter-arg                   558.243      560.512    +2.268  +0.41%    4.86%    2.28%   
+django-only/i18n                         459.680      457.111    -2.568  -0.56%    3.37%    2.16%   
+real-world/normal                        321.010      320.345    -0.665  -0.21%    3.24%    3.11%   
+real-world/large                        2290.424     2297.468    +7.044  +0.31%    3.02%    3.83%   
+
+--- ours, compile
+label                              prefix med us fixed med us  delta us   delta  p drift  f drift   (12 runs a side)
+django-only/realistic                    116.023      115.868    -0.155  -0.13%    3.12%    4.17%   
+real-world/complex                       114.085      114.660    +0.575  +0.50%    2.73%    1.94%   
+django-only/filter-arg                    53.418       53.172    -0.246  -0.46%    3.33%    3.56%   
+django-only/i18n                          56.759       56.739    -0.021  -0.04%    3.44%    3.09%   
+real-world/normal                        167.714      168.144    +0.431  +0.26%    2.50%    2.93%   
+real-world/large                        2068.361     2076.314    +7.954  +0.38%    3.09%    3.05%   
+
+--- render   (median of 12 runs a side)
+  subject django-only/realistic        995.547 ->   1021.127   +25.579 us   +2.57%   (n=12/12)
+  subject real-world/complex           514.355 ->    522.758    +8.404 us   +1.63%   (n=12/12)
+  control django-only/filter-arg       483.633 ->    485.019    +1.386 us   +0.29%   (n=12/12)
+  control django-only/i18n             384.290 ->    384.146    -0.145 us   -0.04%   (n=12/12)
+  control real-world/normal            133.312 ->    132.927    -0.385 us   -0.29%   (n=12/12)
+  control real-world/large             205.927 ->    204.394    -1.533 us   -0.74%   (n=12/12)
+  control floor (max |rel| over the four unreachable rows): 0.745%  <- the widest control, not an average
+  django-only/realistic       +2.57%  =   3.5x the floor  outside
+  real-world/complex          +1.63%  =   2.2x the floor  outside
+--- parse   (median of 12 runs a side)
+  subject django-only/realistic       1148.337 ->   1171.279   +22.942 us   +2.00%   (n=12/12)
+  subject real-world/complex           662.821 ->    671.295    +8.475 us   +1.28%   (n=12/12)
+  control django-only/filter-arg       558.243 ->    560.512    +2.268 us   +0.41%   (n=12/12)
+  control django-only/i18n             459.680 ->    457.111    -2.568 us   -0.56%   (n=12/12)
+  control real-world/normal            321.010 ->    320.345    -0.665 us   -0.21%   (n=12/12)
+  control real-world/large            2290.424 ->   2297.468    +7.044 us   +0.31%   (n=12/12)
+  control floor (max |rel| over the four unreachable rows): 0.559%  <- the widest control, not an average
+  django-only/realistic       +2.00%  =   3.6x the floor  outside
+  real-world/complex          +1.28%  =   2.3x the floor  outside
+--- compile   (median of 12 runs a side)
+  subject django-only/realistic        116.023 ->    115.868    -0.155 us   -0.13%   (n=12/12)
+  subject real-world/complex           114.085 ->    114.660    +0.575 us   +0.50%   (n=12/12)
+  control django-only/filter-arg        53.418 ->     53.172    -0.246 us   -0.46%   (n=12/12)
+  control django-only/i18n              56.759 ->     56.739    -0.021 us   -0.04%   (n=12/12)
+  control real-world/normal            167.714 ->    168.144    +0.431 us   +0.26%   (n=12/12)
+  control real-world/large            2068.361 ->   2076.314    +7.954 us   +0.38%   (n=12/12)
+  control floor (max |rel| over the four unreachable rows): 0.461%  <- the widest control, not an average
+  django-only/realistic       -0.13%  =   0.3x the floor  INSIDE -- cannot resolve
+  real-world/complex          +0.50%  =   1.1x the floor  outside
