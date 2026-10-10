@@ -690,6 +690,32 @@ the identity check are **not** re-specified here — §0's correction.
    paid every iteration in parse mode. A slice reporting only its render number
    is reporting the mode that cannot falsify the cost it just added.
 
+   **The walk's justification is restated here, because §0's second deliverable
+   is already met and this step is no longer what buys it.** After the loader fix
+   (`9ad52e4`), the report's own real-world tiles are **0.79× at render and 0.94×
+   at parse** against stock, both below 1.00, and **5 of the 6 family × mode cells
+   are below it**. The sixth is **`micro/parse` at 1.378×** — ten one-to-three-node
+   templates where the per-parse compile cost dominates and no render work can
+   reach it. So *"the engine must beat stock Django at render and at compile"* is
+   true of the corpus's **whole pages** and **not** true unqualified, and that
+   scoping is the deliverable's to state, not this paragraph's: §0 does not say
+   "on whole pages". Neither tile is quotable to three digits — a second run of
+   the same tree reads 0.773 / 0.977 — so what is quoted is the direction and
+   which row loses (`real-world/large` parse, 1.10–1.18×).
+   **What the walk is for now is the brief's other half: *"Your goal is to be
+   faster than jinja2."*** On that same table we are **2.14× jinja2 on
+   `real-world/normal`, 1.82× on `complex`, 2.34× on `large`**, and the rows
+   carrying it are the loop and the per-node Python frame —
+   `loop_bookkeeping` decomposes the loop row into those exact terms. So the
+   fallback if the walk stalls is no longer "we lose to stock": it is "we ship
+   what we have, which beats stock, and stay behind jinja2". §0's deliverable
+   does not move either way.
+
+   **Slice 2's acceptance line is therefore about jinja2 and about not
+   backsliding:** the real-world render geometric mean must not regress above
+   1.00 against stock, and the loop rows must close on jinja2. Both are printed
+   in the slice's own commit beside the render/parse pair.
+
    **Slice 1 — the escape — landed** (`38f58e1`). `render_value_in_context` now
    takes an exact-`str` fast path into Rust's `html_escape` and declines
    everything else (subclasses, lone surrogates) to the slow path unchanged, so
