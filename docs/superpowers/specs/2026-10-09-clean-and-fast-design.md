@@ -132,13 +132,13 @@ a three-variable template rendered `'1|2|3'` with `{'_native.resolve': 3,
 'Variable._resolve_lookup': 3}`. The chain was `VariableNode.render` →
 `FilterExpression.resolve` → `Variable._resolve_lookup` →
 `_native.resolve(".".join(self.lookups), context)` →
-`crates/template-py/src/lib.rs:2605-2606`, `parse_variable(path)`.
+`crates/template-py/src/lib.rs:2635-2636`, `parse_variable(path)`.
 `LookupScope::resolve` is the *floor prototype's* path, and the prototype is not
 what ships.
 
 **Step 1 has since landed**, and the call is now `engine/base.py:1073`,
 `_native.resolve_lookups(self.lookups, context)`, entering at
-`crates/template-py/src/lib.rs:2662-2667`, with no `parse_variable` between the
+`crates/template-py/src/lib.rs:2692-2697`, with no `parse_variable` between the
 shell and the walk. The row above it is what that bought, measured rather than
 predicted.
 
@@ -218,10 +218,10 @@ the sentence:
   reaches the escape filter.
 - **(b) is inherited**, and it is the whole of the floor's per-variable cost:
   `render_floor` fetches `render_value_in_context` once per render
-  (`crates/template-py/src/lib.rs:2926-2928`) and calls it per variable in
+  (`crates/template-py/src/lib.rs:2956-2958`) and calls it per variable in
   `append_expression_value`. That the floor and `render_desc` share exactly these
   two helpers — the resolver and the escaper — is the floor's own claim about
-  itself (`crates/template-py/src/lib.rs:2725-2727`), and it is what makes the
+  itself (`crates/template-py/src/lib.rs:2755-2757`), and it is what makes the
   subtraction isolate dispatch.
 
 The correction is therefore **narrower than revision 1 made it and points the
@@ -339,11 +339,11 @@ Unchanged from M18 §4 and not re-argued here; the boundary is the whole design:
 2. **The walk resolves with the GIL already held.** The review measured this
    rather than leaving it open, and the answer is that every `LookupTarget`
    method on `PyTarget` re-enters `Python::attach` — `has_getitem`
-   (`crates/template-py/src/lib.rs:2012`), `get_item`
-   (`crates/template-py/src/lib.rs:2022`), `get_attr`
-   (`crates/template-py/src/lib.rs:2033`), `get_index`
-   (`crates/template-py/src/lib.rs:2038`) and `in_dir`
-   (`crates/template-py/src/lib.rs:2059`) — because the trait in `template-core`
+   (`crates/template-py/src/lib.rs:2042`), `get_item`
+   (`crates/template-py/src/lib.rs:2052`), `get_attr`
+   (`crates/template-py/src/lib.rs:2063`), `get_index`
+   (`crates/template-py/src/lib.rs:2068`) and `in_dir`
+   (`crates/template-py/src/lib.rs:2089`) — because the trait in `template-core`
    carries no `py`. A depth-1 lookup is
    ≥2 attaches plus a real `hasattr(type(v), "__getitem__")`. It is not fatal
    today and it is why depth 3 inverts. **Removing it is a `LookupTarget`

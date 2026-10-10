@@ -39,6 +39,15 @@ mod padding;
 /// [`html_escape`] for why it is not a helper inside `escape.rs`.
 mod html_escape;
 
+/// …and it is reachable from outside the crate while the *module* stays private,
+/// which is what M19's shell needs and nothing else does.
+///
+/// `pub use` rather than `pub mod`: the doc note above says no agent owns the
+/// table, and a public module path would make `filters::html_escape::html_escape`
+/// a second name for it — a spelling a caller could adopt without the ownership
+/// question being answered. One name, exported where the crate boundary is.
+pub use html_escape::html_escape;
+
 pub mod add;
 pub mod addslashes;
 pub mod capfirst;

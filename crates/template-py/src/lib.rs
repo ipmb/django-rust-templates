@@ -369,6 +369,36 @@ fn split_contents(contents: &str) -> PyResult<Vec<String>> {
         .map_err(|_| PyStopIteration::new_err("unterminated translation marker"))
 }
 
+/// `django.utils.html.escape` for an exact `str` — the table, and nothing else.
+///
+/// The caller is `engine/base.py::render_value_in_context`'s fast path: the
+/// autoescape branch for a value whose **exact** type is `str`, where `localize`
+/// short-circuits on `str` before reading anything, `template_localtime` has
+/// nothing to convert, and `conditional_escape` finds no `__html__` and reaches
+/// this table wrapped in `SafeString`. **The `SafeString` wrapper is the shell's**
+/// — this crate does not name Django classes.
+///
+/// **`None` means "refuse", and it is a correctness contract rather than a
+/// convenience.** PyO3 extracts a Python `str` as `&str` only when it is
+/// UTF-8-encodable, which a string holding a lone surrogate is not — and
+/// `'\ud800'` is a value stock Django renders, measured at 6.0.9 (`{{ x }}` and
+/// `{{ x|force_escape }}` both render `'\ud800'`). A `&str` signature would turn
+/// a value that renders today into a raise, so the refusal sends the caller down
+/// the slow path, which is correct for that input.
+///
+/// That divergence is **already present for every builtin filter** — measured,
+/// `{{ x|upper }}`, `{{ x|length }}` and `{{ x|escape }}` all raise
+/// `UnicodeEncodeError` where stock renders — and it is *not* fixed here: this
+/// fast path must not add the plain-variable path to that set. The filter
+/// layer's is its own defect and its own change.
+#[pyfunction]
+fn html_escape(text: &Bound<'_, PyString>) -> PyResult<Option<String>> {
+    match text.to_str() {
+        Ok(s) => Ok(Some(template_core::filters::html_escape(s))),
+        Err(_) => Ok(None),
+    }
+}
+
 /// One lexed token as it crosses into Python: token type discriminant,
 /// contents, line number, and character-index span (or `None` when lexed
 /// without `debug`).
@@ -3312,6 +3342,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(decimal_digit_codepoints, m)?)?;
     m.add_function(wrap_pyfunction!(python_upper, m)?)?;
     m.add_function(wrap_pyfunction!(split_contents, m)?)?;
+    m.add_function(wrap_pyfunction!(html_escape, m)?)?;
     m.add_function(wrap_pyfunction!(lex, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(parse_variable, m)?)?;

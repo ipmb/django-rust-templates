@@ -7,7 +7,7 @@ crates/template-core/src/filters/host.rs:195	crates/template-core/src/filters/ho
 crates/template-core/src/filters/host.rs:519-526	crates/template-core/src/filters/host.rs	519	526	-	-
 crates/template-core/src/filters/host.rs:576-739	crates/template-core/src/filters/host.rs	576	739	-	-
 crates/template-core/src/filters/linebreaks.rs:130	crates/template-core/src/filters/linebreaks.rs	130	-	call.autoescape && !call.host.is_safe(&value)	-
-crates/template-core/src/filters/mod.rs:127	crates/template-core/src/filters/mod.rs	127	-	pub struct FilterFlags {	-
+crates/template-core/src/filters/mod.rs:136	crates/template-core/src/filters/mod.rs	136	-	pub struct FilterFlags {	-
 crates/template-core/src/filters/slugify.rs:99	crates/template-core/src/filters/slugify.rs	99	-	pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {	-
 crates/template-core/src/filters/wordwrap.rs:73	crates/template-core/src/filters/wordwrap.rs	73	-	unwrap_or(Value::None)	-
 crates/template-core/src/parser/desc.rs:49	crates/template-core/src/parser/desc.rs	49	-	-	-
@@ -41,17 +41,18 @@ crates/template-py/src/filters.rs:871	crates/template-py/src/filters.rs	871	-	ut
 crates/template-py/src/filters.rs:1675-1683	crates/template-py/src/filters.rs	1675	1683	match args.len()	-
 crates/template-py/src/filters.rs:1731-1734	crates/template-py/src/filters.rs	1731	1734	host.take_raised()	-
 crates/template-py/src/lib.rs:146	crates/template-py/src/lib.rs	146	-	fn filter_flags	-
-crates/template-py/src/lib.rs:740	crates/template-py/src/lib.rs	740	-	fn if_condition_to_py	-
+crates/template-py/src/lib.rs:770	crates/template-py/src/lib.rs	770	-	fn if_condition_to_py	-
 crates/template-py/src/lib.rs:1104	crates/template-py/src/lib.rs	1104	-	-	-
 crates/template-py/src/lib.rs:1251	crates/template-py/src/lib.rs	1251	-	-	-
-crates/template-py/src/lib.rs:2605-2606	crates/template-py/src/lib.rs	2605	2606	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
-crates/template-py/src/lib.rs:2926-2928	crates/template-py/src/lib.rs	2926	2928	fn escape_fn<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {	getattr("render_value_in_context")
-crates/template-py/src/lib.rs:2059	crates/template-py/src/lib.rs	2059	-	Python::attach(|py| self.dir(py, bit))	-
-crates/template-py/src/lib.rs:2038	crates/template-py/src/lib.rs	2038	-	let result = Python::attach(|py| -> PyResult<Py<PyAny>> {	-
-crates/template-py/src/lib.rs:2033	crates/template-py/src/lib.rs	2033	-	Python::attach(|py| self.value.bind(py).getattr(bit)	-
-crates/template-py/src/lib.rs:2022	crates/template-py/src/lib.rs	2022	-	let result = Python::attach(|py| {	-
-crates/template-py/src/lib.rs:2012	crates/template-py/src/lib.rs	2012	-	Python::attach(|py| {	-
-crates/template-py/src/lib.rs:2725-2727	crates/template-py/src/lib.rs	2725	2727	django.template.base.render_value_in_context	-
+crates/template-py/src/lib.rs:2042	crates/template-py/src/lib.rs	2042	-	Python::attach(|py| {	-
+crates/template-py/src/lib.rs:2052	crates/template-py/src/lib.rs	2052	-	let result = Python::attach(|py| {	-
+crates/template-py/src/lib.rs:2063	crates/template-py/src/lib.rs	2063	-	Python::attach(|py| self.value.bind(py).getattr(bit)	-
+crates/template-py/src/lib.rs:2068	crates/template-py/src/lib.rs	2068	-	let result = Python::attach(|py| -> PyResult<Py<PyAny>> {	-
+crates/template-py/src/lib.rs:2089	crates/template-py/src/lib.rs	2089	-	Python::attach(|py| self.dir(py, bit))	-
+crates/template-py/src/lib.rs:2635-2636	crates/template-py/src/lib.rs	2635	2636	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
+crates/template-py/src/lib.rs:2692-2697	crates/template-py/src/lib.rs	2692	2697	fn resolve_lookups(	resolve_components(py, &lookups, context)
+crates/template-py/src/lib.rs:2755-2757	crates/template-py/src/lib.rs	2755	2757	django.template.base.render_value_in_context	-
+crates/template-py/src/lib.rs:2956-2958	crates/template-py/src/lib.rs	2956	2958	fn escape_fn<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {	getattr("render_value_in_context")
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-
@@ -825,35 +826,34 @@ timesince.py:138-143	django/utils/timesince.py	138	143	timeuntil	-
 django/utils/timezone.py:146-161	django/utils/timezone.py	146	161	settings.USE_TZ if use_tz is None else use_tz	-
 timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)
 django/utils/translation/__init__.py:275	django/utils/translation/__init__.py	275	-	get_language_info(lang_info["fallback"][0])	-
-engine/base.py:1089	python/django_rust_templates/engine/base.py	1089	-	def render_annotated(self, context):	-
-engine/engine.py:233	python/django_rust_templates/engine/engine.py	233	-	extra_data = getattr(template, "extra_data", {})	-
-engine/loader_tags.py:154	python/django_rust_templates/engine/loader_tags.py	154	-	for n in compiled_parent.nodelist.get_nodes_by_type(BlockNode)	-
-engine/loader_tags.py:148	python/django_rust_templates/engine/loader_tags.py	148	-	for node in compiled_parent.nodelist:	-
-engine/parser.py:546	python/django_rust_templates/engine/parser.py	546	-	template.extra_data = {} if parser is None else parser.extra_data	-
-engine/defaulttags.py:1253	python/django_rust_templates/engine/defaulttags.py	1253	-	partials = parser.extra_data.setdefault("partials", {})	-
-engine/base.py:1073	python/django_rust_templates/engine/base.py	1073	-	return _native.resolve_lookups(self.lookups, context)	-
 django/utils/translation/__init__.py:279	django/utils/translation/__init__.py	279	-	if "-" not in lang_code:	-
 django/utils/translation/__init__.py:280	django/utils/translation/__init__.py	280	-	raise KeyError("Unknown language code %s." % lang_code)	-
 django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	290	-	info["name_translated"] = gettext_lazy(info["name"])	-
-python/django_rust_templates/render.py:264	python/django_rust_templates/render.py	264	-	(measured — a `{% for %}` node at ``(9, 25)``), so this parser's tokens are	-
-python/django_rust_templates/host.py:737	python/django_rust_templates/host.py	737	-	and its `_culprit_node` attached. Rust can only carry the class's	-
 django_suite/run.py:85	django_suite/run.py	85	-	-	-
 django_suite/template_tests/syntax_tests/test_for.py:334	django_suite/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 django_suite/template_tests/test_partials.py:14	django_suite/template_tests/test_partials.py	14	-	engines["django"]	-
 python/django_rust_templates/engine/base.py:861	python/django_rust_templates/engine/base.py	861	-	names.get(func)	-
-python/django_rust_templates/engine/base.py:1201	python/django_rust_templates/engine/base.py	1201	-	render_value_in_context(output, context)	-
+engine/base.py:1073	python/django_rust_templates/engine/base.py	1073	-	return _native.resolve_lookups(self.lookups, context)	-
+engine/base.py:1089	python/django_rust_templates/engine/base.py	1089	-	def render_annotated(self, context):	-
+python/django_rust_templates/engine/base.py:1213	python/django_rust_templates/engine/base.py	1213	-	render_value_in_context(output, context)	-
+engine/defaulttags.py:1253	python/django_rust_templates/engine/defaulttags.py	1253	-	partials = parser.extra_data.setdefault("partials", {})	-
+engine/engine.py:233	python/django_rust_templates/engine/engine.py	233	-	extra_data = getattr(template, "extra_data", {})	-
 python/django_rust_templates/engine/exceptions.py:38	python/django_rust_templates/engine/exceptions.py	38	-	-	-
+engine/loader_tags.py:148	python/django_rust_templates/engine/loader_tags.py	148	-	for node in compiled_parent.nodelist:	-
+engine/loader_tags.py:154	python/django_rust_templates/engine/loader_tags.py	154	-	for n in compiled_parent.nodelist.get_nodes_by_type(BlockNode)	-
 python/django_rust_templates/engine/parser.py:179	python/django_rust_templates/engine/parser.py	179	-	"BlockTranslateNode": BlockTranslateNode,	-
 python/django_rust_templates/engine/parser.py:285	python/django_rust_templates/engine/parser.py	285	-	-	-
+engine/parser.py:546	python/django_rust_templates/engine/parser.py	546	-	template.extra_data = {} if parser is None else parser.extra_data	-
 python/django_rust_templates/engine/parser.py:568	python/django_rust_templates/engine/parser.py	568	-	-	-
 python/django_rust_templates/engine/parser.py:669	python/django_rust_templates/engine/parser.py	669	-	-	-
 python/django_rust_templates/host.py:35	python/django_rust_templates/host.py	35	-	-	-
 python/django_rust_templates/host.py:422	python/django_rust_templates/host.py	422	-	-	-
-python/django_rust_templates/host.py:607	python/django_rust_templates/host.py	607	-	self._django_tags = django_own_tags()	-
 python/django_rust_templates/host.py:555	python/django_rust_templates/host.py	555	-	-	-
+python/django_rust_templates/host.py:607	python/django_rust_templates/host.py	607	-	self._django_tags = django_own_tags()	-
+python/django_rust_templates/host.py:737	python/django_rust_templates/host.py	737	-	and its `_culprit_node` attached. Rust can only carry the class's	-
+python/django_rust_templates/render.py:264	python/django_rust_templates/render.py	264	-	(measured — a `{% for %}` node at ``(9, 25)``), so this parser's tokens are	-
 tests/milestone_ownership.py:440	tests/milestone_ownership.py	440	-	def unshimmed(scope: str = TARGET) -> list:	-
 tests/parity_target.py:63	tests/parity_target.py	63	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
-tests/template_tests/test_nodelist.py:40	tests/template_tests/test_nodelist.py	40	-	class ErrorIndexTest(SimpleTestCase):	-
 tests/parity_target.py:171	tests/parity_target.py	171	-	So this is the replacement Python side	-
 filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-
 test_unordered_list.py:143	tests/template_tests/filter_tests/test_unordered_list.py	143	-	unordered_list(item_generator()),	-
@@ -870,6 +870,7 @@ custom.py:398	tests/template_tests/templatetags/custom.py	398	-	parser.extra_dat
 tag_27584.py:8-9	tests/template_tests/templatetags/tag_27584.py	8	9	delete_first_token	-
 tag_27584.py:13-15	tests/template_tests/templatetags/tag_27584.py	13	15	class BadNode(template.Node):	raise template.TemplateSyntaxError("error")
 .django/tests/template_tests/test_custom.py:4	tests/template_tests/test_custom.py	4	-	from django.template.base import Node	-
+tests/template_tests/test_nodelist.py:40	tests/template_tests/test_nodelist.py	40	-	class ErrorIndexTest(SimpleTestCase):	-
 tests/template_tests/test_nodelist.py:44-86	tests/template_tests/test_nodelist.py	44	86	def test_correct_exception_index(self):	debug = e.template_debug
 test_parser.py:36	tests/template_tests/test_parser.py	36	-	-	-
 test_parser.py:49	tests/template_tests/test_parser.py	49	-	<Lexer template_string="{% for i in 1 %}{{ a...", verbatim=False>	-
@@ -888,4 +889,3 @@ test_render_parity.py:615	tests/test_render_parity.py	615	-	def test_a_silent_va
 test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
 .django/tests/timezones/tests.py:1051-1071	tests/timezones/tests.py	1051	1071	test_localtime_filters_do_not_raise_exceptions	-
 .django/tests/utils_tests/test_html.py:204-217	tests/utils_tests/test_html.py	204	217	-	-
-crates/template-py/src/lib.rs:2662-2667	crates/template-py/src/lib.rs	2662	2667	fn resolve_lookups(	resolve_components(py, &lookups, context)

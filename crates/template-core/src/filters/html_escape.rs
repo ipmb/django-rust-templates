@@ -52,7 +52,11 @@
 /// `@stringfilter` coercion the FFI loop applied (§D3): `force_escape`'s `value`,
 /// `linenumbers`'s `line`, `linebreaks`'s paragraph `p` and `linebreaksbr`'s
 /// `value` are all `str`s by the time their body sees them.
-pub(crate) fn html_escape(text: &str) -> String {
+/// `pub` rather than `pub(crate)` as of M19: the shell's `render_value_in_context`
+/// fast path is the fifth caller and the first one outside this crate. It goes
+/// through the `filters` module's re-export, so the module stays private — see
+/// the note there.
+pub fn html_escape(text: &str) -> String {
     // Sized for the common case — most text has nothing to escape — and grown by
     // the allocator otherwise. Deliberately not `try_reserve`d: `padding.rs` needs
     // fallibility because a *width* is an unbounded number a template may name,

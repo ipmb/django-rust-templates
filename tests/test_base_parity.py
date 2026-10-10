@@ -13,7 +13,7 @@ teeth has a row with teeth.
 6071 of those calls come from frames named render — VariableNode.render,
 CycleNode.render and TranslateNode.render — and 434 from a nested function
 called render_value inside the blocktranslate tag. The call sites are
-`python/django_rust_templates/engine/base.py:1201`, which is ours, and
+`python/django_rust_templates/engine/base.py:1213`, which is ours, and
 `django/template/defaulttags.py:114`, `django/templatetags/i18n.py:91` and
 `django/templatetags/i18n.py:185`, which are not. The two out-of-module modules
 reach it through a from-import of render_value_in_context at module scope, and

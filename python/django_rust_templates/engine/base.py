@@ -1171,6 +1171,18 @@ def render_value_in_context(value, context):
     means escaping, if required, and conversion to a string. If value is a
     string, it's expected to already be translated.
     """
+    # The common case, and §2's largest single line: an exact `str` is a no-op for
+    # both calls below (`localize` short-circuits on `str` before reading
+    # anything), and `conditional_escape` is `SafeString(html.escape(str))` for
+    # anything without `__html__`. **Exact** type, not `isinstance`: a `str`
+    # subclass is where `SafeString` and `markupsafe.Markup` live, both carry
+    # `__html__`, and escaping one is the bug the predicate exists to decline.
+    # Everything it declines — a subclass, or a lone surrogate, where the binding
+    # refuses rather than raise — takes the slow path unchanged.
+    if context.autoescape and type(value) is str:
+        escaped = _native.html_escape(value)
+        if escaped is not None:
+            return SafeString(escaped)
     value = template_localtime(value, use_tz=context.use_tz)
     value = localize(value, use_l10n=context.use_l10n)
     if context.autoescape:

@@ -181,7 +181,7 @@ class InterpositionTests(unittest.TestCase):
         ``{% if %}`` grammar into ``crates/template-core/src/parser/smartif.rs``,
         which the parse seam drives inside ``compile_template``, and the shell
         then materialises the resulting ``IfCondition`` tree into real
-        ``smartif`` objects (``crates/template-py/src/lib.rs:740``). A row
+        ``smartif`` objects (``crates/template-py/src/lib.rs:770``). A row
         named after the plan's premise would have asserted something untrue
         about a call that does not happen, so it is renamed and rewritten here;
         the substitution is recorded in the plan's Task 3 corrections.
@@ -314,13 +314,16 @@ class InterpositionTests(unittest.TestCase):
         equal = sum(i2 - i1 for tag, i1, i2, _j1, _j2 in opcodes if tag == "equal")
         differing = [op for op in opcodes if op[0] != "equal"]
 
-        # The structure, which is what the guard reads: nine edits — the marker
+        # The structure, which is what the guard reads: ten edits — the marker
         # and its blank line as one pure insertion of ours, M18.1's `BaseContext`
         # import substitution, M16's module-level `_native` import as a second
         # pure insertion, two pairs for `compile_nodelist`'s delegation, then
         # M19's two — a substitution for `__slots__` and the routing cache as a
         # third pure insertion — then M11 Task 2's filter seam as a fourth, then
-        # one replacement for `Variable._resolve_lookup`'s. Asserted here too
+        # one replacement for `Variable._resolve_lookup`'s, then M19's third —
+        # the render leaf's fast path as a fifth pure insertion, and the only
+        # one of the five that lands *outside* every span the compared-path
+        # table names. Asserted here too
         # because a re-alignment that merged two edits into one would move
         # `equal` in a way this row could not explain on its own.
         #
@@ -399,12 +402,32 @@ class InterpositionTests(unittest.TestCase):
         # but by the other op). The routing cache is a pure insertion at ours 809 —
         # a `delete` — and moves `equal` by nothing at all, which is what an
         # insertion is. So the arithmetic that this row is built on
-        # carries through: ours is 1252 lines and 134 of them differ, upstream's
-        # 1207 with 89 differing, and 1252-134 = 1207-89 = 1118. **Two ops rather
+        # carries through: ours is 1264 lines and 146 of them differ, upstream's
+        # 1207 with 89 differing, and 1264-146 = 1207-89 = 1118. **Two ops rather
         # than one because the two changes are of different kinds**, which is the
         # same distinction the pair of counts above draws; a single edit that
         # produced two ops would have been a re-alignment, and this row is what
         # would have said so.
+        #
+        # **M19's third op is the tenth and the last, and it moves `equal` by
+        # nothing.** The render leaf's fast path is twelve lines inserted at ours
+        # 1174 against none of upstream's, so it is a `delete` in this list's
+        # vocabulary — ours alone — and an insertion is the one shape that leaves
+        # both sides' *differing* counts alone on the other side: ours goes 134 →
+        # 146 while upstream's stays 89, which is exactly what a twelve-line
+        # addition to our file with no counterpart should do, and 1264-146 =
+        # 1207-89 holds. It lands **after `Variable._resolve_lookup`'s
+        # `replace`** rather than beside the other M19 ops, and that placement is
+        # the assertion: the earlier two are inside `FilterExpression`, in the
+        # region of the file that class occupies, while this one is in the render
+        # leaf a thousand lines below it — a reader who saw three M19 ops and
+        # assumed one commit had made them all in one place would be wrong, and
+        # the last position in this list is what says so.
+        #
+        # It is the first op in this list that lands inside a function the
+        # compared-path table does not name (`render_value_in_context`), and that
+        # is why it is a pure shift of the two entries below it rather than a
+        # resizing of one of them — see the note on the guard's `COMPARED_PATH`.
         #
         # The pair lands **between `compile_nodelist`'s two `replace`s and the
         # filter seam's `delete`** — the region of the file `FilterExpression`
@@ -428,6 +451,7 @@ class InterpositionTests(unittest.TestCase):
                 "delete",
                 "delete",
                 "replace",
+                "delete",
             ],
         )
 

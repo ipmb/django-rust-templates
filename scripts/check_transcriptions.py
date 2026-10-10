@@ -90,7 +90,7 @@ UPSTREAM_NAMESPACE = "django.template."
 # re-runs the instrument and fails if the two disagree. A pinned table with a
 # live re-measurement behind it is the same shape as the module meter.
 #
-# 30 functions, spanning 117-1252 in a file of 1252 lines — nearly the whole
+# 30 functions, spanning 117-1264 in a file of 1264 lines — nearly the whole
 # file, which is the finding.
 # A guard that checked only the named target's own lines would miss a region
 # declared in any of the other 29.
@@ -116,9 +116,9 @@ UPSTREAM_NAMESPACE = "django.template."
 # `117-1212 in a file of 1212 lines` was wrong in both places at once — the same
 # single carrier, two numbers, which is why a reviewer reading only one of them
 # would have found nothing. It reads `117-1244 in a file of 1244 lines` from
-# M19 — 1252 after the `if self.filters:` guard recorded below — and both numbers
-# come from `wc -l` and the pin rather than from adding a
-# delta to the old text.
+# M19 — 1252 after the `if self.filters:` guard recorded below, and 1264 after
+# the render leaf recorded at the end of the block — and both numbers come from
+# `wc -l` and the pin rather than from adding a delta to the old text.
 #
 # **These are the transcription's line numbers, so an insertion moves them, and
 # two commits have moved them.** M16's module-level `_native` import adds one
@@ -137,6 +137,15 @@ UPSTREAM_NAMESPACE = "django.template."
 # M16 number. **The same place moves again by +8**, when the routing cache's
 # prologue gains its `if self.filters:` guard: `args_check` 884-901 → 892-909
 # through `token_kwargs` 1200-1244 → 1208-1252, and the file is 1252 lines.
+# **A third move, +12, is M19's render leaf**, and it is the one that is a pure
+# shift rather than a resizing: the native escape fast path is inserted at 1174
+# inside `render_value_in_context`, which is not in this table at all, so the
+# only entries it moves are the two that *start* below it — `VariableNode.__init__`
+# 1187-1188 → 1199-1200 and `token_kwargs` 1208-1252 → 1220-1264 — and no other
+# span changes by a line. The file is 1264 lines. The two moves above *resize*
+# the table's tail because the insertion is inside a table member's own span;
+# this one cannot, because the function it lands in is not a member, which is
+# the distinction a reader should take from the three together.
 # Stated as arithmetic so that it can be checked; the spans
 # themselves are re-measured with the instrument, because the instrument is the
 # evidence, and the *set* of functions is the part that could have moved for a
@@ -209,8 +218,8 @@ COMPARED_PATH = {
         (1138, 1143, "NodeList.get_nodes_by_type"),
         (1149, 1150, "TextNode.__init__"),
         (1158, 1165, "TextNode.render_annotated"),
-        (1187, 1188, "VariableNode.__init__"),
-        (1208, 1252, "token_kwargs"),
+        (1199, 1200, "VariableNode.__init__"),
+        (1220, 1264, "token_kwargs"),
     ],
     # 8 functions, spans 56-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
@@ -1011,6 +1020,44 @@ DECLARED = {
                 (1027, 1073),
                 (957, 1028),
                 'return _native.resolve_lookups(self.lookups, context)',
+            ),
+            # M19's, and §2's largest single line: the autoescape fast path for a
+            # value whose **exact** type is `str`. A pure insertion, hence `None`
+            # upstream — upstream's `render_value_in_context` has no branch here
+            # at all — and the snippet is its four executable lines verbatim,
+            # because clause (2) requires every statement in a region to be named.
+            #
+            # **Exact type rather than `isinstance`, and that is the whole safety
+            # argument rather than a micro-optimisation.** The value this branch
+            # takes makes both calls below no-ops (`localize` short-circuits on
+            # `str` before it reads anything; `template_localtime` has nothing to
+            # convert), and `conditional_escape` is `SafeString(html.escape(str(
+            # text)))` for anything without `__html__`, which is what the branch
+            # returns. A `str` *subclass* is exactly where `SafeString` and
+            # `markupsafe.Markup` live, both carry `__html__`, and escaping one is
+            # the defect §3.1 exists to keep out of this branch — so the predicate
+            # declines every subclass, and the slow path below escapes them as it
+            # always did.
+            #
+            # **`None` from the binding is the second refusal, and it is measured
+            # rather than defensive.** PyO3 hands a Python `str` over as `&str`
+            # only when it is UTF-8-encodable, and a lone surrogate is not. At
+            # 6.0.9 stock renders `'\ud800'` for `{{ x }}` *and* for
+            # `{{ x|force_escape }}`, while ours already raises
+            # `UnicodeEncodeError` on every builtin filter that takes a string —
+            # `upper`, `length` and `escape` among them, measured. Without the
+            # refusal this branch would add the **plain-variable** path to that
+            # set, turning a value that renders today into a raise. The filter
+            # layer's half of that divergence is a real defect and is not fixed
+            # here; it is not this region's, and widening this branch would not
+            # reach it.
+            (
+                (1174, 1185),
+                None,
+                "if context.autoescape and type(value) is str:\n"
+                "escaped = _native.html_escape(value)\n"
+                "if escaped is not None:\n"
+                "return SafeString(escaped)",
             ),
             # **M18.1's seventh region was here, and it was removed on the day it
             # was written** — the reason is the region count rather than the line.

@@ -622,10 +622,10 @@
       like rather than three different templates — and the harness prints the engine it
       built, the extension it loaded and which profile built it, refusing to print a table
       for any other engine. Measured 2026-10-09 local, the day the report stamps its run in
-      UTC (2026-10-10 04:32): the port is <b>1.28× slower at render and
-      1.30× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
-      run 1.23×–1.37×), and the worst row in the corpus is compile of a template that is
-      almost nothing but the call — <b>2.22×</b>, 8.72 µs against stock's 3.93 µs. Compatibility has
+      UTC (2026-10-10 04:49): the port is <b>1.02× at render and
+      1.14× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
+      run 0.95×–1.27×), and the worst row in the corpus is compile of a template that is
+      almost nothing but the call — <b>2.23×</b>, 8.81 µs against stock's 3.95 µs. Compatibility has
       been the priority throughout, and the measurement is published here rather than only
       the number that would flatter it. <b>Every chart, tile and table block states which
       way "better" runs</b>, and the word is read from the payload (<code>bench.py</code>'s
@@ -640,8 +640,8 @@
       <b>The micro family's rows say how much of themselves is the call, because the old note
       claimed one family where there are two.</b> Every row pays its engine's per-call
       overhead before it does any template work, and the overheads are not equal: measured,
-      stock Django is <b>1.74 µs</b> on a template that renders nothing, the port is
-      <b>1.72 µs</b> and Jinja2 is <b>3.50 µs</b>. So <code>bench.py</code> measures that empty-template
+      stock Django is <b>1.73 µs</b> on a template that renders nothing, the port is
+      <b>1.73 µs</b> and Jinja2 is <b>3.45 µs</b>. So <code>bench.py</code> measures that empty-template
       <b>floor</b> per engine and mode, prints it, and every table cell carries its
       <b>call share</b> — the floor as a share of that cell. The range settles the question
       the old note answered wrongly: over the micro rows it runs <b>2%–100%</b>, so
@@ -720,6 +720,48 @@
       <code>n</code>-filter expression, so nothing at all on the common one-filter case,
       and a reviewer's identical note was measured and reverted once already, which this
       repository's transcription guard records.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>The render leaf's escape is Rust's now, and it was the largest single removable cost
+      the profile found.</b> Every <code>{{ variable }}</code> runs
+      <code>render_value_in_context</code>, and for a plain <code>str</code> that meant
+      <code>template_localtime</code>, <code>localize</code> and
+      <code>conditional_escape</code> — a chain §1.3b priced at <b>0.79 µs</b> of the
+      <b>1.47 µs</b> a variable cost, about 0.76 of it removable. The fast path is
+      exact-<code>str</code> only, and deliberately not <code>isinstance</code>: a
+      <code>str</code> subclass is where <code>SafeString</code> and
+      <code>markupsafe.Markup</code> live, both carry <code>__html__</code>, and escaping one
+      is the bug the predicate exists to decline. It calls <code>_native.html_escape</code> —
+      the Rust escape the builtin <code>escape</code> filter already used — and takes the
+      slow path unchanged for everything it declines.
+      Measured as a same-harness A/B in which <b>only <code>engine/base.py</code>
+      differs</b> (the control is <code>HEAD</code>'s file, restored afterwards by copy, so
+      the tree is untouched and no <code>git checkout</code> is involved; the extension is
+      the same build on both sides): <code>micro/variable</code> render
+      <b>3.482 → 2.807 µs</b> and <code>micro/escape</code> <b>3.485 → 2.793</b> — the
+      0.68 µs per variable §1.3b predicted, and 89% of what it called removable —
+      <code>real-world/normal</code> <b>570.9 → 415.5 µs</b> (−27.2%),
+      <code>real-world/large</code> <b>871.0 → 689.5</b> (−20.8%) and
+      <code>real-world/complex</code> <b>1211.4 → 1079.7</b> (−10.9%). <b>Both modes move,
+      and that is the signature to read</b>: <code>parse</code> is compile <i>and</i> render,
+      so a per-render cost shows in both rows while a per-compile cost shows only in
+      <code>parse</code> — the inverse of the filter-routing row above. The port now
+      <b>beats stock Django on <code>real-world/normal</code> render</b> (0.95×) and ties it
+      on <code>large</code> (1.00×).
+      <b>The factor that is left is not overhead.</b> On a template that renders nothing the
+      port is 1.73 µs against Jinja2's 3.45 µs, yet Jinja2 renders every whole page
+      <b>2.4×–3.4× faster</b> — so the remaining gap is per-node work in the Python walk,
+      which is what the native render walk is for. <b>One compatibility gap was found on the
+      way and is not fixed here</b>: of the <b>57</b> builtin filters, <b>47 render a
+      <code>str</code> holding a lone surrogate (<code>'\ud800'</code>) in stock Django
+      6.0.9 and raise <code>UnicodeEncodeError</code> in the port</b> — <code>upper</code>,
+      <code>length</code>, <code>escape</code>, <code>striptags</code> and the rest — and
+      eight more raise a <i>different</i> exception from stock's, so only <code>iriencode</code>
+      and <code>urlencode</code> agree at all, and they agree because stock raises on those
+      two as well. The cause is the FFI boundary: a Rust <code>&amp;str</code> is UTF-8, and a
+      lone surrogate has no UTF-8 encoding. The fast path below declines that input rather
+      than joining the set, so this change does not widen the gap — but the gap is real, it is
+      wider than one filter, and it is recorded rather than repaired inside a speed commit.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>That figure holds only for an optimised build, and saying which build is now part
