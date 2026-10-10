@@ -20,11 +20,35 @@ step() { printf '\n=== %s ===\n' "$1"; }
 step "cargo test"
 cargo test --workspace --quiet
 
+step "cargo test, the crate that embeds an interpreter"
+# `template-py`'s own tests are the walk's, and they are not in the step above.
+# `cargo test --workspace` builds this crate with its default features, which
+# include `extension-module` — the feature that tells PyO3 *not* to link
+# libpython, because an extension module borrows the interpreter that loads it.
+# A test binary has to start its own, so the walk's tests are gated on the
+# absence of that feature and this step is the only thing that compiles them.
+# Without it they would be neither run nor missed: `cargo test --workspace`
+# reports an empty test target as a pass.
+#
+# The invocation lives in `run_rust_unit_tests.sh` for the reason the Python
+# one does — it is more than a command line (a `--no-default-features`, a dyld
+# search path taken from the interpreter's own `sysconfig`, and the 8 MiB of
+# test-thread stack the depth guard's boundary row needs, none of which any of
+# them can be inferred from the others) — and it is the single place those are
+# written down.
+"$HERE/run_rust_unit_tests.sh"
+
 step "rustfmt"
 cargo fmt --all -- --check
 
 step "clippy"
 cargo clippy --workspace --all-targets --quiet -- -D warnings
+# Again with `extension-module` off, because that is the configuration the step
+# above does not lint: the walk's tests are `#[cfg(not(feature = ...))]`-gated,
+# so `--workspace` alone lints neither the tests nor `cargo test`'s ability to
+# compile them. Same `-D warnings` as above and not a relaxed one — a lint
+# budget that changes with the feature set is a lint budget nobody can read.
+cargo clippy -p template-py --no-default-features --all-targets --quiet -- -D warnings
 
 step "the extension the python suites exercise"
 # The Python steps below are statements about an *artifact*, and until this line

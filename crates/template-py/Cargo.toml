@@ -10,6 +10,18 @@ description = "PyO3 bindings for template-core. All FFI concerns live here."
 name = "_native"
 crate-type = ["cdylib"]
 
+[features]
+default = ["extension-module"]
+# `pyo3/extension-module` is the *only* thing that makes this crate loadable as
+# an extension module, and it is also the only thing that makes it untestable:
+# it tells PyO3 not to link libpython, which is right in a `cdylib` loaded by an
+# interpreter that already has one and fatal in a test binary that does not. So
+# it is a feature and not a fact — `cargo test -p template-py
+# --no-default-features` links libpython instead, and the tests that need an
+# interpreter are gated on exactly that (`#[cfg(not(feature =
+# "extension-module"))]`).
+extension-module = ["pyo3/extension-module"]
+
 [dependencies]
 template-core.workspace = true
-pyo3 = { version = "0.29", features = ["extension-module"] }
+pyo3 = { version = "0.29" }

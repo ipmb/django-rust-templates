@@ -2940,6 +2940,9 @@ struct ForPlan {
 struct Census {
     handled: Vec<(String, usize)>,
     delegated: Vec<(String, usize)>,
+    /// The characters that came back from `render_annotated`, summed at the
+    /// call site. See [`census_take`] for why this is not a partition.
+    delegated_len: usize,
 }
 
 /// `(class_name, count)`, ascending by first sighting. Named because
@@ -2951,6 +2954,7 @@ static CENSUS_ON: AtomicBool = AtomicBool::new(false);
 static CENSUS: Mutex<Census> = Mutex::new(Census {
     handled: Vec::new(),
     delegated: Vec::new(),
+    delegated_len: 0,
 });
 
 fn census_on() -> bool {
@@ -2982,6 +2986,7 @@ fn census_merge(into: &mut Census, from: Census) {
     for (class_name, count) in from.delegated {
         census_add(&mut into.delegated, &class_name, count);
     }
+    into.delegated_len += from.delegated_len;
 }
 
 /// Start (or clear) the census.
@@ -2993,12 +2998,34 @@ fn census_start() {
     CENSUS_ON.store(true, Ordering::Relaxed);
 }
 
-/// Stop the census and return `(handled, delegated)`, each `(class_name, count)`.
+/// Stop the census and return `(handled, delegated, delegated_len)`.
+///
+/// The third value is the reviewer's correction to this instrument, and it is
+/// the one that matters on a page with inheritance. Counts alone are
+/// **containment-blind**: a delegated `BlockNode` is one node and carries the
+/// whole page body into Python with it, so `real-world/normal` reads 7 handled
+/// against 4 delegated — 36% delegated — while essentially *all* of its output
+/// came back from Python. `delegated_len` sums, at each delegate call site, the
+/// length of the string `render_annotated` returned, so `delegated_len / len(the
+/// render's output)` is a share of the output rather than a share of the nodes.
+///
+/// **It is not a partition and the number can exceed 100%.** A delegate nested
+/// inside another delegate (an `{% include %}` inside a block inside an
+/// `{% extends %}`) contributes its own length *and* is part of its parent's, so
+/// the same character is counted once per nested delegate above it. That is the
+/// honest shape for the question the number answers — "how much of what I print
+/// came back from Python" — and it is deliberately not clamped: a row over 100%
+/// says the delegates are nested, which is a fact about the template and not an
+/// error in the meter.
 #[pyfunction]
-fn census_take() -> (CensusRows, CensusRows) {
+fn census_take() -> (CensusRows, CensusRows, usize) {
     CENSUS_ON.store(false, Ordering::Relaxed);
     let census = CENSUS.lock().unwrap();
-    (census.handled.clone(), census.delegated.clone())
+    (
+        census.handled.clone(),
+        census.delegated.clone(),
+        census.delegated_len,
+    )
 }
 
 /// The first attribute named `name`, or `None`.
@@ -3288,6 +3315,13 @@ impl<'py> Walk<'py> {
                         .node
                         .bind(self.py)
                         .call_method1("render_annotated", (&self.context,))?;
+                    // Before the piece is moved into the sink: what this node
+                    // contributed to the output. A `str` that has no length is
+                    // not a thing, and a piece that is not a `str` raises inside
+                    // `push_python` and so contributes nothing to count.
+                    if let Some(census) = self.census.as_mut() {
+                        census.delegated_len += rendered.len().unwrap_or(0);
+                    }
                     self.push_python(rendered.unbind())?;
                     self.autoescape = self.context.getattr("autoescape")?.extract()?;
                     census_bump(&mut self.census, &slot.class_name, true);
@@ -4006,4 +4040,117 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("UnimplementedTag", m.py().get_type::<UnimplementedTag>())?;
     m.add("CANNOT_HOLD", cannot_hold(m.py()))?;
     Ok(())
+}
+
+/// The Rust side of the walk, tested against plans built here rather than parsed.
+///
+/// Gated on `not(extension-module)` because that is the switch that decides
+/// whether libpython is linked: an extension module is loaded by an interpreter
+/// that already has one, and a test binary has to start its own. Under the
+/// default feature set this module does not exist and the crate's test target
+/// stays empty, which is what keeps `cargo test --workspace` — and the gate that
+/// runs it — unchanged.
+///
+/// Why the walk needs its own harness at all: **`MAX_WALK_DEPTH` has no route to
+/// it through template text.** The plan is built by `plan_list`, which recurses
+/// over the same nesting the parser did, and the parser recurses in Python — so
+/// CPython's own limit raises `RecursionError` at about 200 levels of `{% for %}`
+/// nesting (measured on the pin) long before a plan 501 deep exists. Every
+/// Python-side test of the guard therefore tests the *parser's* limit and passes
+/// whatever the guard does. The plan here is built by hand, which is the only way
+/// to arrive at the boundary from the other side; the two rows are the same
+/// construction at `MAX_WALK_DEPTH` and `MAX_WALK_DEPTH + 1`, so the row that
+/// passes is a control over the population the row that raises is drawn from.
+///
+/// That the walk's recursion is *real* recursion is the other half, and it is
+/// what the boundary row measures on the way past: 500 levels need 4–8 KiB of
+/// stack each in a debug build and 0.5–1 KiB in a release one (probed in
+/// `scripts/run_rust_unit_tests.sh`, which is where the 8 MiB of thread stack
+/// this test needs is set — the default 2 MiB **stalls** rather than failing).
+/// So `MAX_WALK_DEPTH` is a cap on *stack*, and 500 of them is a number inherited
+/// from CPython's parser limit rather than derived from the walk's frame size.
+/// It is reachable only once plans stop being built by the recursive Python
+/// parser; that is the milestone at which the cap should be re-derived from the
+/// smallest stack this might run on, and this test is the thing that will hold
+/// the boundary while it is.
+#[cfg(all(test, not(feature = "extension-module")))]
+mod walk_depth {
+    use super::*;
+
+    /// `ForPlan.sequence`, which `run_for` calls `.resolve(context, true)` on.
+    /// The walk's only Python call on the path under test — it is what makes the
+    /// synthetic plan descend instead of taking the `{% empty %}` branch — and it
+    /// answers with one item so every level is entered exactly once.
+    #[pyclass]
+    struct OneItem;
+
+    #[pymethods]
+    impl OneItem {
+        fn resolve(&self, py: Python<'_>, _context: &Bound<'_, PyAny>, _ignore: bool) -> Py<PyAny> {
+            PyList::new(py, [1i64]).unwrap().into_any().unbind()
+        }
+    }
+
+    /// `levels` nested `{% for %}` slots, the innermost with an empty body.
+    fn nested_for(py: Python<'_>, sequence: &Py<PyAny>, levels: usize) -> Slot {
+        let mut body = Vec::new();
+        if levels > 1 {
+            body.push(nested_for(py, sequence, levels - 1));
+        }
+        Slot {
+            act: Act::For(Box::new(ForPlan {
+                body,
+                empty: Vec::new(),
+                sequence: sequence.clone_ref(py),
+                is_reversed: false,
+            })),
+            node: py.None(),
+            class_name: FOR_NODE.to_string(),
+        }
+    }
+
+    /// Every slot in this plan is an `Act::For`, so the walk never reaches
+    /// `emit`/`push_python` and the `escape`/`context` fields below are never
+    /// read. They are dummies rather than a real Django context because the
+    /// subject is the guard's placement in the recursion, and building a context
+    /// would put the engine's own imports between the test and that.
+    fn walk_depth_of(py: Python<'_>, slots: &[Slot]) -> PyResult<()> {
+        let none = py.None().into_bound(py);
+        let mut walk = Walk {
+            py,
+            context: none.clone(),
+            escape: none.clone(),
+            scope: LookupScope::new(&none),
+            autoescape: false,
+            out: String::new(),
+            spill: None,
+            nodes: 0,
+            census: None,
+        };
+        walk.run(slots, None, 0)
+    }
+
+    #[test]
+    fn the_depth_guard_raises_cpythons_error_at_the_cap_and_not_below_it() {
+        Python::initialize();
+        Python::attach(|py| {
+            let sequence: Py<PyAny> = Py::new(py, OneItem).unwrap().into_any();
+            // A plan exactly `MAX_WALK_DEPTH` loops deep is walked: the body of
+            // loop *n* is run at depth *n*, so this is the deepest plan that
+            // reaches the innermost `run` at the cap without passing it.
+            let at_cap = [nested_for(py, &sequence, MAX_WALK_DEPTH)];
+            walk_depth_of(py, &at_cap).expect("a plan nested exactly MAX_WALK_DEPTH deep walks");
+            let past = [nested_for(py, &sequence, MAX_WALK_DEPTH + 1)];
+            let error = walk_depth_of(py, &past).expect_err("one loop past the cap raises");
+            assert!(
+                error.is_instance_of::<pyo3::exceptions::PyRecursionError>(py),
+                "the guard must raise stock's error class, not a Rust abort: {error}"
+            );
+            assert_eq!(
+                error.value(py).to_string(),
+                "maximum recursion depth exceeded",
+                "and stock's message, so a caller catching RecursionError sees one failure"
+            );
+        });
+    }
 }

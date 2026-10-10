@@ -66,6 +66,7 @@ plausible rather than exotic.
 
 import ast
 import pathlib
+import re
 import unittest
 
 from tests.milestone_ownership import NOT_THE_ENGINE
@@ -578,12 +579,62 @@ class GateBuildTests(unittest.TestCase):
 
         # `source "$HERE/env.sh"` is excluded by name: it sets the environment the
         # build itself needs, so it must come *first*, and it imports nothing.
+        #
+        # What makes a step a consumer is that it **reaches the built package**, so
+        # the population is derived from that and not from the word `python` in a
+        # line. Two shapes reach it:
+        #
+        #   * a line that runs the venv's Python over a project file
+        #     (`.venv/bin/python -I "$HERE/x.py"`) — whatever it runs can import
+        #     the extension;
+        #   * a line that runs one of this repo's scripts — a consumer only if the
+        #     *script* runs project Python, which is read out of the script rather
+        #     than guessed from its name.
+        #
+        # The second shape used to be decided by the substring `run_unit_tests.sh`.
+        # That was a proxy, and it held only while the gate had exactly one runner
+        # script: it classified the gate's **cargo** step for `template-py` as a
+        # consumer of an extension that invocation does not build — the crate is
+        # built `--no-default-features`, the feature that decides whether there is
+        # an extension module at all — so the row failed a step that reads nothing
+        # and the only way to satisfy it would have been to move that step after
+        # the build, i.e. to make the row green for a reason unrelated to its
+        # subject. That is this docstring's own defect one layer down ("a check
+        # written against a stand-in"), so the stand-in is gone and each named
+        # script's body decides.
+        def runs_project_python(script):
+            """Whether ``script`` runs Python over this project's code.
+
+            Comments are dropped, because a script that describes the package in
+            prose is not one that imports it. Two ways to qualify: naming the
+            package (``_native`` / ``django_rust_templates``) anywhere it runs, or
+            invoking an interpreter on a module or file (``-m unittest``,
+            ``x.py``). A `-c` one-liner is deliberately **not** enough on its own:
+            the gate's cargo step reads `sysconfig` from the venv's Python to find
+            libpython, and a row about the artifact must not turn an environment
+            probe into an import.
+            """
+            body = "\n".join(
+                line
+                for line in script.read_text(encoding="utf-8").splitlines()
+                if not line.lstrip().startswith("#")
+            )
+            if "_native" in body or "django_rust_templates" in body:
+                return True
+            return bool(re.search(r"\bpython[\w.-]*\b[^\n]*(?:-m\s|\s[\w./-]+\.py\b)", body))
+
         consumers = [
             (i, line)
             for i, line in enumerate(lines)
             if i != builds[0]
             and not line.lstrip().startswith("source ")
-            and (".venv/bin/python" in line or "$HERE/" in line)
+            and (
+                ".venv/bin/python" in line
+                or any(
+                    runs_project_python(PROJECT_ROOT / "scripts" / name)
+                    for name in re.findall(r"\$HERE/([\w.-]+\.sh)", line)
+                )
+            )
         ]
         # The positive control, and it is load-bearing: the assertion below is that
         # a set of *late* consumers is empty, and an empty set is also what a
@@ -602,6 +653,25 @@ class GateBuildTests(unittest.TestCase):
         self.assertTrue(
             any(".venv/bin/python" in line for _, line in consumers),
             f"no Python step is in the consumer population {consumers}",
+        )
+        # The positive control for the *classification*, and it is the same
+        # discipline as the one above: a rule that excluded nothing would also
+        # leave the row green, so the step the rule exists for is named here and
+        # required to be in the file **and** outside the population. It is the
+        # cargo runner, which builds its crate without `extension-module` and so
+        # has no extension to import; it belongs with the cargo steps above the
+        # build, and this is the row that used to say otherwise.
+        self.assertIn(
+            "run_rust_unit_tests.sh",
+            "\n".join(lines),
+            "the cargo step this classification is written for is not in check.sh, "
+            "so the exclusion below is untested",
+        )
+        self.assertFalse(
+            any("run_rust_unit_tests.sh" in line for _, line in consumers),
+            f"the cargo runner reads no extension — its crate is built "
+            f"--no-default-features, so no extension module is built to import — "
+            f"but the population classified it as a consumer: {consumers}",
         )
         late = [(i, line) for i, line in consumers if i < builds[0]]
         self.assertEqual(
