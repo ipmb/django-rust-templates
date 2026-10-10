@@ -16,6 +16,11 @@ target/
 # Baseline suite logs
 .baseline/
 
+# jinja2 and minijinja, installed here and not into .venv on purpose: five
+# template_tests rows skip when jinja2 is importable, and the acceptance run
+# pins exactly those six skips. See scripts/bench_engines.py.
+.bench-deps/
+
 # Build artifacts
 *.so
 dist/
