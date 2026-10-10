@@ -191,7 +191,7 @@ def per_variable():
 
 def per_operation():
     stock_ctx = __import__("django.template.context", fromlist=["Context"]).Context(
-        {"a": "x", "b": {"c": {"d": "x"}}}
+        {"a": "x", "b": {"c": {"d": "x"}}, "row": {"name": "x"}}
     )
     v_a, v_d3 = Variable("a"), Variable("b.c.d")
 
@@ -206,6 +206,47 @@ def per_operation():
         ('stock_ctx["a"]   (bare dict read)', lambda: stock_ctx["a"]),
     ]:
         print("   %-38s %8.3f us" % (label, timed(fn)))
+    print()
+
+    print("3c. the same three quantities at the depth the corpus actually uses")
+    print(
+        "   The reviewer's census of every variable resolved during a render of all\n"
+        "   18 rust rows: 1408 variables, of which 27 are depth 1 (2%), 1380 are\n"
+        "   depth 2 (98%) and one is depth 3. `{{ row.name }}` is the corpus.\n"
+        "   Section 3a above measures depth 1 and depth 3 — the two the corpus is\n"
+        "   not — so the row the spec quotes is the one below, not the one above.\n"
+        "   The census is the reviewer's instrument; these timings are this probe's,\n"
+        "   on the corpus's own spelling.\n"
+        "   **The `Variable` objects are hoisted, and that is not a detail.** The\n"
+        "   first draft of this section built `Variable(path)` inside the timed\n"
+        "   lambda, as §3a does for `resolve` — harmless there, because `resolve`\n"
+        "   takes a *string* — and every stock row came out at 1.68-1.71 us against\n"
+        "   a depth-1 value of 0.22. That is `Variable.__init__` (about 1.4 us: a\n"
+        "   `float()` that raises, then `unescape_string_literal` that raises) being\n"
+        "   timed as resolution, and it flattered ours by making stock look five\n"
+        "   times slower than it is."
+    )
+    print()
+    hoisted = {p: Variable(p) for p in ("a", "row.name", "b.c.d")}
+    print(
+        "   %-30s %8s %8s %9s %9s %9s"
+        % ("", "ours res", "ours par", "par %", "stock res", "ours/stock")
+    )
+    for path in ("a", "row.name", "b.c.d"):
+        resolve_us = timed(lambda p=path: _native.resolve(p, stock_ctx))
+        parse_us = timed(lambda p=path: _native.parse_variable(p))
+        stock_us = timed(lambda v=hoisted[path]: v.resolve(stock_ctx))
+        print(
+            "   %-30s %8.3f %8.3f %8.0f%% %9.3f %10.2fx"
+            % (
+                f'_native.resolve("{path}", ctx)',
+                resolve_us,
+                parse_us,
+                parse_us / resolve_us * 100,
+                stock_us,
+                resolve_us / stock_us,
+            )
+        )
     print()
 
     print("3b. render_value_in_context by value type  (autoescape is on here)")

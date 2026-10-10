@@ -1,6 +1,6 @@
 interpreter : 3.14.4
 extension   : _native.cpython-314-darwin.so
-sha256      : 1b3bf993eb2d136d
+sha256      : dacdf126ffc563b8
 
 1. which resolver a shipped render calls
    template   : '{{ a }}|{{ b.c }}|{{ d.e.f }}'          (3 variables)
@@ -12,31 +12,53 @@ sha256      : 1b3bf993eb2d136d
    N=1 rust  text node   -> 'xxxxxxx'   (same width, same bytes)
 
    N    engine    vars us    text us      delta    per-var
-   50   rust        74.64       1.73      72.91     1.4581
-   50   stock       55.35       1.74      53.62     1.0723
-   200  rust       290.94       1.82     289.12     1.4456
-   200  stock      216.84       1.78     215.06     1.0753
+   50   rust        77.72       1.76      75.96     1.5192
+   50   stock       56.21       1.75      54.46     1.0892
+   200  rust       304.15       1.77     302.37     1.5119
+   200  stock      218.61       1.82     216.79     1.0839
 
-   N=50 rust/stock per-variable ratio: median 1.369, range 1.360-1.383 over 5 rounds
-       every round: 1.360  1.369  1.369  1.369  1.383
-   N=200 rust/stock per-variable ratio: median 1.362, range 1.344-1.369 over 5 rounds
-       every round: 1.344  1.369  1.344  1.362  1.368
+   N=50 rust/stock per-variable ratio: median 1.380, range 1.375-1.395 over 5 rounds
+       every round: 1.395  1.394  1.377  1.375  1.380
+   N=200 rust/stock per-variable ratio: median 1.378, range 1.366-1.395 over 5 rounds
+       every round: 1.395  1.378  1.378  1.380  1.366
 
 3a. the split inside `_native.resolve`
-   _native.resolve("a", ctx)                 0.515 us
+   _native.resolve("a", ctx)                 0.513 us
    _native.parse_variable('a')               0.217 us
-   _native.resolve("b.c.d", ctx)             0.795 us
-   _native.parse_variable('b.c.d')           0.270 us
-   stock Variable('a').resolve(ctx)          0.232 us
-   stock Variable('b.c.d').resolve(ctx)      0.338 us
-   stock_ctx["a"]   (bare dict read)         0.118 us
+   _native.resolve("b.c.d", ctx)             0.815 us
+   _native.parse_variable('b.c.d')           0.271 us
+   stock Variable('a').resolve(ctx)          0.235 us
+   stock Variable('b.c.d').resolve(ctx)      0.345 us
+   stock_ctx["a"]   (bare dict read)         0.120 us
+
+3c. the same three quantities at the depth the corpus actually uses
+   The reviewer's census of every variable resolved during a render of all
+   18 rust rows: 1408 variables, of which 27 are depth 1 (2%), 1380 are
+   depth 2 (98%) and one is depth 3. `{{ row.name }}` is the corpus.
+   Section 3a above measures depth 1 and depth 3 — the two the corpus is
+   not — so the row the spec quotes is the one below, not the one above.
+   The census is the reviewer's instrument; these timings are this probe's,
+   on the corpus's own spelling.
+   **The `Variable` objects are hoisted, and that is not a detail.** The
+   first draft of this section built `Variable(path)` inside the timed
+   lambda, as §3a does for `resolve` — harmless there, because `resolve`
+   takes a *string* — and every stock row came out at 1.68-1.71 us against
+   a depth-1 value of 0.22. That is `Variable.__init__` (about 1.4 us: a
+   `float()` that raises, then `unescape_string_literal` that raises) being
+   timed as resolution, and it flattered ours by making stock look five
+   times slower than it is.
+
+                                  ours res ours par     par % stock res ours/stock
+   _native.resolve("a", ctx)         0.508    0.217       43%     0.228       2.23x
+   _native.resolve("row.name", ctx)    0.735    0.254       35%     0.299       2.46x
+   _native.resolve("b.c.d", ctx)     0.814    0.271       33%     0.335       2.43x
 
 3b. render_value_in_context by value type  (autoescape is on here)
-   str "hello world"                         0.784 us   ->  'hello world'
-   str "a & b < c"                           0.850 us   ->  'a &amp; b &lt; c'
-   SafeString(mark_safe('x'))                0.236 us   ->  'x'
-   int 12                                    3.421 us   ->  '12'
-   float 12.5                                3.965 us   ->  '12.5'
-   Decimal('12.50')                          4.367 us   ->  '12.50'
-   datetime(2026, 10, 8, 12, 0)             13.024 us   ->  'Oct. 8, 2026, noon'
+   str "hello world"                         0.790 us   ->  'hello world'
+   str "a & b < c"                           0.842 us   ->  'a &amp; b &lt; c'
+   SafeString(mark_safe('x'))                0.238 us   ->  'x'
+   int 12                                    3.409 us   ->  '12'
+   float 12.5                                3.979 us   ->  '12.5'
+   Decimal('12.50')                          4.359 us   ->  '12.50'
+   datetime(2026, 10, 8, 12, 0)             13.271 us   ->  'Oct. 8, 2026, noon'
 

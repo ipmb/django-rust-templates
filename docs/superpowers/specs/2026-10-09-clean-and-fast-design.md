@@ -102,24 +102,33 @@ revision 1's number at all.
 
 ### 1.3 The per-operation costs
 
-| operation | µs |
-|---|---|
-| `_native.resolve("a", ctx)` — **the shipped path** | **0.522** |
-| ‣ of which `parse_variable("a")` | 0.219 |
-| `_native.resolve("b.c.d", ctx)` | 0.820 |
-| ‣ of which `parse_variable("b.c.d")` | 0.279 |
-| stock `Variable("a").resolve(ctx)` | 0.239 |
-| stock `Variable("b.c.d").resolve(ctx)` | 0.345 |
-| `stock_ctx["a"]` — bare dict read | 0.119 |
+Every figure in this section is this probe's, hoisted `Variable` objects, best of
+7, recorded in `.review/m19-measurements/production_render_path.txt`. The third
+column is the corpus's own depth distribution, which is the row of this table
+that matters and was added after the review:
 
-**(a) The render path does call `_native.resolve`, and that is the defect.** The
-review's BLOCKING 1 says the render path "never does" and calls
-`LookupScope::resolve` with strings pre-parsed at plan time. Measured, it calls
+| operation | µs | share of the corpus |
+|---|---|---|
+| `_native.resolve("a", ctx)` — depth 1 | 0.51 | 2% |
+| ‣ of which `parse_variable("a")` | 0.22 | |
+| stock `Variable("a").resolve(ctx)` | 0.23 | |
+| **`_native.resolve("row.name", ctx)` — depth 2** | **0.74** | **98%** |
+| **‣ of which `parse_variable("row.name")`** | **0.25** | |
+| **stock `Variable("row.name").resolve(ctx)`** | **0.30** | |
+| `_native.resolve("b.c.d", ctx)` — depth 3 | 0.81 | one variable |
+| ‣ of which `parse_variable("b.c.d")` | 0.27 | |
+| stock `Variable("b.c.d").resolve(ctx)` | 0.34 | |
+| `stock_ctx["a"]` — bare dict read | 0.12 | |
+
+**(a) The render path does call `_native.resolve`, and the re-parse it pays for
+grows with depth.** The review's BLOCKING 1 said the render path "never does" and
+calls `LookupScope::resolve` with strings pre-parsed at plan time; it was measured
+on `render_floor`, a prototype the package does not install. Measured, it calls
 `_native.resolve` once per variable: a three-variable template renders `'1|2|3'`
 with `{'_native.resolve': 3, 'Variable._resolve_lookup': 3}`. The chain is
 `VariableNode.render` → `FilterExpression.resolve` →
-`Variable._resolve_lookup` → **`engine/base.py:1033`, `_native.resolve(".".join(self.lookups), context)`**
-→ `crates/template-py/src/lib.rs:2591-2592`, `parse_variable(path)`. `LookupScope::resolve` is the *floor
+`Variable._resolve_lookup` → **`engine/base.py:1047`, `_native.resolve(".".join(self.lookups), context)`**
+→ `crates/template-py/src/lib.rs:2602-2603`, `parse_variable(path)`. `LookupScope::resolve` is the *floor
 prototype's* path, and the prototype is not what ships.
 
 So revision 1's 2.24× was a true statement about the shipped engine and a wrong
@@ -127,10 +136,36 @@ account of why: 0.22 µs of every variable is spent re-deriving a lookup that
 `Variable.__init__` split and this module then re-joined. The review's
 decomposition (`parse_variable` 0.219 of 0.522) is exactly right, and its
 conclusion — that a pre-parsed resolve is at parity with stock's — is right about
-the prototype. **The repair is to stop re-joining**: pass `&[String]` across the
-FFI from `FilterExpression.resolve`, which `LookupScope::resolve` already
-accepts. That is a 0.22 µs/variable win, 15% of the shipped per-variable cost, and
-it is cheap.
+the prototype.
+
+**But 0.22 is the depth-1 operand and depth 1 is 2% of the corpus.** The review's
+second pass censused every variable resolved during a render of all 18 rust rows:
+1408 variables, 27 at depth 1, **1380 at depth 2**, one at depth 3. At that depth
+the re-parse is 0.25 µs, not 0.22, and the ratio the corpus actually pays is
+**2.46×** rather than 2.23× — our resolver gets *relatively* worse as the path gets
+longer, which is M18 §7.1's inversion arriving on the shipped path. The review's
+own instrument (which resolves through `_resolve_lookup`, one frame in from mine)
+puts the same three gaps at +0.351 / +0.535 / +0.580 µs.
+
+**Two reasons to stop re-joining, and the second is the load-bearing one.**
+
+*It is 0.25 µs a variable at the depth the corpus uses — 35% of the resolver.*
+Cheap: pass `&[String]` across the FFI, which `LookupScope::resolve` already
+accepts.
+
+*And the join is not a faithful inverse of the parse, which is a correctness bug
+today, not a cost.* `parse_variable` classifies as well as splits, and
+`".".join(("2", ""))` is `"2."`, which the re-parse reads back as a **number**.
+`Variable.__init__` gives `2.` a `2.0` literal *and* the lookups `("2", "")`, and
+`Variable.resolve` reads the lookups first (`base.py:926-928`) — but
+`_native.resolve` read the literal first, so `{{ 2. }}` rendered `2.0` where stock
+Django renders `''`, and `{{ 0. }}` and `{{ 123. }}` did the same. That was
+measured at M19 and **fixed in this milestone** by putting the Rust dispatch back
+into `Variable.resolve`'s order; the shortcut removes the input class rather than
+patching it, which is the better of the two and the reason step 1 is not optional.
+The population, the render comparison that found it, and the search showing the
+1547 never writes a trailing-dot numeral are in
+`.review/m19-measurements/lookup_roundtrip.txt`.
 
 **(b) `render_value_in_context` is where a rendered variable's money goes** —
 0.79 of the 1.47 µs, and for an `int`, 3.49. See §1.5, which is where BLOCKING 3
@@ -155,10 +190,10 @@ the sentence:
   reaches the escape filter.
 - **(b) is inherited**, and it is the whole of the floor's per-variable cost:
   `render_floor` fetches `render_value_in_context` once per render
-  (`crates/template-py/src/lib.rs:2861-2863`) and calls it per variable in
+  (`crates/template-py/src/lib.rs:2871-2873`) and calls it per variable in
   `append_expression_value`. That the floor and `render_desc` share exactly these
   two helpers — the resolver and the escaper — is the floor's own claim about
-  itself (`crates/template-py/src/lib.rs:2658-2660`), and it is what makes the
+  itself (`crates/template-py/src/lib.rs:2670-2672`), and it is what makes the
   subtraction isolate dispatch.
 
 The correction is therefore **narrower than revision 1 made it and points the
@@ -320,7 +355,7 @@ laziness must not reach it.* The test that enforces it is
 ### 3.3 The debug contract: a native node needs a span
 
 **BLOCKING 5 is correct and revision 1 missed it too**, and it is the stronger of
-the two: `Node.render_annotated` (`engine/base.py:1049`) sets
+the two: `Node.render_annotated` (`engine/base.py:1063`) sets
 `e._culprit_node = self` first-writer-wins, then builds `template_debug` from
 `e._culprit_node.token`. A natively-rendered node has no Python `Node` to be the
 culprit and no `.token`, so `e.template_debug` is absent and
@@ -355,6 +390,26 @@ many delegated, with the delegated *class names* listed. §3.3 and §3.2 of the 
 design already require the instrument to have seen something and its
 unattributed list to be empty; this makes it visible where the number it
 qualifies is printed.
+
+**Two pins, with deliberately different semantics.** They are not the same
+instrument and must not share one gate:
+
+- **The benchmark corpus is a column, and a quoting rule.** A row may not be
+  quoted as a win while its delegated set is non-empty — the number is printed
+  either way, but the prose and the headline tile may take a row only if its
+  column reads zero. This is a per-row, per-run reading; it is not stored.
+- **`template_tests` is a ratchet.** A pinned set of delegated **class names**
+  that may only shrink, in `tests/` beside the other pinned counts. Three
+  properties are load-bearing: it is taken at **render** time, not parse time
+  (parse-time delegation is a different and much larger set — the walk's whole
+  point is that a node it cannot *render* is not the same node as one it cannot
+  *parse*); it is keyed by class name **and** the count of occurrences, because a
+  set that shrinks by dropping a rare node is not the same progress as one that
+  shrinks by dropping a common one; and it reports **both numbers always** —
+  classes delegated, nodes delegated — since a judgement of "how much of Django
+  is still Python" is a question about nodes and a review of "what is left to
+  port" is a question about classes.
+
 
 ### 3.5 A family summary is over a population, and the population changed
 
@@ -406,10 +461,25 @@ What this milestone adds:
    compile, `micro/text` parses at 3.80×, and §2's largest single win is compile —
    so the report's headline tile must carry both, not only render.
 4. **The family-population rule** (§3.5, D3).
-5. **A `--json` payload that is the report's whole input**, so the HTML is a view
+5. **`micro/escape`'s solidus agreement becomes an assertion.** The row renders
+   `a</b>` and today its claim is that the engines *agree*; the review's point is
+   that agreement is the weaker claim of the two available. The row asserts the
+   literal — the rendered text is exactly `a/b` — and the agreement then follows
+   from the equality gate instead of being the thing tested. An agreement row
+   passes when every engine is wrong together; an asserted-literal row cannot.
+6. **No `rust`-vs-`django` headline over the shared-12 set.** The 12 shared rows
+   are the corpus's *intersection*, and after minijinja's removal **all 9
+   exclusions name jinja2 alone** — which means the 12 are, by construction, the
+   constructs this engine handles, and the 9 that were dropped are exactly the
+   ones it is slow at. A ratio computed over the 12 is therefore a ratio over a
+   population selected by our own strengths, and it may be printed per row (where
+   §3.4's delegation column qualifies it) but never aggregated into a
+   family- or suite-level "we are N× faster" tile. The Django-only family stays
+   printed beside it for the same reason §3.5 gives.
+7. **A `--json` payload that is the report's whole input**, so the HTML is a view
    of a checkable file rather than the evidence itself. (Already true; stated
-   because it is what makes 1–4 reviewable.)
-6. **The report regenerated from the palette, not from a hand-spelled
+   because it is what makes 1–6 reviewable.)
+8. **The report regenerated from the palette, not from a hand-spelled
    template.** Found while removing minijinja: `bench_report` spelled the `--sN`
    declarations and the `.sN` rules out by hand, so dropping the fourth hue left
    a literal `@light3@` in the emitted CSS — an invalid custom property that no
@@ -423,14 +493,32 @@ the identity check are **not** re-specified here — §0's correction.
 ## 5. Sequencing
 
 1. **The cheap wins, on the shipped path.** `FilterExpression.resolve` passes
-   `&[String]` instead of re-joining (§1.3a, ~0.22 µs/variable); the corpus and
-   the census from §4. Nothing here needs the walk.
+   `&[String]` instead of re-joining (§1.3a, ~0.25 µs/variable **at the corpus's
+   depth 2** — the 0.22 figure in revision 2 was the depth-1 operand, measured on
+   2% of the corpus); the corpus and the census from §4. **And it is not only a
+   cost:** the join is not a faithful inverse of `parse_variable`, and `{{ 2. }}`
+   rendered `2.0` where stock Django renders `''` until this milestone put the
+   Rust dispatch back into `Variable.resolve`'s order (§1.3a). Passing the
+   components removes the input class rather than patching it, which is why this
+   step is not optional. Nothing here needs the walk.
 2. **The render walk.** Text, variable, escape (exact-type predicate, §3.1), the
    66 builtin filters, `{% if %}`, `{% for %}` — each gated by the 1547.
+   **The first slice reports its own per-variable cost against §2's 0.34 µs
+   prediction, and the prediction is the thing on trial.** With minijinja out of
+   the benchmark, §2's ceiling has no external witness left: it is a number this
+   project predicted and this project will measure, and a prediction checked only
+   by its author is a description. One number, printed beside the prediction, on
+   the first slice that makes it checkable — not at the end of the step, when the
+   walk is already the shape that produced it.
 3. **`LookupTarget` takes `py`.** The signature change across `template-core`
    that removes the per-method `Python::attach` (§3.1 item 2). Its own step
    because it touches a trait the whole walk is written against, and because
-   depth 3 is where its absence is visible.
+   **it is the step that has to be sized at depth 2, not at the depth where the
+   gap is smallest.** At depth 1, step 1 leaves a residual of +0.06 µs and the
+   ordering looks like a detail; at depth 2 — where 98% of the corpus's 1408
+   variables live — step 1 leaves **+0.18 µs on my instrument and +0.26 on the
+   review's**, larger than the entire depth-1 gap it was measured against. A
+   step-3 sized from the depth-1 row would be scheduled as optional.
 4. **Lazy materialisation, with `extra_data` eager** (§3.2), and the culprit-span
    protocol (§3.3) in the *same* commit — they are both "what laziness breaks",
    and either alone is a green suite that lies.
@@ -503,7 +591,7 @@ committed), the NIT (`iters` is pinned per row).
 
 **Disputed, with a measurement: B1's premise.** The render path does call
 `_native.resolve` — three calls for a three-variable template, reached from
-`engine/base.py:1033` — so `LookupScope::resolve` is the prototype's path and not the
+`engine/base.py:1047` — so `LookupScope::resolve` is the prototype's path and not the
 shipped one, and revision 1's 2.24× was a true statement about the shipped engine
 with a wrong account of why. The review's decomposition of that 0.522 is exactly
 right and is adopted; its *conclusion* that the engine's resolver is "at parity
