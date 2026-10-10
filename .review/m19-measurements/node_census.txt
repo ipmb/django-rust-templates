@@ -5,63 +5,83 @@ iters=20, rust engine, render mode
 micro/text               walked        1  nodes    1/1    deleg   0.0%  out      0/38     deleg   0.0%
                            handled:   TextNode=1
                            delegated: -
+                           applied:   -
 micro/variable           walked        3  nodes    3/3    deleg   0.0%  out      0/21     deleg   0.0%
                            handled:   TextNode=2 VariableNode=1
                            delegated: -
+                           applied:   -
 micro/lookup             walked        3  nodes    3/3    deleg   0.0%  out      0/11     deleg   0.0%
                            handled:   TextNode=2 VariableNode=1
                            delegated: -
+                           applied:   -
 micro/loop-text          walked        1  nodes   51/51   deleg   0.0%  out      0/950    deleg   0.0%
                            handled:   TextNode=50 ForNode=1
                            delegated: -
+                           applied:   -
 micro/loop-var           walked        1  nodes  151/151  deleg   0.0%  out      0/1742   deleg   0.0%
                            handled:   TextNode=100 VariableNode=50 ForNode=1
                            delegated: -
-micro/if                 walked        1  nodes    0/1    deleg 100.0%  out      9/9      deleg 100.0%
-                           handled:   -
-                           delegated: IfNode=1
-micro/filter             walked        1  nodes    0/1    deleg 100.0%  out     14/14     deleg 100.0%
-                           handled:   -
-                           delegated: VariableNode=1
+                           applied:   -
+micro/if                 walked        1  nodes    2/2    deleg   0.0%  out      0/9      deleg   0.0%
+                           handled:   TextNode=1 IfNode=1
+                           delegated: -
+                           applied:   -
+micro/filter             walked        1  nodes    1/1    deleg   0.0%  out      0/14     deleg   0.0%
+                           handled:   VariableNode=1
+                           delegated: -
+                           applied:   upper=1
 micro/escape             walked        1  nodes    1/1    deleg   0.0%  out      0/39     deleg   0.0%
                            handled:   VariableNode=1
                            delegated: -
-micro/include            walked        1  nodes    4/6    deleg  33.3%  out     43/41     deleg 104.9%
-                           handled:   TextNode=3 VariableNode=1
-                           delegated: VariableNode=1 IncludeNode=1
+                           applied:   -
+micro/include            walked        1  nodes    5/6    deleg  16.7%  out     41/41     deleg 100.0%
+                           handled:   TextNode=3 VariableNode=2
+                           delegated: IncludeNode=1
+                           applied:   length=1
 micro/extends            walked        1  nodes    3/6    deleg  50.0%  out    123/96     deleg 128.1%
                            handled:   TextNode=3
                            delegated: BlockNode=2 ExtendsNode=1
-real-world/normal        walked        1  nodes    7/11   deleg  36.4%  out  11389/5728   deleg 198.8%
-                           handled:   TextNode=6 VariableNode=1
-                           delegated: VariableNode=1 BlockNode=2 ExtendsNode=1
-real-world/complex       walked        1  nodes  439/516  deleg  14.9%  out  18239/5910   deleg 308.6%
-                           handled:   TextNode=294 VariableNode=145
-                           delegated: VariableNode=73 BlockNode=2 ExtendsNode=2
-real-world/large         walked      461  nodes  741/761  deleg   2.6%  out    145/4121   deleg   3.5%
-                           handled:   TextNode=401 VariableNode=320 ForNode=20
-                           delegated: IfNode=20
+                           applied:   -
+real-world/normal        walked        1  nodes    8/11   deleg  27.3%  out  11387/5728   deleg 198.8%
+                           handled:   TextNode=6 VariableNode=2
+                           delegated: BlockNode=2 ExtendsNode=1
+                           applied:   length=1
+real-world/complex       walked        1  nodes  512/516  deleg   0.8%  out  17661/5910   deleg 298.8%
+                           handled:   TextNode=294 VariableNode=218
+                           delegated: BlockNode=2 ExtendsNode=2
+                           applied:   upper=72 length=1
+real-world/large         walked      461  nodes  791/791  deleg   0.0%  out      0/4121   deleg   0.0%
+                           handled:   TextNode=421 VariableNode=330 IfNode=20 ForNode=20
+                           delegated: -
+                           applied:   -
 django-only/filter-arg   walked        4  nodes    2/4    deleg  50.0%  out   2454/2469   deleg  99.4%
                            handled:   TextNode=2
                            delegated: LoadNode=1 ForNode=1
+                           applied:   -
 django-only/i18n         walked        6  nodes    3/6    deleg  50.0%  out    868/922    deleg  94.1%
                            handled:   TextNode=3
                            delegated: LoadNode=1 TranslateNode=1 ForNode=1
+                           applied:   -
 django-only/for-tags     walked        3  nodes    2/3    deleg  33.3%  out   3408/3423   deleg  99.6%
                            handled:   TextNode=2
                            delegated: ForNode=1
+                           applied:   -
 django-only/escape-table walked        5  nodes    5/5    deleg   0.0%  out      0/40     deleg   0.0%
                            handled:   VariableNode=3 TextNode=2
                            delegated: -
+                           applied:   -
 django-only/realistic    walked        1  nodes    4/9    deleg  55.6%  out   5887/2976   deleg 197.8%
                            handled:   TextNode=4
                            delegated: LoadNode=1 BlockNode=3 ExtendsNode=1
+                           applied:   -
 
-flat/normal (no extends) walked       11  nodes   11/16   deleg  31.2%  out   5623/5728   deleg  98.2%
-                           handled:   TextNode=9 VariableNode=2
-                           delegated: VariableNode=2 IfNode=1 ForNode=1 IncludeNode=1
+flat/normal (no extends) walked       11  nodes  618/619  deleg   0.2%  out     41/5728   deleg   0.7%
+                           handled:   TextNode=361 VariableNode=205 IfNode=51 ForNode=1
+                           delegated: IncludeNode=1
+                           applied:   length=2 upper=1 title=50
 
 nested for (2 deep)      walked        1  nodes    0/1    deleg 100.0%  out     32/32     deleg 100.0%
                            handled:   -
                            delegated: ForNode=1
+                           applied:   -
 

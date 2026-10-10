@@ -1,19 +1,24 @@
-as shipped               walked       11  nodes   11/16   deleg  31.2%  out   5623/5728   deleg  98.2%
-                           handled:   TextNode=9 VariableNode=2
-                           delegated: VariableNode=2 IfNode=1 ForNode=1 IncludeNode=1
+as shipped               walked       11  nodes  618/619  deleg   0.2%  out     41/5728   deleg   0.7%
+                           handled:   TextNode=361 VariableNode=205 IfNode=51 ForNode=1
+                           delegated: IncludeNode=1
+                           applied:   length=2 upper=1 title=50
 
-inner if baked           walked       11  nodes   11/16   deleg  31.2%  out   5887/5992   deleg  98.2%
-                           handled:   TextNode=9 VariableNode=2
-                           delegated: VariableNode=2 IfNode=1 ForNode=1 IncludeNode=1
+inner if baked           walked       11  nodes  468/469  deleg   0.2%  out     41/5992   deleg   0.7%
+                           handled:   TextNode=261 VariableNode=205 IfNode=1 ForNode=1
+                           delegated: IncludeNode=1
+                           applied:   length=2 upper=1 title=50
 
-inner filter baked       walked       11  nodes   11/16   deleg  31.2%  out   5623/5728   deleg  98.2%
-                           handled:   TextNode=9 VariableNode=2
-                           delegated: VariableNode=2 IfNode=1 ForNode=1 IncludeNode=1
+inner filter baked       walked       11  nodes  618/619  deleg   0.2%  out     41/5728   deleg   0.7%
+                           handled:   TextNode=361 VariableNode=205 IfNode=51 ForNode=1
+                           delegated: IncludeNode=1
+                           applied:   length=2 upper=1
 
-inner if baked, inner filter baked walked       11  nodes  462/466  deleg   0.9%  out     71/5992   deleg   1.2%
-                           handled:   TextNode=259 VariableNode=202 ForNode=1
-                           delegated: VariableNode=2 IfNode=1 IncludeNode=1
+inner if baked, inner filter baked walked       11  nodes  468/469  deleg   0.2%  out     41/5992   deleg   0.7%
+                           handled:   TextNode=261 VariableNode=205 IfNode=1 ForNode=1
+                           delegated: IncludeNode=1
+                           applied:   length=2 upper=1
 
-loop body is text only   walked       11  nodes   62/66   deleg   6.1%  out     71/4326   deleg   1.6%
-                           handled:   TextNode=59 VariableNode=2 ForNode=1
-                           delegated: VariableNode=2 IfNode=1 IncludeNode=1
+loop body is text only   walked       11  nodes   68/69   deleg   1.4%  out     41/4326   deleg   0.9%
+                           handled:   TextNode=61 VariableNode=5 IfNode=1 ForNode=1
+                           delegated: IncludeNode=1
+                           applied:   length=2 upper=1

@@ -218,7 +218,7 @@ the sentence:
   reaches the escape filter.
 - **(b) is inherited**, and it is the whole of the floor's per-variable cost:
   `render_floor` fetches `render_value_in_context` once per render
-  (`crates/template-py/src/lib.rs:3631-3633`) and calls it per variable in
+  (`crates/template-py/src/lib.rs:4431-4433`) and calls it per variable in
   `append_expression_value`. That the floor and `render_desc` share exactly these
   two helpers — the resolver and the escaper — is the floor's own claim about
   itself, and it is what makes the subtraction isolate dispatch. *(The floor's
@@ -762,6 +762,34 @@ the identity check are **not** re-specified here — §0's correction.
    original probe used counts a refusal as an answer; and both halves of the
    repair were A/B'd, the Python guard removed (48 failures) and the Rust
    `to_str()` refusal reverted to a raise (49 errors).
+
+   **Step 3a — the walk owns a filtered `{{ … }}` and a literal `{% if %}` —
+   landed.** The planner gains `plan_emit` (head from the descriptor, chain
+   routed by handle through `django_own_filter_names`) and `plan_if`
+   (`TemplateLiteral` conditions only; an operator condition still delegates the
+   node), and `seal` therefore accepts a loop body containing either — which is
+   the point of the step, because a body is sealed only if *every* node in it is
+   walk-rendered. **The acceptance row was published before the run**
+   (`.review/m19-measurements/step3a_prediction.md`): the census's `flat/normal`
+   — the corpus's `real-world/normal` with its two `BlockNode`s spliced away —
+   goes **98.2% (5623/5728) → 0.7% (41/5728)** of output delegated, the 41
+   characters of `bench_corpus.FOOTER` and nothing else, with `ForNode` moving
+   from `delegated:` to `handled:` and its visit count from 11 to 618: the loop
+   seals. `micro/if` and `micro/filter` go 100.0% → 0.0%, `real-world/large`
+   3.5% → 0.0% (`IfNode=20` off `delegated:`), and the rows the census puts
+   behind `BlockNode` delegates do not move — the prediction's other half.
+   **Timing, as the pair (§4 item 9), ours/stock, before → after:** `micro/if`
+   render **1.230 → 0.954** and `micro/filter` render **1.060 → 0.870** — the
+   two constructs, both past parity — `real-world/complex` **0.690 → 0.626**
+   render and **0.760 → 0.689** parse, and the report's own top tile, the
+   real-world geometric mean, **0.58× → 0.55× at render and 0.94× → 0.90× at
+   parse**. `micro/if` *parse* is flat (1.720 → 1.769): the per-render saving is
+   ~0.1 µs against a compile path ~11 µs above stock's, so parse mode — which
+   calls `from_string` every iteration — cannot see it, and the render row of
+   the same construct is where the −22% is. Two runs of the same artifact give a
+   median 0.81% / max 4.20% ratio drift over 26 rows, and every move quoted here
+   is outside that. Full A/B, both modes, every row:
+   `.review/m19-measurements/step3a.md`.
 3. **`LookupTarget` takes `py`.** The signature change across `template-core`
    that removes the per-method `Python::attach` (§3.1 item 2). Its own step
    because it touches a trait the whole walk is written against, and because

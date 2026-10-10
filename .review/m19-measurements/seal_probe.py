@@ -15,9 +15,16 @@ walk's own visit set for each variant.  The variants differ in their *bytes*, by
 construction — a baked `{% if %}` is not a test of output equality — so this file
 is about structure only and quotes no timing.
 
-Read the `delegated:` line: `ForNode` present means the loop did not seal and
-everything inside it is Python's; `ForNode` absent while the inner `TextNode` and
-`VariableNode` counts appear under `handled` means it did.
+**Since M19 step 3a every variant seals, so this file is no longer a
+discriminator** — the question it was written to answer is answered by
+construction, and the readings below are all one shape: `ForNode` under
+`handled:` (the walk iterates the loop itself) with `IncludeNode` alone under
+`delegated:`, which is the footer.  Read it now as a regression witness: a row
+that puts `ForNode` back under `delegated:` means some node inside the body
+stopped being walk-rendered and took the whole table back to Python with it, and
+the per-row construct counts say which one.  The rows are kept as they were so
+that the shape of the seal rule — *every* node in a body, or the body is
+Python's — stays visible in one file.
 
 Run:  .venv/bin/python -I .review/m19-measurements/seal_probe.py
 """

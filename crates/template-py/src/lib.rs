@@ -1821,9 +1821,9 @@ fn parse_filter_expression(
 ///
 /// The lex-and-parse half, returning `NodeListDesc` — the type `template-core`
 /// owns — rather than a Python object. Shared by `parse_source` (which converts
-/// it to the wire tuple) and `parse_desc` (which keeps it in Rust for the render
-/// walks), so a second copy cannot be the place a later caller's host silently
-/// went missing.
+/// it to the wire tuple) and `compile_template` (which keeps it in Rust for the
+/// render walk), so a second copy cannot be the place a later caller's host
+/// silently went missing.
 fn parse_nodelist(
     source: &str,
     debug: bool,
@@ -2850,9 +2850,12 @@ fn resolve_components(
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-/// The two node classes the walk renders itself.
+/// The node classes the walk renders itself, by the name `type(node).__name__`
+/// answers. [`TEXT_NODE`] is the fourth and comes from `template-core`, because
+/// the descriptor names it too.
 const VARIABLE_NODE: &str = "VariableNode";
 const FOR_NODE: &str = "ForNode";
+const IF_NODE: &str = "IfNode";
 
 /// The nesting depth past which the walk raises, rather than letting the Rust
 /// stack run out.
@@ -2865,15 +2868,87 @@ const FOR_NODE: &str = "ForNode";
 /// and the failure *mode* stays what stock's is.
 const MAX_WALK_DEPTH: usize = 500;
 
-/// One `{{ … }}` the walk resolves itself.
-enum Expr {
-    /// An unfiltered lookup: `Variable.lookups`. Resolved against the context,
-    /// or — inside a sealed loop — against the loop's frame.
-    Lookup(Vec<String>),
-    /// An unfiltered literal: `Variable.literal`, as the object Django's
-    /// `Variable` holds. `literal_to_py` is the same conversion the resolver
-    /// uses, so a literal renders through one code path and not two.
-    Literal(AttrValue),
+/// The head of a `{{ … }}`: the value the filters, if any, are applied to.
+///
+/// The two arms are `Variable`'s own two shapes, and they are exclusive for the
+/// same reason Django's `(literal, lookups)` pair is: `lookups` is `Some`
+/// exactly when the token was a real variable. See [`Head::Value`].
+enum Head {
+    /// A lookup: `Variable.lookups`. Resolved against the context, or — inside a
+    /// sealed loop — against the loop's frame, which is what `local` says. A
+    /// local head is what keeps the loop variable out of the context and the
+    /// loop free of `context[loopvar] = item`; `seal` is its only producer.
+    Lookups { lookups: Vec<String>, local: bool },
+    /// A literal, as the Python object Django's `Variable.literal` holds —
+    /// `literal_to_py`'s answer, computed once at plan time rather than once per
+    /// render. Django's `Variable` reuses its own `literal` object across
+    /// renders in exactly the same way, and every value a literal can be is
+    /// immutable, so no render can tell the two apart.
+    Value(Py<PyAny>),
+}
+
+/// One filter argument, in Django's two shapes.
+///
+/// `FilterExpression` stores each argument as `(lookup, value)` and
+/// `resolve` reads the flag (`base.py:806-809`), so the same pair decides here:
+/// `lookup=False` is a constant — `arg_vals.append(mark_safe(arg))` — and
+/// `lookup=True` is `Variable(var_arg)`, resolved against the context on every
+/// render.
+enum FilterArg {
+    /// `mark_safe(arg)`, folded to plan time.
+    ///
+    /// Django marks it on every render, and the fold is safe for the reason the
+    /// call is cheap to describe: `arg` is a *constant* — `var_obj =
+    /// Variable(constant).resolve({})` at parse time (`base.py:755`) — `mark_safe` is a pure
+    /// function of it, and its answer cannot reach the output by identity,
+    /// because the render's last step builds a new string.
+    Constant(Py<PyAny>),
+    /// The `Variable` itself, resolved per render. Django's own line is
+    /// `arg.resolve(context)` and the object it resolves is the one the parser
+    /// built, so this holds that object rather than a re-derived lookup path.
+    Variable {
+        variable: Py<PyAny>,
+        /// `variable.lookups[0]`, read once here for `seal`'s question: a
+        /// variable argument is resolved against the **context**, which inside a
+        /// sealed loop does not hold the loop variable, so a body whose filter
+        /// argument reads it cannot be sealed.
+        head: String,
+    },
+}
+
+/// One `|name` or `|name:arg` the walk applies itself.
+struct FilterStep {
+    /// The name Rust's registry answers to. `run_filter` resolves the body by
+    /// name — the *function* was already checked, by handle, when the plan was
+    /// built, so this is not a second, name-based routing decision.
+    name: String,
+    /// Django's `arg_vals` element, or `None` for a filter with no argument.
+    arg: Option<FilterArg>,
+}
+
+/// A `{{ … }}`: a head and the filters applied to it.
+///
+/// Also an `{% if %}` condition, which is a `FilterExpression` evaluated rather
+/// than emitted — `TemplateLiteral.eval` is `self.value.resolve(context,
+/// ignore_failures=True)` (`defaulttags.py:917-918`) — so the two share one shape and
+/// one resolution.
+struct Emit {
+    head: Head,
+    /// In source order; empty for an unfiltered `{{ … }}`.
+    steps: Vec<FilterStep>,
+}
+
+/// One `{% if %}`/`{% elif %}`/`{% else %}` the walk owns.
+///
+/// Owned only when **every** branch's condition is an `{% else %}` or a
+/// `TemplateLiteral` that is not an operator — the shape `{% if rows %}` is. A
+/// condition built from an operator (`and`, `==`, `in`, …) is one of
+/// `smartif`'s thirteen, evaluated by a `smartif` tree this walk does not walk,
+/// so the whole node delegates.
+struct IfPlan {
+    /// `(condition, body)` in source order, `None` for the `{% else %}` —
+    /// Django's own list, in Django's own order, with Django's own `None`.
+    branches: Vec<(Option<Emit>, Vec<Slot>)>,
 }
 
 /// One node's native action.
@@ -2883,12 +2958,10 @@ enum Expr {
 enum Act {
     /// A `TextNode`'s `s`, appended verbatim. Django never escapes a text node.
     Text(String),
-    /// A `{{ … }}` with no filters.
-    Emit(Expr),
-    /// A `{{ … }}` whose head is the enclosing sealed loop's own variable.
-    /// Resolved with the frame as the root target, so the loop variable never
-    /// reaches the context and the loop never pays `context[loopvar] = item`.
-    Local(Vec<String>),
+    /// A `{{ … }}`.
+    Emit(Emit),
+    /// An `{% if %}`.
+    If(Box<IfPlan>),
     /// A `{% for %}` the walk owns end to end.
     For(Box<ForPlan>),
     /// A node the walk does not render. `render_annotated` is called on it,
@@ -2926,6 +2999,12 @@ struct ForPlan {
     sequence: Py<PyAny>,
     /// `self.is_reversed`.
     is_reversed: bool,
+    /// `self.loopvars[0]`, and the loop has exactly one because `seal` requires
+    /// it. Carried rather than re-derived at the render, because the one caller
+    /// that needs it has no lookup path to read it off: a refused node handed
+    /// back to Python inside a sealed body is a whole node, and nothing in the
+    /// walk knows which name its text reads. See [`Walk::delegate_slot`].
+    loopvar: String,
 }
 
 /// Which nodes the walk rendered and which it handed back, over every render
@@ -2943,11 +3022,25 @@ struct Census {
     /// The characters that came back from `render_annotated`, summed at the
     /// call site. See [`census_take`] for why this is not a partition.
     delegated_len: usize,
+    /// The filters the walk applied **itself**, by the name Rust's registry
+    /// answers to, in first-sighting order.
+    ///
+    /// **This is the node census's question one level down, and it exists
+    /// because nothing else can see it.** Once a filtered `{{ … }}` is
+    /// [`Act::Emit`], the filter body is reached inside Rust with *no* seam
+    /// crossing at all — so `tests/test_interposition.py`'s counter on the
+    /// Python-facing `_native.filter` reads zero on the fast route *and* reads
+    /// zero when the routing is broken (a handle missing from
+    /// `django_own_filters()` declines the node, and the Python arm then answers
+    /// from the *transcription* rather than from Rust — the same silently-green
+    /// failure M11 built that row for). A count of what the walk applied is the
+    /// only instrument that tells the two apart.
+    filters: Vec<(String, usize)>,
 }
 
-/// `(class_name, count)`, ascending by first sighting. Named because
-/// `census_take` returns two of them and clippy reads the tuple of tuples as a
-/// type nobody meant to write.
+/// `(name, count)`, ascending by first sighting. Named because `census_take`
+/// returns three of them and clippy reads a tuple of tuples as a type nobody
+/// meant to write.
 type CensusRows = Vec<(String, usize)>;
 
 static CENSUS_ON: AtomicBool = AtomicBool::new(false);
@@ -2955,6 +3048,7 @@ static CENSUS: Mutex<Census> = Mutex::new(Census {
     handled: Vec::new(),
     delegated: Vec::new(),
     delegated_len: 0,
+    filters: Vec::new(),
 });
 
 fn census_on() -> bool {
@@ -2979,12 +3073,25 @@ fn census_bump(census: &mut Option<Census>, class_name: &str, delegated: bool) {
     census_add(counts, class_name, 1);
 }
 
+/// `filters[name] += 1` for a filter the walk applied itself.
+///
+/// Called only on an **answer**: a refusal is the walk declining, and the
+/// application that follows happens on the Python path, so counting it here
+/// would report coverage the walk does not have.
+fn census_filter(census: &mut Option<Census>, name: &str) {
+    let Some(census) = census else { return };
+    census_add(&mut census.filters, name, 1);
+}
+
 fn census_merge(into: &mut Census, from: Census) {
     for (class_name, count) in from.handled {
         census_add(&mut into.handled, &class_name, count);
     }
     for (class_name, count) in from.delegated {
         census_add(&mut into.delegated, &class_name, count);
+    }
+    for (name, count) in from.filters {
+        census_add(&mut into.filters, &name, count);
     }
     into.delegated_len += from.delegated_len;
 }
@@ -2998,7 +3105,7 @@ fn census_start() {
     CENSUS_ON.store(true, Ordering::Relaxed);
 }
 
-/// Stop the census and return `(handled, delegated, delegated_len)`.
+/// Stop the census and return `(handled, delegated, delegated_len, filters)`.
 ///
 /// The third value is the reviewer's correction to this instrument, and it is
 /// the one that matters on a page with inheritance. Counts alone are
@@ -3017,14 +3124,19 @@ fn census_start() {
 /// came back from Python" — and it is deliberately not clamped: a row over 100%
 /// says the delegates are nested, which is a fact about the template and not an
 /// error in the meter.
+///
+/// The fourth is [`Census::filters`], and unlike the first two it *is* a
+/// partition of one thing: every filter application in a walked template is
+/// either counted here or made on the Python path.
 #[pyfunction]
-fn census_take() -> (CensusRows, CensusRows, usize) {
+fn census_take() -> (CensusRows, CensusRows, usize, CensusRows) {
     CENSUS_ON.store(false, Ordering::Relaxed);
     let census = CENSUS.lock().unwrap();
     (
         census.handled.clone(),
         census.delegated.clone(),
         census.delegated_len,
+        census.filters.clone(),
     )
 }
 
@@ -3033,34 +3145,314 @@ fn find_attr<'a>(node: &'a NodeDesc, name: &str) -> Option<&'a AttrValue> {
     node.attrs.iter().find(|(n, _)| n == name).map(|(_, v)| v)
 }
 
-/// A `{{ … }}` with no filters, or `None` if this walk declines it.
+/// `django.utils.safestring.mark_safe`, cached once.
 ///
-/// Declines a filtered expression, a translated variable (`_("x")` resolves to
-/// a `gettext_lazy` proxy Python must build), and any expression whose variable
-/// part is neither a lookup nor a literal. Each is a case this slice does not
-/// cover, and declining is what the census counts.
-fn plan_expr(expr: &FilterExprDesc) -> Option<Expr> {
-    if !expr.filters.is_empty() {
-        return None;
-    }
+/// The fold [`FilterArg::Constant`] argues for: `FilterExpression.resolve` calls
+/// this on every render for every constant argument —
+/// `arg_vals.append(mark_safe(arg))`, `base.py:807` — and the
+/// argument is compile-time — `Variable(constant).resolve({})`, `base.py:768` —
+/// so the answer is reached once, here.
+static MARK_SAFE: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+fn mark_safe_fn(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
+    MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")
+}
+
+/// `django_rust_templates.host.django_own_filter_names`, cached once.
+///
+/// The identity-based router the Python arm already uses — `{func: name}` for
+/// the handles in one expression, `None` where the handle is not a Rust filter —
+/// and the second thing this file reads from Python at **plan** time rather than
+/// per application (see `FilterRoutingTests` for the first).
+static DJANGO_OWN_FILTER_NAMES: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+fn django_own_filter_names_fn(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
+    DJANGO_OWN_FILTER_NAMES.import(py, "django_rust_templates.host", "django_own_filter_names")
+}
+
+/// `django.conf.settings`, cached once — the **object**, not `settings.USE_TZ`.
+///
+/// Caching the object is the whole point: `override_settings` swaps attribute
+/// values on one `Settings` instance and installs a fresh object in
+/// `django.conf.settings` for the duration, so a cached `bool` would survive an
+/// override and a cached module-level lookup would too. The object plus a
+/// per-walk `getattr` sees both. See [`Walk::use_tz`] for when the read happens.
+static DJANGO_SETTINGS: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+/// The head of a `{{ … }}` from its descriptor, or `None` if this walk declines.
+///
+/// Declines a translated variable (`_("x")` resolves to a `gettext_lazy` proxy
+/// Python must build, and one a Rust literal cannot hold) and any expression
+/// whose variable part is neither a lookup nor a literal.
+///
+/// Read from the **descriptor** rather than from the materialised
+/// `FilterExpression`, and that is a cost decision with a measurement behind it:
+/// the unfiltered case is the common one — `real-world/large` is 320 variable
+/// nodes and every one of them is unfiltered — and four Python attribute reads
+/// per node would be a per-*parse* cost, because `parse` mode compiles a fresh
+/// template every iteration.
+fn plan_head(py: Python<'_>, expr: &FilterExprDesc) -> PyResult<Option<Head>> {
     let (lookup, value) = &expr.var;
     let AttrValue::Variable(variable) = value else {
-        return None;
+        return Ok(None);
     };
     if variable.translate {
-        return None;
+        return Ok(None);
     }
     if *lookup {
-        variable
-            .lookups
-            .as_ref()
-            .map(|lookups| Expr::Lookup(lookups.clone()))
+        Ok(variable.lookups.as_ref().map(|lookups| Head::Lookups {
+            lookups: lookups.clone(),
+            local: false,
+        }))
     } else {
-        variable
-            .literal
-            .as_ref()
-            .map(|value| Expr::Literal(value.clone()))
+        match variable.literal.as_ref() {
+            Some(value) => Ok(Some(Head::Value(literal_to_py(py, value)?))),
+            None => Ok(None),
+        }
     }
+}
+
+/// The filter chain of a materialised `FilterExpression`, or `None` if this walk
+/// declines it.
+///
+/// **The chain is read from the object Django renders from**, not from the
+/// descriptor, and the reason is what the descriptor does not carry: the
+/// *function* each name was bound to (`FilterCall::handle` is a reference-table
+/// index, and the table is not reachable from a plan) together with the
+/// already-resolved constant arguments (`Variable(constant).resolve({})`,
+/// `base.py:768`). Both are on the materialised object, because materialisation
+/// is where Django puts them.
+///
+/// **Declines the whole expression if any handle is not ours.** A `{% load %}`ed
+/// filter has no Rust body, and the alternative — running Django's callable from
+/// here — would be a second implementation of the `FilterExpression.resolve`
+/// loop this file is careful to keep to one. Handing the node back keeps Django's
+/// Python arm for it, and the census counts it.
+fn plan_steps(py: Python<'_>, expression: &Bound<'_, PyAny>) -> PyResult<Option<Vec<FilterStep>>> {
+    let filters = expression.getattr("filters")?;
+    let count = filters.len()?;
+    if count == 0 {
+        return Ok(Some(Vec::new()));
+    }
+    let names = django_own_filter_names_fn(py)?.call1((&filters,))?;
+    let names = names.cast::<PyDict>()?;
+    let mut steps = Vec::with_capacity(count);
+    for pair in filters.try_iter()? {
+        let pair = pair?;
+        let func = pair.get_item(0)?;
+        // The answer is a *value* per handle, and `None` — Python's — is the
+        // answer "not ours". `django_own_filter_names` maps every handle in the
+        // expression at once, so the key is always present and an absent one is a
+        // pairing failure rather than a filter that is not ours.
+        let Some(name) = names.get_item(&func)? else {
+            return Ok(None);
+        };
+        if name.is_none() {
+            return Ok(None);
+        }
+        let args = pair.get_item(1)?;
+        let arg = match args.len()? {
+            0 => None,
+            1 => {
+                let operand = args.get_item(0)?;
+                let lookup: bool = operand.get_item(0)?.extract()?;
+                let value = operand.get_item(1)?;
+                if lookup {
+                    // `args.append((True, Variable(var_arg)))` (`base.py:770`) —
+                    // a real variable, so `lookups` is set and the head can be
+                    // read off the object rather than re-derived from the token.
+                    let lookups = value.getattr("lookups")?;
+                    if lookups.is_none() {
+                        return Ok(None);
+                    }
+                    let lookups: Vec<String> = lookups.extract()?;
+                    Some(FilterArg::Variable {
+                        variable: value.unbind(),
+                        head: lookups.first().cloned().unwrap_or_default(),
+                    })
+                } else {
+                    // `args.append((False, Variable(constant_arg).resolve({})))`
+                    // (`base.py:768`) hands already resolved, and
+                    // `arg_vals.append(mark_safe(arg))` (`base.py:807`) is what
+                    // makes the callable's argument the safe one.
+                    Some(FilterArg::Constant(
+                        mark_safe_fn(py)?.call1((value,))?.unbind(),
+                    ))
+                }
+            }
+            // Unreachable: `filter_re`'s argument group allows zero or one
+            // (`(?:%(arg_sep)s`, `base.py:706-711`). Declined rather than
+            // asserted, because a
+            // descriptor and a materialised object disagreeing is the failure
+            // every other arm here answers by handing the node back.
+            _ => return Ok(None),
+        };
+        steps.push(FilterStep {
+            name: name.extract()?,
+            arg,
+        });
+    }
+    Ok(Some(steps))
+}
+
+/// A `{{ … }}`, or `None` if this walk declines it.
+///
+/// An unfiltered expression never touches Python; a filtered one must, because
+/// the handles are Python objects (see [`plan_steps`]) and the descriptor alone
+/// cannot say whether they are ours. The head is read from the descriptor either
+/// way — see [`plan_head`].
+fn plan_emit(
+    py: Python<'_>,
+    desc: &FilterExprDesc,
+    node: &Bound<'_, PyAny>,
+) -> PyResult<Option<Emit>> {
+    let Some(head) = plan_head(py, desc)? else {
+        return Ok(None);
+    };
+    if desc.filters.is_empty() {
+        return Ok(Some(Emit {
+            head,
+            steps: Vec::new(),
+        }));
+    }
+    let expression = node.getattr("filter_expression")?;
+    match plan_steps(py, &expression)? {
+        Some(steps) => Ok(Some(Emit { head, steps })),
+        None => Ok(None),
+    }
+}
+
+/// An `{% if %}` condition, from its materialised `FilterExpression`.
+///
+/// The head is read from the object here rather than from a descriptor, because
+/// a condition's descriptor is a `NodeRef` into the reference table and nothing
+/// else — `IfConditionDesc::Literal` carries the expression's *handle*, not its
+/// shape. A condition is one per branch rather than one per node, so the Python
+/// reads are paid on the rows that write `{% if %}` and not on the rows that are
+/// mostly variables.
+///
+/// **`ignore_failures=True` is not spelled here**: it is a property of the
+/// caller — `TemplateLiteral.eval` (`defaulttags.py:917-918`) — and it changes
+/// only what a failed head means, which is [`Walk::run_if`]'s question.
+fn plan_condition(py: Python<'_>, expression: &Bound<'_, PyAny>) -> PyResult<Option<Emit>> {
+    let head = if expression.getattr("is_var")?.is_truthy()? {
+        let variable = expression.getattr("var")?;
+        if variable.getattr("translate")?.is_truthy()? {
+            return Ok(None);
+        }
+        let lookups = variable.getattr("lookups")?;
+        if lookups.is_none() {
+            return Ok(None);
+        }
+        Head::Lookups {
+            lookups: lookups.extract()?,
+            local: false,
+        }
+    } else {
+        // `obj = self.var` — `FilterExpression.resolve`'s non-var arm
+        // (`base.py:801-802`), which is the object itself.
+        Head::Value(expression.getattr("var")?.unbind())
+    };
+    match plan_steps(py, expression)? {
+        Some(steps) => Ok(Some(Emit { head, steps })),
+        None => Ok(None),
+    }
+}
+
+/// `{% if %}` as an [`IfPlan`], or `None` for a node `IfNode.render` must run.
+///
+/// The **shape** check is on the descriptor and the conditions are read from the
+/// object: whether a branch is an `{% else %}` or a `TemplateLiteral` rather
+/// than a `smartif` operator is a question about the parse tree, which is what
+/// the descriptor is. A branch body that declines hands the whole node back —
+/// [`plan_slot`]'s convention, so a half-planned `{% if %}` cannot render — and
+/// so does an `{% elif %}` written as an operator, which is one of `smartif`'s
+/// thirteen and is not evaluated here at all.
+fn plan_if(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResult<Option<IfPlan>> {
+    let Some(AttrValue::List(branches)) = find_attr(desc, "conditions_nodelists") else {
+        return Ok(None);
+    };
+    let materialised = node.getattr("conditions_nodelists")?;
+    // The branches and the bodies are two lists the parse wrote in step
+    // (`tags/if.rs` pushes a branch and a nodelist per clause, and `do_if` does
+    // the same in `defaulttags.py`), so a disagreement is a pairing failure and
+    // not a template this walk cannot plan.
+    if branches.len() != desc.nodelists.len() || materialised.len()? != branches.len() {
+        return Ok(None);
+    }
+    let mut planned = Vec::with_capacity(branches.len());
+    for (index, branch) in branches.iter().enumerate() {
+        let AttrValue::Tuple(items) = branch else {
+            return Ok(None);
+        };
+        let [condition_desc, body_ref] = items.as_slice() else {
+            return Ok(None);
+        };
+        let pair = materialised.get_item(index)?;
+        let condition = match condition_desc {
+            // `conditions_nodelists.append((None, nodelist))` — `do_if`'s own
+            // `{% else %}` (`defaulttags.py:1009`).
+            AttrValue::None => None,
+            AttrValue::IfCondition(tree) => match tree.as_ref() {
+                // `nud` and `led` build this arm, and a `smartif` operator tree
+                // is thirteen operators deep. Declined as a whole.
+                IfConditionDesc::Operator { .. } => return Ok(None),
+                IfConditionDesc::Literal { .. } => {
+                    let literal = pair.get_item(0)?;
+                    if literal.is_none() {
+                        return Ok(None);
+                    }
+                    match plan_condition(py, &literal.getattr("value")?)? {
+                        Some(emit) => Some(emit),
+                        None => return Ok(None),
+                    }
+                }
+            },
+            _ => return Ok(None),
+        };
+        let AttrValue::NodeListRef(body_index) = body_ref else {
+            return Ok(None);
+        };
+        // `{% if %}` is the one tag with **positional-only** nodelists
+        // (`tags/if.rs`): `IfNode` holds its branch bodies inside
+        // `conditions_nodelists`, so the descriptor carries N unnamed nodelists
+        // and the branch names its own by position.
+        let Some((_, body_desc)) = desc.nodelists.get(*body_index) else {
+            return Ok(None);
+        };
+        let Some(body) = plan_list(py, body_desc, &pair.get_item(1)?)? else {
+            return Ok(None);
+        };
+        planned.push((condition, body));
+    }
+    Ok(Some(IfPlan { branches: planned }))
+}
+
+/// Whether a head may be read inside a sealed loop.
+///
+/// A `forloop` read is refused outright: the dict it names is one of the two
+/// things sealing elides. A read of the loop variable itself is fine — [`seal`]
+/// rewrites it to the frame, and that is the point of the write pass.
+fn head_sealable(head: &Head) -> bool {
+    match head {
+        Head::Value(_) => true,
+        Head::Lookups { lookups, .. } => lookups.first().map(String::as_str) != Some("forloop"),
+    }
+}
+
+/// Whether one emit's chain may be read inside a sealed loop.
+///
+/// A filter **argument** is resolved against the context (`arg.resolve(context)`,
+/// `base.py:809`) and not against the frame, so an argument whose head is the
+/// loop variable would resolve against a context that does not hold it — a miss
+/// where Django has a value. That is why it refuses rather than rewriting: there
+/// is no frame to rewrite it *to*.
+fn emit_sealable(emit: &Emit, loopvar: &str) -> bool {
+    head_sealable(&emit.head)
+        && emit.steps.iter().all(|step| match &step.arg {
+            Some(FilterArg::Variable { head, .. }) => head != loopvar && head != "forloop",
+            Some(FilterArg::Constant(_)) | None => true,
+        })
 }
 
 /// Seal a planned body, and rewrite its loop-variable reads.
@@ -3071,33 +3463,69 @@ fn plan_expr(expr: &FilterExprDesc) -> Option<Expr> {
 /// template text can bound), a nested `{% for %}` (which reads `parentloop` out
 /// of the very dict being elided), or a `forloop` reference of its own.
 ///
-/// The two questions are one pass because they are one decision: a body that
-/// mentions `forloop` cannot be sealed, and a body that *can* be sealed is
-/// exactly the body whose loop-variable reads become [`Step::Local`].
+/// Two passes over the whole body, and they are one decision: the read pass asks
+/// *may* this body be sealed, the write pass does it. Splitting them is what
+/// makes the recursion honest — a nested `{% if %}` body is asked the same
+/// question as its parent, and asking it while rewriting would make the answer
+/// depend on the order the two ran in.
 fn seal(body: &mut [Slot], loopvar: &str) -> bool {
-    let mut reads_loopvar = false;
-    for slot in body.iter() {
-        match &slot.act {
-            Act::Text(_) => {}
-            Act::Emit(Expr::Literal(_)) => {}
-            Act::Emit(Expr::Lookup(lookups)) => match lookups.first().map(String::as_str) {
-                Some("forloop") => return false,
-                Some(head) if head == loopvar => reads_loopvar = true,
-                _ => {}
-            },
-            Act::For(_) | Act::Delegate | Act::Local(_) => return false,
-        }
+    if !body.iter().all(|slot| sealable(&slot.act, loopvar)) {
+        return false;
     }
-    if reads_loopvar {
-        for slot in body.iter_mut() {
-            if let Act::Emit(Expr::Lookup(lookups)) = &slot.act {
-                if lookups.first().map(String::as_str) == Some(loopvar) {
-                    slot.act = Act::Local(lookups.clone());
+    for slot in body.iter_mut() {
+        rewrite(&mut slot.act, loopvar);
+    }
+    true
+}
+
+/// The read pass of [`seal`], one node deep with `{% if %}` recursion.
+fn sealable(act: &Act, loopvar: &str) -> bool {
+    match act {
+        Act::Text(_) => true,
+        Act::For(_) | Act::Delegate => false,
+        Act::Emit(emit) => emit_sealable(emit, loopvar),
+        Act::If(plan) => plan.branches.iter().all(|(condition, body)| {
+            condition
+                .as_ref()
+                .is_none_or(|condition| emit_sealable(condition, loopvar))
+                && body.iter().all(|slot| sealable(&slot.act, loopvar))
+        }),
+    }
+}
+
+/// The write pass of [`seal`]: every read of the loop variable becomes a frame
+/// read, at any depth, in a body the read pass has already accepted.
+fn rewrite(act: &mut Act, loopvar: &str) {
+    match act {
+        Act::Text(_) | Act::For(_) | Act::Delegate => {}
+        Act::Emit(emit) => rewrite_head(&mut emit.head, loopvar),
+        // A condition's head is rewritten for the same reason an emit's is: a
+        // condition is resolved against the context, and inside a sealed loop the
+        // loop variable is not there.
+        Act::If(plan) => {
+            for (condition, body) in plan.branches.iter_mut() {
+                if let Some(condition) = condition {
+                    rewrite_head(&mut condition.head, loopvar);
+                }
+                for slot in body.iter_mut() {
+                    rewrite(&mut slot.act, loopvar);
                 }
             }
         }
     }
-    true
+}
+
+/// A loop-variable read becomes a frame read; nothing else in a head moves.
+///
+/// A filter **argument** is not rewritten even when it names the loop variable,
+/// and it does not need to be: the read pass refused such a body, so no accepted
+/// body has one.
+fn rewrite_head(head: &mut Head, loopvar: &str) {
+    if let Head::Lookups { lookups, local } = head {
+        if lookups.first().map(String::as_str) == Some(loopvar) {
+            *local = true;
+        }
+    }
 }
 
 /// `{% for %}` as a [`ForPlan`], or `None` for a loop `ForNode.render` must run.
@@ -3127,7 +3555,7 @@ fn plan_for(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResul
     let Some(empty) = plan_list(py, empty_desc, &python_empty)? else {
         return Ok(None);
     };
-    let loopvars: Vec<String> = node.getattr("loopvars")?.extract()?;
+    let mut loopvars: Vec<String> = node.getattr("loopvars")?.extract()?;
     // An unpacking loop writes one context entry per name and pops them back
     // per iteration, and each name is a frame of its own. Declined rather than
     // half-done.
@@ -3139,6 +3567,7 @@ fn plan_for(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResul
         empty,
         sequence: node.getattr("sequence")?.unbind(),
         is_reversed: node.getattr("is_reversed")?.extract()?,
+        loopvar: loopvars.remove(0),
     }))
 }
 
@@ -3162,8 +3591,8 @@ fn plan_slot(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResu
         }
     } else if class_name == VARIABLE_NODE {
         match find_attr(desc, "filter_expression") {
-            Some(AttrValue::FilterExpr(expr)) => match plan_expr(expr) {
-                Some(expr) => Act::Emit(expr),
+            Some(AttrValue::FilterExpr(expr)) => match plan_emit(py, expr, node)? {
+                Some(emit) => Act::Emit(emit),
                 None => Act::Delegate,
             },
             _ => Act::Delegate,
@@ -3171,6 +3600,11 @@ fn plan_slot(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResu
     } else if class_name == FOR_NODE {
         match plan_for(py, desc, node)? {
             Some(plan) => Act::For(Box::new(plan)),
+            None => Act::Delegate,
+        }
+    } else if class_name == IF_NODE {
+        match plan_if(py, desc, node)? {
+            Some(plan) => Act::If(Box::new(plan)),
             None => Act::Delegate,
         }
     } else {
@@ -3265,6 +3699,81 @@ fn annotate_culprit(py: Python<'_>, context: &Bound<'_, PyAny>, slot: &Slot, err
     let _ = annotate();
 }
 
+/// Whether a planned node rendered itself or handed back to Python.
+///
+/// There is exactly one route to `Refused`, and it is not an error: a filter
+/// whose answer is a lone surrogate answers the seam's sentinel
+/// ([`cannot_hold`]) rather than raising, because the value is one CPython holds
+/// and this walk's accumulator is a Rust `String`. The node is then rendered by
+/// `render_annotated` — which is what Django would have done had the walk never
+/// owned it, and which absorbs the sentinel the way the transcribed `resolve`
+/// does.
+enum Rendered {
+    Done,
+    Refused,
+}
+
+/// What one filter application did.
+enum StepOutcome {
+    Value(Py<PyAny>),
+    Refused,
+}
+
+/// What `FilterExpression.resolve` did with a **failed head** — three answers,
+/// and three different places to go next.
+///
+/// The distinction is not cosmetic and it is not a detail of this slice: the
+/// truthy `string_if_invalid` returns *early*, so the filter chain never runs,
+/// while the falsy one assigns and **falls through**. `""` is the default
+/// setting, so the second arm is the common one — it is what makes
+/// `{{ missing|default:"x" }}` render `"x"` rather than `""`.
+enum Absorbed {
+    /// `string_if_invalid` is truthy, so `resolve` returned it —
+    /// `return string_if_invalid` (`base.py:793-798`).
+    Final(Py<PyAny>),
+    /// Falsy: `obj = string_if_invalid` and the chain runs on it
+    /// (`base.py:800`).
+    Continue(Py<PyAny>),
+    /// `VariableNode.render`'s `UnicodeDecodeError` arm: the node renders `""`
+    /// and `render_value_in_context` never runs (`engine/base.py:1291-1294`).
+    Nothing,
+}
+
+/// What one `{% if %}` condition decided.
+enum Branch {
+    Match,
+    /// Falsy — and the `VariableDoesNotExist` that `IfNode.render` catches and
+    /// turns into the same falsy `None` (`except VariableDoesNotExist:`,
+    /// `engine/defaulttags.py:329-330`).
+    NoMatch,
+    Refused,
+}
+
+/// The loop state a sealed body is walked with.
+///
+/// Django's `ForNode.render` writes two things per iteration —
+/// `context[self.loopvars[0]] = item` (`engine/defaulttags.py:248`) and the
+/// six-key `forloop` dict, `loop_dict["counter0"] = i` and its five siblings
+/// (`engine/defaulttags.py:220-227`) — and the whole
+/// point of sealing is that this walk writes neither. It carries the state
+/// anyway, because the one caller that hands a node *back* to Python has to put
+/// the context into the state Django's own `render_annotated` call would have
+/// found it in. See [`Walk::delegate_slot`].
+struct Frame<'a, 'py> {
+    /// This iteration's item.
+    item: Bound<'py, PyAny>,
+    /// `self.loopvars[0]` — the name that write uses, borrowed from the plan
+    /// rather than re-derived, because nothing else in the walk knows it.
+    loopvar: &'a str,
+    /// Django's `counter`, which is `i + 1` and not `i`
+    /// (`engine/defaulttags.py:220-221`).
+    counter: usize,
+    /// `len_values`, read before the reversal — `len_values = len(values)`
+    /// (`engine/defaulttags.py:204`) — the only order that works, because
+    /// `reversed(values)` has no length.
+    length: usize,
+}
+
 /// The render-invariant state of one walk.
 struct Walk<'py> {
     py: Python<'py>,
@@ -3279,6 +3788,19 @@ struct Walk<'py> {
     /// because `AutoEscapeControlNode` writes that attribute **in place** on the
     /// context object rather than restoring it later.
     autoescape: bool,
+    /// `template_localtime`'s `use_tz` argument
+    /// (`django/utils/timezone.py:146-161`), filled on first use.
+    ///
+    /// **Lazy, and that is the design.** `Context.use_tz` is `None` unless
+    /// `{% localtime %}` or `{% timezone %}` set it, and the rule for `None` is
+    /// `settings.USE_TZ` — so a value resolved eagerly would put a
+    /// `django.conf` import on every walked render, including the ones whose
+    /// filters are no date filter at all. At 6.0.9, 2 of the 57 builtins declare
+    /// `expects_localtime` and `run_filter` reads this for those two only, so the
+    /// read belongs where the first filter is applied and nowhere earlier. A
+    /// delegate clears it, because a delegate is the one thing that can change
+    /// `context.use_tz`.
+    use_tz: Option<bool>,
     /// The output, as a Rust `String` — which is the whole point of the walk,
     /// and which Python's `str` is not a superset of. See [`Walk::push_python`].
     out: String,
@@ -3293,10 +3815,17 @@ struct Walk<'py> {
 }
 
 impl<'py> Walk<'py> {
-    fn run(
+    /// Render one node list, in `NodeList.render`'s order, into this walk's
+    /// accumulator.
+    ///
+    /// `frame` is the enclosing sealed loop's iteration state, and it is `None`
+    /// outside one: `Act::If` bodies inherit it, `Act::For` bodies replace it,
+    /// and nothing else reads it. A node that refuses is handed back to Python
+    /// ([`Walk::delegate_slot`]), which is the one thing the frame is for.
+    fn run<'a>(
         &mut self,
         slots: &[Slot],
-        frame: Option<&Bound<'py, PyAny>>,
+        frame: Option<&Frame<'a, 'py>>,
         depth: usize,
     ) -> PyResult<()> {
         if depth > MAX_WALK_DEPTH {
@@ -3310,28 +3839,18 @@ impl<'py> Walk<'py> {
                     self.push_text(text)?;
                     census_bump(&mut self.census, &slot.class_name, false);
                 }
-                Act::Delegate => {
-                    let rendered = slot
-                        .node
-                        .bind(self.py)
-                        .call_method1("render_annotated", (&self.context,))?;
-                    // Before the piece is moved into the sink: what this node
-                    // contributed to the output. A `str` that has no length is
-                    // not a thing, and a piece that is not a `str` raises inside
-                    // `push_python` and so contributes nothing to count.
-                    if let Some(census) = self.census.as_mut() {
-                        census.delegated_len += rendered.len().unwrap_or(0);
-                    }
-                    self.push_python(rendered.unbind())?;
-                    self.autoescape = self.context.getattr("autoescape")?.extract()?;
-                    census_bump(&mut self.census, &slot.class_name, true);
-                }
-                Act::Emit(expr) => match self.emit_expr(slot, expr) {
-                    Ok(()) => census_bump(&mut self.census, &slot.class_name, false),
+                // No `culprit` here: `render_annotated` *is* the culprit
+                // protocol, so annotating on this side would be a second writer
+                // of an attribute whose whole contract is first-writer-wins.
+                Act::Delegate => self.delegate(slot)?,
+                Act::Emit(emit) => match self.run_emit(slot, emit, frame) {
+                    Ok(Rendered::Done) => census_bump(&mut self.census, &slot.class_name, false),
+                    Ok(Rendered::Refused) => self.delegate_slot(slot, frame)?,
                     Err(error) => return Err(self.culprit(slot, error)),
                 },
-                Act::Local(lookups) => match self.emit_local(slot, lookups, frame) {
-                    Ok(()) => census_bump(&mut self.census, &slot.class_name, false),
+                Act::If(plan) => match self.run_if(plan, frame, depth + 1) {
+                    Ok(Rendered::Done) => census_bump(&mut self.census, &slot.class_name, false),
+                    Ok(Rendered::Refused) => self.delegate_slot(slot, frame)?,
                     Err(error) => return Err(self.culprit(slot, error)),
                 },
                 Act::For(plan) => match self.run_for(plan, depth + 1) {
@@ -3349,97 +3868,294 @@ impl<'py> Walk<'py> {
         error
     }
 
-    fn emit_expr(&mut self, slot: &Slot, expr: &Expr) -> PyResult<()> {
-        let result = match expr {
-            Expr::Lookup(lookups) => self.scope.resolve(self.py, lookups, &self.context),
-            Expr::Literal(value) => return self.emit(literal_to_py(self.py, value)?),
-        };
-        self.emit_resolved(slot, result)
+    /// Render one node with Python — the arm an unplanned node takes, and the arm
+    /// a refused one takes once its loop state is in place.
+    fn delegate(&mut self, slot: &Slot) -> PyResult<()> {
+        let rendered = slot
+            .node
+            .bind(self.py)
+            .call_method1("render_annotated", (&self.context,))?;
+        // Before the piece is moved into the sink: what this node contributed
+        // to the output. A `str` that has no length is not a thing, and a piece
+        // that is not a `str` raises inside `push_python` and so contributes
+        // nothing to count.
+        if let Some(census) = self.census.as_mut() {
+            census.delegated_len += rendered.len().unwrap_or(0);
+        }
+        self.push_python(rendered.unbind())?;
+        // The two context attributes a delegate can have changed, both of them
+        // written **in place** on the context rather than restored later:
+        // `autoescape` by `AutoEscapeControlNode`, `use_tz` by `{% localtime %}`
+        // and `{% timezone %}`.
+        self.autoescape = self.context.getattr("autoescape")?.extract()?;
+        self.use_tz = None;
+        census_bump(&mut self.census, &slot.class_name, true);
+        Ok(())
     }
 
-    fn emit_local(
+    /// Hand one refused node back to Python **inside the loop state Django would
+    /// have had** — which a sealed body is the one place that does not hold it.
+    ///
+    /// The reasoning is worth stating because the cost is real: sealing elides
+    /// two writes per iteration, so a sealed body's context holds neither the
+    /// loop variable nor `forloop`. A node rendered by Python inside one would
+    /// therefore resolve both out of the *enclosing* context — where `{{ r.name }}`
+    /// inside `{% for r in rows %}` is whatever `r` was before the loop, which is
+    /// measurably `string_if_invalid`. So a delegated node writes the state
+    /// first, exactly as `ForNode.render` would have
+    /// (`engine/defaulttags.py:193-258`).
+    ///
+    /// **Which is `parentloop`, and why writing it from here is honest.** Django
+    /// reads `parentloop` before the push, so for a *nested* loop it is the outer
+    /// loop's dict — and a sealed outer loop has not written one. That difference
+    /// is unreachable rather than merely unobserved: `seal` declines any body
+    /// containing a nested `{% for %}` and any node whose head or filter argument
+    /// mentions `forloop`, so no Python-rendered node inside a sealed body can
+    /// reach `forloop` at all — the only ones there are refused `{{ … }}` and
+    /// `{% if %}` nodes, and neither can start a loop.
+    ///
+    /// **Per delegated node, not per loop.** Django pushes once per loop because
+    /// its dict is live for the whole body; this pushes once per *delegate*,
+    /// because every other node in the body is native and reads nothing. Each
+    /// layer is popped before the next is pushed, so the nesting is
+    /// unobservable — and the alternative, a push for every iteration of every
+    /// sealed loop, would be most of what sealing saves.
+    fn delegate_slot(&mut self, slot: &Slot, frame: Option<&Frame<'_, 'py>>) -> PyResult<()> {
+        let py = self.py;
+        let Some(frame) = frame else {
+            // Not inside a sealed body: only a *nested* sealed loop could be, and
+            // `seal` declines those. The context already holds whatever Django
+            // would have written.
+            return self.delegate(slot);
+        };
+        // `with context.push():` (`engine/defaulttags.py:198`) — the layer both
+        // writes go into, and the one that takes them back out.
+        let pushed = self.context.call_method0("push")?;
+        let result = match self.write_frame(frame) {
+            Ok(()) => self.delegate(slot),
+            Err(error) => Err(error),
+        };
+        // On both paths, which is what `with` does: a failed delegate must not
+        // leave the context a layer deeper than it found it. `__exit__` is
+        // called explicitly because the exception is *travelling* here, not
+        // unwinding through the `with`.
+        let popped = pushed.call_method1("__exit__", (py.None(), py.None(), py.None()));
+        result?;
+        popped?;
+        Ok(())
+    }
+
+    /// The two writes `ForNode.render` makes per iteration
+    /// (`engine/defaulttags.py:193-258`), into the layer `push` just made current.
+    fn write_frame(&self, frame: &Frame<'_, 'py>) -> PyResult<()> {
+        let py = self.py;
+        self.context.set_item(frame.loopvar, &frame.item)?;
+        let forloop = PyDict::new(py);
+        // `if "forloop" in context` then `context["forloop"]` — Django's own
+        // test, and its own fallback. Reading it after our push is the same
+        // read: `__contains__` scans every layer and the new layer is empty.
+        if self.context.contains("forloop")? {
+            forloop.set_item("parentloop", self.context.get_item("forloop")?)?;
+        } else {
+            forloop.set_item("parentloop", PyDict::new(py))?;
+        }
+        let (counter, length) = (frame.counter, frame.length);
+        forloop.set_item("counter0", counter - 1)?;
+        forloop.set_item("counter", counter)?;
+        forloop.set_item("revcounter", length - counter + 1)?;
+        forloop.set_item("revcounter0", length - counter)?;
+        forloop.set_item("first", counter == 1)?;
+        forloop.set_item("last", counter == length)?;
+        self.context.set_item("forloop", forloop)?;
+        Ok(())
+    }
+
+    /// Render one `{{ … }}` — `VariableNode.render`'s shape
+    /// (`engine/base.py:1288-1296`) with the resolution done in Rust.
+    ///
+    /// The two absorbing arms are `render_resolved`'s, and the third route out is
+    /// a refusal, which is a *value* the filter returned rather than an error.
+    fn run_emit(
         &mut self,
         slot: &Slot,
-        lookups: &[String],
-        frame: Option<&Bound<'py, PyAny>>,
-    ) -> PyResult<()> {
-        // `Act::Local` is only produced by `seal`, which only runs inside a
-        // sealed body, which is only ever walked with a frame.
-        let item = frame.ok_or_else(|| PyRuntimeError::new_err("sealed loop has no frame"))?;
-        let result = self.scope.resolve_local(self.py, lookups, item);
-        self.emit_resolved(slot, result)
-    }
-
-    /// Emit a resolved variable, taking the two arms that absorb a failure.
-    ///
-    /// A `{{ … }}` is a `VariableNode`, and the failure of its lookup is
-    /// absorbed *before* the node ever sees it: `FilterExpression.resolve`
-    /// catches `VariableDoesNotExist` and substitutes (`engine/base.py:819-832`), and
-    /// `VariableNode.render` catches `UnicodeDecodeError` and renders `""`
-    /// (`engine/base.py:1291-1294`). Resolving a variable directly — which is what
-    /// makes this walk cheap — is resolving *past* both, so both are taken here.
-    /// `Act::Local` shares this path rather than having its own: it is the same
-    /// `VariableNode.render` with the loop frame standing in for the context, so
-    /// a miss on the tail of a loop variable is substituted the same way.
-    ///
-    /// `Ok(())` with nothing emitted is the `UnicodeDecodeError` arm: Django
-    /// returns early there and `render_value_in_context` never runs.
-    fn emit_resolved(&mut self, slot: &Slot, result: PyResult<Py<PyAny>>) -> PyResult<()> {
-        match result {
-            Ok(value) => self.emit(value),
-            Err(error) => match self.absorb(slot, error)? {
-                Some(value) => self.emit(value),
-                None => Ok(()),
+        emit: &Emit,
+        frame: Option<&Frame<'_, 'py>>,
+    ) -> PyResult<Rendered> {
+        let mut value = match self.resolve_head(&emit.head, frame) {
+            Ok(value) => value,
+            Err(error) => match absorb_emit(self.py, slot, &self.context, error)? {
+                // Truthy `string_if_invalid`: `resolve` returned it and the
+                // filters never ran.
+                Absorbed::Final(value) => {
+                    self.emit(value)?;
+                    return Ok(Rendered::Done);
+                }
+                Absorbed::Continue(value) => value,
+                // The `UnicodeDecodeError` arm: nothing emitted, and the node
+                // still counts as a node.
+                Absorbed::Nothing => {
+                    self.push_text("")?;
+                    return Ok(Rendered::Done);
+                }
             },
+        };
+        for step in &emit.steps {
+            match self.apply_step(step, &value)? {
+                StepOutcome::Value(next) => value = next,
+                StepOutcome::Refused => return Ok(Rendered::Refused),
+            }
+        }
+        self.emit(value)?;
+        Ok(Rendered::Done)
+    }
+
+    /// Render one `{% if %}` this walk owns — `IfNode.render`'s loop
+    /// (`engine/defaulttags.py:324-337`).
+    ///
+    /// The one way out without rendering a branch is a refusal, and a refusal can
+    /// only come from a condition: the body either runs to completion or returns
+    /// its own error. A condition is evaluated before anything is emitted, so
+    /// handing the whole node back at that point is handing back a node that has
+    /// not written a byte — which is what makes it safe to do.
+    fn run_if(
+        &mut self,
+        plan: &IfPlan,
+        frame: Option<&Frame<'_, 'py>>,
+        depth: usize,
+    ) -> PyResult<Rendered> {
+        for (condition, body) in &plan.branches {
+            let matched = match condition {
+                None => true,
+                Some(condition) => match self.condition_matches(condition, frame)? {
+                    Branch::Match => true,
+                    Branch::NoMatch => false,
+                    Branch::Refused => return Ok(Rendered::Refused),
+                },
+            };
+            if matched {
+                self.run(body, frame, depth)?;
+                return Ok(Rendered::Done);
+            }
+        }
+        // `IfNode.render`'s `return ""` (`engine/defaulttags.py:337`): a node
+        // that matched no branch contributes nothing, and is still a node.
+        self.push_text("")?;
+        Ok(Rendered::Done)
+    }
+
+    /// `TemplateLiteral.eval` (`engine/defaulttags.py:919-920`) —
+    /// `self.value.resolve(context, ignore_failures=True)`.
+    ///
+    /// `ignore_failures=True` is the whole difference from an emitted `{{ … }}`,
+    /// and the flag's name is the rule: a failed head is `None` and the filters
+    /// still run on it, where a `{{ … }}` would have reached for
+    /// `string_if_invalid`. `IfNode.render` then catches `VariableDoesNotExist`
+    /// from anywhere in the evaluation and calls the branch a miss, which is why
+    /// the filter loop below has a `VariableDoesNotExist` arm of its own.
+    fn condition_matches(
+        &mut self,
+        condition: &Emit,
+        frame: Option<&Frame<'_, 'py>>,
+    ) -> PyResult<Branch> {
+        let mut value = match self.resolve_head(&condition.head, frame) {
+            Ok(value) => value,
+            Err(error) if is_variable_does_not_exist(self.py, &error)? => self.py.None(),
+            Err(error) => return Err(error),
+        };
+        for step in &condition.steps {
+            match self.apply_step(step, &value) {
+                Ok(StepOutcome::Value(next)) => value = next,
+                Ok(StepOutcome::Refused) => return Ok(Branch::Refused),
+                // The failed *argument* case: `resolve` has no handler there, so
+                // it travels, and `IfNode.render` is what decides it is a miss.
+                Err(error) if is_variable_does_not_exist(self.py, &error)? => {
+                    return Ok(Branch::NoMatch);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(if value.bind(self.py).is_truthy()? {
+            Branch::Match
+        } else {
+            Branch::NoMatch
+        })
+    }
+
+    /// The head's value, by whichever of [`Head`]'s two shapes it is.
+    fn resolve_head(&self, head: &Head, frame: Option<&Frame<'_, 'py>>) -> PyResult<Py<PyAny>> {
+        match head {
+            Head::Value(value) => Ok(value.clone_ref(self.py)),
+            Head::Lookups {
+                lookups,
+                local: false,
+            } => self.scope.resolve(self.py, lookups, &self.context),
+            Head::Lookups {
+                lookups,
+                local: true,
+            } => {
+                // A local head is only built by `seal`, which only walks a body
+                // it decided was sealed, which is only ever reached with a
+                // frame. The error is unreachable; it is here because a loud
+                // wrong answer beats a silent one.
+                let frame =
+                    frame.ok_or_else(|| PyRuntimeError::new_err("sealed lookup has no frame"))?;
+                self.scope.resolve_local(self.py, lookups, &frame.item)
+            }
         }
     }
 
-    /// The substituted value for a lookup failure, or `None` for `""`.
-    ///
-    /// The class test is `except VariableDoesNotExist`, and nothing else is
-    /// caught: `Variable.resolve` has no handler of its own, so a lookup that
-    /// raises anything else reaches the node uncaught, which is where Django's
-    /// outer handler decides whether to log and substitute or to propagate.
-    fn absorb(&self, slot: &Slot, error: PyErr) -> PyResult<Option<Py<PyAny>>> {
+    /// Apply one filter: the body of `resolve`'s loop
+    /// (`for func, args in self.filters:`, `engine/base.py:868-874`).
+    fn apply_step(&mut self, step: &FilterStep, value: &Py<PyAny>) -> PyResult<StepOutcome> {
         let py = self.py;
-        if error.is_instance_of::<PyUnicodeDecodeError>(py) {
-            return Ok(None);
+        // `arg_vals`: a constant was `mark_safe`d at plan time, a variable is
+        // `arg.resolve(context)` with **no handler**, so a failed argument
+        // propagates out of `resolve` and each caller decides what it means.
+        let mut args: Vec<Py<PyAny>> = Vec::with_capacity(1);
+        match &step.arg {
+            None => {}
+            Some(FilterArg::Constant(constant)) => args.push(constant.clone_ref(py)),
+            Some(FilterArg::Variable { variable, .. }) => args.push(
+                variable
+                    .bind(py)
+                    .call_method1("resolve", (&self.context,))?
+                    .unbind(),
+            ),
         }
-        let class = VARIABLE_DOES_NOT_EXIST
-            .import(
-                py,
-                "django_rust_templates.engine.base",
-                "VariableDoesNotExist",
-            )?
-            .cast::<PyType>()?;
-        if !error.is_instance(py, class) {
-            return Err(error);
+        let args = PyTuple::new(py, args)?;
+        let (autoescape, use_tz) = (self.autoescape, self.use_tz()?);
+        let filtered =
+            filters::run_filter(py, &step.name, value.bind(py), &args, autoescape, use_tz)?;
+        // **A refusal is an answer, not an error** — the seam's sentinel, in
+        // place of a result this walk cannot hold. Handing the node back is what
+        // the Python `resolve` does with the same sentinel, one level up, and the
+        // application that follows is Python's: the census counts only the
+        // applications the walk itself made.
+        if filtered.bind(py).is(cannot_hold(py).bind(py)) {
+            return Ok(StepOutcome::Refused);
         }
-        let invalid = string_if_invalid(&self.context)?;
-        let invalid = invalid.bind(py);
-        // `if string_if_invalid:` — and the `else` assigns the falsy value
-        // itself, which is `""` for the default. Both routes end in the same
-        // place, but only one of them is `string_if_invalid`, and `None` is a
-        // value `render_value_in_context` renders as `"None"` rather than as
-        // `""`, so the distinction is not cosmetic.
-        if !invalid.is_truthy()? {
-            return Ok(Some(invalid.clone().unbind()));
+        census_filter(&mut self.census, &step.name);
+        Ok(StepOutcome::Value(filtered))
+    }
+
+    /// `template_localtime`'s `use_tz` argument, filled on first use.
+    fn use_tz(&mut self) -> PyResult<bool> {
+        if let Some(use_tz) = self.use_tz {
+            return Ok(use_tz);
         }
-        if invalid.contains("%s")? {
-            // `string_if_invalid % self.var`, and `self.var` is the `Variable`
-            // object — `%s` on it calls `Variable.__str__`, which is the lookup
-            // text. Read off the node rather than re-derived by joining
-            // `lookups`: it is the operand Django uses, and it is the same
-            // object the expression would have used had it not been planned
-            // natively.
-            let var = slot
-                .node
-                .bind(py)
-                .getattr("filter_expression")?
-                .getattr("var")?;
-            return Ok(Some(invalid.call_method1("__mod__", (var,))?.unbind()));
-        }
-        Ok(Some(invalid.clone().unbind()))
+        let context = self.context.getattr("use_tz")?;
+        let use_tz: bool = if context.is_none() {
+            // The **object** is cached and the attribute is read per walk, so an
+            // `override_settings` between two renders is still seen.
+            DJANGO_SETTINGS
+                .import(self.py, "django.conf", "settings")?
+                .getattr("USE_TZ")?
+                .extract()?
+        } else {
+            context.extract()?
+        };
+        self.use_tz = Some(use_tz);
+        Ok(use_tz)
     }
 
     /// Append one resolved value, taking `render_value_in_context`'s first arm
@@ -3541,8 +4257,7 @@ impl<'py> Walk<'py> {
     /// normalised to something with a length *before* the empty test, the length
     /// is read *before* the reversal, and the empty branch is rendered *before*
     /// any loop state exists. A sealed loop is the only kind that reaches here —
-    /// every other `{% for %}` is a `Act::Delegate` — so `unreachable!` is the
-    /// honest arm for the rest.
+    /// every other `{% for %}` is an `Act::Delegate`.
     fn run_for(&mut self, plan: &ForPlan, depth: usize) -> PyResult<()> {
         let py = self.py;
         let mut values = plan
@@ -3555,7 +4270,11 @@ impl<'py> Walk<'py> {
         if !values.hasattr("__len__")? {
             values = py.import("builtins")?.getattr("list")?.call1((values,))?;
         }
-        if values.len()? < 1 {
+        // Read *before* the reversal, which is both Django's order
+        // (`len_values = len(values)`, `engine/defaulttags.py:204`) and the only
+        // order that works: `reversed(values)` is an iterator and has no length.
+        let length = values.len()?;
+        if length < 1 {
             return self.run(&plan.empty, None, depth);
         }
         if plan.is_reversed {
@@ -3564,12 +4283,93 @@ impl<'py> Walk<'py> {
                 .getattr("reversed")?
                 .call1((values,))?;
         }
-        for item in values.try_iter()? {
-            let item = item?;
-            self.run(&plan.body, Some(&item), depth)?;
+        // No `context.push()`, no `context[loopvar] = item`, no `forloop` dict:
+        // the two writes per iteration are what sealing buys, and every node in
+        // the body reads its names out of the frame instead. The frame is built
+        // anyway, because a *refused* node has to be able to hand Python the
+        // state it expects — see [`Walk::delegate_slot`].
+        for (index, item) in values.try_iter()?.enumerate() {
+            let frame = Frame {
+                item: item?,
+                loopvar: &plan.loopvar,
+                counter: index + 1,
+                length,
+            };
+            self.run(&plan.body, Some(&frame), depth)?;
         }
         Ok(())
     }
+}
+
+/// `except VariableDoesNotExist` — the class test all three callers need.
+///
+/// Nothing else is caught anywhere: `Variable.resolve` has no handler of its
+/// own, so a lookup that raises anything else reaches the node uncaught, which is
+/// where Django's outer handler decides whether to substitute or to propagate.
+fn is_variable_does_not_exist(py: Python<'_>, error: &PyErr) -> PyResult<bool> {
+    let class = VARIABLE_DOES_NOT_EXIST
+        .import(
+            py,
+            "django_rust_templates.engine.base",
+            "VariableDoesNotExist",
+        )?
+        .cast::<PyType>()?;
+    Ok(error.is_instance(py, class))
+}
+
+/// `FilterExpression.resolve`'s failure arm (`except VariableDoesNotExist:`,
+/// `engine/base.py:819-832`), as the
+/// **three-way** decision it is.
+///
+/// A free function rather than a method because it holds no state: the two things
+/// it reads are the context and the node, and everything it returns is owned.
+///
+/// `FilterExpression.resolve`'s `VariableDoesNotExist` handler has two arms and
+/// only one of them is a substitution: a truthy `string_if_invalid` **returns**
+/// (`if string_if_invalid: if "%s" in string_if_invalid: return ... % self.var;
+/// return string_if_invalid`), so the filter chain never runs, while a falsy one
+/// assigns `obj = string_if_invalid` and falls through to the chain. `""` is the
+/// default setting, so the falling-through arm is the common one — and it is why
+/// `{{ missing|default:"x" }}` is `"x"`. Collapsing the two would make the
+/// default `string_if_invalid=""` skip `default`, which is the bug this arm
+/// exists to not have.
+///
+/// The `UnicodeDecodeError` arm is not `resolve`'s at all but
+/// `VariableNode.render`'s (`engine/base.py:1291-1294`): resolving a variable
+/// directly is resolving *past* both handlers, so both are taken here.
+fn absorb_emit(
+    py: Python<'_>,
+    slot: &Slot,
+    context: &Bound<'_, PyAny>,
+    error: PyErr,
+) -> PyResult<Absorbed> {
+    if error.is_instance_of::<PyUnicodeDecodeError>(py) {
+        return Ok(Absorbed::Nothing);
+    }
+    if !is_variable_does_not_exist(py, &error)? {
+        return Err(error);
+    }
+    let invalid = string_if_invalid(context)?;
+    let invalid = invalid.bind(py);
+    if !invalid.is_truthy()? {
+        return Ok(Absorbed::Continue(invalid.clone().unbind()));
+    }
+    if invalid.contains("%s")? {
+        // `string_if_invalid % self.var`, and `self.var` is the `Variable`
+        // object — `%s` on it calls `Variable.__str__`, which is the lookup text.
+        // Read off the node rather than re-derived by joining `lookups`: it is
+        // the operand Django uses, and it is the same object the expression
+        // would have used had it not been planned natively.
+        let var = slot
+            .node
+            .bind(py)
+            .getattr("filter_expression")?
+            .getattr("var")?;
+        return Ok(Absorbed::Final(
+            invalid.call_method1("__mod__", (var,))?.unbind(),
+        ));
+    }
+    Ok(Absorbed::Final(invalid.clone().unbind()))
 }
 
 /// Walk a plan and return the rendered `SafeString`.
@@ -3582,6 +4382,7 @@ fn render_plan(py: Python<'_>, plan: &NativePlan, context: Py<PyAny>) -> PyResul
         escape: render_value_in_context(py)?.clone(),
         scope: LookupScope::new(context),
         autoescape: context.getattr("autoescape")?.extract()?,
+        use_tz: None,
         out: String::new(),
         spill: None,
         nodes: 0,
@@ -4103,6 +4904,9 @@ mod walk_depth {
                 empty: Vec::new(),
                 sequence: sequence.clone_ref(py),
                 is_reversed: false,
+                // Never read: the guard trips before the body is entered, which
+                // is the property under test.
+                loopvar: "item".to_string(),
             })),
             node: py.None(),
             class_name: FOR_NODE.to_string(),
@@ -4122,6 +4926,7 @@ mod walk_depth {
             escape: none.clone(),
             scope: LookupScope::new(&none),
             autoescape: false,
+            use_tz: None,
             out: String::new(),
             spill: None,
             nodes: 0,

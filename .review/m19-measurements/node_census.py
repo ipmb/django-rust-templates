@@ -93,7 +93,7 @@ def render_census(engine, handle, context):
         out = None
         for _ in range(ITERS):
             out = engine.render(handle, context)
-        handled, delegated, delegated_len = _native.census_take()
+        handled, delegated, delegated_len, filters = _native.census_take()
     except BaseException:
         _native.census_take()
         raise
@@ -101,6 +101,7 @@ def render_census(engine, handle, context):
         [(name, count / ITERS) for name, count in handled],
         [(name, count / ITERS) for name, count in delegated],
         delegated_len / ITERS,
+        [(name, count / ITERS) for name, count in filters],
         len(out),
     )
 
@@ -117,7 +118,9 @@ def report(key, templates, data, entry="page.html", libraries=None):
         handle = engine.get(entry)
         plan = getattr(handle, "_native_plan", None)
         context = engine.context(data)
-        handled, delegated, delegated_len, out_len = render_census(engine, handle, context)
+        handled, delegated, delegated_len, filters, out_len = render_census(
+            engine, handle, context
+        )
         nodes = sum(c for _, c in handled) + sum(c for _, c in delegated)
         node_share = sum(c for _, c in delegated) / nodes if nodes else 0.0
         out_share = delegated_len / out_len if out_len else 0.0
@@ -130,6 +133,7 @@ def report(key, templates, data, entry="page.html", libraries=None):
         )
         print(f"{'':24}   handled:   {fmt(handled)}")
         print(f"{'':24}   delegated: {fmt(delegated)}")
+        print(f"{'':24}   applied:   {fmt(filters)}")
     finally:
         engine.close()
 

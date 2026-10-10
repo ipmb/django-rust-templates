@@ -1332,32 +1332,35 @@ class ResolverDelegationTests(unittest.TestCase):
         *lookup* is. A transcription that kept upstream's loop would pass both,
         which is finding 3's shape applied to this method.
 
-        **The seam moved in M19, so the row names two trees and asserts a
-        different thing about each.** Until the walk landed, every render was
-        Python's: the shell looped the nodes and a variable's lookup crossed to
-        `_native.resolve_lookups`, which is what the old row counted. `{{ a.b }}`
-        — one plain lookup, no filter — is now planned as `Act::Emit` and renders
-        with no Python at all, so the honest assertion for it is the *stronger*
-        one: neither seam is reached, because the lookup never leaves Rust.
+        **Three trees, and the third is why the first two mean anything.** Until
+        the walk landed every render was Python's: the shell looped the nodes and
+        a variable's lookup crossed to `_native.resolve_lookups`, which is what
+        the old row counted. `{{ a.b }}` is now an `Act::Emit`, and since M19 step
+        3a so is `{{ a.b|upper }}` — the walk owns filtered expressions — so both
+        render with no Python node at all. The honest assertion for them is the
+        *stronger* one: the seam is not reached, because the lookup never leaves
+        Rust.
 
-        **The word for the second tree is *delegated*, not *declined*, and the
-        two are different failures.** `plan_slot` answers `Act::Delegate` for
-        `{{ a.b|upper }}` — a filtered variable is a node the walk hands back to
-        `render_annotated` — and that node keeps the old route, so there the row
-        asserts the old property. But the *plan* still exists; `_native_plan is
-        None` is reserved for `plan_list` rejecting the whole template, and it is
-        False here. A reader who took "declined template" from the first draft of
-        this docstring would reach for the wrong flag, and it cannot tell the two
-        apart — only the meter can.
+        **But an absent meter reads the same whether the lookup stopped crossing
+        or the meter stopped working**, so the row carries a positive control
+        drawn from the same population: `{% if a.b == 1 %}` resolves `a.b` on the
+        Python path, because `plan_if` takes `TemplateLiteral` conditions only and
+        an operator tree — thirteen operators deep — declines the whole node to
+        `Act::Delegate`. That tree must show the crossing the other two do not.
+        Note *delegated* and not *declined*: the plan survives and
+        `_native_plan is None` is reserved for `plan_list` rejecting the
+        template, a different failure an earlier draft of this docstring sent a
+        reader looking for.
 
         **And it must be the components, not a re-joined path.** Until M19 the
         shell called `_native.resolve(".".join(self.lookups), context)`, which is
         one `parse_variable` per variable — 0.25 µs of a 0.74 µs resolve at the
         depth this corpus uses — and, worse, a re-*classification*: `"2."` parses
-        back as a number, which is how `{{ 2. }}` rendered `2.0`. So the delegated
-        half asserts both halves. Without the second, a revert to the join passes
-        the first: `resolve` still reaches Rust, still returns the right value for
-        `a.b`, and the cost and the divergence come back silently.
+        back as a number, which is how `{{ 2. }}` rendered `2.0`. So the control
+        asserts **both** halves: it reaches the seam, and it reaches it as
+        components. Without the second, a revert to the join passes the first —
+        `resolve` still reaches Rust, still returns the right value for `a.b`,
+        and the cost and the divergence come back silently.
         """
         from django_rust_templates.engine import Context, Engine
 
@@ -1376,31 +1379,55 @@ class ResolverDelegationTests(unittest.TestCase):
             paths.append(path)
             return original_resolve(path, context)
 
+        def render(source, data):
+            """One tree, meters emptied first so each reads as its own."""
+            components.clear()
+            paths.clear()
+            return Engine().from_string(source).render(Context(data))
+
         _native.resolve_lookups = counting_lookups
         _native.resolve = counting_resolve
         try:
-            native = Engine().from_string("{{ a.b }}").render(Context({"a": {"b": 1}}))
-            delegated = Engine().from_string("{{ a.b|upper }}").render(
-                Context({"a": {"b": "x"}})
+            walked = render("{{ a.b }}", {"a": {"b": 1}})
+            self.assertEqual(walked, "1", "the plain walked tree's premise")
+            self.assertEqual(
+                components,
+                [],
+                "the `Act::Emit` tree left the lookup to Python, or the walk "
+                f"stopped planning it: {components}",
+            )
+
+            filtered = render("{{ a.b|upper }}", {"a": {"b": "x"}})
+            self.assertEqual(filtered, "X", "the filtered walked tree's premise")
+            self.assertEqual(
+                components,
+                [],
+                "a filtered `{{ }}` is the walk's node since step 3a, so this "
+                "tree crossing the seam means `upper`'s handle is not routed "
+                f"and the node fell back to Python: {components}",
+            )
+
+            delegated = render("{% if a.b == 1 %}y{% endif %}", {"a": {"b": 1}})
+            self.assertEqual(delegated, "y", "the control tree's premise")
+            self.assertEqual(
+                components,
+                [["a", "b"]],
+                "the control did not cross the seam either, and that is what "
+                "makes the two empty rows above assertions rather than "
+                "silence: an operator condition is `Act::Delegate` by design "
+                "and must resolve `a.b` in Python",
+            )
+            # The control is the last render and the only one that can push a
+            # path, so this asserts on the row that would revert to the join.
+            self.assertEqual(
+                paths,
+                [],
+                "the render path re-joined the lookup into a path and re-parsed "
+                f"it: {paths}",
             )
         finally:
             _native.resolve_lookups = original_lookups
             _native.resolve = original_resolve
-
-        self.assertEqual(native, "1")
-        self.assertEqual(delegated, "X", "the delegated tree's premise")
-        self.assertEqual(
-            components,
-            [["a", "b"]],
-            "the `Act::Emit` tree left the lookup to Python, or the delegated "
-            f"node stopped crossing the seam: {components}",
-        )
-        self.assertEqual(
-            paths,
-            [],
-            "the render path re-joined the lookup into a path and re-parsed it: "
-            f"{paths}",
-        )
 
     def test_the_failing_bit_is_passed_to_the_logger(self):
         """The bit `{{ author.name }}` fails on, not the bit it ends on.
@@ -1480,37 +1507,76 @@ class FilterRoutingTests(unittest.TestCase):
 
     So the row is a **counter**, the shape `test_variable_resolution_reaches_rust`
     uses and `scripts/differential.py` uses for the whole `_native` surface:
-    render a template that applies a built-in filter and assert `_native.filter`
-    ran, with the name it was handed. The premise is asserted separately below,
-    because a row like this passes for a *true* reason and a false one — if the
-    module were still Django's, the counter would read zero and the row would
-    fail, which is right; but if it passed while `defaultfilters` was Django's,
-    that would be M9's finding 3 and the row would be measuring nothing.
+    render a template that applies a built-in filter and assert the application
+    happened **in Rust**. Since M19 step 3a that takes two meters and not one —
+    `_native.filter` says the call crossed from Python, `Census::filters` says the
+    walk applied it itself — because the fast route has `crossed == []` and so
+    does the broken one (a handle missing from `django_own_filters()` declines the
+    *node*, and the Python arm then answers from the transcription). The premise
+    is asserted separately below, because a row like this passes for a *true*
+    reason and a false one — if the module were still Django's, the counter would
+    read zero and the row would fail, which is right; but if it passed while
+    `defaultfilters` was Django's, that would be M9's finding 3 and the row would
+    be measuring nothing.
     """
 
+    def _render_with_both_meters(self, engine, source, data):
+        """Render one template and report **both** filter meters.
 
-    def test_a_built_in_filter_reaches_rust(self):
-        from django_rust_templates.engine import Context, Engine
+        `crossed` is `_native.filter`'s count — applications that went from
+        Python into Rust — and `applied` is the walk's own count of the
+        applications **Rust made without crossing at all** (`Census::filters`).
 
+        **The pair is the row, and one alone is not.** Since M19 step 3a a
+        filtered `{{ … }}` is the walk's node whenever its handle is routed, so
+        the fast route reads `applied=[(name, 1)]` with `crossed == []`. A handle
+        missing from `django_own_filters()` declines the *node* rather than the
+        filter, and the Python arm that follows answers from the **transcription**
+        — so it reads `crossed == []` too, and the old single meter would have
+        gone on reporting success while the body reached was Python's. That is
+        exactly M11's finding 3, and `Census::filters` is the instrument that
+        still sees it.
+        """
         from django_rust_templates import _native
+        from django_rust_templates.engine import Context
 
-        calls = []
+        crossed = []
         original = _native.filter
 
         def counting(*args, **kwargs):
-            calls.append(args[0])
+            crossed.append(args[0])
             return original(*args, **kwargs)
 
         _native.filter = counting
+        _native.census_start()
         try:
-            rendered = Engine().from_string("{{ x|lower }}").render(
-                Context({"x": "ABC"})
-            )
+            rendered = engine.from_string(source).render(Context(data))
         finally:
+            # In the `finally` so a raising render cannot leave the census on:
+            # it is a process-global, and the next module's renders would write
+            # into this row's counts.
+            _, _, _, applied = _native.census_take()
             _native.filter = original
+        return rendered, crossed, applied
+
+    def test_a_built_in_filter_reaches_rust(self):
+        from django_rust_templates.engine import Engine
+
+        rendered, crossed, applied = self._render_with_both_meters(
+            Engine(), "{{ x|lower }}", {"x": "ABC"}
+        )
 
         self.assertEqual(rendered, "abc")
-        self.assertEqual(calls, ["lower"], calls)
+        self.assertEqual(
+            applied,
+            [("lower", 1)],
+            "the walk did not apply `lower` itself: a handle missing from "
+            "`django_own_filters()` declines the node, and the Python arm then "
+            "answers from the transcription — green, and not Rust's",
+        )
+        self.assertEqual(
+            crossed, [], "the filter was applied on the Python path as well"
+        )
 
     def test_the_parser_finds_our_defaultfilters(self):
         """The premise, on its own, so a green counter cannot be the whole story.
@@ -1540,15 +1606,16 @@ class FilterRoutingTests(unittest.TestCase):
     def test_every_library_filter_reaches_rust(self):
         """M12 Task 7: the nine `django.templatetags` filters route to Rust.
 
-        The same **counter** the built-in row above uses, widened to the library
-        filters — and it is the row the milestone needs rather than a repetition,
-        because these nine are the ones whose *routing* could be missing while
-        everything looked right. A library filter's handle is only in
-        `django_own_filters()` once the merge carries the five registries, and the
-        failure mode of a missing handle is not an error: it is the Python loop
-        running the **transcribed** body, which produces the right answer. Green,
-        and not Rust's. So each case asserts `_native.filter` ran, with the name
-        it was handed.
+        The same **pair of meters** the built-in row above uses, widened to the
+        library filters — and it is the row the milestone needs rather than a
+        repetition, because these nine are the ones whose *routing* could be
+        missing while everything looked right. A library filter's handle is only
+        in `django_own_filters()` once the merge carries the five registries, and
+        the failure mode of a missing handle is not an error: it is the Python
+        loop running the **transcribed** body, which produces the right answer,
+        with `_native.filter` never reached. Green, and not Rust's. So each case
+        asserts the walk applied the filter itself, with the name it was handed,
+        **and** that no application crossed from Python.
 
         The render path is the real one — `{% load %}` merges the library into the
         parser (as a template would), and the token is the template's. `Engine`
@@ -1561,9 +1628,7 @@ class FilterRoutingTests(unittest.TestCase):
 
         from scripts.filter_probe import ensure_settings
 
-        from django_rust_templates.engine import Context, Engine
-
-        from django_rust_templates import _native
+        from django_rust_templates.engine import Engine
 
         # `language_name_translated` reaches the host's `gettext`, which needs
         # settings and a populated app registry; guarded, so this supplies them
@@ -1590,28 +1655,24 @@ class FilterRoutingTests(unittest.TestCase):
             ("tz", "timezone", naive, "Europe/Paris"),
         ]
 
-        original = _native.filter
         for library, name, value, arg in cases:
             with self.subTest(filter=name):
-                calls = []
-
-                def counting(*args, **kwargs):
-                    calls.append(args[0])
-                    return original(*args, **kwargs)
-
                 token = f"x|{name}" if arg is None else f'x|{name}:"{arg}"'
                 source = "{% load " + library + " %}{{ " + token + " }}"
-                _native.filter = counting
-                try:
-                    engine.from_string(source).render(Context({"x": value}))
-                finally:
-                    _native.filter = original
+                rendered, crossed, applied = self._render_with_both_meters(
+                    engine, source, {"x": value}
+                )
+                self.assertTrue(rendered, "the premise: this pair renders something")
                 self.assertEqual(
-                    calls,
-                    [name],
-                    f"{{{{ x|{name} }}}} did not reach Rust: a handle missing "
-                    f"from `django_own_filters()` falls through to the Python "
-                    f"loop, which answers correctly and so fails only here",
+                    applied,
+                    [(name, 1)],
+                    f"{{{{ x|{name} }}}} did not reach Rust's body through the "
+                    f"walk: a handle missing from `django_own_filters()` declines "
+                    f"the node, and the Python loop then answers from the "
+                    f"transcription — the right answer, and not Rust's",
+                )
+                self.assertEqual(
+                    crossed, [], f"{{{{ x|{name} }}}} was applied from Python too"
                 )
 
     def test_a_loaded_library_that_rebinds_a_builtin_filter_runs_its_own_body(self):

@@ -956,13 +956,36 @@
       essentially nothing on a template it cannot win on.
     </p>
     <p class="sub" style="margin-top:16px">
+      <b>The walk now owns a filtered expression and an <code>{% if %}</code>, and that is what
+      lets a loop seal.</b> A <code>{{ x|filter }}</code> whose chain Rust can name is walked
+      instead of handed back, and an <code>{% if %}</code> whose condition is a bare lookup is
+      walked too; an operator condition still delegates, as before. Each is small on its own —
+      but a loop body is sealed only if <i>every</i> node in it is walkable, so one filtered
+      variable or one delegated <code>{% if %}</code> anywhere inside a loop used to hand the
+      whole loop, and the whole table it builds, back to Python. Measured on the pre-change tree
+      and published as a prediction <i>before</i> the run
+      (<code>.review/m19-measurements/step3a_prediction.md</code>): the corpus's
+      <code>real-world/normal</code> with its two <code>{% block %}</code>s spliced away goes from
+      <b>98.2% of its output returned from Python to 0.7%</b> — the 41 characters of the footer
+      and nothing else — with the loop's <code>ForNode</code> moving from <i>delegated</i> to
+      <i>walked</i> and the walk's visit count on that page going 11 → 618. The two constructs'
+      own rows each pass parity in render (<b>1.23× → 0.95×</b> for the <code>{% if %}</code>,
+      <b>1.06× → 0.87×</b> for the filtered variable), the real-world render geometric mean
+      against stock goes <b>0.58× → 0.55×</b> (parse 0.94× → 0.90×), and the rows that cannot
+      move — anything whose body sits behind a <code>{% block %}</code>, and a loop body holding
+      <code>{% cycle %}</code> or a <code>forloop</code> read — do not move, which is the
+      prediction's other half. One honest flat: the <code>{% if %}</code> <i>parse</i> row is
+      unchanged, because a per-render saving of ~0.1 µs is invisible beside a compile path that
+      sits ~11 µs above stock's on that row.
+    </p>
+    <p class="sub" style="margin-top:16px">
       <b>What is left, stated against the same table.</b> The single-node <i>parse</i> rows are
-      still ~1.5×–2.3× stock — that is the compile path, not the render path, and it is the
+      still ~1.4×–2.3× stock — that is the compile path, not the render path, and it is the
       next leaf (materialising Python node objects eagerly). <code>micro/include</code>
-      (0.78× stock, 7.9 µs against Jinja2's 6.1) and <code>micro/extends</code> (1.03×, 10.0
-      against 5.3) are the two rows Jinja2 still wins outright, because it precompiles
+      (0.74× stock, 7.2 µs against Jinja2's 6.1) and <code>micro/extends</code> (1.05×, 10.0
+      against 5.1) are the two rows Jinja2 still wins outright, because it precompiles
       inheritance and this engine still crosses into Python for <code>{% include %}</code>.
-      <code>django-only/filter-arg</code> remains the one row both slower than stock (1.37×)
+      <code>django-only/filter-arg</code> remains the one row both slower than stock (1.40×)
       and outside the three-engine intersection, for the reason recorded above.
     </p>
     <p class="sub" style="margin-top:16px">
