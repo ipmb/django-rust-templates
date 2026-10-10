@@ -1,0 +1,19 @@
+before: 3 run(s), sha256:6954e0c1e52f4859 (2703632 bytes)
+after: 3 run(s), sha256:1ec2563e926cb649 (2720496 bytes)
+
+cross-build delta, ours/stock, median of each side's runs; each row judged
+against its own two-run scatter (the larger of its two sides), not the page's:
+  row                     before   after    delta   own band  verdict
+  micro/loop-text          1.536   1.572   +2.34%      3.14%  inside
+  micro/variable           2.137   2.106   -1.45%      2.58%  inside
+  micro/filter             1.626   1.649   +1.41%      2.67%  inside
+  django-only/for-tags     1.258   1.273   +1.19%      1.61%  inside
+  micro/extends            1.460   1.443   -1.16%      4.03%  inside
+  real-world/complex       1.246   1.254   +0.64%      1.12%  inside
+  micro/if                 2.078   2.086   +0.38%      3.26%  inside
+  real-world/normal        1.351   1.346   -0.37%      1.73%  inside
+  micro/text               3.580   3.578   -0.06%      2.80%  inside
+
+  same-build scatter, before side: median 1.88%  max 4.03%
+  same-build scatter, after  side: median 1.95%  max 3.14%
+  rows whose own band is exceeded: 0  (none)

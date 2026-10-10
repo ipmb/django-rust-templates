@@ -1,0 +1,6 @@
+success: ok  {% load reg %}{% for r in rows %}{{ r.name }}{% noop %}{% endfor %}
+   stock  dicts 2 -> 2  out='a!b!' err=None  probe='|'
+   ours   dicts 2 -> 2  out='a!b!' err=None  probe='|'
+failure: ok  {% load reg %}{% for r in rows %}{{ r.name }}{% boom %}{% endfor %}
+   stock  dicts 2 -> 2  out=None err=ValueError  probe='|'
+   ours   dicts 2 -> 2  out=None err=ValueError  probe='|'

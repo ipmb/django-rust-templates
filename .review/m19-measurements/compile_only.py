@@ -123,6 +123,15 @@ def main() -> None:
     rows = SOURCES + corpus_rows(keys)
     print(f"compile only: from_string(source), iters={ITERS}, {REPEATS} repeats, best-of")
     print(f"artifact: {native_artifact()}")
+    # **The population is printed, not implied.**  The corpus rows come from a
+    # command-line flag, so two runs of this file with different flags produce two
+    # tables that differ in row count and are *not* comparable — and a table with
+    # no population line makes that difference invisible to a reader who did not
+    # run it.  This line is what makes the table a claim about a population rather
+    # than a number.
+    print(f"population: {len(SOURCES)} default micro rows"
+          + (f" + {len(keys)} corpus rows ({','.join(keys)})" if keys else " (no --corpus)")
+          + f" = {len(rows)} rows")
     print(f"{'row':18} {'ours us':>9} {'stock us':>9} {'ours/stock':>11}")
     skipped = []
     for label, source in rows:

@@ -1,0 +1,17 @@
+compile only: from_string(source), iters=200, 7 repeats, best-of
+artifact: native:  _native.cpython-314-darwin.so 2720496 bytes sha256:1ec2563e926cb649 -> release (target/release/lib_native.dylib)
+population: 5 default micro rows + 6 corpus rows (micro/extends,real-world/normal,real-world/complex,django-only/realistic,django-only/i18n,django-only/for-tags) = 11 rows
+row                  ours us  stock us  ours/stock
+micro/text              6.81      1.89       3.604
+micro/variable         12.53      5.95       2.106
+micro/if               22.84     10.85       2.105
+micro/filter           18.92     11.47       1.649
+micro/loop-text        15.85     10.04       1.579
+micro/extends          24.14     16.80       1.437
+real-world/normal     166.72    123.86       1.346
+real-world/complex    114.66     91.42       1.254
+django-only/realistic         —         —           —
+django-only/i18n           —         —           —
+django-only/for-tags     53.69     42.17       1.273
+NOT MEASURED  django-only/realistic: TemplateSyntaxError: 'i18n' is not a registered tag library. Must be one of:
+NOT MEASURED  django-only/i18n: TemplateSyntaxError: 'i18n' is not a registered tag library. Must be one of:

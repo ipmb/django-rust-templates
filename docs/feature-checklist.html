@@ -1042,7 +1042,10 @@
       <code>django-only/realistic</code> (0.92×) do not move either, and the census says why
       before the timings do: their loops hold an <code>{% include %}</code> and a
       <code>{% blocktranslate %}</code>, a body holding a delegate cannot seal, so the whole
-      loop is delegated and the walk never reaches inside it. Reached is not the same as
+      loop is delegated and the walk never reaches inside it. <i>(Slice 2 lifts that rule for
+      every delegate except a nested <code>{% for %}</code> — see below; <code>realistic</code>
+      moves there and <code>complex</code> does not, for a reason the sentence above does not
+      name.)</i> Reached is not the same as
       untouched, though — <code>complex</code>'s census moves from <code>upper=72</code> to
       <code>upper=73</code>, one routed-and-computed application in the layout text outside that
       loop, so the honest verdict is <i>reached, effect below the instrument's resolution</i>.
@@ -1122,6 +1125,71 @@
       8.43% over all 36 ratios, so nothing under ~2% is called a move here — and the
       <code>real-world/normal</code> row is 60× the band. Acceptance is unmoved and verified
       on this artifact: <b>1547 tests, OK (skipped=6)</b>, plus the 494 unit tests.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>A loop now seals even when its body holds something Python still has to render, and the
+      page that pays is the one with a real body.</b> Until this slice the rule was absolute — a
+      <code>{% for %}</code> whose body held <i>any</i> delegate was handed to Python whole. Now
+      the loop seals and writes Django's per-iteration state (<code>context[loopvar]</code> and
+      the <code>forloop</code> dict) <i>around</i> the delegate, which is called once per
+      iteration through the same seam everything else crosses. The row that moves is
+      <code>django-only/realistic</code>: render <b>0.92× → 0.84×</b> of stock (−8.49%), parse
+      <b>0.96× → 0.89×</b> (−7.20%). Its loop body holds both a
+      <code>{% blocktranslate %}</code> (the delegate, 50 calls) and
+      <code>{{ r.x|floatformat:2 }}</code>, so sealing moves <b>100 <code>VariableNode</code>s,
+      206 <code>TextNode</code>s and 200 filter-body crossings</b> into Rust
+      (<code>applied: floatformat=50</code> <i>and</i> <code>body xings: 200</code> — the second
+      is what says Python actually computed them) and leaves the 50 delegates where they were.
+      Both ratios are two-run medians; the committed <code>docs/bench.html</code>, one run on
+      this artifact, reads <b>0.82×</b> and <b>0.89×</b>, differing in the last digit as every
+      ratio on this page does.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>Those two ratios are bounded by a cross-build floor rather than the same-build band every
+      earlier slice here used, and that is a change of instrument rather than of taste.</b> A
+      same-build pair cannot see build-to-build layout, and this comparison's two sides <i>are</i>
+      two builds, so the band is the 46 cells this change cannot act on — <b>median 0.92%, p90
+      2.07%, max 2.42%</b> — printed <i>before</i> the deltas it bounds. <code>realistic</code>'s
+      move is 3.5× and 3.0× that max, which is why it is a move. The two-run band's failure is
+      measurable in this very comparison: it called <code>micro/loop-var render +4.41%</code> a
+      move against a 0.86% band, on a row whose loop body holds no delegate at all.
+      <code>scripts/bench.py --compare</code> now refuses to mix a band from one build into a
+      comparison of two, which is the mistake the hand comparison made twice in three slices.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>Three rows were predicted to move and did not, and each miss is a different kind.</b>
+      <code>micro/extends</code> is unchanged (<b>1.02× → 0.99×</b>) because the mechanism its
+      prediction named — <code>ExtendsNode.render</code> off the delegate — was re-scoped out of
+      this slice into its own, and the census says so (<code>delegated: … ExtendsNode=1</code>).
+      <code>real-world/complex</code> still refuses because its loop body holds a nested
+      <code>{% for %}</code>, and a nested loop reads <code>parentloop</code> — the one delegate
+      that still unseals. And <code>django-only/i18n</code> is the sharp one: its census
+      <i>moves</i> (3/6 → 104/156 nodes, its <code>ForNode</code> leaving <code>delegated:</code>)
+      yet its render ratio is flat (<b>+0.66%</b>), because its loop body is <i>one</i>
+      <code>{% blocktranslate %}</code> per iteration and nothing else — <code>body xings:</code>
+      is <b>0 before and 0 after</b>. Sealing there changes which Python function drives the loop,
+      not how many crossings happen; a census column that moves is not a timing that moves.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>Two repairs the probe set forced, both in Django's <code>ForNode.render</code> shape — a
+      layer and two writes.</b> The <code>{% empty %}</code> arm rendered outside any context
+      layer, so a <code>takes_context</code> tag writing in an empty loop's arm leaked a variable
+      Django discards (stock <code>'[]'</code>, ours <code>'[W]'</code>); the fix is the push
+      Django opens <i>before</i> the empty test. And <code>forloop</code>'s <code>length</code>
+      key, added to both state paths — observable on the stated path (a nested loop reading
+      <code>forloop.parentloop.length</code> renders <code>'333'</code>, and <code>''</code> if
+      that write is removed) and pinned by exactly that mutant. The first version of this page's
+      record had called the same write unobservable, on the strength of a probe whose census
+      column reported the read as absent — a false negative, because the reader runs inside a
+      delegated node's own render, past the census's reach. A negative column is a claim too.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>Acceptance is unmoved, verified on this artifact by the full gate:</b> <b>1547 tests,
+      OK (skipped=6)</b> with the six skips checked by identity, <b>509</b> python unit tests and
+      <b>787</b> Rust tests, the differential harness's 48 cases identical, and the packaging
+      banners green. Nothing the slice changes is on a path the vendored suite reaches
+      differently — a seal decision and a boolean — and that is what makes the ratios above safe
+      to read as a pure render saving.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>Until M18 it was a substitution, and that machinery is gone.</b> Earlier revisions of

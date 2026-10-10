@@ -1,0 +1,32 @@
+before: 2 run(s), artifact sha256:6954e0c1e52f4859
+after: 2 run(s), artifact sha256:1ec2563e926cb649
+  before same-build scatter |rel|: median 1.30%  p90 2.38%  max 4.07%
+  after  same-build scatter |rel|: median 1.06%  p90 2.67%  max 3.91%
+
+cells compared: 54
+  named subject/refusal: 8
+  control (this change cannot act): 46
+
+CONTROL floor, cross-build, 46 cells the change cannot reach:
+  median 0.92%   p90 2.07%   max 2.42%  (micro/escape render)
+  every named delta below has to clear the max to be a move
+
+--- SUBJECT (must move)
+  MOVE django-only/realistic render         -8.49%   loop body holds `{% blocktranslate %}` -> seals
+  MOVE django-only/realistic parse          -7.20%   same loop, reached by `from_string` too
+       django-only/i18n render              +0.66%   loop body holds `{% translate %}` -> seals
+       django-only/i18n parse               -0.50%   same loop
+
+--- REFUSAL (must not move)
+       real-world/complex render            -1.43%   outer body holds a nested `{% for %}` -> must still refuse
+       django-only/for-tags parse           -1.38%   same loop, must still refuse
+       django-only/for-tags render          -1.26%   body references `forloop` -> must still refuse
+       real-world/complex parse             -0.62%   same loop, must still refuse
+
+--- CONTROL cells furthest from zero (the floor's right tail, named)
+     micro/escape render                  +2.42%
+     micro/text compile                   -2.40%
+     micro/escape compile                 +2.33%
+     micro/loop-var compile               -2.17%
+     micro/filter compile                 +2.17%
+     django-only/filter-arg compile       +2.07%

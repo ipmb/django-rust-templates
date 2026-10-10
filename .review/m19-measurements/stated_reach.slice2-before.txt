@@ -1,0 +1,20 @@
+control  {% load reg %}{% for r in rows %}{{ r.name }}{% endfor %}
+         out: 'abc'
+         handled:   VariableNode x3, ForNode x1
+         delegated: LoadNode x1
+
+subject  {% load reg %}{% for r in rows %}{{ r.name }}{% noop %}{% endfor %}
+         out: 'a!b!c!'
+         handled:   none
+         delegated: LoadNode x1, ForNode x1
+
+two      {% load reg %}{% for r in rows %}{{ r.name }}{% noop %}{% noop %}{% endfor %}
+         out: 'a!!b!!c!!'
+         handled:   none
+         delegated: LoadNode x1, ForNode x1
+
+ctx      {% load reg %}{% for r in rows %}{% shout r.name %}{% endfor %}
+         out: '&lt;a:1&gt;&lt;b:2&gt;&lt;c:3&gt;'
+         handled:   none
+         delegated: LoadNode x1, ForNode x1
+
