@@ -93,42 +93,106 @@ which is the same contract `plan_list` has.
 The census is `.review/m19-measurements/node_census.py`; the numbers below are
 its columns on the current tree, which is the "before" they are stated against.
 
-### 3.1 `delegated:` — the classes that must leave
+### 3.1 `delegated:` — what the walk newly reaches, and what it does not lose
+
+**Corrected before the run, and the first version of this section had it
+backwards.**  That version said `BlockNode` would leave `delegated:`.  It cannot:
+the design keeps `BlockNode` a Python delegate (§2), and `delegate()` counts the
+class name the *walk* handed back, not where the characters were computed — so
+every class in the column today is still in it afterwards, and the column only
+**gains** the classes the walk can now reach at all.
 
 | row | before | predicted after |
 |---|---|---|
-| `micro/extends` | `BlockNode=2 ExtendsNode=1` | `ExtendsNode=1` |
-| `real-world/normal` | `BlockNode=2 ExtendsNode=1` | `ExtendsNode=1 IncludeNode=1` |
-| `real-world/complex` | `BlockNode=2 ExtendsNode=2` | `ExtendsNode=2 IncludeNode=73` |
-| `django-only/realistic` | `BlockNode=3 ExtendsNode=1` | `ExtendsNode=1 BlockTranslateNode=50 …` |
-| `real-world/large` | `-` | **unmoved** — the control: no inheritance in the source |
+| `micro/extends` | `BlockNode=2 ExtendsNode=1` | **identical** |
+| `real-world/normal` | `BlockNode=2 ExtendsNode=1` | `+ IncludeNode=1` |
+| `real-world/complex` | `BlockNode=2 ExtendsNode=2` | `+ IncludeNode=73` |
+| `django-only/realistic` | `LoadNode=1 BlockNode=3 ExtendsNode=1` | `+ TranslateNode=1 ForNode=1` |
+| `real-world/large` | `-` | **identical** — no inheritance in the source |
 
-Two of those rows predict a delegate that is **not there now**: the include in
-`normal`'s content block and the 73 includes in `complex`'s inner loop are
-currently *inside* Python-rendered block bodies, so the walk never sees them and
-the census cannot count them.  A row that gains a delegate is the signature of
-the walk reaching code it previously could not, which is the opposite of a
-regression and has to be read as one deliberately.
+**The gains are the point, and they are all the same shape.**  Every node in
+that right-hand column sits inside a block body today, so no walk has ever
+visited it: `normal`'s `{% include %}`; `complex`'s 72 per-line includes plus the
+one in the layout's content body; `realistic`'s title `{% translate %}` and its
+loop, which is a `ForNode` whose body holds a per-row `{% blocktranslate %}` and
+therefore **cannot seal** — `seal` refuses a body containing a delegate, so the
+whole loop is delegated, exactly the shape `django-only/i18n` already shows on a
+template with no inheritance at all.  A row that *gains* a delegate is the
+signature of the walk reaching code it could not reach before, which is the
+opposite of a regression and has to be read as one deliberately.
 
-`real-world/large` is the positive control.  It has no `{% extends %}` and no
-`{% block %}`, so a descent that changed anything at all on that row would be
-doing something other than what this section says it does.
+The two controls are controls of different kinds, which is why both are here.
+`micro/extends` has inheritance and no include: its `delegated:` is
+byte-identical while its `handled:` moves (§3.2), which is "the block body and
+not `ExtendsNode`" stated in one row.  `real-world/large` has no `{% extends %}`
+and no `{% block %}`, so a descent that changed anything at all there would be
+doing something other than what this section says it does.  `flat/normal`,
+`nested for (2 deep)` and the remaining `django-only` rows are unmoved for the
+same reason as `large`: no blocks in the source.
 
-### 3.2 `handled:` and `out deleg` — what must appear
+### 3.2 `handled:`, and why the share meters are the wrong instruments here
 
-* `real-world/normal` **gains** `ForNode=1` and its `IfNode`s in `handled:`,
-  and `out deleg` falls from **198.8%** to **~0.7%** — the footer's 41
-  characters and nothing else, the same value `flat/normal` reads.
-* `micro/extends` `out deleg` **128.1% → 0.0%**: it has no include, so once the
-  blocks are walked there is nothing left to delegate but `ExtendsNode`, whose
-  own frame returns the whole page and is the one that stays.
-* `django-only/realistic` — the loop is inside its content block, so `ForNode`
-  moves to `handled:`, but the body holds a `{% blocktranslate %}` per row, so
-  the body **does not seal** (`seal` refuses a body with a delegated node) and
-  the walk still writes loop state 50 times.  Predicted, not hoped for: its
-  `nodes H/N` deleg% falls while its `body xings` stay high.
-* `real-world/complex` — every block body is planned but its *inner* loop holds
-  an include per iteration, so the inner body does not seal either.
+**`out deleg` does not fall.  On two rows it rises a lot, and the reason is
+structural rather than surprising.**  `delegate()` adds `rendered.len()` at each
+delegate call site regardless of who computed the characters, so a `BlockNode`
+whose body the walk now renders inside still returns that whole body, and an
+`ExtendsNode` still returns the whole page:
+
+| row | `out D/T` before | predicted after | what moves it |
+|---|---|---|---|
+| `micro/extends` | 128.1% | **128.1%** | nothing: the same frames return the same strings |
+| `real-world/normal` | 198.8% | **≈199.5%** | the newly-reached include's 41 characters |
+| `real-world/complex` | 298.8% | **≈372%** | the layout's include plus 72 per-line includes (~4.3 KB) |
+| `django-only/realistic` | 197.8% | **≈290%** | the delegated `ForNode` returns the whole `<table>` |
+
+That is the generalisable statement, and it is why this subsection exists:
+**`delegated:`'s share and `out deleg` cannot see a slice that moves work across
+the Rust/Python boundary *inside* a Python frame.**  A delegated `BlockNode`
+still encloses the body, so both meters read as if nothing happened — and where
+the newly-reached node returns a subtree, `out deleg` moves in the **opposite**
+direction from the truth.  **`handled:` is the meter that sees this slice**, and
+it is the only one this section reads as evidence.
+
+**`handled:` grows by the inventory of the newly-walked bodies, and `nodes H/N
+deleg%` falls.**  The counts below are derived from the block bodies' own source
+and stated with the derivation, so a miss names itself rather than being a
+number nobody can check:
+
+* `micro/extends`: `TextNode=3` → `TextNode=6 VariableNode=1`, which is exact
+  because the bodies are tiny.  Base's `{% block title %}Report{% endblock %}`
+  body is one `TextNode`; the page's `{% block content %}` body is
+  `TextNode("<p>"), VariableNode, TextNode("</p>")`.  `nodes` **3/6 (50.0%) →
+  7/10 (30.0%)**.
+* `real-world/normal`: `TextNode=6 VariableNode=2` → **+354 `TextNode`,
+  +201 `VariableNode`, +51 `IfNode`, +1 `ForNode`**.  `NORMAL`'s content body is
+  4 outer text nodes (`<h1>`, `</h1>`, `<table>`, `</table>`), 1 outer variable
+  (`{{ title|upper }}`), `{% if rows %}` and `{% for r in rows %}`; the loop
+  body is `TextNode=6 VariableNode=4 IfNode=1` per row plus the taken branch's
+  one `TextNode`, over 50 rows — and that loop **does seal**, because no node in
+  its body is a delegate.  `{{ r.hot }}` contributes no `VariableNode`: it is the
+  `{% if %}`'s condition, which the walk evaluates rather than visits, and the
+  same arithmetic is already visible in `flat/normal`'s row today
+  (`TextNode=361 VariableNode=205 IfNode=51 ForNode=1`, the same page with the
+  inheritance spliced out).
+* **`applied:` and `body xings:` are the sharpest rows in this table**, because
+  they are the same construct in the same page measured two ways.
+  `real-world/normal` reads `applied: length=1` and `body xings: 0` today —
+  `length=1` is the *footer's* `{{ rows|length }}`, the only filtered expression
+  any walk reaches.  Predicted after: `applied: length=2 upper=1 title=50` and
+  `body xings: 50`, **identical to `flat/normal`'s row**, since the content body
+  holds `{{ rows|length }}`, `{{ title|upper }}` and 50 × `{{ r.status|title }}`.
+  A `title=50` in `applied:` with a `body xings: 0` would say the walk routed the
+  filter without computing it, which is the third meter's whole purpose.
+* `django-only/realistic`: the loop moves to `delegated:` rather than to
+  `handled:`, so the walk never enters it and its `body xings` stay **0** — the
+  opposite of `normal`'s 50, and the pair is the point: the same count of
+  `{% blocktranslate %}`-bearing rows, reached or not reached.
+* `real-world/complex`: the inner loop's body is an `{% include %}`, so the inner
+  body does not seal and the walk visits the include 72 times; the outer loop's
+  body holds the inner `ForNode` and an `{% if %}` and does seal.
+* `flat/normal`, `large`, `nested for (2 deep)`, `django-only/for-tags` and
+  `django-only/i18n`: every census column **identical** — no blocks in the
+  source.
 
 ### 3.3 Timing — the pair, because §4 item 9 is not optional
 
@@ -163,10 +227,15 @@ fixture or the meter is wrong, the same way a result below the floor is.
   suite (`test_extends.py`, `test_partials.py`, `recursive_templates/`), and a
   slice that reaches correct output by rendering a *different* block than Django
   would is a divergence that only shows on a template the corpus does not have.
-* **Falsified** if `real-world/normal`'s `out deleg` does not fall below, say,
-  10%: that would say the block bodies were not the thing being rendered.
-* **Not falsified** by `real-world/large` moving: that row has no inheritance,
-  so a move there is a bug in the descent and would be reported as one.
+* **Falsified** if `real-world/normal`'s `applied:` does not gain `upper=1
+  title=50`, or if its `body xings` does not reach 50.  Those two are the same
+  construct as `flat/normal`'s, in the same page, and a row that reads otherwise
+  says the block body was not the thing being walked.  (The first version of this
+  section gated on `out deleg` *falling*; §3.2 now says it rises, so that gate is
+  withdrawn rather than restated.)
+* **Falsified** if `real-world/large`'s census moves at all: that row has no
+  inheritance, so a move there is a bug in the descent and would be reported as
+  one.
 * **Not falsified** by a timing above my interval: the interval is a reasoned
   residual and this section says so.  A result outside it gets a re-measurement
   and a corrected interval, not a rewording.
