@@ -2255,8 +2255,8 @@ class FilterRoutingTests(unittest.TestCase):
 
         **It pins the write order, not the lever's key identity**, and an earlier
         version of this docstring said otherwise. The store is a plain `dict`
-        (`BaseContext.__setitem__` is `self.dicts[-1][key] = value`,
-        `python/django_rust_templates/engine/context.py:69`) and a dict compares
+        (`BaseContext.__setitem__` — `python/django_rust_templates/engine/context.py:69`
+        — is `self.dicts[-1][key] = value`) and a dict compares
         keys by equality and hash and never by identity, so the item lands in the
         same slot whichever `PyString` carries the name. Measured: this row passes
         on the pre-lever build `dc174855d926defc` as well as the shipped

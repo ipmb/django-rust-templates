@@ -269,7 +269,8 @@ spanning `tests/test_interposition.py:1780-2287` — because it is where the loo
 walk's behavioural rows have landed since slice 3.
 `DefaultTagsInterpositionTests` is 4 rows over 133 lines and its whole premise is
 **identity** — whose file, whose `Node` class — and its one loop row,
-`test_a_rendered_for_holds_our_for_node`, asserts an `isinstance` and not a render.
+`test_a_rendered_for_holds_our_for_node`, asserts `type(...) is` — an identity check
+(`tests/test_interposition.py:4472`) — and does not render.
 Moving these two there would put them beside a class that never renders a loop and
 away from the eight rows that exercise the same `Walk::run_loop_body` they do.
 
@@ -291,7 +292,7 @@ three different heights:
 | insertion | at | shifts everything below by |
 |---|---|---|
 | `use pyo3::intern;` | line 11 | **+1** |
-| ten lines of `ForPlan.loopvar` doc | 3049 | **+11** |
+| ten lines of `ForPlan.loopvar` doc | 3052 | **+11** |
 | sixteen lines into `run_loop_body` | 4453 | **+27** |
 
 The nine the commit re-keyed are all in the +1 zone and each moved by exactly one
@@ -317,12 +318,85 @@ has moved**, which is how a +27 drift survived a gate that was asked about exact
 that. It is re-keyed to 4597 here and **given a snippet**, so it is now a claim the
 gate can fail on.
 
-Two more rows were in the same condition and are repaired for the same reason,
-though not by this commit's shift: `render.py`'s `python_host_error` citations at
-`lib.rs:1104` and `:1251` were stale by **185** and **239** lines — drift
-accumulated since M12 (`8c59934`) — and both rows carried `-`. They are re-keyed to
-1289 and 1490 with snippets. So the honest statement of what this commit's own
-insertions cost is: **one citation moved by +27 and was missed; nine moved by +1 and
-were not.** The two in `render.py` are a different commit's debt, found while
-looking.
+Two more rows were in the same condition and are repaired for the same reason, and
+they sit in the **+1 zone**, so this commit's first insertion moved them too:
+`render.py`'s `python_host_error` citations at `lib.rs:1104` and `:1251` were stale
+by **185** and **239** lines at HEAD, of which **184** and **238** predate this
+commit — drift accumulated since M12 (`8c59934`) — and both rows carried `-`. They
+are re-keyed to 1289 and 1490 with snippets.
 
+**The partition, in the right scope and stated once.** At `c631d5b` the gated roots
+hold **twelve** `lib.rs:N` citation sites — enumerated with `git grep -nE
+'lib\.rs:[0-9]+' c631d5b -- crates python tests docs/superpowers/specs` rather than
+by arithmetic: **one** in the +27 zone (`spec09:238` → 4573) and **eleven** in the +1
+zone (146, 851, 1104, 1251, 2123, 2133, 2144, 2149, 2170, 2716-2717, 2773-2778).
+`0018591b` re-keyed nine of the eleven and left two. So what this commit's insertions
+cost is **one citation missed in the +27 zone and eleven moved in the +1 zone — nine
+re-keyed, two left.** An earlier version of this paragraph said *"nine moved by +1"*,
+and that is the count of **re-keyed** rows wearing the word **moved**: the two
+`render.py` rows were moved by the same +1 and were counted out of it. Their error is
+dominated by the M12 drift, but the +1 was this commit's and belongs in its column.
+
+
+## 9. The round-2 pass, and the four corrections it made
+
+Round 2 of the three-round budget read this record rather than the code, and it is
+recorded here because the numbers above changed under it.
+
+**Verdict: PASS**, no BLOCKING. Its findings are two numbers in §8, a word in §7 and
+a citation in a test docstring; all four are fixed in place.
+
+**It re-measured the A/B basis instead of taking it.** It rebuilt `lib.rs` from
+`git show c631d5b:crates/template-py/src/lib.rs` with `maturin develop --release`
+and got sha16 **`dc174855d926defc`** — byte-identical to
+`.review/m19-measurements/loop-keys/prefix.so`. So `prefix.so` *is* the pre-lever
+`c631d5b` build and not a lookalike, which is the assumption §3's per-swap sha
+assertion rests on. It reported both disputed rows green on both builds.
+
+**And it was re-run here, so this record carries its own run and not only the
+round's.** Each artifact was copied into the package with its sha asserted after the
+swap (the live `.so` is untracked, so that is safe), and both rows went through
+`scripts/run_unit_tests.sh` — one invocation, `.venv/bin/python -I -m unittest` with
+two labels — once per build: `Ran 2 tests` … `OK` on `dc174855d926defc`, and
+`Ran 2 tests` … `OK` on `3d3e99e63eddc036`
+(`.review/m19-measurements/loop-keys/rows-two-builds.txt`). §5's "neither
+discriminates the lever" is now reproduced twice over, from builds resolved the way
+the code resolves them.
+
+| # | where | what was wrong |
+|---|---|---|
+| 1 | §8's closing sentence | counted **re-keyed** rows and called them **moved**: the +1 zone holds **eleven** sites, not nine — two `render.py` rows were in it and were attributed to another commit |
+| 2 | §8's insertion table, row 2 | labelled the `ForPlan.loopvar` doc insertion `3049`; the ten added doc lines are new **3052-3061** (`c631d5b`'s old 3051 is `loopvar: String,`, whose replacement sits at new 3062). Rows 1 and 3 label by first-added-line (11, 4453), so the table disagreed with itself |
+| 3 | §7 | said the identity class's one loop row "asserts an `isinstance`"; it asserts `type(...) is` (`tests/test_interposition.py:4472`), which is the row's whole point |
+| 4 | `tests/test_interposition.py:2258` | cited `engine/context.py:69` (the `def`) while the sentence named the assignment at `:71`; it now names the method and cites the method's line |
+
+Finding 1's repair set was already right — only its count sentence was not. Findings
+2 and 3 were labels. Finding 4 is re-pointed at the `def` rather than widened to the
+range `frame-rewrite-fix.md:1131` uses, because `scripts/anchors.txt` keys an anchor
+by its **full** string: `context.py:69-71` is a different key from `context.py:69`,
+and the row that exists is the latter.
+
+**One thing the round did not confirm, and what closes it.** The full
+`scripts/check.sh` (cargo test, rustfmt, clippy, the release build, the anchor gate,
+the unit suite, the 1547-test Django suite and packaging) was **not** independently
+reproduced by the round; only its anchor step was. Re-run here on this tree: `1587
+anchor occurrence(s) checked, 931 cited of 931 manifest entr(ies), 0 failure(s)`,
+exit 0 — and the whole gate's transcript is
+`.review/m19-measurements/gate-2026-10-10.lever1-corrections.txt`. Nothing in this
+section is asserted beyond what that transcript and this record show.
+
+One more note, because §8 is about exactly this: **finding 2's own reason was wrong
+too.** It quoted the hunk as `@@ -3051 +3052,11 @@`; the hunk in
+`git diff c631d5b 0018591b -- crates/template-py/src/lib.rs` is
+`@@ -3048,7 +3049,17 @@`. The number it asked for is right — 3052 is the first
+added line, verified from the file and not from the hunk — so the label is fixed.
+A reader checking this record will not reproduce the quoted hunk.
+
+The round's raw report is kept at `.review/m19-measurements/lever1-round-2-review.md`
+with **one provenance line added**, marked as such: the count it quotes names no run,
+and this repository's provenance gate (`scripts/check_suite_counts.py`, which found
+it) requires a count to say where it came from — the added line points at the re-run
+above rather than asserting an invocation the round did not record. The line numbers
+**it** cites (`loop-keys.md:324-327`, `:294`, `:271-272`) are the pre-correction ones,
+so a reader following them from here lands a few lines off — the sections above are
+the record, and the raw file is the round's own working evidence, dated `d33fa12`.
