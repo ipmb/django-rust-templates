@@ -355,6 +355,66 @@ def django_own_filters():
     return _DJANGO_OWN_FILTERS
 
 
+def django_own_filter_names(filters):
+    """Rust's name for each handle in ``filters``, ``None`` where the handle is not ours.
+
+    The render arm's answer, computed **once per expression** instead of once per
+    filter *application*. ``FilterExpression`` holds the handles Django's
+    ``find_filter`` returned, frozen when the template was compiled, and the
+    question above — "is this callable the one Rust implements?" — is a property
+    of the handle alone, so an expression has exactly one answer and was paying
+    for it on every call.
+
+    **Measured at M19, and the numbers are why the shape changed.** Best of
+    7 x 20000, interpreter 3.14.4, the release ``.so``:
+    ``django_own_filters()`` is **1.074 us** a call,
+    and the arm asked it per application — 65 times for ``real-world/normal``,
+    which is **69.8 us of a 620.8 us render (11.2%)**, 131.5 us of
+    ``real-world/complex``'s 1323.7 (9.9%), and 23.4% of ``micro/filter``'s
+    5.34 us. Asking once per expression leaves one call per expression, paid
+    where the handles are bound.
+
+    **What is given up is a *re*-reading, and the window it opens is one the
+    reading could not have closed.** ``django_own_filters()`` itself is
+    unchanged: it still tracks the six registry objects it was built from and
+    still rebuilds when one is replaced, which is its own row
+    (`tests/test_interposition.py::FilterRoutingTests::test_the_builtin_filter_map_tracks_the_registry_it_was_built_from`).
+    What is dropped is a second opinion *after* this expression's handles were
+    bound. A replacement landing in that window does not change the answer's
+    *kind* — the arm still runs on a handle, never on a name, so a ``{% load %}``ed
+    rebind still puts a different object in ``filters`` and still takes the
+    Python loop — it changes only which of two bodies runs for the *same* handle:
+    the Rust one, or the transcribed Python one that
+    ``tests/test_filter_parity.py`` and ``scripts/differential.py`` exist to hold
+    byte-identical to it. Before this change the same window routed the frozen
+    handle the other way — absent from the rebuilt map, so the Python loop — which
+    is the same pair of bodies with the choice made the other way round.
+
+    **Filled lazily, on first ``resolve``, and that is not a style choice.** The
+    two construction routes do not share a constructor. ``FilterExpression.__init__``
+    (``base.py``) is on the parity harness's **compared path**
+    (``check_transcriptions.COMPARED_PATH``), so a line added there would be a
+    declared difference inside a function the harness executes — the comparison
+    would be Rust against Rust — while ``resolve`` is deliberately not on it, which
+    is also where the routing arm itself lives. The other route, the descriptor materialiser
+    (``engine/parser.py``), builds its object with ``__new__`` and never calls
+    ``__init__`` at all. One fill site, in ``resolve``, covers both; the cost is one
+    ``AttributeError`` per expression, paid where the handles are bound — **and
+    only for an expression that has a filter.** The caller guards the fill with
+    ``if self.filters:``, and that is a measurement: the bench's ``parse`` mode
+    compiles a fresh template every iteration, so a one-off cost is not one-off
+    there. Measured before the guard, ``real-world/large`` — the row with no
+    filters in it at all — went 2900 us to 3114/3469 us while its ``render`` row
+    did not move, which is the signature of a per-compile cost. See the region's
+    note in ``scripts/check_transcriptions.py`` for the whole of it, including the
+    one row that is still slower: a *single*-filter expression in ``parse`` mode.
+    """
+    if not filters:
+        return {}
+    own = django_own_filters()
+    return {func: own.get(func) for func, _ in filters}
+
+
 def effective_autoescape(context, func):
     """The ``bool`` ``_native.filter`` must be handed for ``func``, upstream's laziness kept.
 

@@ -206,8 +206,9 @@ pub struct FilterEntry {
 /// The tag side has two (`registry.rs::REGISTRY` and `LIBRARY_REGISTRY`) because
 /// a library *tag* is not ours until `{% load %}`ed — `has_tag` compares a name
 /// against Django's callable. Filters have no such question: the Python seam is
-/// `django_own_filters().get(func)` keyed on the **function object**
-/// (`python/django_rust_templates/engine/base.py:829`), so a library filter's handle is in the map only once
+/// `names.get(func)` — the per-expression name table `host.django_own_filter_names`
+/// builds from `django_own_filters()` — keyed on the **function object**
+/// (`python/django_rust_templates/engine/base.py:861`), so a library filter's handle is in the map only once
 /// `{% load %}` registered it — "loaded" is implied by the key being present at
 /// all. A second Rust filter table would be a routing distinction the seam does
 /// not make, and `django_own_filters()` would have to guess which table to search.

@@ -825,23 +825,23 @@ timesince.py:138-143	django/utils/timesince.py	138	143	timeuntil	-
 django/utils/timezone.py:146-161	django/utils/timezone.py	146	161	settings.USE_TZ if use_tz is None else use_tz	-
 timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)
 django/utils/translation/__init__.py:275	django/utils/translation/__init__.py	275	-	get_language_info(lang_info["fallback"][0])	-
-engine/base.py:1057	python/django_rust_templates/engine/base.py	1057	-	def render_annotated(self, context):	-
+engine/base.py:1089	python/django_rust_templates/engine/base.py	1089	-	def render_annotated(self, context):	-
 engine/engine.py:233	python/django_rust_templates/engine/engine.py	233	-	extra_data = getattr(template, "extra_data", {})	-
 engine/loader_tags.py:154	python/django_rust_templates/engine/loader_tags.py	154	-	for n in compiled_parent.nodelist.get_nodes_by_type(BlockNode)	-
 engine/loader_tags.py:148	python/django_rust_templates/engine/loader_tags.py	148	-	for node in compiled_parent.nodelist:	-
 engine/parser.py:546	python/django_rust_templates/engine/parser.py	546	-	template.extra_data = {} if parser is None else parser.extra_data	-
 engine/defaulttags.py:1253	python/django_rust_templates/engine/defaulttags.py	1253	-	partials = parser.extra_data.setdefault("partials", {})	-
-engine/base.py:1041	python/django_rust_templates/engine/base.py	1041	-	return _native.resolve_lookups(self.lookups, context)	-
+engine/base.py:1073	python/django_rust_templates/engine/base.py	1073	-	return _native.resolve_lookups(self.lookups, context)	-
 django/utils/translation/__init__.py:279	django/utils/translation/__init__.py	279	-	if "-" not in lang_code:	-
 django/utils/translation/__init__.py:280	django/utils/translation/__init__.py	280	-	raise KeyError("Unknown language code %s." % lang_code)	-
 django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	290	-	info["name_translated"] = gettext_lazy(info["name"])	-
 python/django_rust_templates/render.py:264	python/django_rust_templates/render.py	264	-	(measured — a `{% for %}` node at ``(9, 25)``), so this parser's tokens are	-
-python/django_rust_templates/host.py:677	python/django_rust_templates/host.py	677	-	and its `_culprit_node` attached. Rust can only carry the class's	-
+python/django_rust_templates/host.py:737	python/django_rust_templates/host.py	737	-	and its `_culprit_node` attached. Rust can only carry the class's	-
 django_suite/run.py:85	django_suite/run.py	85	-	-	-
 django_suite/template_tests/syntax_tests/test_for.py:334	django_suite/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 django_suite/template_tests/test_partials.py:14	django_suite/template_tests/test_partials.py	14	-	engines["django"]	-
-python/django_rust_templates/engine/base.py:829	python/django_rust_templates/engine/base.py	829	-	django_own_filters().get(func)	-
-python/django_rust_templates/engine/base.py:1169	python/django_rust_templates/engine/base.py	1169	-	render_value_in_context(output, context)	-
+python/django_rust_templates/engine/base.py:861	python/django_rust_templates/engine/base.py	861	-	names.get(func)	-
+python/django_rust_templates/engine/base.py:1201	python/django_rust_templates/engine/base.py	1201	-	render_value_in_context(output, context)	-
 python/django_rust_templates/engine/exceptions.py:38	python/django_rust_templates/engine/exceptions.py	38	-	-	-
 python/django_rust_templates/engine/parser.py:179	python/django_rust_templates/engine/parser.py	179	-	"BlockTranslateNode": BlockTranslateNode,	-
 python/django_rust_templates/engine/parser.py:285	python/django_rust_templates/engine/parser.py	285	-	-	-
@@ -849,7 +849,7 @@ python/django_rust_templates/engine/parser.py:568	python/django_rust_templates/e
 python/django_rust_templates/engine/parser.py:669	python/django_rust_templates/engine/parser.py	669	-	-	-
 python/django_rust_templates/host.py:35	python/django_rust_templates/host.py	35	-	-	-
 python/django_rust_templates/host.py:422	python/django_rust_templates/host.py	422	-	-	-
-python/django_rust_templates/host.py:547	python/django_rust_templates/host.py	547	-	self._django_tags = django_own_tags()	-
+python/django_rust_templates/host.py:607	python/django_rust_templates/host.py	607	-	self._django_tags = django_own_tags()	-
 python/django_rust_templates/host.py:555	python/django_rust_templates/host.py	555	-	-	-
 tests/milestone_ownership.py:440	tests/milestone_ownership.py	440	-	def unshimmed(scope: str = TARGET) -> list:	-
 tests/parity_target.py:63	tests/parity_target.py	63	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-

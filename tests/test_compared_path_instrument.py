@@ -11,7 +11,10 @@ an ``lru_cache``. Four of those were invisible.
 
 Measured on the pinned tree before anything changed, by the reviewer's
 reproduction: ``FilterExpression.args_check`` is a ``staticmethod``, the parity
-corpus calls it **85** times, and its lines 860-877 sat in the *gap* between
+corpus calls it **85** times, and its lines 860-877 (884-901 since M19's cache
+moved them; 860-877 is the reproduction's number, and
+``test_the_definitions_carry_spans_from_the_right_file`` is what pins the
+current one) sat in the *gap* between
 two pinned spans — so no pin would have moved if it had stayed invisible, and a
 declared transcription region placed on those lines would have been accepted by
 clause (4) with both sides of the comparison running Rust. The defect was
@@ -196,7 +199,7 @@ class DescriptorCountingTests(unittest.TestCase):
         """
         # This package's modules, not Django's: the spans asserted below are the
         # *transcription's* line numbers, and `django.template.base` answers with
-        # Django's (822-839 where ours is 860-877). Read from the wrong tree the
+        # Django's (822-839 where ours is 884-901). Read from the wrong tree the
         # row is not merely off by a constant — it is measuring a file no clause
         # of the guard has ever read.
         import django_rust_templates.engine.base as base
@@ -206,7 +209,13 @@ class DescriptorCountingTests(unittest.TestCase):
         from tests.compared_path import definitions
 
         base_defs = definitions(base)
-        self.assertEqual(base_defs["FilterExpression.args_check"], (860, 877))
+        # 892, not 860: M19's routing cache inserts 23 lines inside
+        # `FilterExpression.resolve`, which is above this `def` and below the
+        # nineteen functions the M16 note shifts by +1, so this one moved by
+        # **+24**; the `if self.filters:` guard then adds 8 more at the same
+        # place, so it moved by **+32** in all. Both numbers are re-measured, not
+        # shifted by arithmetic.
+        self.assertEqual(base_defs["FilterExpression.args_check"], (892, 909))
         # 135, not 134: M16's module-level `_native` import is one line above
         # this `def`, and `args_check` on the line above is unmoved because the
         # line it gained there is cancelled by the one `resolve` lost. Both
@@ -267,7 +276,8 @@ class DescriptorCountingTests(unittest.TestCase):
         ``scripts/check_transcriptions.py``'s clause (4) refuses a transcription
         whose declared regions cover the code the parity harness executes, and
         before this fix ``args_check`` was not in the table it consults — so a
-        region placed on 860-877 was accepted, and the parity comparison then
+        region placed on 860-877 (884-901 since M19) was accepted, and the parity
+        comparison then
         ran Rust against Rust with both sides agreeing. That is the whole reason
         this module exists.
 
@@ -279,17 +289,30 @@ class DescriptorCountingTests(unittest.TestCase):
         """
         import scripts.check_transcriptions as guard
 
-        self.assertIn(
-            (860, 877, "FilterExpression.args_check"),
-            guard.COMPARED_PATH["base.py"],
+        # **Looked up by label rather than written out, because the span moves and
+        # the label does not.** M19's routing cache moved it 24 lines in one
+        # commit; a hard-coded pair would have made this row fail for a shift
+        # that is the *other* row's business, and — worse — would have kept
+        # passing, silently and vacuously, if the table had ever been re-measured
+        # to a span the synthetic region below no longer touched. What this row
+        # needs is the span, not the number.
+        args_check = [
+            (first, last)
+            for first, last, label in guard.COMPARED_PATH["base.py"]
+            if label == "FilterExpression.args_check"
+        ]
+        self.assertEqual(
+            len(args_check),
+            1,
             "the span this row is about is not in the table any more",
         )
+        (first, last) = args_check[0]
 
         upstream, regions = guard.DECLARED["base.py"]
         # Same length as ours, so clause (5) — which requires prose for a
         # region whose two spans differ in length — has nothing to say and the
         # only clause with anything to report is the one under test.
-        synthetic = ((860, 877), (855, 872), "args_check")
+        synthetic = ((first, last), (first - 5, last - 5), "args_check")
         guard.DECLARED["base.py"] = (upstream, regions + [synthetic])
         try:
             failures = guard.check()
@@ -298,7 +321,7 @@ class DescriptorCountingTests(unittest.TestCase):
 
         self.assertTrue(
             any(
-                "FilterExpression.args_check (860-877)" in failure
+                f"FilterExpression.args_check ({first}-{last})" in failure
                 and "Rust against Rust" in failure
                 for failure in failures
             ),

@@ -314,14 +314,15 @@ class InterpositionTests(unittest.TestCase):
         equal = sum(i2 - i1 for tag, i1, i2, _j1, _j2 in opcodes if tag == "equal")
         differing = [op for op in opcodes if op[0] != "equal"]
 
-        # The structure, which is what the guard reads: six edits — the marker
-        # and its blank line as one pure insertion of ours, then M16's
-        # module-level `_native` import as a second, then two pairs for
-        # `compile_nodelist`'s delegation, then M11 Task 2's filter seam as a
-        # third pure insertion, then one replacement for
-        # `Variable._resolve_lookup`'s. Asserted here too because a
-        # re-alignment that merged two edits into one would move `equal` in a
-        # way this row could not explain on its own.
+        # The structure, which is what the guard reads: nine edits — the marker
+        # and its blank line as one pure insertion of ours, M18.1's `BaseContext`
+        # import substitution, M16's module-level `_native` import as a second
+        # pure insertion, two pairs for `compile_nodelist`'s delegation, then
+        # M19's two — a substitution for `__slots__` and the routing cache as a
+        # third pure insertion — then M11 Task 2's filter seam as a fourth, then
+        # one replacement for `Variable._resolve_lookup`'s. Asserted here too
+        # because a re-alignment that merged two edits into one would move
+        # `equal` in a way this row could not explain on its own.
         #
         # Five rather than three since M9's Task 5, and the pair that grew is
         # the one worth reading: `difflib` splits the resolver's single
@@ -331,8 +332,8 @@ class InterpositionTests(unittest.TestCase):
         # is satisfied either way; this row is what would notice if a future
         # edit merged them and the declaration stopped describing the diff.
         #
-        # **Six rather than five since M11 Task 2, and the sixth is a `delete`.**
-        # That is the filter seam: ours 816-847 — a comment block, one import,
+        # **Six were five until M11 Task 2, and the sixth is a `delete`.**
+        # That is the filter seam: ours 847-879 — a comment block, one import,
         # the identity test, the call and its `continue` — against none of
         # upstream's, because the arm *replaces* `resolve`'s loop body with a
         # call rather than wrapping it. `difflib` names a run that only one side
@@ -341,16 +342,18 @@ class InterpositionTests(unittest.TestCase):
         # an arm that had been written as a *rewrite* of the loop would show up
         # as a `replace` here and as a declared region with two spans.
         #
-        # **The run is 32 lines and 16 of them are executable, and the two
-        # numbers are both in this file and `check_transcriptions.py` because
-        # this seam has already been miscounted three ways.** `difflib` counts
-        # lines in the run; `executable_lines` counts the lines of it that hold a
-        # statement, and a parenthesised `import` contributes five of the
-        # sixteen. Neither is the other's denominator. Hoisting those imports
-        # above the `for` — tried and reverted — would have split this one
-        # `delete` into two, with upstream's verbatim `arg_vals` loop equal in
-        # place between them, which is why the shape of this list is worth
-        # asserting rather than deriving.
+        # **The seam's run is 33 lines and 15 of them are executable**, and both
+        # numbers are in this file and `check_transcriptions.py` because this seam
+        # has already been miscounted three ways. `difflib` counts lines in the
+        # run; `executable_lines` counts the lines of it that hold a statement,
+        # and a parenthesised `import` contributes four of the fifteen. Neither is
+        # the other's denominator. Hoisting those imports above the `for` — tried
+        # and reverted — would have split this one `delete` into two, with
+        # upstream's verbatim `arg_vals` loop equal in place between them, which is
+        # why the shape of this list is worth asserting rather than deriving.
+        # **M19 does that split for a different reason and at a different
+        # boundary** — see its own paragraph below; the imports are still where
+        # M11 put them.
         #
         # **M16 moved the shape, deliberately, and this row is why the move was
         # measured rather than noticed.** Hoisting `from django_rust_templates
@@ -388,6 +391,31 @@ class InterpositionTests(unittest.TestCase):
         # as a count: an inserted `replace` that had landed at either end would
         # have left the length at seven and read as the same edit. Position in
         # this list is `difflib`'s statement of *where in the file* the change is.
+        #
+        # **M19 adds two ops in one commit, and they are the two shapes this list
+        # can have.** `__slots__` gains a fifth name — ours 743 against upstream's
+        # 737, one line each, so a `replace` and a **substitution**: `equal` falls
+        # by one, 1119 -> 1118, with neither file's *length* relevant (ours grew,
+        # but by the other op). The routing cache is a pure insertion at ours 809 —
+        # a `delete` — and moves `equal` by nothing at all, which is what an
+        # insertion is. So the arithmetic that this row is built on
+        # carries through: ours is 1252 lines and 134 of them differ, upstream's
+        # 1207 with 89 differing, and 1252-134 = 1207-89 = 1118. **Two ops rather
+        # than one because the two changes are of different kinds**, which is the
+        # same distinction the pair of counts above draws; a single edit that
+        # produced two ops would have been a re-alignment, and this row is what
+        # would have said so.
+        #
+        # The pair lands **between `compile_nodelist`'s two `replace`s and the
+        # filter seam's `delete`** — the region of the file `FilterExpression`
+        # occupies — and that placement is asserted rather than incidental: the
+        # cache's run is ours 809-839 and the seam's begins eight lines after it,
+        # in the same method, so a reader who saw the two `delete`s adjacent in
+        # this list without reading the file would take them for one change. The
+        # run grew from 23 lines to 31 when the prologue gained its
+        # `if self.filters:` guard and the comment stating why, which is *inside*
+        # the same run: an insertion with no equal line in it stays one op, so the
+        # list's length is the check on that too.
         self.assertEqual(
             [op[0] for op in differing],
             [
@@ -396,6 +424,8 @@ class InterpositionTests(unittest.TestCase):
                 "delete",
                 "replace",
                 "replace",
+                "replace",
+                "delete",
                 "delete",
                 "replace",
             ],
@@ -403,7 +433,7 @@ class InterpositionTests(unittest.TestCase):
 
         self.assertEqual(
             equal,
-            1119,
+            1118,
             "the number of lines this transcription shares with upstream, in "
             "place, has moved; if that was a delegation, re-pin it here and "
             "declare the region in scripts/check_transcriptions.py",

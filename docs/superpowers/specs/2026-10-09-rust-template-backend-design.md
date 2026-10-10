@@ -291,7 +291,12 @@ exactly that.
 five module tuples on every call, to answer "is this filter Django's or ours?".
 That question exists only because two universes can arrive at one call site. With
 the filter's handle bound at compile time it is answered once and never asked
-again.
+again. **M19 landed the first half of that on the shipped tree, one step short of
+this**: the answer is now computed once per *expression* on its first `resolve`
+and kept beside the handles, so the registry merge stops running per filter
+application — measured, that merge is 1.074 µs a call at M19 and a real-world page
+applies 65 filters in one render. Compile-time binding is what remains, and it
+needs the Rust tree (M19's own spec, §5, step 2).
 
 *The join/re-split goes.* M16 attributes +0.595 µs per variable to
 `_native.resolve` plus `".".join`. The join exists because `_native.resolve` takes
@@ -419,8 +424,8 @@ the `tree:` line discriminates.
 >
 > That second clause is a reachability claim, and a first draft supported it the
 > way one supports such things badly: by naming two call sites
-> (`python/django_rust_templates/host.py:547`,
-> `python/django_rust_templates/engine/base.py:829`) and calling the audit
+> (`python/django_rust_templates/host.py:607`,
+> `python/django_rust_templates/engine/base.py:861`) and calling the audit
 > representative. It is measured instead, because it is one run and four seconds:
 > wrap each helper in a counter, then run the pinned suite in that process
 > (`.venv/bin/python -I`, `django_suite/run.py template_tests`, `Ran 1547 tests …

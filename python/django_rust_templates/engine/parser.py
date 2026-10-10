@@ -609,9 +609,13 @@ def compile_filter(parser):
 def _materialise_filter_expression(desc, parser=None, resolve_ref=None):
     """A real :class:`FilterExpression` from a descriptor, without re-parsing.
 
-    ``FilterExpression.__slots__`` is ``("token", "filters", "var", "is_var")``
-    and ``__init__`` parses and computes all four, so the constructor is out of
-    the question for the same reason as ``Variable``'s.
+    ``FilterExpression.__slots__`` is
+    ``("token", "filters", "var", "is_var", "_rust_names")`` and ``__init__``
+    sets the first four, so the constructor is out of the question for the same
+    reason as ``Variable``'s. The fifth is ours rather than Django's and is **not
+    filled here**: ``FilterExpression.resolve`` fills it on first use, the one
+    site both construction routes pass through. See ``host.django_own_filter_names``
+    for why the answer belongs to the expression rather than to the application.
 
     **The filter function comes from the handle the parse carried, not from a
     second lookup by name.** ``find_filter``'s result is what renders

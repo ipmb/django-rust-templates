@@ -136,7 +136,7 @@ a three-variable template rendered `'1|2|3'` with `{'_native.resolve': 3,
 `LookupScope::resolve` is the *floor prototype's* path, and the prototype is not
 what ships.
 
-**Step 1 has since landed**, and the call is now `engine/base.py:1041`,
+**Step 1 has since landed**, and the call is now `engine/base.py:1073`,
 `_native.resolve_lookups(self.lookups, context)`, entering at
 `crates/template-py/src/lib.rs:2662-2667`, with no `parse_variable` between the
 shell and the walk. The row above it is what that bought, measured rather than
@@ -383,7 +383,7 @@ laziness must not reach it.* The test that enforces it is
 ### 3.3 The debug contract: a native node needs a span
 
 **BLOCKING 5 is correct and revision 1 missed it too**, and it is the stronger of
-the two: `Node.render_annotated` (`engine/base.py:1057`) sets
+the two: `Node.render_annotated` (`engine/base.py:1089`) sets
 `e._culprit_node = self` first-writer-wins, then builds `template_debug` from
 `e._culprit_node.token`. A natively-rendered node has no Python `Node` to be the
 culprit and no `.token`, so `e.template_debug` is absent and
@@ -399,7 +399,7 @@ protocol, so it is on the walk's path by construction.
 data exists — the Rust parser's tokens carry correct positions, and
 `python/django_rust_templates/render.py:264` cites a `{% for %}` at (9, 25) — but
 there is no protocol for handing one back, and
-`python/django_rust_templates/host.py:677` already notes that Rust can carry the
+`python/django_rust_templates/host.py:737` already notes that Rust can carry the
 class's token but not the object.
 
 The review's three non-blocking checks on this area all pass and are recorded
@@ -627,7 +627,7 @@ committed), the NIT (`iters` is pinned per row).
 
 **Disputed, with a measurement: B1's premise.** The render path does call
 `_native.resolve` — three calls for a three-variable template, reached from
-`engine/base.py:1041` — so `LookupScope::resolve` is the prototype's path and not the
+`engine/base.py:1073` — so `LookupScope::resolve` is the prototype's path and not the
 shipped one, and revision 1's 2.24× was a true statement about the shipped engine
 with a wrong account of why. The review's decomposition of that 0.522 is exactly
 right and is adopted; its *conclusion* that the engine's resolver is "at parity

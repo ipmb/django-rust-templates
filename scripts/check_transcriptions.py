@@ -90,7 +90,7 @@ UPSTREAM_NAMESPACE = "django.template."
 # re-runs the instrument and fails if the two disagree. A pinned table with a
 # live re-measurement behind it is the same shape as the module meter.
 #
-# 30 functions, spanning 117-1212 in a file of 1212 lines — nearly the whole
+# 30 functions, spanning 117-1252 in a file of 1252 lines — nearly the whole
 # file, which is the finding.
 # A guard that checked only the named target's own lines would miss a region
 # declared in any of the other 29.
@@ -110,21 +110,38 @@ UPSTREAM_NAMESPACE = "django.template."
 # whose carrier moved under it, found here while re-deriving the numbers M16
 # does move.
 #
+# **The trailing pair above was stale as well, by eight, and M19 is where it was
+# measured.** The committed file was 1220 lines and `token_kwargs` ended at 1220
+# (`git show HEAD:python/django_rust_templates/engine/base.py | wc -l`), so
+# `117-1212 in a file of 1212 lines` was wrong in both places at once — the same
+# single carrier, two numbers, which is why a reviewer reading only one of them
+# would have found nothing. It reads `117-1244 in a file of 1244 lines` from
+# M19 — 1252 after the `if self.filters:` guard recorded below — and both numbers
+# come from `wc -l` and the pin rather than from adding a
+# delta to the old text.
+#
 # **These are the transcription's line numbers, so an insertion moves them, and
-# M16's is why thirty of them are not what `13f9b08` pinned.** The module-level
-# `_native` import adds one line at 73 and the two in-function imports remove
-# one inside `FilterExpression.resolve` and two inside `Variable._resolve_lookup`,
-# so the shift is three-valued rather than uniform: **+1** for the nineteen
-# functions above `resolve` (`Origin.__init__` 116-119 → 117-120 through
-# `FilterExpression.__init__` 744-788 → 745-789), **0** for the four between
-# `resolve` and `_resolve_lookup` (`args_check` 860-877 → 860-877 — the removal
-# cancels the insertion — through `Variable.resolve` 962-978 → 962-978), and
-# **-2** for the seven below it (`Node.get_nodes_by_type` 1077-1089 → 1075-1087
-# through `token_kwargs` 1170-1214 → 1168-1212). Re-measured with the instrument
-# rather than computed, because the instrument is the evidence; the shift is
-# arithmetic anyone can check, and the *set* of functions is the part that could
-# have moved for a real reason (the routing arm is on `resolve`'s own lines, and
-# `resolve` is not in this table — the parse harness never renders).
+# two commits have moved them.** M16's module-level `_native` import adds one
+# line at 73 while its two in-function imports remove one inside
+# `FilterExpression.resolve` and two inside `Variable._resolve_lookup`, so that
+# shift was three-valued: **+1** for the nineteen functions above `resolve`
+# (`Origin.__init__` 116-119 → 117-120 through `FilterExpression.__init__`
+# 744-788 → 745-789), **0** for the four between `resolve` and
+# `_resolve_lookup` (`args_check` 860-877 unchanged — the removal cancels the
+# insertion — through `Variable.resolve` 962-978), and **-2** for the seven below
+# it (`Node.get_nodes_by_type` 1077-1089 → 1075-1087 through `token_kwargs`
+# 1170-1214 → 1168-1212). M19 then inserts **23 lines inside
+# `FilterExpression.resolve` itself**, at 809, so every function that *starts*
+# below that point moves by **+24** — `args_check` 860-877 → 884-901 through
+# `token_kwargs` 1176-1220 → 1200-1244 — while every function above it keeps its
+# M16 number. **The same place moves again by +8**, when the routing cache's
+# prologue gains its `if self.filters:` guard: `args_check` 884-901 → 892-909
+# through `token_kwargs` 1200-1244 → 1208-1252, and the file is 1252 lines.
+# Stated as arithmetic so that it can be checked; the spans
+# themselves are re-measured with the instrument, because the instrument is the
+# evidence, and the *set* of functions is the part that could have moved for a
+# real reason. `resolve` is not in this table — the parse harness never renders —
+# which is why a change inside it shifts the table without appearing in it.
 #
 # The arithmetic was wrong here once before, in the direction this block exists
 # to warn about: it counted the region someone had named (M11's arm, nineteen
@@ -134,7 +151,16 @@ UPSTREAM_NAMESPACE = "django.template."
 # The stale pin did not fail quietly: clause (4) read the old `args_check` span
 # against the new region and reported an overlap that was not there, which is
 # the false *positive* half of the same staleness the re-measurement row catches
-# from the other side.
+# from the other side. **M19 reproduced it exactly, and deliberately**: with
+# these spans still 24 lines high, the arm's new region `ours:839-871` overlapped
+# a function it has nothing to do with, and clause (4) said so —
+# `region ours:839-871 covers FilterExpression.args_check (860-877), which the
+# parity harness executes`. The row above caught the other half first
+# (`measured[label] (884, 901) != pinned[label] (860, 877)`, for ten labels), so
+# the fix was a re-measurement rather than a re-reading. That a *false* clause
+# (4) is the loudest thing a stale pin produces is the argument for measuring
+# rather than computing, since the same staleness in the other direction is
+# silent.
 #
 # The count was 28 until the instrument learned to see through a descriptor.
 # `FilterExpression.args_check` is bound with `staticmethod(...)`, and the sweep
@@ -175,16 +201,16 @@ COMPARED_PATH = {
         (678, 682, "Parser.compile_filter"),
         (684, 688, "Parser.find_filter"),
         (745, 789, "FilterExpression.__init__"),
-        (860, 877, "FilterExpression.args_check"),
-        (909, 960, "Variable.__init__"),
-        (962, 978, "Variable.resolve"),
-        (1083, 1095, "Node.get_nodes_by_type"),
-        (1103, 1104, "NodeList.render"),
-        (1106, 1111, "NodeList.get_nodes_by_type"),
-        (1117, 1118, "TextNode.__init__"),
-        (1126, 1133, "TextNode.render_annotated"),
-        (1155, 1156, "VariableNode.__init__"),
-        (1176, 1220, "token_kwargs"),
+        (892, 909, "FilterExpression.args_check"),
+        (941, 992, "Variable.__init__"),
+        (994, 1010, "Variable.resolve"),
+        (1115, 1127, "Node.get_nodes_by_type"),
+        (1135, 1136, "NodeList.render"),
+        (1138, 1143, "NodeList.get_nodes_by_type"),
+        (1149, 1150, "TextNode.__init__"),
+        (1158, 1165, "TextNode.render_annotated"),
+        (1187, 1188, "VariableNode.__init__"),
+        (1208, 1252, "token_kwargs"),
     ],
     # 8 functions, spans 56-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
@@ -704,6 +730,26 @@ DECLARED = {
             # from here down shifts by one — the region count is unchanged at
             # six, which is the number the note says is the review surface.
             ((73, 73), None, "from django_rust_templates import _native"),
+            # M19's slot, and the only line in this class that is not upstream's.
+            # `FilterExpression` declares `__slots__`, so a per-expression cache
+            # has to be named here or there is nowhere to put it — a module-level
+            # dict keyed on the object would be a weak table plus a lookup, for a
+            # value that belongs on the object. One line for one line (upstream's
+            # 737 carries the four names), so clause (5) is satisfied by the shape
+            # alone and the snippet is our line.
+            #
+            # **The region clears clause (4) by two lines, and that margin is the
+            # whole reason the cache is filled where it is.** The compared path's
+            # entry for `FilterExpression.__init__` is `(745, 789)`; `__slots__` is
+            # above it, so this line is declared and legal, while a line *inside*
+            # `__init__` would make the parity comparison Rust against Rust. That
+            # is what forced the lazy fill below, and it is why the two entries are
+            # in this file together.
+            (
+                (743, 743),
+                (737, 737),
+                '__slots__ = ("token", "filters", "var", "is_var", "_rust_names")',
+            ),
             # M9's parse seam: `Template.compile_nodelist` delegates to Rust.
             # Upstream's lexer construction and `Parser(...)` call are gone, and
             # in their place is a comment block plus the import that reaches the
@@ -732,27 +778,58 @@ DECLARED = {
                 "self.extra_data = parsed.extra_data\n"
                 "return parsed.nodelist",
             ),
-            # M11 Task 2's filter seam: `FilterExpression.resolve`'s loop over
-            # `self.filters` gains one branch, and it is a **pure insertion** —
+            # M11 Task 2's filter seam: `FilterExpression.resolve` gains one
+            # branch, and M19 makes the answer it branches on per *expression*
+            # rather than per *application*. Both halves are **pure insertions** —
             # upstream has no counterpart on these lines, hence `None` on the
-            # upstream side and a snippet that names statements rather than
-            # pairing them. Sixteen executable lines in the one region below:
-            # the import that reaches the shell, the identity test against the
-            # built-in registry, the two flag reads, the call with its five
-            # arguments, and the `continue`. Sixteen rather than the fifteen a
-            # statement count gives, because `executable_lines` counts a
-            # parenthesised `import`'s continuation lines: the five-line import
-            # is one statement and five lines, and only the second granularity
-            # is what the guard compares. (This was seventeen before M16 moved
-            # the first line — `from django_rust_templates import _native` — to
-            # the module-level region above; see that region's note.)
+            # upstream side and snippets that name statements rather than pairing
+            # them.
             #
-            # **One region, and that is a decision rather than a coincidence.**
+            # **Fifteen executable lines in the arm below**: the import that
+            # reaches the shell (a parenthesised `import`, so `executable_lines`
+            # counts its four lines rather than its one statement — that
+            # granularity is what the guard compares), the identity test against
+            # the name table, the two flag reads, the call with its five arguments,
+            # and the `continue`. It was sixteen until M19: the import used to
+            # reach `django_own_filters` as well, and the arm no longer asks that
+            # question. (It was seventeen before M16 moved the first line —
+            # `from django_rust_templates import _native` — to the module-level
+            # region above; see that region's note.)
+            #
+            # **M19's second region, and the reason the seam has two where M11's
+            # note below insists on one.** The fill has to run *before* the loop
+            # over `self.filters` — inside it, it is per application again, which
+            # is the cost M19 exists to remove — while the arm has to run *inside*
+            # that loop, because it consumes the `arg_vals` upstream's verbatim
+            # six lines build. Upstream's lines therefore sit between our two, and
+            # `difflib` reports the gap as what it is. **The split is forced by
+            # where the two statements must run, not by where they were typed**,
+            # which is the distinction the M11 note turns on; the alternative kept
+            # the region count down at the cost of a host helper that mutates the
+            # expression it is asked about (`_rust_names_of(self)`, which would
+            # also put a Python call back on the per-application path this change
+            # removes), and the mutation is better here, where a reader of the
+            # diff can see it.
+            #
+            # `host.django_own_filter_names` carries the argument for the shape,
+            # the measurement (**1.074 us** a call, 65 calls in `real-world/normal`
+            # = 69.8 us of a 620.8 us render, 11.2%), and what the re-reading gives
+            # up. The `try`/`except AttributeError` is the unset slot rather than an
+            # error: `FilterExpression` has no `__dict__`, and there are two
+            # construction routes — `__init__` (ours 745) and the descriptor
+            # materialiser (`engine/parser.py`), which builds the object with
+            # `__new__` and never calls `__init__`. Filling it in `__init__` is what
+            # clause (4) forbids (that span is on the compared path) and filling it
+            # only in the materialiser would leave every `Parser.compile_filter`
+            # expression unset, so one lazy fill covers both routes at one
+            # `AttributeError` per expression.
+            #
+            # **M11's note on the single region, kept for the decision it records.**
             # The `host` import sat inside the loop above the identity test; a
             # reviewer's NIT moved it above the `for` — once per `resolve`
             # instead of once per filter, which no test can observe — and that
             # split this region in two, because upstream's verbatim `arg_vals`
-            # loop (ours 810-815, equal in place) then sits between the import
+            # loop then sits between the import
             # and the branch, and equal lines are what makes `difflib` see two
             # differing regions rather than one. Reverted on the reviewer's own
             # measurement of the cost: a declared region is the diff a reader
@@ -762,6 +839,45 @@ DECLARED = {
             # diff shape is not a NIT — the region count is part of the review
             # surface. The code comment above the import says the same in three
             # lines, where someone reading the file will meet it.
+            #
+            # M19 pays that tax, and the amount is why: the reverted move saved
+            # `(n-1)` `sys.modules` hits for an `n`-filter expression and so
+            # **nothing at all** for the common one-filter case, while this one
+            # saves a 1.074 us call per filter application — 65 of them on one
+            # render. The test the note implies is not "is the region count one"
+            # but "is the second region bought by something the first cannot
+            # express"; M19's is, because the two statements need different
+            # scopes, and the reverted NIT's was not.
+            #
+            # **The prologue is guarded by `if self.filters:`, and the guard is a
+            # measurement rather than a tidy-up.** The fill is a *one-off* cost
+            # per expression, and `parse` mode is where one-off stops being once:
+            # it compiles a fresh template every iteration, so every
+            # `FilterExpression` is built again and the prologue is paid again.
+            # Measured that way, and before the guard, `real-world/large` — the
+            # row with no filters in it at all, ~300 expressions over 62
+            # iterations — went **2900 us → 3114/3469 us, ratio 1.353 → 1.527**,
+            # while its *render* row, the same template compiled once, did not
+            # move at all. That pair is the signature of a per-compile cost, and
+            # this was the one row where the change lost; `micro/variable` parse
+            # (+5.7%) is the same thing at one expression. With the guard a
+            # filter-free expression pays a truth test and nothing else, which is
+            # what it paid before M19. **The residual is stated rather than
+            # hidden**: a *one-filter* expression in `parse` mode is still
+            # slightly slower (`micro/filter` parse, +3.6%), because the fill's
+            # import and `AttributeError` cost about what the one
+            # `django_own_filters()` call they replace did. The win is on the hot
+            # path, where the answer is kept, and on expressions carrying more
+            # than one filter.
+            (
+                (809, 839),
+                None,
+                "if self.filters:\n"
+                "try:\n"
+                "names = self._rust_names\n"
+                "from django_rust_templates.host import django_own_filter_names\n"
+                "names = self._rust_names = django_own_filter_names(self.filters)",
+            ),
             #
             # **That `continue` is the design, not a shortcut.** The arm
             # *replaces* the loop body below rather than wrapping it, because
@@ -776,11 +892,11 @@ DECLARED = {
             #
             # **This region is outside clause (4)'s reach, and that is a
             # measurement rather than an assumption.** `COMPARED_PATH["base.py"]`
-            # holds the 29 names this guard actually compares against the pin;
+            # holds the 30 names this guard actually compares against the pin;
             # `FilterExpression.resolve` is not among them — the compared path is
             # the *parse* harness — so clause (4) permits this region without
             # examining it, and clause (2) is the only thing standing between
-            # these seventeen lines and nothing at all. What the guard therefore
+            # these fifteen lines and nothing at all. What the guard therefore
             # cannot see is the one failure that matters here: an arm that
             # delegated to `_native.filter` and then *also* ran the four steps,
             # or an arm whose identity test were keyed by name rather than
@@ -801,14 +917,13 @@ DECLARED = {
             # `test_filter_parity.py::test_the_comparison_target_is_not_rust_owned`
             # is what watches *that*.
             (
-                (816, 847),
+                (847, 879),
                 None,
                 "from django_rust_templates.host import (\n"
-                "django_own_filters,\n"
                 "effective_autoescape,\n"
                 "effective_use_tz,\n"
                 ")\n"
-                "if (builtin_name := django_own_filters().get(func)) is not None:\n"
+                "if (builtin_name := names.get(func)) is not None:\n"
                 "use_tz = effective_use_tz(context, func)\n"
                 "autoescape = effective_autoescape(context, func)\n"
                 "obj = _native.filter(\n"
@@ -834,21 +949,31 @@ DECLARED = {
             # blank line between them keeping the two hunks apart. M16 removed
             # the in-function `from django_rust_templates import _native` and
             # the blank line that followed it, so the two hunks now abut and
-            # `difflib` reports them as one — our 995-1041 against upstream's
+            # `difflib` reports them as one — our 1027-1073 against upstream's
             # 957-1028, the whole body replaced by a comment block and a call.
             # (The span read 995-1033 until M19 lengthened the comment block to
             # record the `2.` divergence, and 995-1047 while the shell still
             # re-joined the path; M19's step 1 then shortened the block by six
             # lines, because the join is no longer this method's input and the
-            # paragraph explaining the join's inexactness is gone with it. The
+            # paragraph explaining the join's inexactness is gone with it, and
+            # M19's routing cache added 24 lines *above* this region without
+            # touching it, which is why the span read 1019-1065, and the
+            # `if self.filters:` guard added eight more at the same place, which
+            # is why it reads 1027-1073.) The
             # upstream side has not moved in any of it, because the *pairing* is
             # unaffected by how much prose our side carries. Re-derived with the
             # checker's own `differing_lines`, not by adding a delta to the old
             # number: `.review/m19-measurements/rederive_base_regions.py`.)
             # That is a *merge* rather than a split, so it is the direction the
             # M11 note calls a tax reduction rather than a tax; and the region
-            # count is unchanged (two `compile_nodelist`, the marker, the
-            # module-level import, this file's filter seam, and this one = six).
+            # count stood at six through M16's merge — two `compile_nodelist`,
+            # the marker, the module-level import, this file's filter seam, and
+            # this one. **It is nine from M19**, and the count is enumerated
+            # rather than asserted because it moved twice in one milestone: the
+            # marker, the `BaseContext` import (M18.1), the module-level `_native`
+            # import (M16), `__slots__` (M19), two `compile_nodelist`, the
+            # routing cache (M19), this file's filter seam, and this one. The
+            # M11 note below is where the second of M19's two is argued for.
             # The upstream span now reaches 1028 because it carries the
             # handler's body *and* the `return current` tail, which is where the
             # alignment landed rather than where the code moved to — stated
@@ -883,7 +1008,7 @@ DECLARED = {
             # not — a non-raising signature carries the bit on an ordinary return
             # value) is what makes the alternative live rather than closed.
             (
-                (995, 1041),
+                (1027, 1073),
                 (957, 1028),
                 'return _native.resolve_lookups(self.lookups, context)',
             ),

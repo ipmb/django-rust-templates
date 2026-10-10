@@ -740,7 +740,7 @@ class FilterExpression:
         <Variable: 'variable'>
     """
 
-    __slots__ = ("token", "filters", "var", "is_var")
+    __slots__ = ("token", "filters", "var", "is_var", "_rust_names")
 
     def __init__(self, token, parser):
         self.token = token
@@ -806,6 +806,37 @@ class FilterExpression:
                         obj = string_if_invalid
         else:
             obj = self.var
+        # Rust's name for each handle in `self.filters`, or `None` where the
+        # handle is not ours — computed **once per expression** and kept, where
+        # M11 asked the question once per filter *application*. It is a property
+        # of the handle alone and `self.filters` froze the handles at compile
+        # time, so one expression has one answer; asking it per application cost
+        # `real-world/normal` 69.8 us of a 620.8 us render, 65 asks at the
+        # 1.074 us `host.django_own_filters` measures (M19). `host.django_own_filter_names`
+        # carries the argument for the shape, and for what the re-reading gives up.
+        #
+        # Filled here rather than in `__init__` because of where the handles are
+        # *read*: `__init__` is on the parity harness's **compared path**
+        # (`check_transcriptions.COMPARED_PATH`), so a declared difference there
+        # would make the comparison Rust against Rust, while `resolve` is
+        # deliberately not — which is also why the arm below lives here. The
+        # `AttributeError` is the unset slot, not an error: `__slots__` is all
+        # this class has, and the descriptor materialiser
+        # (`engine/parser.py`) builds one through `__new__` without `__init__`.
+        #
+        # Guarded by `self.filters` because the fill is a *one-off* cost and the
+        # row that pays it is the one with no filters to win back: `{{ var }}`
+        # pays an `AttributeError`, an import and a call it never uses. Whether
+        # that shows depends on the mode — `render` compiles once and hides it,
+        # `parse` compiles every iteration and does not: without this guard,
+        # `real-world/large` parse went 2900 -> 3114/3469 us, render unmoved.
+        if self.filters:
+            try:
+                names = self._rust_names
+            except AttributeError:
+                from django_rust_templates.host import django_own_filter_names
+
+                names = self._rust_names = django_own_filter_names(self.filters)
         for func, args in self.filters:
             arg_vals = []
             for lookup, arg in args:
@@ -820,13 +851,14 @@ class FilterExpression:
             # running them here as well would apply `@stringfilter`'s coercion
             # and `mark_safe` twice. Decided by handle identity, so a
             # `{% load %}`ed filter that merely shares a name keeps this arm.
+            # The decision itself was made in the prologue above, once per
+            # expression; `names` is its result.
             from django_rust_templates.host import (
-                django_own_filters,
                 effective_autoescape,
                 effective_use_tz,
             )
 
-            if (builtin_name := django_own_filters().get(func)) is not None:
+            if (builtin_name := names.get(func)) is not None:
                 # Upstream's *conditionality*, not its order: each attribute is
                 # read only when its own flag is set, and the two flags are
                 # disjoint — measured at 6.0.9, 2 filters set `expects_localtime`

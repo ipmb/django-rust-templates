@@ -622,10 +622,10 @@
       like rather than three different templates — and the harness prints the engine it
       built, the extension it loaded and which profile built it, refusing to print a table
       for any other engine. Measured 2026-10-09 local, the day the report stamps its run in
-      UTC (2026-10-10 04:02): the port is <b>1.36× slower at render and
-      1.35× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
-      run 1.26×–1.45×), and the worst row in the corpus is compile of a template that is
-      almost nothing but the call — <b>2.21×</b>, 8.64 µs against stock's 3.91 µs. Compatibility has
+      UTC (2026-10-10 04:32): the port is <b>1.28× slower at render and
+      1.30× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
+      run 1.23×–1.37×), and the worst row in the corpus is compile of a template that is
+      almost nothing but the call — <b>2.22×</b>, 8.72 µs against stock's 3.93 µs. Compatibility has
       been the priority throughout, and the measurement is published here rather than only
       the number that would flatter it. <b>Every chart, tile and table block states which
       way "better" runs</b>, and the word is read from the payload (<code>bench.py</code>'s
@@ -673,7 +673,53 @@
       1.72 µs — because the hoisted set is read only on the compile path. The two compile
       figures are different estimators and are quoted apart deliberately: the report's
       <code>parse</code> mode is compile <i>and</i> render, so the ratio it prints for an
-      empty template is about half the compile-only one.
+      empty template is about half the compile-only one. The table below is a single
+      unpaired run, and it quotes slightly different digits for the same rows than a
+      before-and-after pair does; the two are different statistics and are not meant to
+      reconcile.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>The filter-routing answer is now bound once per expression, not once per
+      application.</b> Every filter application asked the same question — is this handle one
+      of ours? — and asked it by calling an accessor that re-derives and identity-checks its
+      six source registries on every call: <b>1.074 µs</b> each time, and a real-world page
+      asks it 65 times in one render. Nothing
+      in the answer depends on the argument, the value, or the context, only on the set of
+      handles in the expression, so it is now computed on the expression's first
+      <code>resolve</code> and kept in a fifth slot beside Django's four. That one site is
+      what makes it work for both construction routes: the template compiler calls
+      <code>FilterExpression.__init__</code>, while the Rust-side descriptor materialiser
+      builds its objects with <code>__new__</code> and never calls <code>__init__</code> at
+      all — and <code>__init__</code> is deliberately left alone, since it sits inside a
+      function the transcription harness executes, where an added line would compare Rust
+      against Rust.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>It is a win on the hot path and it was a loss on the cold one, until the fill was
+      guarded.</b> Measured as a same-harness A/B — two runs on each side of the commit, one
+      machine, the extension's sha256 confirmed equal before and after, release build —
+      <code>micro/filter</code> render fell <b>5.5/5.3 → 4.1/4.0 µs</b>,
+      <code>real-world/normal</code> <b>639.6/617.3 → 564.5/559.6 µs</b> and
+      <code>real-world/complex</code> <b>1311.6/1296.4 → 1199.4/1186.0 µs</b>, against a
+      Django control that did not move. But the report's two modes are not one instrument
+      here: <code>render</code> compiles a template once and renders it repeatedly, while
+      <code>parse</code> compiles a fresh one every iteration, so a cost paid once per
+      expression is paid once per <i>render</i> in the first and once per <i>iteration</i> in
+      the second. Measured in that second mode, <code>real-world/large</code> — ~300
+      expressions and not one filter — went <b>2900 → 3114/3469 µs</b> while its render row
+      did not move at all, which is the signature of a per-compile cost, and
+      <code>micro/variable</code> parse rose <b>5.7%</b>. Both are flat again now that the
+      prologue runs only <code>if self.filters</code>: a filter-free expression pays a truth
+      test, which is what it paid before. <b>One row is still slower and is stated rather
+      than hidden</b> — a <i>single</i>-filter expression in <code>parse</code> mode
+      (<code>micro/filter</code> parse, <b>+1.9%</b>), because the fill's import and slot
+      miss cost about what the one accessor call they replace did. The win is on the hot
+      path, where the answer is kept, and on expressions carrying more than one filter.
+      The reviewer's companion suggestion — hoist the import out of the same loop —
+      was <b>not</b> taken: it saves <code>n-1</code> <code>sys.modules</code> hits on an
+      <code>n</code>-filter expression, so nothing at all on the common one-filter case,
+      and a reviewer's identical note was measured and reverted once already, which this
+      repository's transcription guard records.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>That figure holds only for an optimised build, and saying which build is now part
