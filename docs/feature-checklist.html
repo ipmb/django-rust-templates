@@ -735,8 +735,10 @@
       the Rust escape the builtin <code>escape</code> filter already used — and takes the
       slow path unchanged for everything it declines.
       Measured as a same-harness A/B in which <b>only <code>engine/base.py</code>
-      differs</b> (the control is <code>HEAD</code>'s file, restored afterwards by copy, so
-      the tree is untouched and no <code>git checkout</code> is involved; the extension is
+      differs</b> (the control is that file at <code>8d1e74b</code> — named, not
+      <code>HEAD</code>, because <code>HEAD</code> moved the moment this slice was committed
+      — restored afterwards by copy, so the tree is untouched and no
+      <code>git checkout</code> is involved; the extension is
       the same build on both sides): <code>micro/variable</code> render
       <b>3.482 → 2.807 µs</b> and <code>micro/escape</code> <b>3.485 → 2.793</b> — the
       0.68 µs per variable §1.3b predicted, and 89% of what it called removable —
@@ -748,6 +750,14 @@
       <code>parse</code> — the inverse of the filter-routing row above. The port now
       <b>beats stock Django on <code>real-world/normal</code> render</b> (0.95×) and ties it
       on <code>large</code> (1.00×).
+      On §1.2's own per-variable instrument — <b>rebuilt</b>, because the copy the review
+      kept under <code>.review/m19-measurements/</code> no longer exists — <b>the slice's
+      number finally sits beside §2's prediction</b>: <b>1.387 (N=50) / 1.407 (N=200) µs
+      per variable before, 0.731 / 0.731 after</b> (a second run on the same commit gave
+      0.758 / 0.757, so the slice is −47% ± 2 pts), against a predicted <b>0.34 µs</b>.
+      <b>~0.39 µs of the gap remains — 53% of it.</b> Stock is flat at 1.077 either way,
+      so ours/stock on this instrument moves <b>1.28× → 0.68×</b>: the port now beats
+      stock per variable, where before this slice it lost.
       <b>The factor that is left is not overhead.</b> On a template that renders nothing the
       port is 1.73 µs against Jinja2's 3.45 µs, yet Jinja2 renders every whole page
       <b>2.4×–3.4× faster</b> — so the remaining gap is per-node work in the Python walk,
