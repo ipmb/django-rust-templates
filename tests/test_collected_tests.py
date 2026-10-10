@@ -766,7 +766,41 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # both entries and `{{ forloop }}` would still print the dict.
 #
 # Counts at close: 518 collected, proxy and discovery agreeing.
-PINNED = 518
+#
+# 518 → 532 is **+14**, and it is this slice's — §5.5's *third* cost lever, which
+# transcribes `BaseContext.__getitem__`'s upward search into the Rust walk behind a
+# per-use guard, and which the record in `.review/m19-measurements/root-read.md`
+# prices. What the fourteen rows are for is the one thing a transcription is
+# uniquely bad at: disagreeing with the thing it transcribes while everything stays
+# green. It is the same function on both sides, so **no input distinguishes "Rust
+# answered" from "the method answered"** — the instrument has to be a Python frame.
+# `tests/test_loop_read_guard.py` counts entries into `BaseContext.__getitem__`
+# with a `sys.setprofile` hook: zero for a root read and zero for a loop-variable
+# read, and **non-zero on the same template, context and helper with one class
+# attribute moved**. That last row is the control and it is the one that matters,
+# because a hook that never fires and a fast path that never runs print the same
+# zero.
+#
+# Seven of the rest are the ways the transcription could be wrong, each with
+# Django's own method as the reference for both halves: a moved class attribute
+# deciding the answer, a subclass override, an upward search past a layer that does
+# not hold the key, the innermost layer winning, a non-`dict` layer, and a key no
+# layer holds being a miss rather than an error. The seventh is the one no input
+# would have caught unaided, and the reason membership and subscription go through
+# the *object protocol* rather than `PyDict::contains`/`::get_item`: a `dict`
+# subclass that overrides `__contains__` to claim a key it does not hold reaches
+# `__missing__` through Django's `d[key]` and answers `'MISSING-x'`, where the raw C
+# lookup answers `''`. A subclass defining only `__missing__` does *not* separate
+# them, which is why the row builds the disagreement instead of reasoning about it.
+#
+# The fourteenth cannot run beside the others, and that is its whole content: a pin
+# captured lazily on the Rust side would have been taken by the first render in
+# this process, so `PinSoundnessProcessTests` moves the class attribute in a **fresh
+# interpreter**, before anything renders, and expects `REBOUND`. `1` is the failure
+# reading, and it is what the unsound spelling prints.
+#
+# Counts at close: 532 collected, proxy and discovery agreeing.
+PINNED = 532
 
 
 def collected() -> unittest.TestSuite:

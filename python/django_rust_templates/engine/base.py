@@ -1405,3 +1405,29 @@ def token_kwargs(bits, parser, support_legacy=False):
                 return kwargs
             del bits[:1]
     return kwargs
+
+
+# ---------------------------------------------------------------------------
+# `BaseContext.__getitem__`, pinned for the Rust walk's root lookup.
+#
+# `PyTarget::get_item` in `crates/template-py/src/lib.rs` reimplements that
+# method's upward search — the `reversed(self.dicts)` walk, membership before
+# subscription — and enters it only while `type(context).__getitem__` *is* the
+# function bound below. So this line has to be the function as it stood **before
+# any code outside this package could rebind it**, and where it sits is the whole
+# of that claim. Capture the same attribute lazily, on the Rust side, and a
+# process that rebinds `BaseContext.__getitem__` before its first render pins the
+# *replacement*, after which the guard licenses the transcribed body and answers a
+# lookup the class no longer performs — silently, and green everywhere.
+#
+# Reading this name requires importing this module, and every route to
+# `BaseContext` runs through this module's import of it, so the binding below
+# happens *inside* the statement that hands the class to whoever means to rebind
+# it. The pin therefore cannot be late. It cannot be early either: the import it
+# reads is 60 lines above.
+#
+# **At end of file on purpose.** Every `COMPARED_PATH["base.py"]` span in
+# `scripts/check_transcriptions.py` is a literal line range over this file, and the
+# highest ends at 1407 — `token_kwargs`, this file's last line until this block was
+# appended under it. A binding at 1408 moves no span; one above 1407 re-keys all.
+BASE_CONTEXT_GETITEM = BaseContext.__getitem__

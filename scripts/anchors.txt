@@ -42,20 +42,20 @@ crates/template-py/src/filters.rs:311-320	crates/template-py/src/filters.rs	311	
 crates/template-py/src/filters.rs:958	crates/template-py/src/filters.rs	958	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
 crates/template-py/src/filters.rs:1833-1841	crates/template-py/src/filters.rs	1833	1841	match args.len()	-
 crates/template-py/src/filters.rs:1903-1906	crates/template-py/src/filters.rs	1903	1906	host.take_raised()	-
-crates/template-py/src/lib.rs:147	crates/template-py/src/lib.rs	147	147	fn filter_flags	-
-crates/template-py/src/lib.rs:852	crates/template-py/src/lib.rs	852	852	fn if_condition_to_py	-
+crates/template-py/src/lib.rs:147	crates/template-py/src/lib.rs	147	-	fn filter_flags	-
+crates/template-py/src/lib.rs:852	crates/template-py/src/lib.rs	852	-	fn if_condition_to_py	-
 crates/template-py/src/lib.rs:1289	crates/template-py/src/lib.rs	1289	-	fn python_host_error(py: Python<'_>, error: &PyErr) -> Error {	-
 crates/template-py/src/lib.rs:1490	crates/template-py/src/lib.rs	1490	-	.map_err(|error| python_host_error(py, &error))?;	-
 crates/template-py/src/lib.rs:1612	crates/template-py/src/lib.rs	1612	-	.map_err(|error| python_host_error(host.py(), &error))?;	-
 crates/template-py/src/lib.rs:1687	crates/template-py/src/lib.rs	1687	-	.map_err(|error| python_host_error(host.py(), &error))?;	-
-crates/template-py/src/lib.rs:2124	crates/template-py/src/lib.rs	2124	2124	Python::attach(|py| {	-
-crates/template-py/src/lib.rs:2134	crates/template-py/src/lib.rs	2134	2134	let result = Python::attach(|py| {	-
-crates/template-py/src/lib.rs:2145	crates/template-py/src/lib.rs	2145	2145	Python::attach(|py| self.value.bind(py).getattr(bit)	-
-crates/template-py/src/lib.rs:2150	crates/template-py/src/lib.rs	2150	2150	let result = Python::attach(|py| -> PyResult<Py<PyAny>> {	-
-crates/template-py/src/lib.rs:2171	crates/template-py/src/lib.rs	2171	2171	Python::attach(|py| self.dir(py, bit))	-
-crates/template-py/src/lib.rs:2717-2718	crates/template-py/src/lib.rs	2717	2718	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
-crates/template-py/src/lib.rs:2774-2779	crates/template-py/src/lib.rs	2774	2779	fn resolve_lookups(	resolve_components(py, &lookups, context)
-crates/template-py/src/lib.rs:4597	crates/template-py/src/lib.rs	4597	-	/// `django_rust_templates.engine.base.render_value_in_context`, cached once.	-
+crates/template-py/src/lib.rs:2206	crates/template-py/src/lib.rs	2206	-	Python::attach(|py| {	-
+crates/template-py/src/lib.rs:2215	crates/template-py/src/lib.rs	2215	-	fn get_item(&self, bit: &str) -> Step {	-
+crates/template-py/src/lib.rs:2231	crates/template-py/src/lib.rs	2231	-	Python::attach(|py| self.value.bind(py).getattr(bit)	-
+crates/template-py/src/lib.rs:2236	crates/template-py/src/lib.rs	2236	-	let result = Python::attach(|py| -> PyResult<Py<PyAny>> {	-
+crates/template-py/src/lib.rs:2257	crates/template-py/src/lib.rs	2257	-	Python::attach(|py| self.dir(py, bit))	-
+crates/template-py/src/lib.rs:2828-2829	crates/template-py/src/lib.rs	2828	2829	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
+crates/template-py/src/lib.rs:2885-2890	crates/template-py/src/lib.rs	2885	2890	fn resolve_lookups(	resolve_components(py, &lookups, context)
+crates/template-py/src/lib.rs:4708	crates/template-py/src/lib.rs	4708	-	/// `django_rust_templates.engine.base.render_value_in_context`, cached once.	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-
@@ -247,6 +247,9 @@ base.py:1200	django/template/base.py	1200	-	-	-
 base.py:1202	django/template/base.py	1202	-	kwargs[key] = parser.compile_filter(value)	-
 base.py:1203-1206	django/template/base.py	1203	1206	-	-
 django/template/context.py:5	django/template/context.py	5	-	_builtin_context_processors = ("django.template.context_processors.csrf",)	-
+context.py:14	django/template/context.py	14	-	class ContextDict(dict):	-
+context.py:88-91	django/template/context.py	88	91	raise KeyError(key)	-
+context.py:89-90	django/template/context.py	89	90	-	-
 defaultfilters.py:6	django/template/defaultfilters.py	6	-	from decimal import ROUND_HALF_UP, Context, Decimal, InvalidOperation, getcontext	-
 defaultfilters.py:14	django/template/defaultfilters.py	14	-	-	-
 defaultfilters.py:38-52	django/template/defaultfilters.py	38	52	def stringfilter(func):	return _dec
@@ -845,6 +848,7 @@ django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	29
 django_suite/run.py:85	django_suite/run.py	85	-	-	-
 django_suite/template_tests/syntax_tests/test_for.py:334	django_suite/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 django_suite/template_tests/test_partials.py:14	django_suite/template_tests/test_partials.py	14	-	engines["django"]	-
+engine/base.py:61	python/django_rust_templates/engine/base.py	61	-	from .context import BaseContext	-
 engine/base.py:819-832	python/django_rust_templates/engine/base.py	819	832	except VariableDoesNotExist:	-
 engine/base.py:868-874	python/django_rust_templates/engine/base.py	868	874	for func, args in self.filters:	-
 python/django_rust_templates/engine/base.py:889	python/django_rust_templates/engine/base.py	889	-	names.get(func)	-

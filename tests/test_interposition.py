@@ -423,7 +423,7 @@ class InterpositionTests(unittest.TestCase):
         # region of the file that class occupies, while this one is in the render
         # leaf a thousand lines below it — a reader who saw three M19 ops and
         # assumed one commit had made them all in one place would be wrong, and
-        # the last position in this list is what says so.
+        # the position — last, until step 5.5 appended one below it — is what says so.
         #
         # It is the first op in this list that lands inside a function the
         # compared-path table does not name (`render_value_in_context`), and that
@@ -475,8 +475,8 @@ class InterpositionTests(unittest.TestCase):
         # **They arrive as the twelfth and thirteenth entries of the list this row
         # asserts, and the nine matched lines at ours 1199-1207 are why the pair
         # reads as adjacent here.** That list is the **differing** opcodes —
-        # `[op for op in matcher.get_opcodes() if op[0] != "equal"]`, fourteen of
-        # the twenty-nine `difflib` returns for this pair of files — and every
+        # `[op for op in matcher.get_opcodes() if op[0] != "equal"]`, fifteen of
+        # the thirty `difflib` returns for this pair of files — and every
         # position named in this comment is a position in *it*, never in
         # `get_opcodes()`. The distinction is worth the sentence because the two
         # counts differ by a factor of two and only one of them is asserted
@@ -493,11 +493,38 @@ class InterpositionTests(unittest.TestCase):
         # two bands rather than shifting it as one — +18 for the two functions
         # above the second region, +60 below it.
         #
-        # The render leaf's `delete`, last in this list until now, is pushed from
-        # position twelve to fourteen. It is *still* last, so the claim the
-        # paragraph above makes about the last position holds, and it is the
-        # pushed-back entry rather than either of the newest two that shows the
-        # pair landed **above** it in the file rather than beside it.
+        # The render leaf's `delete` is pushed from position twelve to fourteen by
+        # the pair. It held the last position in this list until the read pin
+        # below took it, and it is the pushed-back entry rather than either of the
+        # newest two that shows the pair landed **above** it in the file rather
+        # than beside it.
+        #
+        # **The fifteenth entry is M19 step 5.5 lever 3, it is the last, and it is
+        # the first op here that sits at the end of *our* file.** `engine/base.py`
+        # gains `BASE_CONTEXT_GETITEM = BaseContext.__getitem__` at ours 1433, so
+        # the run is ours 1408-1433 against upstream's 1207: twenty-six lines, one
+        # statement and twenty-five that are comment and blank. It is ours alone,
+        # so it is a `delete`, and `equal` moves by nothing for the fourth time in
+        # this sequence and for the same reason — an insertion with no matched line
+        # inside it cannot take a line out of an equal block. Re-measured: ours is
+        # 1433 lines, 315 of them differ, upstream's 1207 with 89, and
+        # 1433-315 = 1207-89 = 1118.
+        #
+        # Its *position* is the assertion and not a fact about the edit's size. The
+        # binding has to be in this module, because the name is only resolvable by
+        # importing it and `engine/base.py:61` — `from .context import BaseContext` —
+        # is the statement that hands
+        # `BaseContext` to whoever means to rebind it — but it has to be *below
+        # every declared span*, and those are literal line ranges: the highest ends
+        # at 1407, `token_kwargs`'s, which was this file's last line. A binding one
+        # line higher would have re-keyed that span and every other one under it in
+        # `scripts/check_transcriptions.py`. So this is the one edit in the
+        # sequence whose placement was chosen by the *guard's* arithmetic rather
+        # than by the code's, and the list's last position is what records it: a
+        # reader who found this op at the head would be looking at an edit in the
+        # middle of the file. It is also the first entry here that no re-alignment
+        # could have moved — the appended text shares no line with upstream's, so
+        # there is nothing for `difflib` to pair it against.
         self.assertEqual(
             [op[0] for op in differing],
             [
@@ -512,6 +539,7 @@ class InterpositionTests(unittest.TestCase):
                 "delete",
                 "delete",
                 "replace",
+                "delete",
                 "delete",
                 "delete",
                 "delete",

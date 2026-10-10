@@ -346,16 +346,24 @@ def _heroes(grouped: dict, modes: list[str], shared: set, metrics: dict, engines
     return "".join(out)
 
 
-def _winners(grouped: dict, family: str, mode: str) -> list:
-    """The per-engine records of every row in one (family, mode) that >=2 engines ran."""
+def _winners_pair(grouped: dict, family: str, mode: str) -> list:
+    """`(workload_key, per-engine records)` for every row in one (family, mode) with >=2 engines.
+
+    The key is carried because a sentence that says *which* page went the other way
+    has to name it — `_winners` drops it, which is all the pooled count below needs
+    and not enough for the tile in `_fastest_tile`.
+    """
     out = []
     for (fam, m), by_workload in grouped.items():
         if fam != family or m != mode:
             continue
-        for per in by_workload.values():
-            if len(per) >= 2:
-                out.append(per)
+        out.extend((key, per) for key, per in by_workload.items() if len(per) >= 2)
     return out
+
+
+def _winners(grouped: dict, family: str, mode: str) -> list:
+    """The per-engine records of every row in one (family, mode) that >=2 engines ran."""
+    return [per for _key, per in _winners_pair(grouped, family, mode)]
 
 
 def _fastest_tile(grouped: dict, metrics: dict) -> str:
@@ -366,29 +374,50 @@ def _fastest_tile(grouped: dict, metrics: dict) -> str:
     `micro` is 10 one-construct templates, and `parse` answers the opposite way to
     `render`, because Jinja2 compiles to Python source and Django does not. Pooled,
     the count reads "django 19, jinja2 7" — a headline that a reader takes as
-    "Django is faster", while Jinja2 wins **every whole-page render**, by 2.5x-3.3x.
+    "Django is faster", while Jinja2 won **every whole-page render of that run**,
+    by 2.5x-3.3x. The tense is deliberate: it was true of the run this paragraph was
+    written from, and step 5.5's third lever has since taken one of those three pages
+    — see the paragraph below, which is the same defect in the same tile.
 
     Both sentences are true and only one of them is what a reader wants, so the
     tile states the one that answers "which engine should I use to render a page",
     and the note says what the pooled count is and why it says `django`. A number
     that misleads is worse than a number that is absent, and the honest version of
     this one is a *scope*, not a bigger sample.
+
+    **M19 step 5.5's third lever broke the sentence above, and the defect is worth
+    recording because it was invisible for as long as it lasted.** The note read
+    "`{leader}` wins **every one** of these {n} pages", where `leader` is whichever
+    engine won the most. That sentence is true only while the leader also wins all
+    of them — a property of *the run*, not of the code — and it was true of every
+    run until the read lever landed and put `real-world/normal` under the port. The
+    tile then printed `jinja2 2/3` beside a note claiming jinja2 won every one of
+    the three: a page whose own two halves disagreed, which is what a count derived
+    from one quantity and a claim written from another looks like. The clause is
+    read off `won_by` now, so it cannot say "every" while the value says 2/3.
     """
-    page = _winners(grouped, "real-world", "render")
+    page: list[tuple[str, dict]] = []
+    for (fam, m), by_workload in grouped.items():
+        if fam == "real-world" and m == "render":
+            page.extend((key, per) for key, per in by_workload.items() if len(per) >= 2)
     if not page:
         return ""
     wins: dict[str, int] = {}
-    for per in page:
+    won_by: dict[str, str] = {}
+    for key, per in page:
         best = min(per.values(), key=lambda r: r["best_us"])
         wins[best["engine"]] = wins.get(best["engine"], 0) + 1
+        won_by[key] = best["engine"]
     leader = min(wins, key=lambda e: (-wins[e], e))
+    lead = wins[leader]
+    lost = sorted(key for key, engine in won_by.items() if engine != leader)
 
     # The ratio the leader actually wins by, against the control, when the leader is
     # jinja2 and the control ran. Computed rather than asserted, and skipped rather
     # than guessed if either is absent.
     ratios = sorted(
         per["jinja2"]["best_us"] / per["django"]["best_us"]
-        for per in page
+        for _key, per in page
         if leader == "jinja2" and "jinja2" in per and "django" in per
     )
     spread = (
@@ -399,14 +428,28 @@ def _fastest_tile(grouped: dict, metrics: dict) -> str:
 
     pooled: dict[str, int] = {}
     pooled_rows = 0
-    for per in _winners(grouped, "micro", "render") + _winners(grouped, "micro", "parse") + page + _winners(grouped, "real-world", "parse"):
+    for _key, per in (
+        _winners_pair(grouped, "micro", "render")
+        + _winners_pair(grouped, "micro", "parse")
+        + page
+        + _winners_pair(grouped, "real-world", "parse")
+    ):
         pooled_rows += 1
         best = min(per.values(), key=lambda r: r["best_us"])
         pooled[best["engine"]] = pooled.get(best["engine"], 0) + 1
     pooled_leader = min(pooled, key=lambda e: (-pooled[e], e))
 
+    if lost:
+        held = ", ".join(f"{key} to {won_by[key]}" for key in lost)
+        clause = (
+            f"{leader} wins {lead} of these {len(page)} pages{spread}, "
+            f"and {held}"
+        )
+    else:
+        clause = f"{leader} wins every one of these {len(page)} pages{spread}"
+
     note = (
-        f"{leader} wins every one of these {len(page)} pages{spread}. Counting "
+        f"{clause}. Counting "
         f"winners over the shared corpus instead reads “{pooled_leader} "
         f"{pooled[pooled_leader]} of {pooled_rows}”: that pools in the parse rows, "
         f"where the answer is the other way round, and the micro rows, which the "
@@ -414,7 +457,7 @@ def _fastest_tile(grouped: dict, metrics: dict) -> str:
         f"rows are outside it, because Jinja2 cannot render them."
     )
     return _tile(
-        f"{leader} {wins[leader]}/{len(page)}",
+        f"{leader} {lead}/{len(page)}",
         "fastest on whole-page renders — real-world / render",
         note,
         metrics["render"]["better"],

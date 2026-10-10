@@ -2113,6 +2113,88 @@ impl PyTarget {
         };
         names.contains(bit).unwrap_or(false)
     }
+
+    /// `BaseContext.__getitem__` (`context.py:88-91`) — `for d in reversed(self.dicts):`,
+    /// then `if key in d: return d[key]`, else `raise KeyError(key)`. The upward
+    /// search, transcribed for the root target only.
+    ///
+    /// `Ok(None)` means *"use the real thing"*, and that is the whole safety
+    /// argument: every path that is not certain is the slow path, and the slow
+    /// path is Django's own code, run by the caller. The transcription below is
+    /// reached only when all of
+    ///
+    /// 1. this target **is** the context object (`is`: the root of a `resolve` is
+    ///    the object the walk was handed, so this is exactly "we are at the root"),
+    /// 2. `type(context).__getitem__` **is** `BASE_CONTEXT_GETITEM`, read here on
+    ///    every use and never cached — `Context.__getitem__` can be rebound while
+    ///    a body runs, and `engine/base.py` binds that name at import time and
+    ///    argues why that is the only moment it can be trusted,
+    /// 3. `context.dicts` is a `list`, and
+    /// 4. every layer walked over is a `dict` or a `dict` subclass.
+    ///
+    /// Condition 4 is about `ContextDict` — `class ContextDict(dict):`
+    /// (`context.py:14`) — the subclass `push()` appends for `{% with %}` and
+    /// `{% include %}`: a subclass is still Django's `d[key]`, so it is admitted. A
+    /// layer that is not a dict at all is not.
+    ///
+    /// **Membership before subscription**, and both through the *object protocol*
+    /// rather than the raw `PyDict` calls — because for a `dict` subclass the two
+    /// readings can disagree, and the way to see which is to try to build the
+    /// disagreement.
+    ///
+    /// A subclass defining `__missing__` and nothing else does **not** produce one:
+    /// `if key in d:` is tested before `return d[key]` (`context.py:89-90`), so a miss
+    /// is never subscribed to, and `__missing__` is only reached from a subscription.
+    /// Measured, on such a subclass: both this walk and Django raise `KeyError`. What
+    /// does produce one is a subclass that also overrides `__contains__` to claim a key
+    /// it does not hold — membership then passes, the subscription misses, and `d[key]`
+    /// reaches `__missing__` through CPython's `dict_subscript` (`dict.__getitem__` *is*
+    /// that function) while `PyDict_GetItemWithError` would not. Measured, on
+    /// `class C(dict): __contains__ -> True, __missing__ -> "MISSING-" + key`: Django
+    /// answers `'MISSING-x'`, and so must this.
+    ///
+    /// `PyObject_Contains`/`PyObject_GetItem` are what `in` and `[]` compile to, so
+    /// routing both operations through them leaves that distinction nowhere to
+    /// arise. `key` is always a `str`, because `LookupTarget::get_item` takes `&str`.
+    fn root_item(&self, py: Python<'_>, bit: &str) -> PyResult<Option<Py<PyAny>>> {
+        let value = self.value.bind(py);
+        if !value.is(self.context.bind(py)) {
+            return Ok(None);
+        }
+        let Ok(current) = value.get_type().getattr(intern!(py, "__getitem__")) else {
+            return Ok(None);
+        };
+        if !current.is(base_context_getitem(py)?) {
+            return Ok(None);
+        }
+        let Ok(dicts) = value.getattr(intern!(py, "dicts")) else {
+            return Ok(None);
+        };
+        let Ok(dicts) = dicts.cast::<PyList>() else {
+            return Ok(None);
+        };
+        let key = PyString::new(py, bit);
+        // `reversed(self.dicts)` is a `list_reverseiterator`, and that object
+        // re-reads the list's length on every step: a layer whose `__contains__`
+        // shortens the list ends the loop early and Django raises `KeyError`. The
+        // length is therefore read here per step too — a snapshot taken once at
+        // the top would walk indices the iterator would have stopped at.
+        let mut index = dicts.len();
+        while index > 0 {
+            index -= 1;
+            if index >= dicts.len() {
+                return Ok(None);
+            }
+            let layer = dicts.get_item(index)?;
+            if !layer.is_instance_of::<PyDict>() {
+                return Ok(None);
+            }
+            if layer.contains(&key)? {
+                return Ok(Some(layer.get_item(&key)?.unbind()));
+            }
+        }
+        Err(PyKeyError::new_err(bit.to_owned()))
+    }
 }
 
 impl LookupTarget for PyTarget {
@@ -2131,11 +2213,15 @@ impl LookupTarget for PyTarget {
     }
 
     fn get_item(&self, bit: &str) -> Step {
-        let result = Python::attach(|py| {
-            self.value
-                .bind(py)
-                .get_item(bit)
-                .map(|found| found.unbind())
+        let result = Python::attach(|py| -> PyResult<Py<PyAny>> {
+            match self.root_item(py, bit)? {
+                Some(found) => Ok(found),
+                None => self
+                    .value
+                    .bind(py)
+                    .get_item(bit)
+                    .map(|found| found.unbind()),
+            }
         });
         self.step(result, Arm::Item)
     }
@@ -2352,6 +2438,31 @@ static BASE_CONTEXT: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 
 fn base_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
     BASE_CONTEXT.import(py, "django_rust_templates.engine.base", "BaseContext")
+}
+
+/// `BaseContext.__getitem__`, as `engine/base.py` bound it **during its own
+/// import**.
+///
+/// **Read from that module rather than captured from the class here, and the
+/// difference is the whole of this guard's soundness.** `PyTarget::root_item`
+/// licences its Rust transcription of the upward search by comparing against this
+/// object, so it has to be the function as it stood *before any code outside the
+/// package could rebind it*. Both spellings resolve once per process, and the one
+/// this is not — `type(context).__getitem__` taken on first use — can be taken
+/// *after* a project rebinds the attribute, and would then license the transcribed
+/// body against a class that no longer runs it. What is cached here is a name that
+/// was already correct when it was bound, and the region in `engine/base.py` argues
+/// why no project can reach the class before that binding happens.
+/// `tests/test_loop_read_guard.py` is the control: it moves the class attribute and
+/// asserts that the walk stops taking this path.
+static BASE_CONTEXT_GETITEM: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+fn base_context_getitem(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
+    BASE_CONTEXT_GETITEM.import(
+        py,
+        "django_rust_templates.engine.base",
+        "BASE_CONTEXT_GETITEM",
+    )
 }
 
 /// Django's `VariableDoesNotExist`, cached for the same reason.

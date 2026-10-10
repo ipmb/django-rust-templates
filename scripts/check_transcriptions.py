@@ -1316,6 +1316,35 @@ DECLARED = {
             # in the guard as a single normalization of the compared package prefix
             # (task #23), and until that lands the absolute import stays and this
             # file's diff keeps its pre-M18.1 shape.
+            #
+            # M19 step 5.5's, and the first region in this file that upstream has no
+            # counterpart for at all: a pure insertion at end of file, hence `None`
+            # on the upstream side. It pins `BaseContext.__getitem__` for the Rust
+            # walk's root lookup, and **the insertion point is the whole of what
+            # makes the pin sound** — the comment in the file argues the ordering,
+            # which is a fact about imports rather than about this table. What
+            # belongs here is the two reasons the *guard* reads it this way:
+            #
+            # * **At the end, so no span above moves.** Every `COMPARED_PATH["base.py"]`
+            #   entry is a literal line range, and the last of them — `token_kwargs`'s
+            #   — ends on this file's final line. An insertion below every span
+            #   re-measures none of them, which is the same property `loader_tags.py`'s
+            #   two `TRANSFORMS` rows were chosen for and the reason a module-level
+            #   helper was withdrawn there.
+            # * **Outside clause (4)'s reach, and that is a measurement.** The
+            #   region's span starts after the last `COMPARED_PATH` entry, so no
+            #   function a parity harness executes is covered by it, and clause (2) is
+            #   the only thing standing between that one line and nothing at all.
+            #   Which is the honest statement: the harness would not notice if this
+            #   line were deleted, because nothing it compares reads it. What would
+            #   notice is `tests/test_loop_read_guard.py`, which asserts the Rust
+            #   fast path is *not* taken once the class attribute is moved — and that
+            #   test is the control for this line, not the guard.
+            (
+                (1408, 1433),
+                None,
+                "BASE_CONTEXT_GETITEM = BaseContext.__getitem__",
+            ),
         ],
     ),
     "smartif.py": (
