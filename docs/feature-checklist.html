@@ -622,10 +622,10 @@
       like rather than three different templates — and the harness prints the engine it
       built, the extension it loaded and which profile built it, refusing to print a table
       for any other engine. Measured 2026-10-09 local, the day the report stamps its run in
-      UTC (2026-10-10 03:23): the port is <b>1.36× slower at render and
-      1.39× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
-      run 1.25×–1.47×), and the worst row in the corpus is compile of a template with no
-      nodes in it at all — <b>3.85×</b>, 14.9 µs against stock's 3.9 µs. Compatibility has
+      UTC (2026-10-10 03:54): the port is <b>1.38× slower at render and
+      1.40× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
+      run 1.27×–1.48×), and the worst row in the corpus is compile of a template with no
+      nodes in it at all — <b>3.74×</b>, 14.7 µs against stock's 3.9 µs. Compatibility has
       been the priority throughout, and the measurement is published here rather than only
       the number that would flatter it. <b>Every chart, tile and table block states which
       way "better" runs</b>, and the word is read from the payload (<code>bench.py</code>'s
@@ -635,6 +635,27 @@
       <i>Django is faster</i>, while <b>Jinja2 wins every whole-page render</b> at
       0.30×–0.41× stock's time. Both are true; <code>parse</code> is where they invert,
       because Jinja2 compiles to Python source and Django does not.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>The micro family's rows say how much of themselves is the call, because the old note
+      claimed one family where there are two.</b> Every row pays its engine's per-call
+      overhead before it does any template work, and the overheads are not equal: measured,
+      stock Django and the port are both <b>1.73 µs</b> on a template that renders nothing and
+      Jinja2 is <b>3.52 µs</b>. So <code>bench.py</code> measures that empty-template
+      <b>floor</b> per engine and mode, prints it, and every table cell carries its
+      <b>call share</b> — the floor as a share of that cell. The range settles the question
+      the old note answered wrongly: over the micro rows it runs <b>2%–100%</b>, so
+      <code>micro/text</code>, <code>variable</code>, <code>lookup</code>, <code>if</code>,
+      <code>filter</code> and <code>escape</code> are mostly a measurement of the call, while
+      <code>loop-text</code>, <code>loop-var</code>, <code>include</code> and
+      <code>extends</code> are a measurement of the construct — and on the real-world pages
+      it never reaches <b>5%</b> (0%–2% at render), i.e. those rows were never
+      overhead-dominated at all. The floor is
+      reported and <b>not</b> subtracted: a loop's own fixed setup is ~4.0 µs, not the 1.7 µs
+      the empty template measures, so subtracting the floor would leave ~2.3 µs of loop setup
+      inside a column claiming to be per-item work.
+      (Both numbers are computed from the payload the table prints, not typed into a caption —
+      the first draft of that caption said 51%–96% while the cells under it said 32%–100%.)
     </p>
     <p class="sub" style="margin-top:16px">
       <b>That figure holds only for an optimised build, and saying which build is now part

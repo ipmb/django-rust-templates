@@ -503,7 +503,13 @@ def workloads() -> list[Workload]:
 FAMILIES = ("micro", "real-world", "django-only")
 
 FAMILY_SUMMARY = {
-    "micro": "one construct per row, so a regression names itself. These are the smallest templates the engines can render, so their ratios are dominated by per-call overhead rather than by template work — read them as a regression detector, not as an engine verdict",
+    "micro": (
+        "one construct per row, so a regression names itself. It is two families and "
+        "the earlier note here claimed one: the single-node rows (text, variable, "
+        "lookup, if, filter, escape) are mostly a measurement of the render call, and "
+        "the loop, include and extends rows are a measurement of the construct. The "
+        "call share in the caption says where the split falls on this run"
+    ),
     "real-world": "whole pages, rendered by all three engines",
     "django-only": "the constructs outside the three-engine intersection, rendered by the two engines that have them",
 }

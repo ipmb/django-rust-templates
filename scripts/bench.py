@@ -284,6 +284,85 @@ def measure(
 MIN_ITERS = 5
 MAX_ITERS = 20000
 
+# The floor row's key. It is deliberately not in the corpus: a workload is a
+# *construct*, and this one renders nothing, so putting it in `workloads()` would
+# add a do-nothing row to every pooled count on the page — which is the defect the
+# fastest-engine tile was already fixed for once. It is measured here, beside the
+# rows, and reported as a number rather than as a row.
+FLOOR_KEY = "__floor__"
+FLOOR_ENTRY = "floor.html"
+
+
+def measure_floor(engines: list[str], repeats: int, target: float) -> dict:
+    """Per (mode, engine), what a `render` call costs when the template does nothing.
+
+    **This is the number that says whether a micro row is about its construct.**
+    Every row pays the engine's call overhead before it does any template work, and
+    the overheads are not equal between engines — measured at M19, stock Django and
+    this package are both ~1.72 us and Jinja2 is ~3.52 us, in the same process, on
+    the same three-method interface. A row whose whole cost is near that figure is a
+    measurement of the call; the report prints the share (`call N%`) beside every
+    cell so a reader can tell which rows those are instead of taking the family's
+    word for it.
+
+    **It is not subtracted from anything.** The subtraction is tempting and it is
+    wrong at the row level: a loop's fixed setup is *not* the empty template's cost.
+    Fitting `cost(n) = a + b*n` over 5/20/50 rows (`.review/m19-measurements/
+    micro_slope.py`) puts the loop's own intercept at ~4.0 us against the empty
+    template's ~1.7 us, so subtracting the floor would leave ~2.3 us of loop setup
+    inside a column that claims to be per-item. The floor is reported as itself.
+
+    Same instrument and same pin discipline as `run`: the count is calibrated on the
+    control, once per mode, and handed to every engine.
+    """
+    workload = bench_corpus.Workload(
+        FLOOR_KEY,
+        "floor",
+        "a template that renders nothing, so the row is the call",
+        {FLOOR_ENTRY: ""},
+        FLOOR_ENTRY,
+        {},
+        tuple(engines),
+        False,
+        "",
+    )
+    built: dict = {}
+    out: dict = {}
+    try:
+        for name in engines:
+            built[name] = bench_engines.build(name, workload.templates, {})
+        contexts = {name: built[name].context({}) for name in engines}
+        control = bench_engines.CONTROL
+        pins = {}
+        if control in built:
+            for mode in MODES:
+                pins[mode] = calibrate(
+                    built[control],
+                    workload,
+                    built[control].get(FLOOR_ENTRY),
+                    mode,
+                    contexts[control],
+                    target,
+                )
+        for mode in MODES:
+            out[mode] = {}
+            for name in engines:
+                engine = built[name]
+                out[mode][name] = measure(
+                    engine,
+                    workload,
+                    engine.get(FLOOR_ENTRY),
+                    mode,
+                    contexts[name],
+                    repeats,
+                    target,
+                    pin_iters=pins.get(mode),
+                )[0]
+    finally:
+        for engine in built.values():
+            engine.close()
+    return out
+
 
 def run(engines: list[str], repeats: int, target: float) -> list[dict]:
     """One result record per (row, mode, engine).
@@ -599,6 +678,7 @@ def main() -> int:
 
     records = run(engines, args.repeats, args.target, )
     verdicts = equality(records)
+    floor = measure_floor(engines, args.repeats, args.target)
 
     # The engine each column claims to be, checked against the class that built it:
     # a table is a claim about three engines, so which engine produced a column is the
@@ -612,6 +692,13 @@ def main() -> int:
             return 2
 
     print_table(records, verdicts, engines)
+
+    for mode in MODES:
+        cells = " ".join(f"{e} {floor[mode][e]:.3f}" for e in engines if e in floor[mode])
+        print(f"\nfloor [{mode}]: a template that renders nothing, microseconds per call")
+        print(f"              {cells}")
+    print("              a row's `call N%` in the table below is its cost divided by")
+    print("              its engine's floor, so a row near 100% measures the call.")
 
     detail = disagreement_detail(records, verdicts)
     if detail:
@@ -629,7 +716,7 @@ def main() -> int:
         print("\n".join(f"  {line}" for line in bad))
         return 2
 
-    payload = build_payload(records, verdicts, engines, args)
+    payload = build_payload(records, verdicts, engines, args, floor)
     if args.json:
         Path(args.json).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"\nwrote {args.json}")
@@ -641,7 +728,7 @@ def main() -> int:
     return 0
 
 
-def build_payload(records, verdicts, engines, args) -> dict:
+def build_payload(records, verdicts, engines, args, floor) -> dict:
     return {
         "meta": environment(),
         "native": native_artifact(),
@@ -666,6 +753,11 @@ def build_payload(records, verdicts, engines, args) -> dict:
         # report's charts and table so each one states its direction, rather than
         # carrying a caption someone wrote once (see `MODE_METRIC`).
         "metrics": {mode: MODE_METRIC[mode] for mode in MODES},
+        # Per (mode, engine), the cost of a template that renders nothing. Every
+        # cell's `call N%` is read from this, and it is the *only* thing on the page
+        # that separates a row's dispatch from its construct work. See
+        # `measure_floor` for why it is reported rather than subtracted.
+        "floor": floor,
         "families": {
             f: bench_corpus.FAMILY_SUMMARY[f] for f in bench_corpus.FAMILIES
         },

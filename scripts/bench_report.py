@@ -120,14 +120,18 @@ def _group(records: list[dict]) -> dict:
     return out
 
 
-def _ran_shared(group: dict) -> bool:
+def _ran_shared(group: dict, ran: list[str]) -> bool:
     """Whether every workload in this group was run by the whole engine set.
 
-    The engine count is read off the palette, which has exactly one hue per engine
-    and is not allowed to cycle: a fourth engine arriving without a fourth hue is a
-    chart that repaints a series, so the two must move together.
+    **The count comes from the payload, not from the palette.** It used to read
+    `len(SERIES_LIGHT)`, which is a presentation constant: one hue per engine and
+    not allowed to cycle, so the two move together *when the run has three engines*.
+    Under `--engines django,rust` they do not move together at all, and the palette
+    happily reported "the whole engine set" for a two-engine run — which is how the
+    agreement tile came out `0/0` over a corpus that had agreed everywhere, labelled
+    "three-engine rows". `ran` is what actually ran.
     """
-    return all(len(per) == len(SERIES_LIGHT) for per in group.values())
+    return all(len(per) == len(ran) for per in group.values())
 
 
 def _ticks(lo: float, hi: float) -> list[float]:
@@ -281,7 +285,12 @@ def _tile(value: str, label: str, note: str, direction: str = "") -> str:
     )
 
 
-def _heroes(grouped: dict, modes: list[str], shared: set, metrics: dict) -> str:
+def _count_word(n: int) -> str:
+    """`3` -> `three`, for a label that reads as a sentence rather than a report."""
+    return {1: "one", 2: "two", 3: "three", 4: "four"}.get(n, str(n))
+
+
+def _heroes(grouped: dict, modes: list[str], shared: set, metrics: dict, engines: list[str]) -> str:
     """The numbers that answer "how does ours compare", before any chart.
 
     Every tile says which way is better, in its own `note` and not only in the one
@@ -304,7 +313,8 @@ def _heroes(grouped: dict, modes: list[str], shared: set, metrics: dict) -> str:
                 _tile(
                     f"{_geomean(ratios):.2f}x",
                     f"ours vs stock Django — real-world / {mode}",
-                    f"geometric mean over {len(ratios)} pages; 1.00x is parity and "
+                    f"geometric mean over {len(ratios)} pages, unweighted, so the "
+                    f"smallest page counts once and no more; 1.00x is parity and "
                     f"below it we win",
                     metrics[mode]["better"],
                 )
@@ -312,18 +322,24 @@ def _heroes(grouped: dict, modes: list[str], shared: set, metrics: dict) -> str:
     out.append(_fastest_tile(grouped, metrics))
     agree = 0
     total = 0
+    n = len(engines)
     for path in shared:
         for per in grouped[path].values():
+            # **A row only one engine ran is not agreement.** The predicate below is
+            # a one-element set for such a row and reads true, so the guard is what
+            # keeps "they all agree" from meaning "only one of them spoke".
+            if len(per) < 2:
+                continue
             total += 1
             if len({r["sha256"] for r in per.values()}) == 1:
                 agree += 1
     out.append(
         _tile(
             f"{agree}/{total}",
-            "three-engine rows that byte-agree",
-            "every one of these rows is a row where three independent engines "
-            "produced the same bytes. The shared corpus is the measured syntax "
-            "intersection, not a preference",
+            f"{_count_word(n)}-engine rows that byte-agree",
+            f"every one of these rows is a row where {_count_word(n)} independent "
+            f"engines produced the same bytes. The shared corpus is the measured "
+            f"syntax intersection, not a preference",
             AGREEMENT_BETTER,
         )
     )
@@ -391,10 +407,11 @@ def _fastest_tile(grouped: dict, metrics: dict) -> str:
 
     note = (
         f"{leader} wins every one of these {len(page)} pages{spread}. Counting "
-        f"winners over the whole corpus instead reads “{pooled_leader} "
-        f"{pooled[pooled_leader]} of {pooled_rows}”: that pools in the `parse` "
-        f"rows, where the answer is the other way round, and the `micro` rows, which "
-        f"the family's own note explains."
+        f"winners over the shared corpus instead reads “{pooled_leader} "
+        f"{pooled[pooled_leader]} of {pooled_rows}”: that pools in the parse rows, "
+        f"where the answer is the other way round, and the micro rows, which the "
+        f"family's own note explains. It is not the whole corpus — the django-only "
+        f"rows are outside it, because Jinja2 cannot render them."
     )
     return _tile(
         f"{leader} {wins[leader]}/{len(page)}",
@@ -404,7 +421,7 @@ def _fastest_tile(grouped: dict, metrics: dict) -> str:
     )
 
 
-def _table(grouped: dict, engines: list[str], families: dict, metrics: dict) -> str:
+def _table(grouped: dict, engines: list[str], families: dict, metrics: dict, floor: dict) -> str:
     """Every measurement, one row per workload.
 
     The direction goes in **two** places, because the table holds both modes at
@@ -458,9 +475,21 @@ def _table(grouped: dict, engines: list[str], families: dict, metrics: dict) -> 
                 if control is not None and rec["sha256"] != control["sha256"]:
                     marker = '<span class="no">&ne;</span>'
                 spread = rec["worst_us"] / rec["best_us"] if rec["best_us"] else 1.0
+                # The share of this cell that is the `render` call itself, from the
+                # engine's own empty-template floor. Capped at 100 because the row
+                # and the floor are two separate measurements: a row that adds almost
+                # nothing to the floor can land a hair above it, and "104% call" is a
+                # sentence that means nothing. The legend says so.
+                call = ""
+                if floor and rec["best_us"]:
+                    share = floor.get(mode, {}).get(engine, 0.0) / rec["best_us"] * 100
+                    if share >= 1:
+                        call = f"call {min(share, 100.0):.0f}% &middot; "
+                    elif share > 0:
+                        call = "call &lt;1% &middot; "
                 cells.append(
                     f'<td><b>{html.escape(_fmt_us(rec["best_us"]))}</b>{extra}'
-                    f'<br><span class="sub">spread {spread:.2f}x &middot; '
+                    f'<br><span class="sub">{call}spread {spread:.2f}x &middot; '
                     f"{rec['bytes']} B &middot; {marker}</span></td>"
                 )
             # Every record of a workload carries the same note, so the first
@@ -531,7 +560,7 @@ def render(payload: dict) -> str:
     grouped = _group(payload["records"])
     engines = payload["ran"]
     modes = payload["modes"]
-    shared = {path for path, group in grouped.items() if _ran_shared(group)}
+    shared = {path for path, group in grouped.items() if _ran_shared(group, engines)}
 
     panels = []
     for mode in modes:
@@ -569,6 +598,29 @@ def render(payload: dict) -> str:
                 '. The <span class="tok">N.NN&times;</span> beside a bar is that row '
                 "against django, so below 1.00 is faster"
             )
+            # **The call share is computed here, not written into the family's own
+            # note.** It is a percentage of the very cells the table below prints, so
+            # a figure typed once beside a table that moves every run goes stale in
+            # the direction that flatters — and the first draft of this caption did
+            # exactly that, claiming 51%-96% while the cells said 32%-100%. Both
+            # terms come from the payload: `floor` is the measurement and `group` is
+            # the population.
+            floor = payload.get("floor", {}).get(mode, {})
+            # Capped exactly as the cells are, or the caption and the table below it
+            # disagree: the first run printed "2%-102%" here while the cell it came
+            # from printed "100%".
+            shares = [
+                min(floor[name] / rec["best_us"] * 100, 100.0)
+                for per in group.values()
+                for name, rec in per.items()
+                if name in floor and rec["best_us"]
+            ]
+            if shares:
+                caption += (
+                    f'. The empty-template floor is {min(shares):.0f}%-'
+                    f"{max(shares):.0f}% of these cells: at the low end the row is "
+                    f"the construct, and at the high end it is the call"
+                )
             # Every panel but the first mode's is hidden in the markup rather than
             # by script on load, so the page is correct with JavaScript off and the
             # button's pressed state and the visible panels always agree.
@@ -595,9 +647,12 @@ def render(payload: dict) -> str:
             for i in range(len(SERIES_LIGHT))
         ),
         "@@LEGEND@@": legend,
-        "@@HEROES@@": _heroes(grouped, modes, shared, payload["metrics"]),
+        "@@HEROES@@": _heroes(grouped, modes, shared, payload["metrics"], engines),
         "@@PANELS@@": "".join(panels),
-        "@@TABLE@@": _table(grouped, engines, payload["families"], payload["metrics"]),
+        "@@TABLE@@": _table(
+            grouped, engines, payload["families"], payload["metrics"],
+            payload.get("floor", {}),
+        ),
         "@@DISAGREEMENTS@@": _disagreements(payload),
         "@@ENVIRONMENT@@": _environment(payload),
         "@@ENGINES@@": html.escape(", ".join(engines)),
@@ -778,7 +833,11 @@ pre.cmd { background: var(--surface-2); border: 1px solid var(--border);
 <p class="cap">&ldquo;spread&rdquo; is worst/best across a row&rsquo;s timed samples: a
 spread well above 1.00 means a noisy machine and a figure worth re-running. &equiv;
 means the bytes matched the <code>django</code> control, &ne; that they did not, and
-&mdash; that the engine cannot render the row at all.</p>
+&mdash; that the engine cannot render the row at all. &ldquo;call&rdquo; is that
+engine&rsquo;s floor &mdash; the cost of a template that renders nothing, printed
+above &mdash; as a share of the cell, capped at 100% because the two are separate
+measurements: a row near <b>call 100%</b> is a measurement of the call, and a row
+near <b>call 2%</b> is a measurement of the construct.</p>
 @@TABLE@@
 
 <h2>Where the engines do not agree</h2>
