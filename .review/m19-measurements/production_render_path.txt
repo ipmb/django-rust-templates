@@ -1,0 +1,42 @@
+interpreter : 3.14.4
+extension   : _native.cpython-314-darwin.so
+sha256      : 1b3bf993eb2d136d
+
+1. which resolver a shipped render calls
+   template   : '{{ a }}|{{ b.c }}|{{ d.e.f }}'          (3 variables)
+   rendered   : '1|2|3'
+   call counts: {'_native.resolve': 3, 'Variable._resolve_lookup': 3}
+
+2. per-variable cost on the shipped path  (best of 7)
+   N=1 rust  `{{ a }}` -> 'x'
+   N=1 rust  text node   -> 'xxxxxxx'   (same width, same bytes)
+
+   N    engine    vars us    text us      delta    per-var
+   50   rust        74.64       1.73      72.91     1.4581
+   50   stock       55.35       1.74      53.62     1.0723
+   200  rust       290.94       1.82     289.12     1.4456
+   200  stock      216.84       1.78     215.06     1.0753
+
+   N=50 rust/stock per-variable ratio: median 1.369, range 1.360-1.383 over 5 rounds
+       every round: 1.360  1.369  1.369  1.369  1.383
+   N=200 rust/stock per-variable ratio: median 1.362, range 1.344-1.369 over 5 rounds
+       every round: 1.344  1.369  1.344  1.362  1.368
+
+3a. the split inside `_native.resolve`
+   _native.resolve("a", ctx)                 0.515 us
+   _native.parse_variable('a')               0.217 us
+   _native.resolve("b.c.d", ctx)             0.795 us
+   _native.parse_variable('b.c.d')           0.270 us
+   stock Variable('a').resolve(ctx)          0.232 us
+   stock Variable('b.c.d').resolve(ctx)      0.338 us
+   stock_ctx["a"]   (bare dict read)         0.118 us
+
+3b. render_value_in_context by value type  (autoescape is on here)
+   str "hello world"                         0.784 us   ->  'hello world'
+   str "a & b < c"                           0.850 us   ->  'a &amp; b &lt; c'
+   SafeString(mark_safe('x'))                0.236 us   ->  'x'
+   int 12                                    3.421 us   ->  '12'
+   float 12.5                                3.965 us   ->  '12.5'
+   Decimal('12.50')                          4.367 us   ->  '12.50'
+   datetime(2026, 10, 8, 12, 0)             13.024 us   ->  'Oct. 8, 2026, noon'
+

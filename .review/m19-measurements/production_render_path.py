@@ -146,25 +146,43 @@ def per_variable():
         "   %-4s %-6s %10s %10s %10s %10s"
         % ("N", "engine", "vars us", "text us", "delta", "per-var")
     )
-    rows = {}
+
+    def one_round(verbose):
+        rows = {}
+        for n in (50, 200):
+            for label, make in (("rust", rust_engine), ("stock", stock_engine)):
+                ctx_cls = RustContext if label == "rust" else StockContext
+                hv = make(page(n, "var")).get_template("page.html")
+                ht = make(page(n, "text")).get_template("page.html")
+                ctx = ctx_cls({"a": "x"})
+                us_v = timed(lambda: hv.render(ctx), 300)
+                us_t = timed(lambda: ht.render(ctx), 300)
+                rows[(label, n)] = us_v - us_t
+                if verbose:
+                    print(
+                        "   %-4d %-6s %10.2f %10.2f %10.2f %10.4f"
+                        % (n, label, us_v, us_t, us_v - us_t, (us_v - us_t) / n)
+                    )
+        return {n: rows[("rust", n)] / rows[("stock", n)] for n in (50, 200)}
+
+    # **The ratio is a difference of two differences, and it is reported with its
+    # spread rather than to a third decimal.** Three runs of the single-round
+    # version printed 1.360, 1.375 and 1.402 for this same quantity on this same
+    # tree, so a figure quoted to three places is a run, not a measurement. The
+    # round whose absolute costs are printed is round 1; the ratios below are over
+    # all of them.
+    ROUNDS = 5
+    ratios = [one_round(verbose=True)]
+    for _ in range(ROUNDS - 1):
+        ratios.append(one_round(verbose=False))
+    print()
     for n in (50, 200):
-        for label, make in (("rust", rust_engine), ("stock", stock_engine)):
-            ctx_cls = RustContext if label == "rust" else StockContext
-            hv = make(page(n, "var")).get_template("page.html")
-            ht = make(page(n, "text")).get_template("page.html")
-            ctx = ctx_cls({"a": "x"})
-            us_v = timed(lambda: hv.render(ctx), 300)
-            us_t = timed(lambda: ht.render(ctx), 300)
-            rows[(label, n)] = us_v - us_t
-            print(
-                "   %-4d %-6s %10.2f %10.2f %10.2f %10.4f"
-                % (n, label, us_v, us_t, us_v - us_t, (us_v - us_t) / n)
-            )
-    for n in (50, 200):
+        seen = sorted(round_[n] for round_ in ratios)
         print(
-            "   N=%d rust/stock per-variable ratio = %.3f"
-            % (n, rows[("rust", n)] / rows[("stock", n)])
+            "   N=%d rust/stock per-variable ratio: median %.3f, range %.3f-%.3f over %d rounds"
+            % (n, seen[len(seen) // 2], seen[0], seen[-1], ROUNDS)
         )
+        print("       every round: " + "  ".join("%.3f" % value for value in (r[n] for r in ratios)))
     print()
 
 
