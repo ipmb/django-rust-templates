@@ -1512,20 +1512,29 @@ class FilterRoutingTests(unittest.TestCase):
     `_native.filter` says the call crossed from Python, `Census::filters` says the
     walk applied it itself — because the fast route has `crossed == []` and so
     does the broken one (a handle missing from `django_own_filters()` declines the
-    *node*, and the Python arm then answers from the transcription). The premise
-    is asserted separately below, because a row like this passes for a *true*
-    reason and a false one — if the module were still Django's, the counter would
-    read zero and the row would fail, which is right; but if it passed while
+    *node*, and the Python arm then answers from the transcription). And since the
+    same step there is a **third**, because the pair is still true of a filter
+    whose Rust body is Python: `Census::body_crossings` counts the Python the body
+    itself ran. `applied == [("escape", 1)]` with `crossed == []` is the reviewer's
+    case and both numbers are honest there — the escaping happened in Python. The
+    three are described on `_render_with_both_meters` below, and the site list
+    behind the third is gated by `FilterCrossingCoverageTests` at the end of this
+    module.
+
+    The premise is asserted separately below, because a row like this passes for a
+    *true* reason and a false one — if the module were still Django's, the counter
+    would read zero and the row would fail, which is right; but if it passed while
     `defaultfilters` was Django's, that would be M9's finding 3 and the row would
     be measuring nothing.
     """
 
     def _render_with_both_meters(self, engine, source, data):
-        """Render one template and report **both** filter meters.
+        """Render one template and report **all three** filter meters.
 
         `crossed` is `_native.filter`'s count — applications that went from
-        Python into Rust — and `applied` is the walk's own count of the
-        applications **Rust made without crossing at all** (`Census::filters`).
+        Python into Rust — `applied` is the walk's own count of the applications
+        **Rust made without crossing the seam** (`Census::filters`), and
+        `body_crossings` is the Python that ran **inside** those bodies.
 
         **The pair is the row, and one alone is not.** Since M19 step 3a a
         filtered `{{ … }}` is the walk's node whenever its handle is routed, so
@@ -1536,6 +1545,17 @@ class FilterRoutingTests(unittest.TestCase):
         gone on reporting success while the body reached was Python's. That is
         exactly M11's finding 3, and `Census::filters` is the instrument that
         still sees it.
+
+        **And the pair is still not enough, which is what the third meter is.**
+        `applied` says the walk *routed* the filter to Rust's registry; it does
+        not say Rust computed the answer, because a Rust body may call back into
+        Python — `escape`'s body *is* `conditional_escape`, and `lower`'s is
+        Python's `str.lower`. So `applied=[("escape", 1)]` with `crossed == []`
+        is true while the escaping ran in Python, and a row that read it as "Rust
+        escaped it" would be M11's finding one level further in.
+        `body_crossings` counts the host crossings made between the two reads
+        that bracket `(entry.run)(...)` in `run_filter_inner`, so it is a
+        statement about the body and not about the wrapper around it.
         """
         from django_rust_templates import _native
         from django_rust_templates.engine import Context
@@ -1555,14 +1575,14 @@ class FilterRoutingTests(unittest.TestCase):
             # In the `finally` so a raising render cannot leave the census on:
             # it is a process-global, and the next module's renders would write
             # into this row's counts.
-            _, _, _, applied = _native.census_take()
+            _, _, _, applied, body_crossings = _native.census_take()
             _native.filter = original
-        return rendered, crossed, applied
+        return rendered, crossed, applied, body_crossings
 
     def test_a_built_in_filter_reaches_rust(self):
         from django_rust_templates.engine import Engine
 
-        rendered, crossed, applied = self._render_with_both_meters(
+        rendered, crossed, applied, body_crossings = self._render_with_both_meters(
             Engine(), "{{ x|lower }}", {"x": "ABC"}
         )
 
@@ -1576,6 +1596,73 @@ class FilterRoutingTests(unittest.TestCase):
         )
         self.assertEqual(
             crossed, [], "the filter was applied on the Python path as well"
+        )
+        self.assertGreaterEqual(
+            body_crossings,
+            1,
+            "`lower`'s body reached no Python at all, so the third meter is "
+            "not counting the body: Rust's `str_lower` is `call_text`, which "
+            "calls `str.lower` on a Python str. Zero here means a bump site "
+            "is missing (43 of them, one per host method that crosses), and "
+            "it is the row `FilterCrossingCoverageTests` is the source-level "
+            "half of",
+        )
+
+    def test_a_body_that_is_rusts_alone_reads_no_crossing(self):
+        """`upper` is the counterpart, and it is why the count is per input.
+
+        Its body is `to_str` — pure for a `Value::Str` — plus a Rust table, so
+        the same `applied`/`crossed` pair that reads at least one crossing for
+        `lower` reads **zero** here. Without a row asserting zero, a meter that
+        counted the *wrapper* instead of the body — the seam's own `classify`,
+        the `@stringfilter` coercion, `mark_safe` — would look identical on
+        both rows and would still be measuring nothing about the body.
+        """
+        from django_rust_templates.engine import Engine
+
+        rendered, crossed, applied, body_crossings = self._render_with_both_meters(
+            Engine(), "{{ x|upper }}", {"x": "abc"}
+        )
+
+        self.assertEqual(rendered, "ABC")
+        self.assertEqual(applied, [("upper", 1)], "the walk did not apply `upper`")
+        self.assertEqual(crossed, [], "`upper` was applied from Python too")
+        self.assertEqual(
+            body_crossings,
+            0,
+            "`upper` on a str is `to_str` (pure for `Value::Str`) plus a Rust "
+            "table, so its body enters Python nowhere. A non-zero count here "
+            "means the meter is counting the seam's own work — `classify`, the "
+            "`@stringfilter` coercion, `mark_safe` — which brackets the body "
+            "rather than being in it",
+        )
+
+    def test_the_escape_row_is_the_one_the_pair_is_blind_to(self):
+        """The reviewer's exact case, as a row: `applied` and `crossed` both lie here.
+
+        `{{ x|escape }}` under autoescape reads `applied == [("escape", 1)]` and
+        `crossed == []`, and both are true while the escaping ran in Python —
+        Rust's body for `escape` **is** `django.utils.html.conditional_escape`.
+        So the row is the pair's counterexample and the third meter's reason to
+        exist, and it asserts all three numbers rather than only the third: the
+        first two must go on being true, or this row stops being about a blind
+        spot and becomes about a routing bug.
+        """
+        from django_rust_templates.engine import Engine
+
+        rendered, crossed, applied, body_crossings = self._render_with_both_meters(
+            Engine(), "{{ x|escape }}", {"x": "<b>"}
+        )
+
+        self.assertEqual(rendered, "&lt;b&gt;")
+        self.assertEqual(applied, [("escape", 1)], "the walk did not apply `escape`")
+        self.assertEqual(crossed, [], "`escape` was applied from Python too")
+        self.assertGreaterEqual(
+            body_crossings,
+            1,
+            "`escape`'s body is `conditional_escape`, a Python function: zero "
+            "crossings means the body did not run, or the count is not the "
+            "body's",
         )
 
     def test_the_parser_finds_our_defaultfilters(self):
@@ -1659,7 +1746,7 @@ class FilterRoutingTests(unittest.TestCase):
             with self.subTest(filter=name):
                 token = f"x|{name}" if arg is None else f'x|{name}:"{arg}"'
                 source = "{% load " + library + " %}{{ " + token + " }}"
-                rendered, crossed, applied = self._render_with_both_meters(
+                rendered, crossed, applied, _ = self._render_with_both_meters(
                     engine, source, {"x": value}
                 )
                 self.assertTrue(rendered, "the premise: this pair renders something")
@@ -2217,6 +2304,135 @@ class FilterRoutingTests(unittest.TestCase):
             sentinel,
             host.django_own_filters(),
             "the map kept the sentinel after its registry was restored",
+        )
+
+
+class FilterCrossingCoverageTests(unittest.TestCase):
+    """The site list behind `body_crossings`, held against the source that declares it.
+
+    The third meter is only as trustworthy as its **bump sites**: 43
+    `self.crossed();` calls in `crates/template-py/src/filters.rs`, one for each
+    host method that reaches Python. `FilterHost` is the trait the render walk
+    calls, so a method added later — the next filter or tag this project ports —
+    can cross into Python with nobody remembering to bump, and every row in
+    `FilterRoutingTests` would stay green: the meter is a *lower bound*, and it
+    reads zero for a filter whose body crossed and was not counted. A missing
+    site is invisible from the Python side, which is why this row reads the Rust
+    file.
+
+    **The rule, and it is deliberately weaker than "the body crosses":** every
+    entry point of `impl FilterHost for PyFilterHost<'_>` must either contain
+    `self.crossed();` or call another host method that, transitively, does. It is
+    a *reachability* rule and not a sufficiency one — a method that bumps in one
+    arm and reaches Python in another passes here, and that residual is what
+    `FilterRoutingTests`' two rows are for (one that must read zero, one that
+    must read non-zero, on the reviewer's own case). What it does catch, with no
+    allowlist and no marker list, is the case that actually happens: a new host
+    method that crosses and does not bump, or a bump deleted from an existing
+    one.
+
+    **Two things it must not be confused with.** The universe is the trait impl's
+    own methods, not every `fn` in the file: `intern`, `classify`, `object`,
+    `host_error` and `infallible_failure` are plumbing the bumped methods call,
+    and bumping *there* would count crossings by method rather than per crossing
+    — which is also why the recursion is over `self.` calls and not over the
+    file. And a delegating method is not exempt: `to_str` is `text_of`, and
+    `gettext` is `utility_text`, so the rule follows them there.
+    """
+
+    FILTERS_RS = PROJECT_ROOT / "crates" / "template-py" / "src" / "filters.rs"
+
+    #: The trait impl whose methods the walk calls. Spelled as the reader sees it
+    #: rather than matched loosely, so a rename fails here instead of silently
+    #: narrowing the universe to nothing.
+    TRAIT = "impl FilterHost for PyFilterHost<'_> {"
+
+    @staticmethod
+    def _methods(source):
+        """Every host `fn`, by name, as the text from its signature to the next one.
+
+        A span rule rather than a balanced-brace scan: a method's body ends where
+        the next method begins, and a brace scan would have to know Rust's
+        strings and comments to be right. It carries the *next* method's doc
+        comment along, which is harmless here only because no comment in this
+        file contains `self.crossed();` — measured, 43 occurrences and all of
+        them call sites.
+        """
+        import re
+
+        hits = list(re.finditer(r"\n    fn (\w+)", source))
+        methods = {}
+        for i, hit in enumerate(hits):
+            end = hits[i + 1].start() if i + 1 < len(hits) else len(source)
+            methods[hit.group(1)] = source[hit.start() : end]
+        return methods
+
+    @classmethod
+    def _entry_points(cls, source):
+        import re
+
+        start = source.index(cls.TRAIT)
+        end = source.index("\n}\n", start)
+        return re.findall(r"\n    fn (\w+)", source[start:end])
+
+    @classmethod
+    def _unbumped(cls, source):
+        """The entry points with no route to `self.crossed();`, sorted.
+
+        The closure is a fixpoint rather than one level because the phrasing the
+        site list is written in — "directly or one delegation level down" — was
+        an understatement when it was measured: `date_format` is `formats_text`
+        is `date_text` is the call. What matters is reachability, not depth.
+        """
+        import re
+
+        methods = cls._methods(source)
+        covered = set()
+        changed = True
+        while changed:
+            changed = False
+            for name, body in methods.items():
+                if name in covered:
+                    continue
+                callees = set(re.findall(r"self\.(\w+)\(", body))
+                if "self.crossed();" in body or callees & covered:
+                    covered.add(name)
+                    changed = True
+        return sorted(name for name in cls._entry_points(source) if name not in covered)
+
+    def test_every_host_entry_point_reaches_a_bump(self):
+        source = self.FILTERS_RS.read_text()
+        offenders = self._unbumped(source)
+        self.assertEqual(
+            offenders,
+            [],
+            "these host methods reach Python and no route from them contains "
+            "`self.crossed();`, so the third meter reports zero crossings for "
+            "every body they run: "
+            + ", ".join(offenders)
+            + ". The count is a lower bound and nothing else notices — the "
+            "meter's own rows are green either way",
+        )
+
+    def test_that_row_can_see_a_bump_that_is_missing(self):
+        """The positive control: the rule above, on a source with one bump cut.
+
+        `wrap` is an entry point that bumps unconditionally and calls one host
+        method, `infallible_failure`, which does not — so cutting its bump leaves
+        no route, and a rule that could not say so would be asserting nothing.
+        The mutation is a single line, applied to a copy in memory: the file on
+        disk is not touched, so a failure here can only be the rule's.
+        """
+        source = self.FILTERS_RS.read_text()
+        signature = "    fn wrap(&self, text: &str, width: usize) -> String {\n"
+        self.assertEqual(source.count(signature), 1, "the mutation's anchor moved")
+        mutated = source.replace(signature + "        self.crossed();\n", signature)
+        self.assertNotEqual(mutated, source, "the bump this row cuts is not there")
+        self.assertEqual(
+            self._unbumped(mutated),
+            ["wrap"],
+            "the rule did not name `wrap`, so `test_every_host_entry_point_"
+            "reaches_a_bump` would not either",
         )
 
 

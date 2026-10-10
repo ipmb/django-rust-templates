@@ -39,7 +39,7 @@ use pyo3::exceptions::{
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PySlice, PyString, PyTuple};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use template_core::filters::host::{
     DecimalParse, DecimalTuple, FilterCall, FilterHost, LanguageInfo, NestedSequence,
@@ -102,6 +102,14 @@ pub struct PyFilterHost<'py> {
     /// returned from [`run_filter`] instead. One slot, because a body stops at
     /// the first `?`: the error being reported is always the last one raised.
     raised: RefCell<Option<PyErr>>,
+    /// Crossings made since this host was built, for the census's third meter.
+    ///
+    /// The counter is the host's rather than a process-global because the
+    /// question is *per body*: [`run_filter_inner`] reads it before and after
+    /// `(entry.run)(...)`, so what is reported is the Python a **body** asked
+    /// for and not the seam's own conversion around it. See
+    /// [`crate::census_body_crossings`] for what counts as a crossing.
+    crossings: Cell<usize>,
 }
 
 /// Why a value could not be turned back into the Python object it came from.
@@ -118,7 +126,28 @@ impl<'py> PyFilterHost<'py> {
             py,
             interner: RefCell::new(Vec::new()),
             raised: RefCell::new(None),
+            crossings: Cell::new(0),
         }
+    }
+
+    /// Count one Rust→Python crossing, for [`crate::census_body_crossings`].
+    ///
+    /// Called at every point where this host **touches a Python object or asks
+    /// Python to compute something**, and deliberately not at every use of `py`:
+    /// building a `PyString` from Rust text, or reading a `Value`'s own `int`,
+    /// is Rust's work with an FFI conversion at the end. The distinction is the
+    /// meter's whole content — see the module comment on `BODY_CROSSINGS` in
+    /// `lib.rs` — and the site list is asserted by
+    /// `tests/test_interposition.py::FilterCrossingCoverageTests`.
+    fn crossed(&self) {
+        if crate::census_on() {
+            self.crossings.set(self.crossings.get() + 1);
+        }
+    }
+
+    /// Crossings made so far, read around a body by [`run_filter_inner`].
+    pub fn crossings(&self) -> usize {
+        self.crossings.get()
     }
 
     /// Hold a Python object for the life of this host and return its id.
@@ -314,6 +343,7 @@ impl<'py> PyFilterHost<'py> {
     /// stays exact; the trait method wraps it and is what a *body* calls, where
     /// the value is one the body assembled.
     fn mark_safe_checked(&self, value: Value) -> PyResult<Value> {
+        self.crossed();
         let py = self.py;
         let object = self.object(&value)?;
         let marked = mark_safe_fn(py)?.call1((object,))?;
@@ -325,7 +355,10 @@ impl<'py> PyFilterHost<'py> {
     fn text_of(&self, value: &Value) -> PyResult<String> {
         match value {
             Value::Str(text) | Value::Safe(text) => Ok(text.to_string()),
-            other => Ok(self.object(other)?.bind(self.py).str()?.to_string()),
+            other => {
+                self.crossed();
+                Ok(self.object(other)?.bind(self.py).str()?.to_string())
+            }
         }
     }
 
@@ -338,6 +371,7 @@ impl<'py> PyFilterHost<'py> {
             Value::Bool(flag) => return Ok(IntValue::Small(i64::from(*flag))),
             _ => {}
         }
+        self.crossed();
         let py = self.py;
         let parsed = py.get_type::<PyInt>().call1((self.object(value)?,))?;
         Ok(match parsed.extract::<i64>() {
@@ -373,6 +407,7 @@ impl<'py> PyFilterHost<'py> {
             Value::Bool(flag) => return Ok(if *flag { 1.0 } else { 0.0 }),
             _ => {}
         }
+        self.crossed();
         let parsed = self
             .py
             .get_type::<PyFloat>()
@@ -392,7 +427,10 @@ impl<'py> PyFilterHost<'py> {
             Value::Float(number) => *number != 0.0,
             Value::Str(text) | Value::Safe(text) => !text.is_empty(),
             Value::List(items) => !items.is_empty(),
-            Value::Opaque(_) => self.object(value)?.bind(self.py).is_truthy()?,
+            Value::Opaque(_) => {
+                self.crossed();
+                self.object(value)?.bind(self.py).is_truthy()?
+            }
         })
     }
 
@@ -402,7 +440,10 @@ impl<'py> PyFilterHost<'py> {
         Ok(match value {
             Value::Str(text) | Value::Safe(text) => text.chars().count(),
             Value::List(items) => items.len(),
-            other => self.object(other)?.bind(self.py).len()?,
+            other => {
+                self.crossed();
+                self.object(other)?.bind(self.py).len()?
+            }
         })
     }
 
@@ -411,6 +452,7 @@ impl<'py> PyFilterHost<'py> {
         if let Value::List(items) = value {
             return Ok(items.clone());
         }
+        self.crossed();
         let py = self.py;
         let listed = py.get_type::<PyList>().call1((self.object(value)?,))?;
         let mut items = Vec::with_capacity(listed.len()?);
@@ -448,6 +490,7 @@ impl<'py> PyFilterHost<'py> {
                 ))),
             };
         }
+        self.crossed();
         let py = self.py;
         let got = self.object(value)?.bind(py).get_item(index)?;
         self.classify(&got)
@@ -462,6 +505,7 @@ impl<'py> PyFilterHost<'py> {
         stop: Option<i64>,
         step: Option<i64>,
     ) -> PyResult<Value> {
+        self.crossed();
         let py = self.py;
         let component = |part: Option<i64>| -> PyResult<Py<PyAny>> {
             Ok(match part {
@@ -481,6 +525,7 @@ impl<'py> PyFilterHost<'py> {
     /// `a + b` through Python, which is the only side that can answer it: `+` is
     /// `__add__`, and no `Value` variant carries one.
     fn add_values_checked(&self, a: &Value, b: &Value) -> PyResult<Value> {
+        self.crossed();
         let py = self.py;
         let left = self.object(a)?.bind(py).clone();
         let right = self.object(b)?.bind(py).clone();
@@ -543,6 +588,7 @@ impl<'py> PyFilterHost<'py> {
         prop: &Value,
         reverse: bool,
     ) -> PyResult<Value> {
+        self.crossed();
         let py = self.py;
         let key_arg = self.object(prop)?;
         let key = match py.get_type::<PyFloat>().call1((key_arg.bind(py).clone(),)) {
@@ -590,6 +636,7 @@ impl<'py> PyFilterHost<'py> {
         match value {
             Value::Safe(_) => true,
             Value::Opaque(_) => {
+                self.crossed();
                 let Ok(object) = self.object(value) else {
                     return false;
                 };
@@ -755,6 +802,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn percent_format(&self, format: &str, value: &Value) -> Result<Value, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let formatted =
@@ -765,6 +813,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn percent_mapping(&self, format: &str, name: &str, size: &Value) -> Result<Value, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             // The dict is Python's to build because it is the operand: `%` reads
@@ -793,6 +842,7 @@ impl FilterHost for PyFilterHost<'_> {
         // an arbitrary object is Python's to walk (§D2).
         match value {
             Value::Opaque(_) => {
+                self.crossed();
                 let Ok(object) = self.object(value) else {
                     return false;
                 };
@@ -818,6 +868,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn conditional_escape(&self, value: &Value) -> Result<Value, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let escaped = py
@@ -835,6 +886,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn as_nested_sequence(&self, value: &Value) -> Result<Option<NestedSequence>, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let object = self.object(value)?;
@@ -865,6 +917,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn comma_bits(&self, value: &Value, prepend_comma: bool) -> Result<Vec<String>, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| -> PyResult<Vec<String>> {
             let mut argument = self.object(value)?.into_bound(py);
@@ -910,6 +963,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn phone2numeric(&self, value: &Value) -> Result<Value, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             // The helper, whole, and the `Value` goes in as it is:
@@ -928,6 +982,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn urlize(&self, text: &str, limit: Option<&IntValue>, autoescape: bool) -> String {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let kwargs = PyDict::new(py);
@@ -969,6 +1024,7 @@ impl FilterHost for PyFilterHost<'_> {
         html: bool,
         truncate_text: Option<&str>,
     ) -> String {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let kwargs = PyDict::new(py);
@@ -986,6 +1042,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn wrap(&self, text: &str, width: usize) -> String {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let wrapped = py
@@ -1013,6 +1070,7 @@ impl FilterHost for PyFilterHost<'_> {
     /// and its `bytes([c for c in safe if c < 128])` branch is Python's answer
     /// rather than a Rust reconstruction of it.
     fn quote(&self, text: &str, safe: Option<&Value>) -> Result<String, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let quoted = py.import("urllib.parse")?.getattr("quote")?;
@@ -1031,6 +1089,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn json_dumps(&self, value: &Value) -> Result<String, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             // **Django's own call, and an earlier revision of these two lines was
@@ -1068,6 +1127,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn pformat(&self, value: &Value) -> Result<String, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let formatted = py
@@ -1080,6 +1140,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn random_choice(&self, value: &Value) -> Result<Value, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let chosen = py
@@ -1092,6 +1153,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn localtime(&self, value: Value, use_tz: bool) -> Result<Value, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let kwargs = PyDict::new(py);
@@ -1114,6 +1176,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn timesince(&self, d: &Value, now: Option<&Value>, reversed: bool) -> Result<String, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let now_object = match now {
@@ -1141,6 +1204,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn number_format(&self, args: NumberFormatArgs<'_>) -> String {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let kwargs = PyDict::new(py);
@@ -1157,6 +1221,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn language_info(&self, lang_code: &Value) -> Result<LanguageInfo, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| -> PyResult<LanguageInfo> {
             // The argument crosses as the object it is, not as text: the four
@@ -1183,6 +1248,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn localize(&self, value: &Value, use_l10n: bool) -> Result<Value, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let kwargs = PyDict::new(py);
@@ -1206,6 +1272,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn do_timezone(&self, value: Value, source: TimezoneSource<'_>) -> Result<Value, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             // The argument the three `tz` filters pass to the one Python body,
@@ -1251,6 +1318,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn ngettext(&self, singular: &str, plural: &str, n: u64) -> String {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let translated = py
@@ -1263,6 +1331,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn decimal_parse(&self, value: &Value) -> Result<DecimalParse, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| -> PyResult<DecimalParse> {
             let decimal_module = py.import("decimal")?;
@@ -1362,6 +1431,7 @@ impl FilterHost for PyFilterHost<'_> {
         places: u64,
         integral: bool,
     ) -> Result<DecimalTuple, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| -> PyResult<DecimalTuple> {
             let decimal_module = py.import("decimal")?;
@@ -1434,6 +1504,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn filesize_number_format(&self, value: f64) -> String {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             // `round(value, 1)` as a two-argument call to the builtin, not a Rust
@@ -1451,6 +1522,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn int_divide_by_power_of_two(&self, value: &IntValue, shift: u32) -> Result<f64, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let int_type = py.get_type::<PyInt>();
@@ -1475,6 +1547,7 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn int_modulo(&self, a: &Value, b: &Value) -> Result<IntValue, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let int_type = py.get_type::<PyInt>();
@@ -1504,6 +1577,7 @@ impl PyFilterHost<'_> {
         name: &str,
         text: &str,
     ) -> String {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let result = py
@@ -1526,6 +1600,7 @@ impl PyFilterHost<'_> {
         name: &str,
         text: &str,
     ) -> Result<String, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let result = py
@@ -1543,6 +1618,7 @@ impl PyFilterHost<'_> {
     /// have to name the lifetime of the receiver it borrows, which is more
     /// machinery than two callers justify.
     fn call_text(&self, operation: &'static str, text: &str, method: &str) -> String {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             let lowered = PyString::new(py, text).call_method0(method)?;
@@ -1558,6 +1634,7 @@ impl PyFilterHost<'_> {
         value: &Value,
         format: Option<&str>,
     ) -> Result<String, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             // `None` crosses as Python's own `None`, which is the point: the
@@ -1588,6 +1665,7 @@ impl PyFilterHost<'_> {
         value: &Value,
         format: &Value,
     ) -> Result<String, Error> {
+        self.crossed();
         let py = self.py;
         let outcome = (|| {
             // `format` crosses as a `&Value` and is `str()`d by Python *inside*
@@ -1690,6 +1768,14 @@ impl PyFilterHost<'_> {
 /// coerced value — `cut` reads its safety (`defaultfilters.py:445`) — and a wrapper that handed
 /// bodies the raw value would make that filter unimplementable without a second, subtler rule that
 /// 29 separately-written bodies would each have to remember.
+///
+/// **`walked` says which of the two callers this is, and the third meter needs
+/// it.** `true` from the render walk applying the filter itself
+/// (`Walk::apply_step`), `false` from Python asking through `_native.filter`. The
+/// census's `crate::BODY_CROSSINGS` counts only the walk's applications, because
+/// those are the ones with a `Census::filters` entry beside them — the pair is
+/// what says "applied *and* computed in Rust", and a number from a body the walk
+/// never applied would be answering a question nobody asked it.
 pub fn run_filter(
     py: Python<'_>,
     name: &str,
@@ -1697,8 +1783,9 @@ pub fn run_filter(
     args: &Bound<'_, PyTuple>,
     autoescape: bool,
     use_tz: bool,
+    walked: bool,
 ) -> PyResult<Py<PyAny>> {
-    match run_filter_inner(py, name, value, args, autoescape, use_tz) {
+    match run_filter_inner(py, name, value, args, autoescape, use_tz, walked) {
         Ok(answered) => Ok(answered),
         // **A refusal is an answer, and the answer is "not mine".** The caller
         // runs Django's own body for this filter instead — the `else` branch
@@ -1731,6 +1818,7 @@ fn run_filter_inner(
     args: &Bound<'_, PyTuple>,
     autoescape: bool,
     use_tz: bool,
+    walked: bool,
 ) -> PyResult<Py<PyAny>> {
     let entry = template_core::filters::filter(name)
         .ok_or_else(|| PyKeyError::new_err(format!("`{name}` is not a built-in filter")))?;
@@ -1777,7 +1865,21 @@ fn run_filter_inner(
         autoescape,
         use_tz,
     };
-    let result = (entry.run)(current, argument, &call).map_err(|error| report(&host, py, error))?;
+    // **The body's window, which is what the third meter measures.**  Everything
+    // above is the loop's — `classify`, `localtime`, `is_safe`, the
+    // `@stringfilter` coercion — and everything below is the loop's again
+    // (`mark_safe`, the conversion of the answer).  Reading the counter on either
+    // side of the one call that *is* the body is what makes the number a
+    // statement about the body rather than about the application.
+    let before = host.crossings();
+    let answered = (entry.run)(current, argument, &call);
+    // Counted before the `?`, so a body that crossed and *then* failed is still
+    // reported: the number is about what Python did, not about whether the answer
+    // was usable. Only for the walk's own applications — see `walked`.
+    if walked {
+        crate::census_body_crossings(host.crossings() - before);
+    }
+    let result = answered.map_err(|error| report(&host, py, error))?;
     let result = if entry.flags.is_safe && (was_safe || coerced_is_safe) {
         host.mark_safe_checked(result)
             .map_err(|error| host.host_error("mark_safe", error))

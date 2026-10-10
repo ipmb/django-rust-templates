@@ -218,7 +218,7 @@ the sentence:
   reaches the escape filter.
 - **(b) is inherited**, and it is the whole of the floor's per-variable cost:
   `render_floor` fetches `render_value_in_context` once per render
-  (`crates/template-py/src/lib.rs:4431-4433`) and calls it per variable in
+  (`crates/template-py/src/lib.rs:4504-4506`) and calls it per variable in
   `append_expression_value`. That the floor and `render_desc` share exactly these
   two helpers — the resolver and the escaper — is the floor's own claim about
   itself, and it is what makes the subtraction isolate dispatch. *(The floor's
@@ -421,7 +421,7 @@ Unchanged from M18 §4 and not re-argued here; the boundary is the whole design:
 4. **What the boundary does with a `str` Rust cannot hold is decided here, not
    after the walk — and today the answer is a live divergence.** Rust's `&str`
    is UTF-8; a Python `str` is not, and the crossing is **one conversion**:
-   `crates/template-py/src/filters.rs:187` is
+   `crates/template-py/src/filters.rs:216` is
    `obj.cast::<PyString>()?.to_str()`, which cannot encode a lone surrogate. So
    this is a property of the seam and not of any filter's signature, and the
    measured consequence is that **all 57 built-in filter names raise

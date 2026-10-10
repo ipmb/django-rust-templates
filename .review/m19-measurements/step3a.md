@@ -23,7 +23,7 @@ on `0f5ae85` (the commit under this one).  Every row below is
 **baseline → predicted → measured**, and the two rows that are claims about the
 *seal* rather than about a node count are called out where they appear.
 
-## 0. Two meters, because one of them cannot tell the fast route from the broken one
+## 0. Three meters, because `applied` is a statement about routing and not about who computed
 
 The interposition tests read `crossed == []` to mean "the walk answered this
 itself".  After this step that reading is unsound: routing can break — a handle
@@ -40,10 +40,58 @@ route reads `applied: []` with `crossed == []`.  That argument lives in
 `tests/test_interposition.py::FilterRoutingTests`'s class docstring and in the
 rows that carry both meters.
 
+**And the pair is still one short, which is the reviewer's catch.**  `applied` is
+about **routing**: the walk reached Rust's registry for that name.  It is not a
+statement that Rust computed the answer, because a Rust body may call back into
+Python — `escape`'s body **is** `conditional_escape`
+(`crates/template-core/src/filters/escape.rs`, one host call and no branch of its
+own), `lower`'s is Python's `str.lower` through `utility_text`, and
+`truncate`/`urlize`/`wrap` call Django's.  So for `{{ x|escape }}` the walk
+reports `applied: [("escape", 1)]` with `crossed == []`, and both are true while
+the escaping ran in Python — M11's finding one level further in.  Hence the third
+meter:
+
+  * `Census::body_crossings` / the census's `body xings:` line — how much Python
+    ran **inside** the bodies `applied:` counted?
+
+**Three properties make it trustworthy, and each is a decision rather than a
+detail.**  The count is of *crossings* and not of host-method calls: `upper` is
+`to_str` — pure for a `Value::Str` (`crates/template-core/src/filters/upper.rs`)
+— plus a Rust table, and reads **zero**, so the number separates "the body is
+Rust's" from "the body is Rust's and then asks Python".  The window is the
+**body** and not the application: `run_filter_inner` reads its host's counter on
+either side of `(entry.run)(...)`, so the seam's own work — `classify`, the
+`@stringfilter` coercion, `localtime`, `is_safe`, the loop's `mark_safe` — is
+outside it by construction, which is what makes `upper`'s zero mean "the body"
+rather than "the wrapper".  And it counts only the **walk's** applications: the
+seam has a second caller (`_native.filter`, the fallback arm) and counting both
+put a number beside an `applied: -` row that reads as if the walk's empty set of
+bodies had crossed.  Measured before that flag was added, `django-only/filter-arg`
+printed `applied: -` with `body xings: 200` — the 200 being the *Python* arm's
+`{{ …|title }}` inside the delegated `ForNode` — and three rows had that shape.
+With it, the two lines are about the same set of bodies by construction, so
+"applied, and read zero" means what it says.
+
+The rows are in `FilterRoutingTests`: one that must read non-zero — `lower`, and
+`escape` as the reviewer's own case — and one that must read zero, `upper`.  The
+43 `self.crossed()` calls behind the meter, one per host method that reaches
+Python, are gated by
+`FilterCrossingCoverageTests` — a *source* row, because a missing bump site is
+invisible from the Python side: the meter is a lower bound and reads zero for a
+body that crossed and was not counted.  Its rule is reachability — a
+`self.crossed();` in the body, or a call to a method that transitively has one —
+over the trait impl's entry points, and its positive control cuts a bump out of
+the source in memory and requires the rule to name it.
+
 ## 1. Structure — the census
 
-`node_census.py`, 20 renders per row, release artifact `sha256:34386acb…`.
-Baseline is the same instrument on the pre-slice tree.
+`node_census.py`, 20 renders per row, release artifact `sha256:34386acb…`,
+re-run for this record on the third-meter build `sha256:dff8b62d…`.  Baseline is
+the same instrument on the pre-slice tree.  **The re-run is additive and that is
+its own measurement:** the diff against the committed `node_census.txt` is 22
+inserted lines — the `body xings:` line per row and the `check_flat_normal` line
+— with every pre-existing number unchanged, so the meter's arrival moved nothing
+it measures.
 
 | row | `out` delegated before | predicted | measured | |
 |---|---|---|---|---|
@@ -55,6 +103,35 @@ Baseline is the same instrument on the pre-slice tree.
 | `real-world/complex` | 308.6% | unmoved, node share down | **298.8%**, node share 14.9% → **0.8%** | both halves |
 | `django-only/for-tags` | 99.6% (3408/3423) | unmoved | **99.6%** (3408/3423) | unmoved, as predicted |
 | `nested for (2 deep)` | 100.0% (32/32) | 100.0% | **100.0%** (32/32) | met — the seal's negative control |
+
+**`flat/normal` is a hand-made page, and the prediction is what defends it.**  It
+is not a corpus row: it is `real-world/normal` with the inheritance spliced away,
+because the question this step's whole justification turns on — does a loop seal
+once nothing above it is a `BlockNode`? — is a question about *reachability*, and
+the shipped page cannot answer it while two `BlockNode` delegates sit above the
+body.  A fixture written to pass is the classic way a gate narrows toward
+passing, and the defence here is not the fixture's shape but the *order*: the
+acceptance row was published from a baseline census **before** the slice was
+written, predicted `flat/normal` at ≈0.7% (41/5728), and landed on 0.7%
+(41/5728) — including the 41 characters being exactly the corpus's `FOOTER`.  A
+fixture chosen after the fact could not have that property.  The reviewer showed
+the hazard from the other side in one round: splicing its own "normal without its
+blocks" by hand, it got a *different* page and a different number (99.6%
+delegated output against this row's 98.2% baseline), which is what a hand-typed
+lookalike does.
+
+**So the splice is mechanical now, and the claim says what it rests on.**  The
+fixture is derived in code from `bench_corpus.BASE`/`NORMAL`
+(`node_census.py:flatten_inheritance`, which refuses a source whose blocks nest
+rather than cutting it wrongly), and `check_flat_normal` renders the shipped page
+under stock Django, the shipped page under this engine, and the derived page
+under this engine, requiring **one** byte string from all three.  Re-run with the
+derived fixture, every number in the committed `node_census.txt` is unchanged —
+which is the check that the derivation is the same page the row was measured on.
+And the honest sentence: **this row's page does not ship.**  What ships is
+`real-world/normal`, whose `out` row is unmoved at 198.8%.  The loop-seals claim
+is about what the walk can reach *once inheritance is out of the way*, and the
+slice that has to bring the shipped page along is the next one.
 
 **The node-level deltas, which is where the slice is legible.** Each row is
 `delegated:` before → after, with the `handled:` side that paid for it:
@@ -75,6 +152,17 @@ own `applied:` line for that row is **72 + 1 = 73** — the node delta and the
 meter are the same number arriving two ways.  `real-world/large`'s 20 delegated
 `IfNode`s become 20 handled `IfNode`s whose branches add 20 `TextNode`s and 10
 `VariableNode`s — the walk now descends into the branches it used to hand back.
+
+**The third meter's own line reads legibly on exactly one row, and that is the
+right number of rows.**  `flat/normal` prints `applied: length=2 upper=1
+title=50` with **`body xings: 50`** — 50 applications of `title` entering
+Python's `str.title` once each (`str_title` is `call_text`, one host call per
+body), and `length`'s two and `upper`'s one contributing nothing, because a
+`Value::List`'s length is Rust's and `upper` is a Rust table.  Every other row
+reads `0`, which is true of them: the shipped `real-world/normal` applies only
+`length` (`applied: length=1`, `body xings: 0`), and its 50 `title` applications
+are the *Python* arm's, inside the delegated `BlockNode` — the rows whose
+`out` share is ~199% have nothing the walk applied to report on.
 
 **The seal half, asserted separately because a `delegated:` line cannot show
 it.** `flat/normal`'s `handled:` goes from 11 visits to **618** with `ForNode=1`
@@ -98,7 +186,14 @@ Django 6.0.9, same machine, `--repeats 7`.
 **The scatter first, because it is what makes the rest a claim.**  Two runs of
 the *same* artifact on the *same* tree, ratio-against-ratio over all 26 rows:
 **median 0.81%, p90 2.55%, max 4.20%.**  Nothing smaller than that is called a
-move below.
+move below.  **What it does not license:** both band runs were adjacent, so what
+it samples is short-timescale noise, while the `HEAD` ↔ `A`/`B` comparison below
+also crosses two reports and so carries thermal and load drift the band never
+saw.  The band is the *floor* of what a cross-report delta owes and not a
+substitute for it, which is why only the two constructs this step is about — at
+5× and 4× the band's max — are treated as moves at row level, why the report's
+own tiles are additionally checked between the two *post*-slice runs, and why
+`real-world/large`'s −5.9% is kept with its caveat rather than promoted.
 
 `HEAD` is the committed report at `0f5ae85` (same corpus, same procedure); `A`
 and `B` are the two post-slice runs.  Ratio is ours/stock, **lower is better**,
@@ -130,16 +225,38 @@ Three honest qualifications, all of them visible in the table:
   delegated variable *visits* that stopped crossing.  It is the only whole-page
   row with a move outside the scatter, and it is the row whose body is not
   behind a `BlockNode`.
-* **`real-world/large` render, −5.9%, is at the scatter's own max (4.20%)** —
-  direction consistent with the census (145 characters of output stopped coming
-  back from Python, and `IfNode=20` off `delegated:`), and not a number to lean
-  on.  Its parse row is flat (−1.2%).
-* **`micro/if` *parse* is flat-to-worse (+2.8%, inside scatter).**  This is the
-  case §4 item 9 exists for and it is not a puzzle: the per-render saving is
-  ~0.1 µs against a compile path that costs ~11 µs more than stock's, so parse
-  mode — which calls `from_string` every iteration — cannot see it.  The render
-  row for the same construct moves −22.4%.  Flat-in-parse here means the render
-  win is small in absolute terms, not that the parse path was made worse.
+* **`real-world/large` render, −5.9%, clears the median and p90 and nothing
+  more.**  The direction is consistent with the census (145 characters of output
+  stopped coming back from Python, and `IfNode=20` off `delegated:`), so it is
+  kept here with its number — but the band it is measured against is a
+  *within-report* one (both its runs were adjacent, sampling short-timescale
+  noise), while this A/B crosses two reports and so adds thermal and load drift
+  the band never saw.  For a single row under 10%, that licence is thin: it is
+  not a number to lean on, and the sentence is the row's status rather than a
+  defence of it.  (The reviewer's correction to an earlier draft of this
+  paragraph: testing one row's delta against the *max* of 26 rows is an
+  extreme-value statistic on a tiny sample and is the wrong test in both
+  directions — median and p90 are the usable figures.)  Its parse row is flat
+  (−1.2%).
+* **`micro/if` *parse* is flat-to-worse (+2.8%, inside scatter), and the reason
+  is measured rather than asserted.**  This is the case §4 item 9 exists for.
+  `parse` is `from_string` + render per iteration (`bench.py:194`), so the claim
+  decomposes, and `.review/m19-measurements/compile_only.py` times the first term
+  alone — `from_string(source)` with no render, the corpus's own sources, ours
+  and stock.  On `micro/if`: **compile ours 22.20 µs, stock 10.83 µs (+11.37 µs);
+  render ours 2.31 µs, stock 2.42 µs (−0.11 µs)**; the measured parse gap is
+  25.83 − 14.53 = **+11.30 µs**, i.e. **~100% of it is compile**.  The reviewer
+  ran the same decomposition independently and got +11.312 µs compile, −0.038 µs
+  render, with the parts reconstructing the measured parse ratio to 2%.  The
+  instrument's own cross-check is that `compile + render` reconstructs the
+  measured `parse` row to within 0.23–1.33 µs on all five rows it was run on
+  (both engines) — the residual is the two runs' drift, not a term.  So
+  flat-in-parse here means the row is a compile measurement this slice did not
+  touch and never claimed to, not that the render path was made worse.  (An
+  earlier draft of this paragraph said "the per-render saving is ~0.1 µs" without
+  saying *which* saving: 0.11 µs is our advantage over stock on that row at this
+  commit, where the saving the slice itself produced is the ratio's own
+  `1.230 → 0.954` — a different quantity against a different baseline.)
 
 ## 3. What did not move, and why it must not
 

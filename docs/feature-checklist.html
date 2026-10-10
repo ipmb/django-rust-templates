@@ -826,7 +826,7 @@
     <p class="sub" style="margin-top:16px">
       <b>A value Django renders, this engine refuses — and the crossing is one line.</b>
       Rust's <code>&amp;str</code> is UTF-8 and a Python <code>str</code> is not, so
-      <code>crates/template-py/src/filters.rs:187</code>'s
+      <code>crates/template-py/src/filters.rs:216</code>'s
       <code>obj.cast::&lt;PyString&gt;()?.to_str()</code> cannot hold a lone surrogate. Measured
       (census in <code>surrogate_boundary.py</code>): <b>all 57 built-in filter names raised
       <code>UnicodeEncodeError</code> on <code>'\ud800'</code></b> — 37 of them take only the
@@ -975,8 +975,11 @@
       move — anything whose body sits behind a <code>{% block %}</code>, and a loop body holding
       <code>{% cycle %}</code> or a <code>forloop</code> read — do not move, which is the
       prediction's other half. One honest flat: the <code>{% if %}</code> <i>parse</i> row is
-      unchanged, because a per-render saving of ~0.1 µs is invisible beside a compile path that
-      sits ~11 µs above stock's on that row.
+      unchanged, and the reason is measured rather than asserted. A <i>parse</i> row is
+      <code>from_string</code> plus a render, so the claim decomposes: on that row the compile
+      path is <b>22.2 µs against stock's 10.8</b> and the render <b>2.31 against 2.42</b>, so
+      essentially all of the 11.3 µs measured gap is compile — a path this change never
+      touched — and the render path is 0.11 µs <i>ahead</i> of stock's on that row.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>What is left, stated against the same table.</b> The single-node <i>parse</i> rows are

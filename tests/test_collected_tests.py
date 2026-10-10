@@ -589,8 +589,27 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # row — the other two test files in the diff changed one line each, a re-keyed
 # citation in `test_filter_inventory.py` and `test_interposition.py`. 484 + 3 = 487.
 #
-# Counts at close: 487 collected, proxy and discovery agreeing.
-PINNED = 487
+# 487 → 491 is **+4**, all in `tests/test_interposition.py`, and they are step
+# 3a's third filter meter: `Census::body_crossings`, the Python that runs *inside*
+# the bodies the walk applied. Two are `FilterRoutingTests` rows that read the
+# meter — one that must be non-zero (`escape`, whose Rust body is
+# `conditional_escape`, and `lower`, whose body is Python's `str.lower`) and one
+# that must be zero (`upper`: `to_str`, pure for a `Value::Str`, plus a Rust
+# table) — because a count that is only ever asserted `>= 1` cannot be told from a
+# count of the wrapper. The other two are a new class,
+# `FilterCrossingCoverageTests`, which reads `crates/template-py/src/filters.rs`:
+# the gate that every entry point of `impl FilterHost` reaches a `self.crossed();`
+# (directly or through a call, transitively), and its positive control, which cuts
+# one bump out of the source in memory and requires the rule to name it. A source
+# row because a *missing* site is what the Python side cannot see: the meter is a
+# lower bound and reads zero for a body that crossed and was not counted.
+# Measured the other way, as this ledger's rule asks: `git diff -U0 tests/` adds
+# **4** `def test_` lines and removes none, no module gains a row but this one
+# (`test_collected_tests.py`'s own pin moves with it, which is this paragraph),
+# and no row is renamed or deleted — 487 + 4 = 491.
+#
+# Counts at close: 491 collected, proxy and discovery agreeing.
+PINNED = 491
 
 
 def collected() -> unittest.TestSuite:

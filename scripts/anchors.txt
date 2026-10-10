@@ -37,11 +37,11 @@ crates/template-core/src/parser/tags/mod.rs:231	crates/template-core/src/parser/
 crates/template-core/src/parser/tags/url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
 crates/template-core/src/parser/tags/with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
 crates/template-py/src/filters.rs:87-89	crates/template-py/src/filters.rs	87	89	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
-crates/template-py/src/filters.rs:187	crates/template-py/src/filters.rs	187	-	obj.cast::<PyString>()?.to_str()	-
-crates/template-py/src/filters.rs:282-291	crates/template-py/src/filters.rs	282	291	*self.raised.borrow_mut() = Some(err)	-
-crates/template-py/src/filters.rs:905	crates/template-py/src/filters.rs	905	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
-crates/template-py/src/filters.rs:1745-1753	crates/template-py/src/filters.rs	1745	1753	match args.len()	-
-crates/template-py/src/filters.rs:1801-1804	crates/template-py/src/filters.rs	1801	1804	host.take_raised()	-
+crates/template-py/src/filters.rs:216	crates/template-py/src/filters.rs	216	-	obj.cast::<PyString>()?.to_str()	-
+crates/template-py/src/filters.rs:311-320	crates/template-py/src/filters.rs	311	320	*self.raised.borrow_mut() = Some(err)	-
+crates/template-py/src/filters.rs:958	crates/template-py/src/filters.rs	958	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
+crates/template-py/src/filters.rs:1833-1841	crates/template-py/src/filters.rs	1833	1841	match args.len()	-
+crates/template-py/src/filters.rs:1903-1906	crates/template-py/src/filters.rs	1903	1906	host.take_raised()	-
 crates/template-py/src/lib.rs:146	crates/template-py/src/lib.rs	146	-	fn filter_flags	-
 crates/template-py/src/lib.rs:851	crates/template-py/src/lib.rs	851	-	fn if_condition_to_py	-
 crates/template-py/src/lib.rs:1104	crates/template-py/src/lib.rs	1104	-	-	-
@@ -53,7 +53,7 @@ crates/template-py/src/lib.rs:2149	crates/template-py/src/lib.rs	2149	-	let resu
 crates/template-py/src/lib.rs:2170	crates/template-py/src/lib.rs	2170	-	Python::attach(|py| self.dir(py, bit))	-
 crates/template-py/src/lib.rs:2716-2717	crates/template-py/src/lib.rs	2716	2717	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
 crates/template-py/src/lib.rs:2773-2778	crates/template-py/src/lib.rs	2773	2778	fn resolve_lookups(	resolve_components(py, &lookups, context)
-crates/template-py/src/lib.rs:4431-4433	crates/template-py/src/lib.rs	4431	4433	fn render_value_in_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {	-
+crates/template-py/src/lib.rs:4504-4506	crates/template-py/src/lib.rs	4504	4506	fn render_value_in_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-

@@ -240,7 +240,7 @@ fn filter(
     autoescape: bool,
     use_tz: bool,
 ) -> PyResult<Py<PyAny>> {
-    filters::run_filter(py, name, value, args, autoescape, use_tz)
+    filters::run_filter(py, name, value, args, autoescape, use_tz, false)
 }
 
 /// A filter failure (or a filter stub) as a Python exception — **for the errors
@@ -2847,7 +2847,7 @@ fn resolve_components(
 // reachable and checkable — minijinja's own `pc`/`Jump` exists for an
 // instruction-swap re-entry this design does not need.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 /// The node classes the walk renders itself, by the name `type(node).__name__`
@@ -3051,8 +3051,64 @@ static CENSUS: Mutex<Census> = Mutex::new(Census {
     filters: Vec::new(),
 });
 
-fn census_on() -> bool {
+pub(crate) fn census_on() -> bool {
     CENSUS_ON.load(Ordering::Relaxed)
+}
+
+/// Python work executed **inside a filter body** since [`census_start`], over
+/// every render.
+///
+/// The third meter, and the one the other two cannot replace.  [`Census::filters`]
+/// counts the filters the walk applied *itself*, which is a statement about
+/// **routing** — and a Rust body is free to call back into Python: `escape`'s body
+/// is `conditional_escape(value)` (`filters/escape.rs`), `lower`'s is Python's
+/// `str.lower` (Final_Sigma), `truncate`/`urlize`/`wrap` call Django's own
+/// implementations.  So `applied == [("escape", 1)]` with `crossed == []` is true
+/// while the escaping ran in Python — the same silently-green shape as M11's
+/// finding, one level further in.  Counting the host's crossings is the only
+/// instrument that separates "the body is Rust's" from "the body is Rust's and
+/// then asks Python".
+///
+/// **What is counted is a crossing and not a host-method call.**  A `Value` that
+/// is a `str`/`int`/`float`/`bool`/`None`/`list` is answered by Rust, and a host
+/// method that answers it never touches Python — `upper` is `to_str` (pure for
+/// `Value::Str`) plus a Rust table, so it reads **zero**.  What counts is a
+/// Python object being touched or Python being executed: a call, an import, an
+/// attribute or item access, a `str()`/`len()`/`isinstance`/truth test on an
+/// object Python owns, and the `object(...)` conversion that hands a value over
+/// at all.
+///
+/// **The window is the body and not the filter application.**  `run_filter_inner`
+/// brackets `(entry.run)(...)` and reports the crossings made between the two
+/// reads, so the seam's own work — `classify`, the `@stringfilter` coercion,
+/// `localtime`, `is_safe`, the loop's `mark_safe` — is outside it by
+/// construction.  A filter that crosses only in its wrapper reads zero, which is
+/// the honest answer to "did this body do Python's work".
+///
+/// **And the applications counted are the walk's own, which is the whole point of
+/// the meter.**  The seam has two callers — [`filter`], which is Python asking
+/// (`_native.filter`, the fallback arm), and `Walk::apply_step`, which is the
+/// walk applying one itself — and only the second has a [`Census::filters`] entry
+/// to be checked against.  Counting both would put a number beside an `applied:
+/// -` row that reads as if the walk's (empty) set of bodies had crossed: measured
+/// before the flag, `django-only/filter-arg` printed `applied: -` with `body
+/// xings: 200`, the 200 being the *Python* arm's `{{ …|title }}` inside the
+/// delegated `ForNode`.  With the flag the two lines are about the same set of
+/// bodies by construction, so "applied, and read zero" means what it says: Rust
+/// computed it.  How much Python the fallback does is the delegated rows' own
+/// business and is already reported by `delegated`.
+static BODY_CROSSINGS: AtomicUsize = AtomicUsize::new(0);
+
+/// Add `count` crossings to the census's third meter.
+///
+/// Called once per **walk-applied** `run_filter` with the body's own count rather
+/// than once per crossing, so the counter lives in the host (which is created per
+/// call and dropped with it) and this is the one place that reaches the
+/// process-global.  The Python arm does not call this: see [`BODY_CROSSINGS`].
+pub(crate) fn census_body_crossings(count: usize) {
+    if count > 0 && census_on() {
+        BODY_CROSSINGS.fetch_add(count, Ordering::Relaxed);
+    }
 }
 
 fn census_add(counts: &mut Vec<(String, usize)>, class_name: &str, count: usize) {
@@ -3102,6 +3158,7 @@ fn census_start() {
     // Cleared before the flag is set, so a render that starts between the two
     // cannot write into the previous run's counts.
     *CENSUS.lock().unwrap() = Census::default();
+    BODY_CROSSINGS.store(0, Ordering::Relaxed);
     CENSUS_ON.store(true, Ordering::Relaxed);
 }
 
@@ -3128,8 +3185,16 @@ fn census_start() {
 /// The fourth is [`Census::filters`], and unlike the first two it *is* a
 /// partition of one thing: every filter application in a walked template is
 /// either counted here or made on the Python path.
+///
+/// The fifth is [`BODY_CROSSINGS`], the Python work done **inside** the bodies
+/// the fourth counts — the meter that says whether "the walk applied it" also
+/// means "Rust computed it".  Zero is the strong reading and it is a claim about
+/// a particular filter and input, not a property of the filter: `upper` on a
+/// `str` reads zero, `upper` on an `int` reads one (the `@stringfilter` coercion
+/// is outside the window, so it is the body's `to_str` that crosses), and
+/// `escape` reads one on any input because its body is `conditional_escape`.
 #[pyfunction]
-fn census_take() -> (CensusRows, CensusRows, usize, CensusRows) {
+fn census_take() -> (CensusRows, CensusRows, usize, CensusRows, usize) {
     CENSUS_ON.store(false, Ordering::Relaxed);
     let census = CENSUS.lock().unwrap();
     (
@@ -3137,6 +3202,7 @@ fn census_take() -> (CensusRows, CensusRows, usize, CensusRows) {
         census.delegated.clone(),
         census.delegated_len,
         census.filters.clone(),
+        BODY_CROSSINGS.load(Ordering::Relaxed),
     )
 }
 
@@ -4124,8 +4190,15 @@ impl<'py> Walk<'py> {
         }
         let args = PyTuple::new(py, args)?;
         let (autoescape, use_tz) = (self.autoescape, self.use_tz()?);
-        let filtered =
-            filters::run_filter(py, &step.name, value.bind(py), &args, autoescape, use_tz)?;
+        let filtered = filters::run_filter(
+            py,
+            &step.name,
+            value.bind(py),
+            &args,
+            autoescape,
+            use_tz,
+            true,
+        )?;
         // **A refusal is an answer, not an error** — the seam's sentinel, in
         // place of a result this walk cannot hold. Handing the node back is what
         // the Python `resolve` does with the same sentinel, one level up, and the

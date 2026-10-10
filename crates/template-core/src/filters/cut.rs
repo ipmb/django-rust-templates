@@ -32,7 +32,7 @@
 //! * **A `None` argument is the `replace` `TypeError`, not a missing-argument
 //!   error.** The FFI tells the two apart: a missing argument is `None` and the
 //!   literal `None` is `Some(Value::None)`, whose *length* is the distinction
-//!   (`match args.len()`, `crates/template-py/src/filters.rs:1745-1753`). Only the
+//!   (`match args.len()`, `crates/template-py/src/filters.rs:1833-1841`). Only the
 //!   second is reachable here
 //!   — `{{ x|cut }}` is an arity `TemplateSyntaxError` the parser raises first,
 //!   measured `cut requires 2 arguments, 1 provided` (`base.py:819`), so it never
@@ -90,7 +90,7 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
         Some(Value::Str(text)) | Some(Value::Safe(text)) => text,
         // The literal `None` arrives as `Some(Value::None)` — the FFI's length,
         // not an `Option`, is what separates it from a missing argument
-        // (`crates/template-py/src/filters.rs:1745-1753`) — and only it is reachable:
+        // (`crates/template-py/src/filters.rs:1833-1841`) — and only it is reachable:
         // `{{ x|cut }}` is an arity `TemplateSyntaxError` the parser raises
         // first, measured `cut requires 2 arguments, 1 provided` (`base.py:819`),
         // so it never reaches a body, while `{{ x|cut:None }}` does and is
