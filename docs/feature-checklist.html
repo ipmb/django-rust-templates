@@ -985,8 +985,8 @@
       <b>What is left, stated against the same table.</b> The single-node <i>parse</i> rows are
       still ~1.4×–2.3× stock — that is the compile path, not the render path, and it is the
       next leaf (materialising Python node objects eagerly). <code>micro/include</code>
-      (0.70× stock, 7.0 µs against Jinja2's 6.0) and <code>micro/extends</code> (0.98×, 9.7
-      against 5.2) are the two rows Jinja2 still wins outright: it precompiles
+      (0.69× stock, 6.9 µs against Jinja2's 6.0) and <code>micro/extends</code> (0.99×, 9.5
+      against 5.1) are the two rows Jinja2 still wins outright: it precompiles
       <code>{% include %}</code> into the parent, and this engine still opens a Python frame
       per include and per inheritance level, which is what step 5's second slice is for.
       <code>django-only/filter-arg</code> remains the one row both slower than stock (1.10×)
@@ -1022,8 +1022,10 @@
       through Python. <code>ExtendsNode</code> and <code>BlockNode</code> stay Python
       delegates — this slice takes the body, not the inheritance machinery — and the numbers
       say the body was the thing: <code>real-world/normal</code>'s render ratio goes
-      <b>0.89× → 0.31×</b> of stock (373 µs → 129 µs against stock's 417), its parse
-      <b>0.99× → 0.55×</b>, measured on two runs of one artifact. The gate is the census, and
+      <b>0.90× → 0.32×</b> of stock (369 µs → 129 µs against stock's 411 → 407), its parse
+      <b>0.99× → 0.55×</b>. The <i>before</i> side of every such ratio on this page is the
+      median of two runs of the pre-slice artifact; the <i>after</i> side is the committed
+      <code>docs/bench.html</code> run, so the two can differ in the last digit. The gate is the census, and
       it is the same page measured two ways: <code>real-world/normal</code> now reads
       <b><code>applied: length=2 upper=1 title=50</code> and <code>body xings: 50</code></b> —
       <i>identical</i> to the spliced fixture <code>flat/normal</code> that step 3a used as
@@ -1033,19 +1035,42 @@
     </p>
     <p class="sub" style="margin-top:16px">
       <b>And it is honest about where it does not pay, which is the other half of the
-      prediction.</b> <code>micro/extends</code> moves only <b>1.04× → 0.98×</b>, because its
-      bodies are three and four nodes and the render is two Python frames and a
-      <code>get_nodes_by_type</code> walk over the whole parent — a body plan does not touch
-      any of that. <code>real-world/complex</code> (0.62×) and
-      <code>django-only/realistic</code> (0.93×) do not move at all, and the census says why
+      prediction.</b> <code>micro/extends</code> does not move — <b>1.02× → 0.99×</b>, inside
+      the run-to-run band — because its bodies are three and four nodes and the render is two
+      Python frames and a <code>get_nodes_by_type</code> walk over the whole parent; a body plan
+      does not touch any of that. <code>real-world/complex</code> (0.62×) and
+      <code>django-only/realistic</code> (0.92×) do not move either, and the census says why
       before the timings do: their loops hold an <code>{% include %}</code> and a
       <code>{% blocktranslate %}</code>, a body holding a delegate cannot seal, so the whole
-      loop is delegated and the walk never reaches inside it. Their output-returned-from-Python
-      share <i>rises</i> — 298.8% → <b>494.5%</b> and 197.8% → <b>295.0%</b> — which is the
-      correct reading of moving work out of a frame a share meter cannot see inside. Both were
-      predicted to move and both predictions are recorded as misses rather than reworded.
-      <code>real-world/large</code>, the control with no inheritance at all, is identical in
-      every census column and every timing, as predicted.
+      loop is delegated and the walk never reaches inside it. Reached is not the same as
+      untouched, though — <code>complex</code>'s census moves from <code>upper=72</code> to
+      <code>upper=73</code>, one routed-and-computed application in the layout text outside that
+      loop, so the honest verdict is <i>reached, effect below the instrument's resolution</i>.
+      Their output-returned-from-Python share <i>rises</i> — 298.8% → <b>494.5%</b> and
+      197.8% → <b>295.0%</b> — which is the correct reading of moving work out of a frame a
+      share meter cannot see inside. Both were predicted to move and both predictions are
+      recorded as misses rather than reworded. <code>real-world/large</code>, the control with
+      no inheritance at all, is identical in every census column; its render ratio is
+      0.298 → 0.300 and its parse 1.073 → 1.098, both inside the run-to-run band and
+      attributable to nothing in the slice — it carries no <code>{% block %}</code> for the
+      descent to find.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>The slice pays a per-compile cost, and that is the one number a <i>render</i> table
+      cannot show.</b> The descent pass that plans block bodies runs over the whole tree on
+      every compile, so our <code>from_string</code> gets slower while stock's stays flat: on
+      <code>real-world/normal</code> our compile goes <b>149 µs → 167 µs (+11.7%)</b> against
+      stock's 123.5 → 124.6 (+0.8%), and on <code>micro/extends</code> 23.3 → 24.3 (+4.6%). A
+      render row amortises a one-off over every iteration and so cannot see it; a parse row
+      compiles every iteration and so carries it folded into the render saving. The obvious way
+      to isolate it — subtracting the render row from the parse row — is wrong: parse's render
+      is a <i>cold</i> render of the template it just compiled while render mode's is a warm
+      handle, so that subtraction reads this term as <b>−1.3 µs</b> where a compile-only probe
+      reads <b>+17.5 µs</b>. Two instruments disagreeing about even the sign is the clearest
+      statement that they are not the same quantity. Read correctly, the parse row is
+      <b>render's saving minus compile's new cost</b> — against ~240 µs on
+      <code>normal</code> the cost is ~17 µs — and the compile gap widens from 1.21× to 1.34×,
+      which is what eager materialisation is for.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>One design change against its own prediction, made because the guard refused the

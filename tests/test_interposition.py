@@ -472,8 +472,15 @@ class InterpositionTests(unittest.TestCase):
         # stays 89. Re-measured: ours is 1407 lines, 289 differ, upstream's 1207
         # with 89, and 1407-289 = 1207-89 = 1118, the same number a third time.
         #
-        # **They arrive as ops twelve and thirteen, and the nine matched lines at
-        # ours 1199-1207 are why the pair reads as adjacent here.** `difflib`
+        # **They arrive as the twelfth and thirteenth entries of the list this row
+        # asserts, and the nine matched lines at ours 1199-1207 are why the pair
+        # reads as adjacent here.** That list is the **differing** opcodes —
+        # `[op for op in matcher.get_opcodes() if op[0] != "equal"]`, fourteen of
+        # the twenty-nine `difflib` returns for this pair of files — and every
+        # position named in this comment is a position in *it*, never in
+        # `get_opcodes()`. The distinction is worth the sentence because the two
+        # counts differ by a factor of two and only one of them is asserted
+        # below. `difflib`
         # matched that run because `NodeList.render` and
         # `NodeList.get_nodes_by_type` are upstream's to the character — the two
         # functions the slice deliberately did *not* touch, an arm inside `render`

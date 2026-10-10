@@ -29,9 +29,24 @@ correction.  See `tests/test_interposition.py`'s diff-shape row and the
 
 | label | artifact | what it is |
 |---|---|---|
-| `before` | `sha256:4c14186d…` | `bench-ab/pre-{a,b}`, two runs on the pre-slice tree |
-| `after` | `sha256:6954e0c1…` | runs `A` and `B` this session, on the built slice |
-| `predicted` | — | `step5_prediction.md`, whose own baseline was a *different* run of the pre-slice tree (`sha256:bc4c750a`) |
+| `before` | `sha256:bc4c750a…` | `bench-pre-{a,b}.json`, two runs on the pre-slice tree |
+| `after` | `sha256:6954e0c1…` | `bench-post-{a,b}.json`, two runs on the built slice |
+| `predicted` | — | `step5_prediction.md`, whose declared baseline is the **same artifact** as `before` |
+
+**The `before` column was re-measured, because this file's first version had it on
+the wrong tree.**  It used `bench-ab/pre-{a,b}` (`sha256:4c14186d…`), which is
+`dbce272`'s A/B pair — a tree **one slice older than step 5's own parent**, so it
+was missing the bare-number argument work too.  The row that gives it away is
+`django-only/filter-arg`: `1.374` render in `bench-ab/pre-a.txt`, against `1.089` /
+`1.092` on the real pre-slice tree — and `dbce272`'s own message predicts 1.09
+from 1.374 at −20.5%.  Reverting the three files the slice touches to `6231b04`
+and rebuilding reproduces `sha256:bc4c750a…`, **byte-for-byte the artifact
+`step5_prediction.md` declared as its baseline**, so `before` and the prediction
+cite one artifact rather than two.  The correction moves the `before` render
+ratio on `real-world/normal` from 0.894 to 0.899, a 0.6% shift: **the
+conclusions survive the correction, the citation did not.**  §1's own `before`
+column never had this problem — it comes from the committed `node_census.txt`,
+which `dbce272` last regenerated.
 
 `scripts/bench.py`, `.venv/bin/python -I`, Django 6.0.9, `--repeats 7
 --target 0.05`, same machine.  Ratio is ours/stock, **lower is better**, 1.00 is
@@ -44,12 +59,12 @@ supposed to bound.
 
 | pair | rows | median \|rel\| | max \|rel\| |
 |---|---|---|---|
-| `after` A↔B (both `6954e0c1`) | 36 | **1.08%** | 8.43% (`real-world/large parse`, 10–23 iters) |
-| `before` a↔b (both `4c14186d`) | 36 | **0.82%** | 2.87% |
+| `after` a↔b (both `6954e0c1`) | 36 | **1.23%** | 3.67% (`real-world/complex parse`) |
+| `before` a↔b (both `bc4c750a`) | 36 | **0.82%** | 2.87% (`django-only/for-tags render`) |
 
 A cross-artifact delta of two ratios owes roughly the sum of the two bands, so
 **nothing under ~2% is called a move below, and the two rows this section treats
-as moves are 200× and 44× that.**  What the bands do *not* license: both pairs
+as moves are 53× and 35× that.**  What the bands do *not* license: both pairs
 were run back to back, so what they sample is short-timescale noise; the
 `before` ↔ `after` comparison also crosses artifacts and sessions, so it carries
 thermal and load drift neither band saw.  The band is the *floor* of what a
@@ -134,54 +149,110 @@ predicted right even though the count was not.
 
 ## 2. Timing — the render/parse pair
 
-| row | mode | before | predicted | measured A / B | verdict |
+| row | mode | before A / B | predicted | measured A / B | verdict |
 |---|---|---|---|---|---|
-| `real-world/normal` | render | 0.894 | 0.33–0.45 (ceiling 0.298) | **0.311 / 0.317** | **hit, and below the interval** |
-| `real-world/normal` | parse | 0.990 | 0.85–0.99 | **0.550 / 0.561** | **miss — see below** |
-| `real-world/complex` | render | 0.620 | 0.45–0.60 | 0.617 / 0.628 | **miss: unmoved** |
-| `real-world/complex` | parse | 0.688 | 0.62–0.72 | 0.693 / 0.705 | hit |
-| `django-only/realistic` | render | 0.929 | 0.40–0.60 | 0.915 / 0.923 | **miss: unmoved** |
-| `django-only/realistic` | parse | 0.962 | 0.85–0.99 | 0.971 / 0.981 | hit |
-| `real-world/large` | render | 0.300 | 0.28–0.32 unmoved | 0.299 / 0.296 | hit |
-| `micro/extends` | render | 1.043 | 0.70–0.95 | **0.982 / 0.998** | **miss: moved only −5%** |
+| `real-world/normal` | render | 0.903 / 0.895 | 0.33–0.45 (ceiling 0.298) | **0.315 / 0.312** | **hit, and below the interval** |
+| `real-world/normal` | parse | 0.996 / 0.987 | 0.85–0.99 | **0.562 / 0.557** | **miss — the row is not a control** |
+| `real-world/complex` | render | 0.619 / 0.614 | 0.45–0.60 | 0.633 / 0.610 | **miss: reached, effect below the band** |
+| `real-world/complex` | parse | 0.687 / 0.692 | 0.62–0.72 | 0.706 / 0.680 | hit |
+| `django-only/realistic` | render | 0.923 / 0.915 | 0.40–0.60 | 0.921 / 0.920 | **miss: reached, effect below the band** |
+| `django-only/realistic` | parse | 0.974 / 0.964 | 0.85–0.99 | 0.971 / 0.975 | hit |
+| `real-world/large` | render | 0.298 / 0.298 | 0.28–0.32 unmoved | 0.305 / 0.305 | **unresolved, inside the band** |
+| `micro/extends` | render | 1.021 / 1.022 | 0.70–0.95 | 1.016 / 0.990 | **miss: unmoved** |
+| `micro/extends` | parse | 1.238 / 1.222 | — unmoved | 1.266 / 1.288 | **+3.8%: the compile cost** |
 
-**`real-world/normal` is 0.894 → 0.311.**  That is −65%, 60× the `after` band's
-median and 8× its max; the before column's own pair spans 0.894 and its scatter
-is 0.82% median.  In microseconds: 372.8 → 129.0 ours against a stock 416.8 →
-414.7.  And it is **above the 0.298 ceiling** `step5_ceiling.py` set from
+**`real-world/normal` is 0.899 → 0.313.**  That is −65%, 53× the `after` band's
+median and 18× its max.  In microseconds: 369.3 → 128.1 ours against a stock
+410.8 → 409.2.  And it is **above the 0.298 ceiling** `step5_ceiling.py` set from
 `flat/normal`, which is the check that keeps a very good number from being read
 as a broken fixture.
 
-**The parse row was mislabelled as a control, and the miss is the correction.**
-§3.3 called `parse` "the control" on the reasoning that a per-render saving must
-not show up in a row that never renders.  It does show up, because
-`bench.py`'s `parse` mode times `engine.render(engine.from_string(source), context)`
-— **compile *plus* render** — so it moves whenever render moves.  Decomposed on
-`normal`: ours parse 570.6 − ours render 129.0 = **185 µs** of compile
-(before: 568.3 − 372.8 = 195.5), against stock's 570.6 − 414.7 = 155.9.  Our
-compile is unchanged to within 5% and still ~19% slower than stock's; every bit
-of the parse ratio's move is the render's.  The row that *would* have been a
-control is a compile-only one (`.review/m19-measurements/compile_only.py`), not
-this one — and the correct reading of the pair is the one
-`render-parse-pair-is-the-diagnostic` states: flat-in-render alone is ambiguous,
-so both rows are read together as *render + constant compile*, not as
-*treatment + control*.
+Every `after` figure in this section is the **median of the two committed runs**,
+`bench-post-{a,b}.json`.  `docs/bench.html` is regenerated from the shipped
+artifact as a *single* run, and its ratios are the cross-check that the pair is
+not drifting: `normal` 0.317 render / 0.554 parse, `complex` 0.613 / 0.696,
+`realistic` 0.916 / 0.969, `large` 0.300 / 1.098, `micro/extends` 0.991 / 1.271 —
+each within the band of the pair's numbers below.
 
-**The two unmoved render rows are unmoved because the walk reaches nothing that
-matters in them, and §1 says so independently.**  `complex`'s bulk is a
-delegated loop of 72 includes; `realistic`'s is a delegated loop of 50
-`{% blocktranslate %}` rows.  Both were predicted to move (0.45–0.60 and
-0.40–0.60) by reading "the block body is now Rust" as "the page is now Rust";
-the census's `out deleg` at 494.5% and 295.0% said otherwise before the timings
-did.  **A slice that walks a block body only pays where the body is the page.**
+**The parse row was mislabelled as a control, and the repair is harder than
+swapping an instrument.**  §3.3 called `parse` "the control" on the reasoning
+that a per-render saving must not show up in a row that never renders.  It does
+show up, because `bench.py`'s `parse` mode times
+`engine.render(engine.from_string(source), context)` — **compile *plus* render**
+— so it moves whenever render moves.
 
-**`micro/extends` moved −5% against a predicted 0.70–0.95.**  Its bodies are 3
-and 4 nodes; the render is dominated by the two Python frames (`ExtendsNode` and
-`BlockNode`) and the per-render `compiled_parent.nodelist.get_nodes_by_type(BlockNode)`
-walk, exactly the residual §3.3 named — but §3.3 then priced that residual as
-"wide because unmeasured one frame at a time", and the interval it produced was
-too optimistic.  The measured residual is the honest one: at this size the
-frames are the cost, and a body plan does not touch them.
+**And the obvious repair, `parse − render`, is not compile either.**  Both terms
+are in the file and both are the wrong quantity: `parse`'s render is a **cold**
+render of a template compiled on that very iteration, while `render` mode's is a
+**warm** handle whose caches are filled, so the subtraction carries
+`compile + (cold render − warm render)` and the second term is not small.  On
+`real-world/normal` it gives ours `560.3 − 369.3 = 191.0 µs` before and
+`317.8 − 128.1 = 189.7` after — our compile moved **−1.3 µs** — while
+`compile_only.py` on the same two artifacts measures **+17.5 µs**
+(149.3 → 166.8).  The two instruments do not merely differ in size: **they
+disagree in sign**, which is the clearest statement available that they are not
+the same quantity.
+
+`compile_only.py --corpus micro/extends,real-world/normal,real-world/complex`,
+twice per tree, artifact pinned (µs, median of the two runs per side;
+`compile_only.step5-{pre,post}{,-b}.txt`):
+
+| row | ours before | ours after | rel | stock before → after |
+|---|---|---|---|---|
+| `micro/extends` | 23.26 | 24.33 | **+4.6%** | 16.67 → 16.71 (−0.2%) |
+| `real-world/normal` | 149.32 | 166.81 | **+11.7%** | 123.52 → 124.55 (+0.8%) |
+| `real-world/complex` | 101.74 | 112.93 | **+11.0%** | 90.27 → 90.58 (+0.3%) |
+
+So the descent pass is a **per-compile cost of +4.6% to +11.7% on our own
+compile**, while stock's is flat within 0.8%, widening the compile gap on
+`real-world/normal` from 1.21× to 1.34×.  That is the term `parse` mode cannot
+separate and `render` mode cannot see at all — a one-off paid on every compile,
+and `parse` compiles every iteration.  The parse row's move is therefore
+**render's saving minus compile's new cost**, and on `real-world/normal` the
+saving is ~240 µs against a ~17 µs cost.  The row that *would* have been a
+control is the compile-only one, and the correct reading of the pair is the one
+`render-parse-pair-is-the-diagnostic` states: both rows read together as *render
++ per-compile constant*, not as *treatment + control*.
+
+**`micro/extends` is where the compile term is visible in the pair with no
+arithmetic at all.**  Its render did **not** move — 1.021 → 1.003, −1.8%, inside
+the band (the `after` pair's median is 1.23%) — while its parse moved **+3.8%**
+(1.230 → 1.277), just above the `after` band's max of 3.67%.  Compile-only on
+that row measures **+4.6%** independently and at the same size.  So the one row
+where the two terms are comparable shows both: render flat, compile up, parse
+up.  (This file's first version read that row as "moved only −5%" against a
+1.043 `before`; on the right tree it is unmoved, and the band is what says so.)
+
+**The unmoved render rows are where the walk reaches nothing that is the page,
+and §1 says so independently.**  `complex`'s bulk is a delegated loop of
+includes; `realistic`'s is a delegated loop of 50 `{% blocktranslate %}` rows.
+Both were predicted to move (0.45–0.60 and 0.40–0.60) by reading "the block body
+is now Rust" as "the page is now Rust", and the census's `out deleg` at 494.5%
+and 295.0% said otherwise before the timings did.  But **"unmoved" here means
+reached-and-below-the-band, not untouched**: `complex`'s census moved —
+`applied: upper=72 → upper=73`, `handled: TextNode=294→297 VariableNode=218→219`
+— so the slice does reach it, by one routed-and-computed application in the
+layout text outside the delegated loop, and the effect is under the instrument's
+resolution.  `micro/extends` is unmoved for the opposite reason: its bodies are 3
+and 4 nodes, so the render is dominated by the two Python frames (`ExtendsNode`
+and `BlockNode`) and the per-render
+`compiled_parent.nodelist.get_nodes_by_type(BlockNode)` walk — the residual §3.3
+named and then priced too optimistically as "wide because unmeasured one frame at
+a time".  The measured residual is the honest one: at this size the frames are
+the cost, and a body plan does not touch them.  **A slice that walks a block body
+pays where the body is the page, and nowhere else.**
+
+**`real-world/large` is the row whose movement I could not attribute, and five
+runs are what settle it as unresolved rather than as an effect.**  Its render
+ratio reads 0.298 / 0.298 on the pre-slice pair, 0.305 / 0.305 on this slice's
+pair, and **0.300 on the regenerated `docs/bench.html` run** — a span of 2.3%,
+inside the `after` band's own max of 3.67%, with our absolute render at
+199.7–207.0 µs across the five.  Its parse reads 1.073 / 1.074 → 1.091 / 1.103 →
+1.098, the same span.  The row has no `{% extends %}` and no `{% block %}` in its
+source and its census is identical in every column (§1), so nothing in this
+slice's mechanism can reach it: the honest statement is that this row's ratio is
+not resolvable to better than the band, **not** that it moved.  It is the one row
+here I would rather have had a smaller instrument for.
 
 ## 3. What this leaves for step 5 slice 2
 
@@ -199,12 +270,23 @@ rather than how big it is:
   here — it is a candidate for the compile-time cache slice 1 already has a
   place for.
 
+And one follow-up the slice's own shape asks for, which is **not** in slice 2:
+`plan_block_bodies` should report its own coverage — bodies visited, planned,
+declined — so that a missing attach is a number rather than a gap.  Today
+`NodeList._native_plan = None` is a class default and the failure mode it hides
+is a silently unplanned body that renders correctly and slowly, which is exactly
+the class of miss this record has already had to correct twice.  It changes the
+census's printed shape, which every M19 record cites, so it wants its own slice
+rather than a line in this one.
+
 ## 4. What did not move, and must not
 
-* **The acceptance suite: `Ran 1547 tests … OK (skipped=6)`**, plus the 494
-  unit tests, on the artifact this file measures.  Block semantics are the most
-  heavily tested thing in the suite (`test_extends.py`, `test_partials.py`,
-  `recursive_templates/`).
+* **The acceptance suite: `Ran 1547 tests … OK (skipped=6)`**, plus the 494 unit
+  tests — both from `scripts/check.sh`, on the artifact this file measures.  The
+  vendored suite is that script's `django_suite/run.py -v 2 template_tests` step
+  against the pinned, unmodified checkout, the unit suite `-m unittest` through
+  `run_unit_tests.sh`.  Block semantics are the most heavily tested thing in the
+  suite (`test_extends.py`, `test_partials.py`, `recursive_templates/`).
 * **Every bench row's `out` column: `===`,** three engines byte-identical,
   including `django-only/realistic`, `micro/extends` and `real-world/normal`.
 * **`real-world/large`'s census, all columns.**  No `{% extends %}` and no
@@ -213,12 +295,24 @@ rather than how big it is:
 * `flat/normal`, `nested for (2 deep)` and the remaining `django-only` rows:
   identical, for the same reason.
 
+One thing did move that is not a row: **our compile, and only our compile.**  §2
+measures it at +4.6% to +11.7% on the three rows probed, with stock flat inside
+0.8%.  It is called out here rather than left in §2 because a cost that appears
+in no `render` row is the one a reader of the tables will not find.
+
 ## 5. The instruments
 
 | file | what it settles |
 |---|---|
 | `bench_scatter.py` | the same-tree scatter band, with a `sha256:` guard against comparing two builds |
+| `compile_only.py` | what a `parse` row cannot separate and a `render` row cannot see: `from_string(source)` with no render, and so the slice's per-compile cost |
+| `node_census.py` | the structure behind the timings; its committed `.txt` is §1's `before` column |
 | `inheritance_share.py`, `lazy_size.py`, `step5_ceiling.py` | the prediction's inputs; unchanged |
+
+The four bench payloads (`bench-{pre,post}-{a,b}.json`) and the four compile-only
+runs (`compile_only.step5-{pre,post}{,-b}.txt`) are committed beside this file:
+they are what `bench_scatter.py` and the §2 table were computed from, and a band
+quoted without its input is a number a reader cannot check.
 
 All `.review/` records rather than shipped instruments, and none on the gate's
 path.

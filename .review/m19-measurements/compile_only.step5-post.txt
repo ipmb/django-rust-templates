@@ -1,0 +1,11 @@
+compile only: from_string(source), iters=200, 7 repeats, best-of
+artifact: native:  _native.cpython-314-darwin.so 2703632 bytes sha256:6954e0c1e52f4859 -> release (target/release/lib_native.dylib)
+row                  ours us  stock us  ours/stock
+micro/text              6.71      1.88       3.564
+micro/variable         12.49      5.97       2.091
+micro/if               22.66     10.87       2.085
+micro/filter           18.35     11.47       1.600
+micro/loop-text        15.36     10.08       1.523
+micro/extends          24.16     16.61       1.454
+real-world/normal     167.50    124.71       1.343
+real-world/complex    112.60     90.02       1.251
