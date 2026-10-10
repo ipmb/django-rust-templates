@@ -249,7 +249,7 @@ class SimpleTemplateResponseTest(SimpleTestCase):
 @override_settings(
     TEMPLATES=[
         {
-            "BACKEND": "django_rust_templates.backends.RustTemplates",
+            "BACKEND": "django_rust_templates.rust.RustTemplates",
             "NAME": "django",
             "DIRS": [TEMPLATE_DIR],
             "OPTIONS": {

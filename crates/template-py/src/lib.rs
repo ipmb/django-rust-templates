@@ -2433,13 +2433,13 @@ fn log_resolution_failure(
 /// the rows they were built for.
 ///
 /// **A second version of this paragraph added that moving the handler to Python
-/// would be refused by `tests/parity_target.py:62`, and that was false too.**
+/// would be refused by `tests/parity_target.py:63`, and that was false too.**
 /// That guard's subject is the *target* — its own docstring at that line
 /// describes `target` as a class or function whose source file is the
 /// comparison's Python side, Django's — and routing the five harnesses through
 /// the shell's `_resolve_lookup` changes **our** side, not the target, which
 /// stays the ast-extraction out of the pinned checkout
-/// (`tests/parity_target.py:170`). That is the whole job of
+/// (`tests/parity_target.py:171`). That is the whole job of
 /// `pinned_resolve_lookup()`, so the guard would be satisfied and unmoved. The
 /// sentence conflated the side under test with the oracle.
 ///
@@ -3077,12 +3077,14 @@ fn render_desc(py: Python<'_>, tree: &DescTree, context: Py<PyAny>) -> PyResult<
 /// materialising a `FilterExpression` calls `parser.find_filter`. It did not
 /// settle how Rust reaches the *materialiser*, and the answer the plan assumed
 /// is impossible: the shell lives in `django_rust_templates/engine`, whose
-/// `__init__.py` is the shim's `django.template` and imports its own siblings
-/// (`from .engine import Engine`), so `import
-/// django_rust_templates.engine.parser` raises
-/// `ModuleNotFoundError: No module named 'django_rust_templates.engine.engine'`
-/// — measured. Under the shim the name `django.template.parser` would resolve,
-/// and M3 runs unshimmed. So the shell hands its materialiser over, as one
+/// `__init__.py` imports its own siblings (`from .engine import Engine`), so an
+/// `import django_rust_templates.engine.parser` issued from inside the extension
+/// re-enters a package that is still initialising. Measured before M18, against a
+/// package whose `__init__` did more work on the way, this failed as
+/// `ModuleNotFoundError: No module named 'django_rust_templates.engine.engine'`.
+/// The layout has changed since; the reason to avoid the import has not, and the
+/// import is a hazard rather than an impossibility, which is worse to rely on.
+/// So the shell hands its materialiser over, as one
 /// module rather than three callables: `tree.check_filter(parser)`,
 /// `tree.materialise(desc, None, None, parser)` and
 /// `tree.template_for(nodelist)` are the functions this needs, and all three are

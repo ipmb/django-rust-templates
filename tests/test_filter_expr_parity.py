@@ -37,9 +37,9 @@ DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
-from django.template import defaultfilters  # noqa: E402
-from django.template import defaulttags  # noqa: E402
-from django.template.base import FilterExpression, Parser, Variable  # noqa: E402
+from django_rust_templates.engine import defaultfilters  # noqa: E402
+from django_rust_templates.engine import defaulttags  # noqa: E402
+from django_rust_templates.engine.base import FilterExpression, Parser, Variable  # noqa: E402
 from django.utils.functional import Promise  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
@@ -324,7 +324,7 @@ class FilterExpressionParityTests(unittest.TestCase):
         """
         import re
 
-        from django.template.base import filter_raw_string
+        from django_rust_templates.engine.base import filter_raw_string
 
         pattern = re.compile(filter_raw_string, re.VERBOSE)
         for text, matched in ALPHABET_WORD_ROWS.items():

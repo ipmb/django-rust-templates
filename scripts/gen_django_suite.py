@@ -28,7 +28,7 @@ So `test_autoreloader.py` and `test_response.py` keep importing Django's
 view layer and Django's backend registry, and §6's vendoring policy declines
 them with a reason each. They reach this engine the way a *project* does: through
 `settings.TEMPLATES`, which `django_suite/run.py` points at
-`django_rust_templates.backends.RustTemplates`.
+`django_rust_templates.rust.RustTemplates`.
 
 **The rewrite is structural, not textual.** `assertLogs("django.template", …)`
 is a *logger* name, and it occurs three times in `test_logging.py`; a regex over
@@ -93,7 +93,7 @@ TAGS = "django.templatetags"
 # against ours, and the suite is green about code it never ran. That is the one
 # failure mode a vendored suite exists to make impossible.
 DJANGO_BACKEND = "django.template.backends.django.DjangoTemplates"
-OUR_BACKEND = "django_rust_templates.backends.RustTemplates"
+OUR_BACKEND = "django_rust_templates.rust.RustTemplates"
 
 # The same two classes split into the module they live in and the name they are
 # bound to, for the one row that reaches the backend by *import* instead of by the
@@ -214,7 +214,7 @@ def _spans(source: str):
     #
     # **This rule cannot be derived from `ours()`, and that is the part worth
     # recording.** `ours()` is `engine/<rest>.py exists`, and the backend is
-    # `django_rust_templates/backends.py` — outside `engine/`. The one component
+    # `django_rust_templates/rust.py` — outside `engine/`. The one component
     # of this package that is not under `engine/` is invisible to a partition
     # keyed on `engine/`, so it is spelled out here instead. A second such
     # component would inherit the same blindness.
@@ -414,9 +414,10 @@ def _name_insertions(source: str):
 
     **Rewriting the backend string renames the engine, and that is not obvious
     from the line being edited.** The alias is not a property of the backend
-    class — it is arithmetic on the *string*, and this package's spelling
-    (``django_rust_templates.backends.RustTemplates``) gives ``rsplit(".", 2)[-2]
-    == "backends"``. So a `TEMPLATES` literal whose `BACKEND` is rewritten from
+    class — it is arithmetic on the *string*, and the two strings' second-to-last
+    segments differ: Django's spelling gives ``"django"`` and this package's
+    (``django_rust_templates.rust.RustTemplates``) gives ``"rust"``. So a
+    `TEMPLATES` literal whose `BACKEND` is rewritten from
     Django's to ours silently stops answering to ``"django"``, and every row that
     reaches the engine through the registry by that name raises
     ``InvalidTemplateEngineError: Could not find config for 'django' in
@@ -427,6 +428,15 @@ def _name_insertions(source: str):
     An entry that names itself is left alone — ``test_engine`` spells ``"NAME":
     "default"`` and ``"other"``, and those are names the test chose deliberately.
     Only a fixture whose alias is currently *derived* gets one written in.
+
+    **And that makes this key the one place the suite pins a value upstream
+    computes.** The alias is an implementation detail of ``EngineHandler``, not a
+    property the four ``test_response`` rows are about — which is why they must
+    not be allowed to fail for seeing it change, and why the key is written down
+    rather than derived at run time. The cost is that if upstream ever changes the
+    derivation, their fixture follows and ours does not, silently. So: this key is
+    load-bearing, not cosmetic, and a Django bump that touches
+    ``EngineHandler.__init__`` is the moment to re-read it.
 
     The literal is located twice, once by the syntax tree and once by
     :data:`STRING`, and the two are matched up **by line number**: the tree knows

@@ -15,7 +15,7 @@ policy and the list of other transcribed files.
 
 **The name of this module is not ``django.template``.** It lives in this
 package's own namespace, and the only thing that puts it in front of a project
-is ``TEMPLATES[0]["BACKEND"]`` pointing at ``django_rust_templates.backends``.
+is ``TEMPLATES[0]["BACKEND"]`` pointing at ``django_rust_templates.rust``.
 So the relative imports below resolve to this package's modules throughout, at
 every line, in every mode — there is no second spelling of this file and no
 ``__path__`` fallback that could resolve one of them to Django's.

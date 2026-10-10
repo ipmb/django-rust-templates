@@ -16,8 +16,14 @@ if [ -d "$ROOT/.venv/bin" ]; then
   export VIRTUAL_ENV="$ROOT/.venv"
 fi
 
-# Make the pinned Django checkout runnable and our shim installable.
-export DJANGO_RUST_TEMPLATES=1
+# **No `DJANGO_RUST_TEMPLATES` and no `PYTHONPATH` any more.** Both existed to
+# arrange the substitution: the variable was what `scripts/shimpath/sitecustomize.py`
+# read before putting our file on `sys.meta_path` under Django's name, and the
+# checkout had to precede it on the path so that `import django` resolved to
+# `.django/`. M18 deleted the finder and moved the engine to its own namespace, so
+# there is nothing to arrange: the vendored suite imports
+# `django_rust_templates.engine` by name, and the unit suite imports Django from the
+# venv. Two gates that need neither one are exactly the two that used to spell them.
 
 # The machine's ~/.config/pip/pip.conf sets `global.uploaded-prior-to = P3D`,
 # which is not a valid ISO 8601 timestamp, so every pip invocation aborts with

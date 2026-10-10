@@ -51,10 +51,11 @@ def key_of(source: Path) -> str:
     the file being interrogated, so the last two clauses — the ones that exist to
     catch a region on the compared path — are the ones that go quiet.
 
-    The spelling is not chosen here. It is what ``_shim.shadowing_files()``
-    reports, what ``check_transcriptions.py``'s ``DECLARED`` and
-    ``COMPARED_PATH`` are keyed by, and what
-    ``.review/m10-measurements/m10_measure_compared_path.py`` prints its rows in.
+    The spelling is not chosen here. It is what
+    ``milestone_ownership.shadowing_files()`` reports, what
+    ``check_transcriptions.py``'s ``DECLARED`` and ``COMPARED_PATH`` are keyed by,
+    and what ``.review/m10-measurements/m10_measure_compared_path.py`` prints its
+    rows in.
     """
     return source.relative_to(IMPL_DIR.resolve()).as_posix()
 
@@ -213,7 +214,7 @@ def pinned_resolve_lookup():
     else:  # pragma: no cover - the pinned tree has it
         raise AssertionError(f"Variable._resolve_lookup is not in {path}")
 
-    namespace = dict(importlib.import_module("django.template.base").__dict__)
+    namespace = dict(importlib.import_module("django_rust_templates.engine.base").__dict__)
     exec(compile(ast.get_source_segment(source, child), str(path), "exec"), namespace)
     _PINNED_RESOLVE_LOOKUP = namespace["_resolve_lookup"]
     return _PINNED_RESOLVE_LOOKUP

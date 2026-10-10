@@ -1,15 +1,18 @@
-"""Direct-entry evidence that the interposed modules are actually ours.
+"""Direct-entry evidence that each ``engine`` module is actually ours.
 
 The suite cannot see this. Measured (``.review/m9-recon.md`` finding 3): with
-``engine/base.py`` a byte-for-byte copy of Django's, ``unshimmed()`` reports one
-fewer module, the whole suite is green, and the only row that notices is the
-meter. So a transcription that delegates nothing, or delegates wrongly, passes
-every count this project otherwise accepts.
+``engine/base.py`` a byte-for-byte copy of Django's, the coverage count reports
+one fewer module, the whole suite is green, and the only row that notices is the
+count. So a transcription that delegates nothing, or delegates wrongly, is
+invisible to every other count this project accepts.
 
-Every row here imports the module through the shim and asserts on the file it
-resolved to, or on a Rust call it must have made — the latter because a
-delegation that quietly called Django's own implementation is green too
-(finding 1a).
+Every row here imports the module by its real name — ``django_rust_templates.engine.base``
+and no other — and asserts on the file it resolved to, or on a Rust call it must
+have made — the latter because a delegation that quietly called Django's own
+implementation is green too (finding 1a). **Until the M18 rewiring the import ran
+through the shim's finder; it does not now, and the rows did not weaken when the
+finder left, because a direct import resolves to a strictly better-known path
+than a mediated one.**
 
 Rows arrive with the commit that makes them true, so every commit is green:
 ``base``'s here, ``compile_nodelist`` in Task 2, ``smartif`` in Task 3, the
@@ -25,10 +28,17 @@ import pathlib
 import tempfile
 import unittest
 
-from django.template import Context, Engine
-from django_rust_templates import _shim
+from django_rust_templates.engine import Context, Engine
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+#: The engine's own directory. Rows here assert on the **file** a module resolved
+#: to, and until the M18 rewiring they read that path off the shim
+#: (``_shim._IMPL_DIR``). There is no shim and there is no second copy of the
+#: tree: the file an import resolves to is the file under here, which is why the
+#: constant is a plain path and not a lookup. It is spelled once so a rename of
+#: the package moves every row at once.
+ENGINE_DIR = PROJECT_ROOT / "python" / "django_rust_templates" / "engine"
 
 
 def render_through(tmpdir, source, *, template_name="index.html", **context):
@@ -51,37 +61,38 @@ def render_through(tmpdir, source, *, template_name="index.html", **context):
     the thing that has to give way.
     """
     pathlib.Path(tmpdir, template_name).write_text(source)
-    engine = Engine(loaders=[("django.template.loaders.filesystem.Loader", [tmpdir])])
+    engine = Engine(loaders=[("django_rust_templates.engine.loaders.filesystem.Loader", [tmpdir])])
     return engine.get_template(template_name).render(Context(dict(context)))
 
 
 class InterpositionTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        _shim.install()
-
     def test_base_resolves_to_our_file(self):
-        import django.template.base as base
+        import django_rust_templates.engine.base as base
 
         self.assertIn("engine", base.__file__, base.__file__)
 
     def test_the_node_classes_are_defined_by_our_file(self):
-        """Resolution and *identity* are different claims.
+        """Resolution and *definition* are different claims.
 
-        The module resolving to our file does not by itself mean the class a
-        render uses was defined there: a consumer that bound the name from an
-        earlier import keeps Django's object while the module is ours. So the
-        assertion is on the defining file.
+        The row above says the module is ours. This one says the five class
+        objects a render actually uses are *defined* in it rather than bound into
+        it from somewhere else — a ``base.py`` doing ``Node =
+        django.template.base.Node`` would satisfy that row and fail this one, and
+        would be a transcription that had kept Django's classes while wearing our
+        file's name.
 
-        **Not on ``__module__``**, which reads ``django.template.base`` for our
-        classes and is *supposed* to — the shim loads our file under Django's
-        name, so that is the correct value for a drop-in replacement. The first
-        draft of this row asserted ``"engine" in cls.__module__`` and failed on
-        all five classes for exactly that reason.
+        **``inspect.getfile`` and ``cls.__module__`` are one mechanism** — the
+        former follows the latter into ``sys.modules`` — so today either spelling
+        would pass, and the reason this row reaches for the file is historical
+        rather than technical: the first draft asserted ``"engine" in
+        cls.__module__`` and failed on all five classes, because the engine then
+        lived in ``django_rust_templates._impl`` and no class said ``engine``.
+        M18 moved it to ``django_rust_templates.engine``, and the assertion is now
+        simply what its name says.
         """
         import inspect
 
-        import django.template.base as base
+        import django_rust_templates.engine.base as base
 
         for name in ("Template", "NodeList", "Node", "Variable", "VariableNode"):
             with self.subTest(name=name):
@@ -101,7 +112,7 @@ class InterpositionTests(unittest.TestCase):
         ``Engine.from_string`` is the caller because it is the one the suite
         uses 1170 times: ``Template.__init__`` ends in ``compile_nodelist``.
         """
-        from django.template import Engine
+        from django_rust_templates.engine import Engine
 
         from django_rust_templates import _native
 
@@ -130,7 +141,7 @@ class InterpositionTests(unittest.TestCase):
         built by ``__new__``, and the docstring there says why setting
         ``extra_data`` in two places is how the two would drift.
         """
-        from django.template import Engine
+        from django_rust_templates.engine import Engine
 
         template = Engine().from_string("{% csrf_token %}")
         self.assertTrue(hasattr(template, "extra_data"))
@@ -138,8 +149,8 @@ class InterpositionTests(unittest.TestCase):
 
     def test_compile_nodelist_attaches_debug_info_to_a_parse_error(self):
         """The debug arm: a failed parse is annotated, not merely re-raised."""
-        from django.template import Engine
-        from django.template.exceptions import TemplateSyntaxError
+        from django_rust_templates.engine import Engine
+        from django_rust_templates.engine.exceptions import TemplateSyntaxError
 
         engine = Engine(debug=True)
         with self.assertRaises(TemplateSyntaxError) as caught:
@@ -154,7 +165,7 @@ class InterpositionTests(unittest.TestCase):
         The plan's Step 5 row, unchanged: the shim loads our file under Django's
         name, so this is the ``__file__`` a reader can check by hand.
         """
-        import django.template.smartif as smartif
+        import django_rust_templates.engine.smartif as smartif
 
         self.assertIn("engine", smartif.__file__, smartif.__file__)
 
@@ -191,9 +202,9 @@ class InterpositionTests(unittest.TestCase):
         """
         import inspect
 
-        import django.template.smartif as smartif
-        from django.template import Engine
-        from django.template.defaulttags import TemplateLiteral
+        import django_rust_templates.engine.smartif as smartif
+        from django_rust_templates.engine import Engine
+        from django_rust_templates.engine.defaulttags import TemplateLiteral
 
         from django_rust_templates import _native
 
@@ -248,8 +259,8 @@ class InterpositionTests(unittest.TestCase):
         it, because its origin is ``UNKNOWN_SOURCE`` and the rewrite is
         conditional on the name differing from that.
         """
-        from django.template import Engine, Origin, Template
-        from django.template.exceptions import TemplateSyntaxError
+        from django_rust_templates.engine import Engine, Origin, Template
+        from django_rust_templates.engine.exceptions import TemplateSyntaxError
 
         origin = Origin(name="some/template.html", template_name="some/template.html")
         with self.assertRaises(TemplateSyntaxError) as caught:
@@ -293,10 +304,8 @@ class InterpositionTests(unittest.TestCase):
         import difflib
         import pathlib
 
-        from django_rust_templates import _shim as shim
-
         project_root = pathlib.Path(__file__).resolve().parent.parent
-        ours = (shim._IMPL_DIR / "base.py").read_text().splitlines()
+        ours = (ENGINE_DIR / "base.py").read_text().splitlines()
         theirs = (project_root / ".django" / "django" / "template" / "base.py")
         theirs = theirs.read_text().splitlines()
 
@@ -360,14 +369,41 @@ class InterpositionTests(unittest.TestCase):
         # of the edit** (which is -2 on our side): it falls because upstream's
         # blank line 1022 — which `difflib` had paired with one of our blank
         # lines — now sits inside the replaced run instead of being matched.
+        #
+        # **The seventh edit is a `replace`, and it is the M18 namespace.** M18.1
+        # stopped transcribing Django's *imports*: our 61 is
+        # `from .context import BaseContext` where upstream's 59 is
+        # `from django.template.context import BaseContext`. The line stood inside
+        # a run `difflib` had matched, so substituting it does three things at
+        # once and moves `equal` by `-1` **without changing either file's length**
+        # — 1212 lines before and 1212 now. One line was taken out of the equal
+        # blocks and one line was added to each side's differing lines: ours
+        # 92 -> 93, upstream's 87 -> 88, so 1212-93 = 1207-88 = 1119 both ways.
+        # It is the *pair* of those two counts that is the check, not either one:
+        # +1 differing on **both** sides is a substitution, while +1 on one side
+        # alone would be an insertion or a deletion wearing the same list.
+        #
+        # The op list gained the `replace` **in the middle of the two
+        # `delete`s** and this is the reason it is asserted as a list rather than
+        # as a count: an inserted `replace` that had landed at either end would
+        # have left the length at seven and read as the same edit. Position in
+        # this list is `difflib`'s statement of *where in the file* the change is.
         self.assertEqual(
             [op[0] for op in differing],
-            ["delete", "delete", "replace", "replace", "delete", "replace"],
+            [
+                "delete",
+                "replace",
+                "delete",
+                "replace",
+                "replace",
+                "delete",
+                "replace",
+            ],
         )
 
         self.assertEqual(
             equal,
-            1120,
+            1119,
             "the number of lines this transcription shares with upstream, in "
             "place, has moved; if that was a delegation, re-pin it here and "
             "declare the region in scripts/check_transcriptions.py",
@@ -463,69 +499,29 @@ class ModuleInterpositionTests(unittest.TestCase):
       non-zero count only shows the instrument counted something.
 
     Rows arrive with the commit that makes them true, so every commit is green.
+
+    **``utils``'s three rows left in the M18 rewiring, and they left because the
+    module did.** ``engine/utils.py`` held ``EngineHandler`` — the registry that
+    resolved a project's ``TEMPLATES[0]["BACKEND"]`` to a class — and the registry
+    itself is what the backend route replaces: Django's own ``django.template.utils``
+    does that job now, for our backend exactly as for any other, and there is no
+    ``engines`` binding in this package to build it from. So the module is on the
+    ``NOT_THE_ENGINE`` list and there is no file under ``engine`` to have rows
+    about. Deleting them was the honest move and not a loss of coverage: the
+    claim they made — "a template load runs our code" — is made, end to end and
+    against a real ``Engine``, by ``test_a_template_loads_and_renders_through_our_engine``
+    below.
     """
 
-    @classmethod
-    def setUpClass(cls):
-        _shim.install()
-
-    def test_utils_resolves_to_our_file(self):
-        import django.template.utils as utils
-
-        self.assertIn("engine", utils.__file__, utils.__file__)
-
-    def test_the_engine_handler_class_is_not_djangos(self):
-        import django.template.utils as utils
-
-        from tests.pinned_module import load_pinned
-
-        pinned = load_pinned("utils.py")
-        self.assertIsNot(utils.EngineHandler, pinned.EngineHandler)
-        self.assertIsNot(
-            utils.InvalidTemplateEngineError, pinned.InvalidTemplateEngineError
-        )
-
-    def test_the_package_built_its_handler_from_our_class(self):
-        """The discriminating row: ``django.template.engines`` is *our* handler.
-
-        ``engine/__init__.py`` is a transcription and does ``from .utils import
-        EngineHandler``, then ``engines = EngineHandler()``. So the singleton that
-        ``loader.py`` reaches through ``engines.all()`` is built from whichever
-        class that import bound — and if the interposition were absent it would be
-        Django's, while the two rows above stayed green.
-        """
-        import django.template as package
-        import django.template.utils as utils
-
-        self.assertIs(package.engines.__class__, utils.EngineHandler)
-
-    def test_the_engine_lookup_runs_our_code(self):
-        """``engines.all()`` is the route out of ``utils`` into a template load.
-
-        The suite's settings have ``TEMPLATES = []`` — the project's own
-        ``tests/__init__.py`` configures with ``USE_I18N`` only, so the global
-        default applies — which makes ``all()`` an empty list and a *safe* call.
-        The count is what the row reads, not the result.
-        """
-        import django.template as package
-        import django.template.utils as utils
-
-        from tests.compared_path import instrumented
-
-        with instrumented(utils) as counts:
-            self.assertEqual(list(package.engines.all()), [])
-
-        self.assertIn("EngineHandler.all", counts)
-
     def test_context_resolves_to_our_file(self):
-        import django.template.context as context
+        import django_rust_templates.engine.context as context
 
         self.assertIn("engine", context.__file__, context.__file__)
 
     def test_the_context_classes_are_not_djangos(self):
         import inspect
 
-        import django.template.context as context
+        import django_rust_templates.engine.context as context
 
         from tests.pinned_module import load_pinned
 
@@ -564,7 +560,7 @@ class ModuleInterpositionTests(unittest.TestCase):
         copy of this file instrumented instead, must reach nothing. Without it a
         non-zero count would only show that the instrument counted something.
         """
-        import django.template.context as context
+        import django_rust_templates.engine.context as context
 
         from tests.compared_path import instrumented
         from tests.pinned_module import load_pinned
@@ -580,22 +576,22 @@ class ModuleInterpositionTests(unittest.TestCase):
         self.assertEqual(sum(pinned_counts.values()), 0)
 
     def test_engine_resolves_to_our_file(self):
-        import django.template.engine as engine
+        import django_rust_templates.engine.engine as engine
 
         self.assertIn("engine", engine.__file__, engine.__file__)
 
     def test_the_engine_class_is_not_djangos(self):
         import inspect
 
-        import django.template.engine as engine
+        import django_rust_templates.engine.engine as engine
 
         from tests.pinned_module import load_pinned
 
         self.assertIsNot(engine.Engine, load_pinned("engine.py").Engine)
         self.assertIn("engine", inspect.getfile(engine.Engine))
-        # `django.template.Engine` is the same object, because the package
+        # `django_rust_templates.engine.Engine` is the same object, because the package
         # `__init__` imports it from this module by name.
-        import django.template as package
+        import django_rust_templates.engine as package
 
         self.assertIs(package.Engine, engine.Engine)
 
@@ -609,7 +605,7 @@ class ModuleInterpositionTests(unittest.TestCase):
         is fresh each time, the count is per call rather than once per process.
         The positive control is the pinned copy, which must reach nothing.
         """
-        import django.template.engine as engine
+        import django_rust_templates.engine.engine as engine
 
         from tests.compared_path import instrumented
         from tests.pinned_module import load_pinned
@@ -636,14 +632,14 @@ class ModuleInterpositionTests(unittest.TestCase):
         this commit the loader itself is still Django's, which is why the row
         asserts the *engine* functions and not the loader's; Task 7 extends it.
         """
-        import django.template.engine as django_engine
+        import django_rust_templates.engine.engine as django_engine
 
         from tests.compared_path import instrumented
 
         with tempfile.TemporaryDirectory() as tmpdir:
             pathlib.Path(tmpdir, "greet.html").write_text("{{ name }}!")
             engine = Engine(
-                loaders=[("django.template.loaders.filesystem.Loader", [tmpdir])]
+                loaders=[("django_rust_templates.engine.loaders.filesystem.Loader", [tmpdir])]
             )
             with instrumented(django_engine) as counts:
                 rendered = engine.get_template("greet.html").render(
@@ -675,39 +671,82 @@ class ModuleInterpositionTests(unittest.TestCase):
             ImproperlyConfigured,
             re.escape("app_dirs must not be set when loaders is defined."),
         ):
-            Engine(app_dirs=True, loaders=["django.template.loaders.filesystem.Loader"])
+            Engine(app_dirs=True, loaders=["django_rust_templates.engine.loaders.filesystem.Loader"])
 
-    def test_the_utils_zero_is_a_measurement_and_not_a_silence(self):
-        """A zero is evidence only if the same instrument reports non-zero nearby.
+    def test_every_empty_pin_is_a_measurement_and_not_a_silence(self):
+        """Every ``COMPARED_PATH`` key pinned ``[]`` is a measurement, not a silence.
 
-        ``COMPARED_PATH['utils.py']`` is ``[]``, and an empty pin is the one kind
-        of pin a *broken instrument* also produces: if the wrapper never fired,
-        every measured set would be empty and the empty ones would agree with it.
-        The failure to fear for a claim of the form "this count is zero" is
-        therefore the instrument reporting zero for **everything**.
+        ``COMPARED_PATH[name] == []`` says that no parity harness executes a
+        function in that module. It is the one kind of pin a **broken instrument**
+        also produces: if the wrapper never fired, every measured set would be
+        empty and the empty ones would agree with it. The failure to fear for a
+        claim of the form "this count is zero" is therefore an instrument that
+        reports zero for everything.
 
-        The guard already covers that globally —
-        ``test_the_compared_path_is_the_measured_one`` re-measures ``base.py``'s
-        twenty-nine functions in the same pass, so a globally dead instrument
-        fails there. This row adds the same guarantee *locally*, beside the claim
-        it underwrites, because "the instrument fires, and it did not fire here"
-        is one statement and the two halves should not be able to drift apart.
+        Three ways a zero can be vacuous, and the row splits the guard's empty
+        pins against all three rather than trusting the number:
 
-        The control this **replaces** was instrumenting the *pinned* copy of a
-        module and asserting zero. That refutes a different risk — an instrument
-        that counts by name rather than by identity — and it is a fine locality
-        check, but it cannot refute a silent instrument, because a module the
-        harness never imports is silent either way.
+        * the instrument is globally dead — refuted by the positive control
+          below, which instruments ``engine`` over the same ``django_parse`` the
+          empty modules are measured against;
+        * the module cannot be imported at all, so nothing could have fired —
+          asserted by the import in the loop;
+        * **the module has nothing to instrument**, which is what the two
+          packages are. ``__init__.py`` and ``loaders/__init__.py`` re-export;
+          :func:`definitions` finds no function of their own, so "no harness
+          executes this module" is true of *any* corpus, including one that runs
+          every line of it. They are named and counted here rather than left to
+          pad the population, because "eleven modules are untouched" would then
+          be 9/11 evidence wearing a bigger n.
 
-        ``engine`` is the positive half rather than ``base`` or ``defaulttags``
-        because it is entered on every source through the same ``django_parse``,
-        so the two halves are one call apart rather than one corpus apart.
+        **The row this replaces named ``utils.py``, and ``utils.py`` is gone**
+        (``03038e6``): its subject was a module that no longer exists, which is
+        the failure mode this whole class is written against.
+
+        The last arm is the discriminating one. Instrumenting a module and
+        running the corpus is weak on its own — a module the corpus cannot
+        *reach* scores zero for a reason that has nothing to do with the corpus.
+        So ``loaders/locmem.py`` is measured twice: once under a call that does
+        enter it, where it must report non-zero, and once under ``django_parse``,
+        where it must report zero. "The instrument fires, and it did not fire
+        here" is one statement, and the two halves should not be able to drift
+        apart.
+
+        ``locmem`` is the subject rather than one of the other eight because it
+        is the one whose emptiness a reader is most likely to doubt: it defines a
+        real ``Loader`` with two methods, and it is reached by an ordinary
+        ``TEMPLATES`` setting. What keeps it at zero is that ``template_tests``
+        never constructs a locmem loader — a positive statement, which the first
+        arm turns into a measurement.
         """
-        import django.template.engine as engine
-        import django.template.utils as utils
+        import importlib
 
-        from tests.compared_path import instrumented
+        import scripts.check_transcriptions as guard
+
+        from tests.compared_path import definitions, instrumented
         from tests.test_parser_parity import django_parse
+
+        empty = sorted(name for name, rows in guard.COMPARED_PATH.items() if not rows)
+        # The population, before the split: a guard whose table had lost its
+        # empty pins would make every assertion below agree about nothing.
+        self.assertGreater(len(empty), 5, empty)
+
+        carriers, vacuous = [], []
+        for name in empty:
+            with self.subTest(name=name):
+                module = importlib.import_module(guard.module_of(name))
+                (carriers if definitions(module) else vacuous).append(name)
+
+        self.assertEqual(
+            vacuous,
+            ["__init__.py", "loaders/__init__.py"],
+            "the empty pins no longer split the way this row states: a key that "
+            "lands in `vacuous` is one whose zero is true of every corpus, and a "
+            "package that has grown a function of its own has left that class",
+        )
+
+        import django_rust_templates.engine.engine as engine
+        import django_rust_templates.engine.loaders.locmem as locmem
 
         with instrumented(engine) as positive:
             django_parse("{{ x }}")
@@ -715,9 +754,19 @@ class ModuleInterpositionTests(unittest.TestCase):
             sum(positive.values()), 0, "the instrument reports nothing at all"
         )
 
-        with instrumented(utils) as counts:
+        with instrumented(locmem) as reached:
+            loader = locmem.Loader(Engine(), {"x": "hi"})
+            list(loader.get_template_sources("x"))
+        self.assertGreater(
+            sum(reached.values()),
+            0,
+            "the instrument cannot see a call into the module it is pointed at, "
+            "so its zero over the corpus would say nothing",
+        )
+
+        with instrumented(locmem) as counts:
             django_parse("{{ x }}")
-        self.assertEqual(sum(counts.values()), 0)
+        self.assertEqual(sum(counts.values()), 0, sorted(counts))
 
     LOADER_MODULES = [
         "loaders",
@@ -733,36 +782,65 @@ class ModuleInterpositionTests(unittest.TestCase):
 
         for name in self.LOADER_MODULES:
             with self.subTest(name=name):
-                module = importlib.import_module(f"django.template.{name}")
+                module = importlib.import_module(f"django_rust_templates.engine.{name}")
                 self.assertIn("engine", module.__file__, module.__file__)
 
-    def test_the_package_still_reaches_djangos_siblings(self):
-        """The fallback survives one level down, which is the whole hazard.
+    def test_our_package_shadows_nothing_and_djangos_siblings_are_intact(self):
+        """The two packages are disjoint, and the row that said so inverted at M18.
 
-        `django.template.loaders` is a package now, and a package's `__path__`
-        is built by the finder from *our* directory plus Django's. If the second
-        half were missing, every loader we have not taken would stop resolving —
-        and the failure would appear when a milestone is half-finished, which is
-        exactly when the fallback is needed.
+        **This row asserted the opposite until the M18 rewiring, and it was the
+        shim's claim.** ``django_rust_templates.engine.loaders`` used to be a
+        finder's re-presentation of ``django.template.loaders``, so its
+        ``__path__`` was built from *our* directory plus Django's, and "Django's
+        is also there" was the half that broke when a milestone was half
+        finished. There is no finder now, and there is no fallback: our loaders
+        directory holds all five loaders and the ``__init__`` that names them, so
+        nothing under it needs Django's directory to resolve. Asserted as an
+        equality, because the surviving hazard is the *inverse* of the old one —
+        a residue of the deleted finder would put Django's directory back on our
+        ``__path__``, and a package that resolves Django's modules under our name
+        is the thing M18 removed.
 
-        Asserted as two memberships rather than as a length, because "our
-        directory is first" is the ordering the finder promises and "Django's is
-        also there" is the half that breaks; a `len(__path__) == 2` would be
-        true of our directory twice.
+        The ``loaders`` package and not ``engine`` itself: both were spliced, and
+        the subpackage is where a leftover splice would matter least visibly — a
+        name like ``cached`` would resolve twice from two directories, ours
+        first, with no test failing.
+
+        The second half is the direction that survives the rename: **Django's own
+        package is untouched.** Asked of the module objects rather than of the
+        paths, because two directories named ``loaders`` compare equal by name
+        and the claim is that these are two different modules. Django's
+        ``loaders/__init__.py`` is empty upstream, so the name to reach for on
+        that side is the submodule both trees *do* define.
         """
-        import django.template.loaders as loaders
+        import django.template.loaders.filesystem
+        import django_rust_templates.engine.loaders as loaders
+        import django_rust_templates.engine.loaders.filesystem as ours_filesystem
 
-        paths = [pathlib.Path(p).resolve() for p in loaders.__path__]
-        self.assertIn(
-            (
-                PROJECT_ROOT / "python" / "django_rust_templates" / "engine" / "loaders"
-            ).resolve(),
-            paths,
+        self.assertEqual(
+            [pathlib.Path(p).resolve() for p in loaders.__path__],
+            [ENGINE_DIR / "loaders"],
+            "our loaders package resolves from more than its own directory, "
+            "which is what a surviving finder splice would look like",
         )
-        self.assertTrue(
-            any(p.name == "loaders" and "engine" not in str(p) for p in paths),
-            f"Django's own loader directory is not on {paths}",
+
+        theirs_filesystem = django.template.loaders.filesystem
+        self.assertIsNot(ours_filesystem, theirs_filesystem)
+        self.assertNotIn(
+            pathlib.Path(theirs_filesystem.__file__).resolve().parent,
+            [pathlib.Path(p).resolve() for p in loaders.__path__],
+            "Django's loader directory is back on our package's __path__, which "
+            "is what a surviving finder splice would look like",
         )
+        self.assertEqual(
+            ours_filesystem.Loader.__module__,
+            "django_rust_templates.engine.loaders.filesystem",
+        )
+        self.assertEqual(
+            theirs_filesystem.Loader.__module__,
+            "django.template.loaders.filesystem",
+        )
+        self.assertIsNot(ours_filesystem.Loader, theirs_filesystem.Loader)
 
     def test_the_loader_classes_are_not_djangos(self):
         import importlib
@@ -778,7 +856,7 @@ class ModuleInterpositionTests(unittest.TestCase):
             ("loaders.locmem", "loaders/locmem.py"),
         ]:
             with self.subTest(name=name):
-                module = importlib.import_module(f"django.template.{name}")
+                module = importlib.import_module(f"django_rust_templates.engine.{name}")
                 self.assertIsNot(module.Loader, load_pinned(relative).Loader)
                 self.assertIn("engine", inspect.getfile(module.Loader))
 
@@ -797,8 +875,8 @@ class ModuleInterpositionTests(unittest.TestCase):
         of a hierarchy rooted in Django's class, since our `filesystem.Loader`
         subclasses it. What this milestone claims is the *inner* link.
         """
-        import django.template.loaders.app_directories as app_directories
-        import django.template.loaders.filesystem as filesystem
+        import django_rust_templates.engine.loaders.app_directories as app_directories
+        import django_rust_templates.engine.loaders.filesystem as filesystem
 
         from tests.pinned_module import load_pinned
 
@@ -814,7 +892,7 @@ class ModuleInterpositionTests(unittest.TestCase):
     def test_the_engines_loader_class_is_ours(self):
         """Review Focus 4, as a row: a dotted path in settings resolves to us.
 
-        `Engine.find_template_loader` does `import_string("django.template.
+        `Engine.find_template_loader` does `import_string("django_rust_templates.engine.
         loaders.filesystem.Loader")`, which is the spelling in `TEMPLATES` for
         every Django project and in Django's own loader tests. So the assertion
         that matters is not that the module is ours but that the *object the
@@ -825,11 +903,11 @@ class ModuleInterpositionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             pathlib.Path(tmpdir, "index.html").write_text("{{ name }}")
             engine = Engine(
-                loaders=[("django.template.loaders.filesystem.Loader", [tmpdir])]
+                loaders=[("django_rust_templates.engine.loaders.filesystem.Loader", [tmpdir])]
             )
             loader = engine.template_loaders[0]
 
-        import django.template.loaders.filesystem as filesystem
+        import django_rust_templates.engine.loaders.filesystem as filesystem
 
         self.assertIsInstance(loader, filesystem.Loader)
         self.assertNotIsInstance(loader, load_pinned("loaders/filesystem.py").Loader)
@@ -856,15 +934,15 @@ class ModuleInterpositionTests(unittest.TestCase):
           ``FilesystemLoader``'s and overrides ``get_dirs()``. The override is
           the class, so its row is the next one.
         """
-        import django.template.loaders.base as base
-        import django.template.loaders.cached as cached
-        import django.template.loaders.locmem as locmem
+        import django_rust_templates.engine.loaders.base as base
+        import django_rust_templates.engine.loaders.cached as cached
+        import django_rust_templates.engine.loaders.locmem as locmem
 
         with tempfile.TemporaryDirectory() as tmpdir:
             pathlib.Path(tmpdir, "index.html").write_text("{{ a }}")
 
             filesystem_engine = Engine(
-                loaders=[("django.template.loaders.filesystem.Loader", [tmpdir])]
+                loaders=[("django_rust_templates.engine.loaders.filesystem.Loader", [tmpdir])]
             )
             self.assertEqual(
                 filesystem_engine.get_template("index.html").render(
@@ -879,8 +957,8 @@ class ModuleInterpositionTests(unittest.TestCase):
             cached_engine = Engine(
                 loaders=[
                     (
-                        "django.template.loaders.cached.Loader",
-                        [("django.template.loaders.filesystem.Loader", [tmpdir])],
+                        "django_rust_templates.engine.loaders.cached.Loader",
+                        [("django_rust_templates.engine.loaders.filesystem.Loader", [tmpdir])],
                     )
                 ]
             )
@@ -896,7 +974,7 @@ class ModuleInterpositionTests(unittest.TestCase):
 
             locmem_engine = Engine(
                 loaders=[
-                    ("django.template.loaders.locmem.Loader", {"index.html": "{{ a }}"})
+                    ("django_rust_templates.engine.loaders.locmem.Loader", {"index.html": "{{ a }}"})
                 ]
             )
             self.assertIsInstance(locmem_engine.template_loaders[0], locmem.Loader)
@@ -921,12 +999,12 @@ class ModuleInterpositionTests(unittest.TestCase):
         — the milestone's ``test_loaders`` gate — which is where the app-registry
         machinery that row needs already lives.
         """
-        from django.template import TemplateDoesNotExist
+        from django_rust_templates.engine import TemplateDoesNotExist
 
         with tempfile.TemporaryDirectory() as tmpdir:
             pathlib.Path(tmpdir, "index.html").write_text("{{ a }}")
             engine = Engine(
-                loaders=[("django.template.loaders.app_directories.Loader", [tmpdir])]
+                loaders=[("django_rust_templates.engine.loaders.app_directories.Loader", [tmpdir])]
             )
             loader = engine.template_loaders[0]
             self.assertEqual(list(loader.get_dirs()), [])
@@ -969,13 +1047,10 @@ class LoaderTagsInterpositionTests(unittest.TestCase):
     milestone that dated it.
     """
 
-    def setUp(self):
-        _shim.install()
-
     def test_loader_tags_resolves_to_our_file(self):
         import importlib
 
-        module = importlib.import_module("django.template.loader_tags")
+        module = importlib.import_module("django_rust_templates.engine.loader_tags")
         self.assertIn("engine", module.__file__, module.__file__)
 
     def test_the_classes_this_module_defines_are_not_djangos(self):
@@ -987,7 +1062,7 @@ class LoaderTagsInterpositionTests(unittest.TestCase):
 
         ``Node`` is deliberately **not** compared that way, and the reason is the
         interposition working as intended: the pinned file's
-        ``from django.template.base import Node`` resolves through the shim to
+        ``from django_rust_templates.engine.base import Node`` resolves through the shim to
         *our* ``base``, so the pinned module's ``Node`` is ours too. Asserting
         ``is not`` there would fail on a correct tree. What is asserted instead
         is the identity that matters — the two modules name one class — because
@@ -997,7 +1072,7 @@ class LoaderTagsInterpositionTests(unittest.TestCase):
         import importlib
         import inspect
 
-        from django.template import base, loader_tags
+        from django_rust_templates.engine import base, loader_tags
 
         from tests.pinned_module import load_pinned
 
@@ -1022,12 +1097,12 @@ class LoaderTagsInterpositionTests(unittest.TestCase):
         """
         import inspect
 
-        from django.template import loader_tags
+        from django_rust_templates.engine import loader_tags
         from django_rust_templates.render import parse_template
 
         engine = Engine(
             loaders=[
-                ("django.template.loaders.locmem.Loader", {"n": "{% include \"m\" %}"})
+                ("django_rust_templates.engine.loaders.locmem.Loader", {"n": "{% include \"m\" %}"})
             ]
         )
         template = parse_template('{% include "n" %}', engine)
@@ -1037,83 +1112,79 @@ class LoaderTagsInterpositionTests(unittest.TestCase):
         self.assertIn("engine", inspect.getfile(type(includes[0])))
 
 
-class ShadowingTests(unittest.TestCase):
-    """Which ``engine`` files wear a real module's name, and that each was meant.
+class CollisionTests(unittest.TestCase):
+    """Which ``engine`` files wear a real module's name, and each one's warrant.
 
-    ``_shim.py``'s docstring states the rule — a file under ``engine`` may take a
-    real module's name only when it implements that module — and the rule as
-    first written forbade the mechanism itself: four shipped files broke it on
-    the day it was written, because interposing a module *is* taking its name
-    (``.review/m10-recon.md`` §6). :data:`_shim.SHADOWING` replaces the
-    prohibition with a declaration, and these rows are what make the declaration
-    binding rather than decorative.
+    The rule — a file under ``engine`` may take a real module's name only when it
+    implements that module — is as old as the directory, and it is the rule the
+    filesystem answers: `shadowing_files()` is every file whose ``engine``-relative
+    path Django's tree also has, asked of the two trees rather than read from a
+    list.
+
+    **The name of this class was ``ShadowingTests`` and the name was the only
+    thing the mechanism decided.** Nothing is shadowed now: ``engine/base.py`` is
+    ``django_rust_templates.engine.base`` and Django's ``django.template.base`` is
+    untouched, so these files no longer stand in front of anything — they
+    *collide* with a name, which is a fact about two directories and not about an
+    import. The rule survives the rename unchanged, because it was always about
+    the collision; what did not survive is the table.
+
+    **The ``kind`` column is gone, and its deletion is this class's one
+    improvement.** ``_shim.SHADOWING`` carried ``"transcribed"``/``"fresh"`` beside
+    each path, and the row below compared each against the guard — a second
+    account of a question ``check_transcriptions.py`` already answers, held in
+    step by an assertion. It is not held in step any more; it is not written down.
+    A file is transcribed exactly when the guard declares it and fresh exactly
+    when ``tests/test_transcription_equivalence.py`` states an equivalence for it,
+    and those two tables are now the only writers of the distinction. A file in
+    neither is the failure the row is for, and it has nowhere to hide: there is no
+    column left to edit.
     """
 
-    @classmethod
-    def setUpClass(cls):
-        _shim.install()
+    def test_every_colliding_file_has_a_warrant(self):
+        """Set equality against the two warrant tables, in both directions.
 
-    def test_the_shadowing_files_are_the_declared_ones(self):
-        """Set equality, and both directions are the point.
+        A file on disk that neither table carries is a transcription nothing
+        checks against the pin — and the guard's own diff is the only instrument
+        that falsifies one (M9's finding 3: a verbatim copy and a wrongly
+        transcribed file both keep all 1547 tests green). A key with no file is
+        the opposite error, a claim about nothing that the next reader takes for a
+        measurement; **``utils.py`` was exactly that**, declared in
+        ``check_transcriptions.py`` and deleted from the tree in ``03038e6``, and
+        this row is written so that the deletion cannot be recorded by leaving the
+        key behind.
 
-        A file on disk that is not declared is the ``render.py``-at-``engine.py``
-        accident: it shadows a real module for Django's internal imports as much
-        as for ours, and nothing else in the tree notices — the ``ImportError``
-        that eventually fires names Django, three files from the cause. A
-        declared key with no file is the opposite error, a claim about nothing
-        that the next reader would take for a measurement.
-        """
-        self.assertEqual(_shim.shadowing_files(), sorted(_shim.SHADOWING))
-
-    def test_each_kind_is_the_transcription_guards_own_answer(self):
-        """``kind`` is compared, not trusted — and each kind has its own warrant.
-
-        It is the one column here that could rot into a second, disagreeing
-        account of which files are transcriptions — the account
-        ``scripts/check_transcriptions.py`` already owns and already checks
-        against each file's marker. So the two are compared directly, and the
-        comparison now has two arms because the two kinds carry different
-        obligations:
-
-        * ``transcribed`` must be a name that guard declares. The **diff against
-          the pin** is the warrant, and it is the only instrument that falsifies
-          a transcription (M9's finding 3: a verbatim copy and a wrongly
-          transcribed file both keep all 1547 tests green).
-        * ``fresh`` must be a name ``tests/test_transcription_equivalence.py`` states
-          an equivalence for. A fresh file has no diff of its own, so nothing in
-          the transcription guard can see it, and the suite cannot see it
-          either — for the same reason. Without this arm ``fresh`` is the free
-          option: changing one word in the table above would move a file out of
-          every guard in the tree with everything green.
-
-        The class is required to have rows rather than merely to be named,
-        because an empty test case is how a warrant becomes a gesture.
+        The two warrant tables carry different obligations and both are required:
+        the guard's diff against the pin for a transcription, and a stated
+        equivalence with rows for a fresh file. A fresh file has no diff of its
+        own, so nothing in the guard can see it and the suite cannot either — for
+        the same reason. Without that arm, ``fresh`` is the free option: one word
+        moves a file out of every guard in the tree with everything green.
         """
         import importlib
 
         import scripts.check_transcriptions as guard
 
         from tests import test_transcription_equivalence as equivalence
+        from tests.milestone_ownership import shadowing_files
 
-        for name, kind in sorted(_shim.SHADOWING.items()):
+        on_disk = set(shadowing_files())
+        warrants = set(guard.DECLARED) | set(equivalence.EQUIVALENCE)
+        self.assertEqual(
+            on_disk, warrants, "a colliding file and its warrant disagree"
+        )
+        # The control, drawn from the same population: an empty answer here would
+        # make the two assertions above agree about nothing at all.
+        self.assertGreater(len(on_disk), 15, sorted(on_disk))
+
+        for name in sorted(equivalence.EQUIVALENCE):
             with self.subTest(name=name):
-                self.assertIn(kind, ("transcribed", "fresh"))
-                if kind == "transcribed":
-                    self.assertIn(
-                        name,
-                        guard.DECLARED,
-                        f"{name} is declared 'transcribed' in SHADOWING but "
-                        "check_transcriptions.py does not declare it, so "
-                        "nothing reads its diff against the pin",
-                    )
-                    continue
-                self.assertIn(
+                self.assertNotIn(
                     name,
-                    equivalence.EQUIVALENCE,
-                    f"{name} is declared 'fresh' in SHADOWING but states no "
-                    "equivalence in tests/test_transcription_equivalence.py, so "
-                    "nothing in this tree can falsify it — transcribe it "
-                    "instead, or state the equivalence as rows",
+                    guard.DECLARED,
+                    f"{name} is both declared and stated as an equivalence; the "
+                    "kind is read off these two tables, so a name in both makes "
+                    "it ambiguous rather than doubly warranted",
                 )
                 module_name, class_name = equivalence.EQUIVALENCE[name]
                 case = getattr(importlib.import_module(module_name), class_name)
@@ -1154,7 +1225,6 @@ class ResolverDelegationTests(unittest.TestCase):
         from scripts.filter_probe import ensure_settings
 
         ensure_settings()
-        _shim.install()
 
     def _capture(self):
         """A ``Capture`` handler on ``django.template``, plus its records.
@@ -1185,7 +1255,7 @@ class ResolverDelegationTests(unittest.TestCase):
         *lookup* is. A transcription that kept upstream's loop would pass both,
         which is finding 3's shape applied to this method.
         """
-        from django.template import Context, Engine
+        from django_rust_templates.engine import Context, Engine
 
         from django_rust_templates import _native
 
@@ -1213,7 +1283,7 @@ class ResolverDelegationTests(unittest.TestCase):
         recon named its two `test_logging` failures as one defect; the silent
         half is the third row below.
         """
-        from django.template import Context, Engine
+        from django_rust_templates.engine import Context, Engine
 
         logger, handler, records = self._capture()
         try:
@@ -1245,7 +1315,7 @@ class ResolverDelegationTests(unittest.TestCase):
         """
         import logging
 
-        from django.template import Context, Engine
+        from django_rust_templates.engine import Context, Engine
 
         logger, handler, records = self._capture()
         try:
@@ -1290,11 +1360,9 @@ class FilterRoutingTests(unittest.TestCase):
     that would be M9's finding 3 and the row would be measuring nothing.
     """
 
-    def setUp(self):
-        _shim.install()
 
     def test_a_built_in_filter_reaches_rust(self):
-        from django.template import Context, Engine
+        from django_rust_templates.engine import Context, Engine
 
         from django_rust_templates import _native
 
@@ -1334,7 +1402,7 @@ class FilterRoutingTests(unittest.TestCase):
 
         from django_rust_templates.render import parser_for
 
-        defaultfilters = importlib.import_module("django.template.defaultfilters")
+        defaultfilters = importlib.import_module("django_rust_templates.engine.defaultfilters")
         self.assertIn("engine", defaultfilters.__file__)
 
         func = parser_for("").find_filter("lower")
@@ -1365,7 +1433,7 @@ class FilterRoutingTests(unittest.TestCase):
 
         from scripts.filter_probe import ensure_settings
 
-        from django.template import Context, Engine
+        from django_rust_templates.engine import Context, Engine
 
         from django_rust_templates import _native
 
@@ -1376,9 +1444,9 @@ class FilterRoutingTests(unittest.TestCase):
 
         engine = Engine(
             libraries={
-                "i18n": "django.templatetags.i18n",
-                "l10n": "django.templatetags.l10n",
-                "tz": "django.templatetags.tz",
+                "i18n": "django_rust_templates.engine.templatetags.i18n",
+                "l10n": "django_rust_templates.engine.templatetags.l10n",
+                "tz": "django_rust_templates.engine.templatetags.tz",
             }
         )
         naive = datetime.datetime(2026, 10, 8, 22, 30)
@@ -1436,7 +1504,7 @@ class FilterRoutingTests(unittest.TestCase):
         `Template.compile_nodelist` fills from the engine's map, so no module on
         disk and no `sys.path` entry is needed to make a loadable name.
         """
-        from django.template import Context, Engine, Library
+        from django_rust_templates.engine import Context, Engine, Library
 
         from django_rust_templates import _native
 
@@ -1507,7 +1575,7 @@ class FilterRoutingTests(unittest.TestCase):
         number is measured where stock code can be reached at all — the pinned
         `lower` called directly.
         """
-        from django.template import Context, Engine
+        from django_rust_templates.engine import Context, Engine
 
         from tests.pinned_module import load_pinned
 
@@ -1583,7 +1651,7 @@ class FilterRoutingTests(unittest.TestCase):
         which is the measurement behind the claim that these inputs
         discriminate and the rest do not.
         """
-        from django.template import Context, Engine
+        from django_rust_templates.engine import Context, Engine
 
         engine = Engine()
         self.assertEqual(
@@ -1636,11 +1704,11 @@ class FilterRoutingTests(unittest.TestCase):
         """
         import importlib
 
-        from django.template.base import FilterExpression, Parser
+        from django_rust_templates.engine.base import FilterExpression, Parser
 
         from tests.pinned_module import load_pinned
 
-        ours_registry = importlib.import_module("django.template.defaultfilters").register
+        ours_registry = importlib.import_module("django_rust_templates.engine.defaultfilters").register
         pinned = load_pinned("base.py")
         pinned_registry = load_pinned("defaultfilters.py").register
 
@@ -1700,7 +1768,7 @@ class FilterRoutingTests(unittest.TestCase):
         pinned body as `'a---b'` too, so the doubled value is the body's own
         answer and not an artifact of ours.
         """
-        from django.template import Context, Engine
+        from django_rust_templates.engine import Context, Engine
 
         engine = Engine()
         self.assertEqual(
@@ -1745,9 +1813,9 @@ class FilterRoutingTests(unittest.TestCase):
         cache would have returned must not, which is asserted too, so the row
         cannot pass by asserting something both maps satisfy.
         """
-        import django.template.defaultfilters as defaultfilters
+        import django_rust_templates.engine.defaultfilters as defaultfilters
 
-        from django.template import Context, Engine
+        from django_rust_templates.engine import Context, Engine
 
         from django_rust_templates import host
 
@@ -1803,7 +1871,7 @@ class FilterRoutingTests(unittest.TestCase):
         from django_rust_templates import host
 
         registries = {
-            name: importlib.import_module(f"django.templatetags.{name}").register.filters
+            name: importlib.import_module(f"django_rust_templates.engine.templatetags.{name}").register.filters
             for name in ("cache", "i18n", "l10n", "static", "tz")
         }
         own = host.django_own_filters()
@@ -1841,10 +1909,10 @@ class FilterRoutingTests(unittest.TestCase):
         import importlib
         from collections import Counter
 
-        from django.template import defaultfilters
+        from django_rust_templates.engine import defaultfilters
 
         tables = [
-            importlib.import_module(f"django.templatetags.{name}").register.filters
+            importlib.import_module(f"django_rust_templates.engine.templatetags.{name}").register.filters
             for name in ("cache", "i18n", "l10n", "static", "tz")
         ]
         tables.append(defaultfilters.register.filters)
@@ -1885,7 +1953,7 @@ class FilterRoutingTests(unittest.TestCase):
         """
         import importlib
 
-        from django.template import defaultfilters
+        from django_rust_templates.engine import defaultfilters
 
         from django_rust_templates import host
 
@@ -1894,7 +1962,7 @@ class FilterRoutingTests(unittest.TestCase):
 
         sentinel.__name__ = "lower"
 
-        tz = importlib.import_module("django.templatetags.tz")
+        tz = importlib.import_module("django_rust_templates.engine.templatetags.tz")
         before = tz.register.filters
         tz.register.filters = {**before, "lower": sentinel, "timezone": sentinel}
         try:
@@ -1943,7 +2011,7 @@ class FilterRoutingTests(unittest.TestCase):
 
         sentinel.__name__ = "m12_filter_sentinel"
 
-        tz = importlib.import_module("django.templatetags.tz")
+        tz = importlib.import_module("django_rust_templates.engine.templatetags.tz")
         before = tz.register.filters
         self.assertNotIn(sentinel, host.django_own_filters())
         tz.register.filters = {**before, "m12_filter_sentinel": sentinel}
@@ -1990,7 +2058,6 @@ class TagPredicateCoverageTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        _shim.install()
         from django_rust_templates import host as host_module
         from django_rust_templates.render import parser_for
 
@@ -2068,7 +2135,6 @@ class FabricatedNameTests(unittest.TestCase):
     def setUpClass(cls):
         import importlib
 
-        _shim.install()
         from django_rust_templates import host as host_module
 
         cls.host_module = host_module
@@ -2077,8 +2143,6 @@ class FabricatedNameTests(unittest.TestCase):
             for name in host_module._LIBRARY_TAG_MODULES
         }
 
-    def setUp(self):
-        _shim.install()
 
     def registries(self):
         """Every registry a template's tag and filter names resolve against.
@@ -2090,7 +2154,7 @@ class FabricatedNameTests(unittest.TestCase):
         Kept as a mapping rather than a list so a failure names the registry it
         came from.
         """
-        from django.template import defaultfilters
+        from django_rust_templates.engine import defaultfilters
 
         from django_rust_templates import _native
 
@@ -2203,7 +2267,6 @@ class LibraryTagPredicateTests(unittest.TestCase):
     def setUpClass(cls):
         import importlib
 
-        _shim.install()
         from django_rust_templates import host as host_module
 
         cls.host_module = host_module
@@ -2212,8 +2275,6 @@ class LibraryTagPredicateTests(unittest.TestCase):
             for name in host_module._LIBRARY_TAG_MODULES
         }
 
-    def setUp(self):
-        _shim.install()
 
     def test_the_predicate_covers_every_registered_library_tag(self):
         """18 names, and the *same object* under each, counted rather than prose.
@@ -2263,7 +2324,7 @@ class LibraryTagPredicateTests(unittest.TestCase):
         disjointness that lives in a comment is one nothing re-reads, which is
         the correction M12 Task 0b exists for.
         """
-        from django.template import defaulttags, loader_tags
+        from django_rust_templates.engine import defaulttags, loader_tags
 
         library_names = set().union(*(tags for tags in self.libraries.values()))
         base_names = set(defaulttags.register.tags) | set(loader_tags.register.tags)
@@ -2289,14 +2350,14 @@ class LibraryTagPredicateTests(unittest.TestCase):
         """
         import importlib
 
-        from django.template import defaulttags
+        from django_rust_templates.engine import defaulttags
 
         def sentinel(parser, token):  # pragma: no cover - named, never compiled
             raise AssertionError("the sentinel is a name, not an implementation")
 
         sentinel.__name__ = "if"
 
-        static = importlib.import_module("django.templatetags.static")
+        static = importlib.import_module("django_rust_templates.engine.templatetags.static")
         before = static.register.tags
         static.register.tags = {
             **before,
@@ -2342,7 +2403,7 @@ class LibraryTagPredicateTests(unittest.TestCase):
         def sentinel(parser, token):  # pragma: no cover - named, never compiled
             raise AssertionError("the sentinel is a name, not an implementation")
 
-        tz = importlib.import_module("django.templatetags.tz")
+        tz = importlib.import_module("django_rust_templates.engine.templatetags.tz")
         before = tz.register.tags
         self.assertNotIn("m12_sentinel", self.host_module.django_own_tags())
         tz.register.tags = {**before, "m12_sentinel": sentinel}
@@ -2376,7 +2437,7 @@ class LibraryTagPredicateTests(unittest.TestCase):
         the caller's library, so a row that reported `shadow(for)` for both
         would not be evidence of anything.
         """
-        from django.template import Library, Node, defaulttags
+        from django_rust_templates.engine import Library, Node, defaulttags
 
         class ShadowNode(Node):
             def __init__(self, label):
@@ -2411,7 +2472,7 @@ class LibraryTagPredicateTests(unittest.TestCase):
         )
         self.assertIs(
             table["trans"],
-            self.libraries["django.templatetags.i18n"]["trans"],
+            self.libraries["django_rust_templates.engine.templatetags.i18n"]["trans"],
         )
 
         template = "{% for i in xs %}{{ i }}{% endfor %}"
@@ -2450,7 +2511,7 @@ class LibraryTagPredicateTests(unittest.TestCase):
         return, which is why this row stages at all — an unstaged version asserts
         the early return twice and says nothing about the clause.
         """
-        from django.template import Library, Node
+        from django_rust_templates.engine import Library, Node
 
         from django_rust_templates.render import parser_for
 
@@ -2511,7 +2572,7 @@ class LibraryTagPredicateTests(unittest.TestCase):
 class TzInterpositionTests(unittest.TestCase):
     """M12 Task 4: ``tz`` is our module — three tags, three node classes, no filter body.
 
-    ``django.templatetags.tz`` is the third of the milestone's five libraries, and
+    ``django_rust_templates.engine.templatetags.tz`` is the third of the milestone's five libraries, and
     its three tags are the ones whose compile functions read a **body** and, for
     two of them, something other than a filter expression: ``{% localtime %}``
     takes ``on``/``off``/nothing and stores a *boolean*, ``{% get_current_timezone %}``
@@ -2537,14 +2598,10 @@ class TzInterpositionTests(unittest.TestCase):
     version of the claim, so a green instrument is not the whole story.
     """
 
-    @classmethod
-    def setUpClass(cls):
-        _shim.install()
-
     def test_tz_resolves_to_our_file(self):
         import importlib
 
-        module = importlib.import_module("django.templatetags.tz")
+        module = importlib.import_module("django_rust_templates.engine.templatetags.tz")
         self.assertIn("engine", module.__file__, module.__file__)
 
     def test_each_tz_tag_compiles_to_our_node_class(self):
@@ -2552,7 +2609,7 @@ class TzInterpositionTests(unittest.TestCase):
 
         A real ``Engine`` with the library spelled as a dotted path, because that
         is the route ``{% load tz %}`` takes and the route the suite takes: a bare
-        ``Engine()`` cannot see ``django.templatetags.tz`` at all (measured — it
+        ``Engine()`` cannot see ``django_rust_templates.engine.templatetags.tz`` at all (measured — it
         reports ``'tz' is not a registered tag library``), so a row written
         against one would measure the probe rather than the routing. The node
         class is compared *by identity* to the one our transcribed module
@@ -2562,9 +2619,9 @@ class TzInterpositionTests(unittest.TestCase):
         import importlib
         import inspect
 
-        tz = importlib.import_module("django.templatetags.tz")
+        tz = importlib.import_module("django_rust_templates.engine.templatetags.tz")
 
-        engine = Engine(libraries={"tz": "django.templatetags.tz"})
+        engine = Engine(libraries={"tz": "django_rust_templates.engine.templatetags.tz"})
         for source, class_name in [
             ("{% load tz %}{% localtime on %}x{% endlocaltime %}", "LocalTimeNode"),
             ('{% load tz %}{% timezone "UTC" %}x{% endtimezone %}', "TimezoneNode"),
@@ -2591,7 +2648,7 @@ class TzInterpositionTests(unittest.TestCase):
 class L10nInterpositionTests(unittest.TestCase):
     """M12 Task 5: ``l10n`` is our module — one tag, one node class, two filters to Task 7.
 
-    ``django.templatetags.l10n`` is the fourth of the milestone's five libraries
+    ``django_rust_templates.engine.templatetags.l10n`` is the fourth of the milestone's five libraries
     and the smallest: 60 lines, one class (``LocalizeNode``), one tag
     (``{% localize %}``) and two filters. The tag is the only one in the
     milestone whose compile function is **variadic in what it accepts** — `on`,
@@ -2614,14 +2671,10 @@ class L10nInterpositionTests(unittest.TestCase):
     green instrument is not the whole story.
     """
 
-    @classmethod
-    def setUpClass(cls):
-        _shim.install()
-
     def test_l10n_resolves_to_our_file(self):
         import importlib
 
-        module = importlib.import_module("django.templatetags.l10n")
+        module = importlib.import_module("django_rust_templates.engine.templatetags.l10n")
         self.assertIn("engine", module.__file__, module.__file__)
 
     def test_the_localize_tag_compiles_to_our_node_class(self):
@@ -2630,7 +2683,7 @@ class L10nInterpositionTests(unittest.TestCase):
         A real ``Engine`` with the library spelled as a dotted path — the route
         ``{% load l10n %}`` takes and the route the suite takes — for the reason
         ``TzInterpositionTests`` states: a bare ``Engine()`` cannot see
-        ``django.templatetags.l10n`` at all (measured — ``'l10n' is not a
+        ``django_rust_templates.engine.templatetags.l10n`` at all (measured — ``'l10n' is not a
         registered tag library``), so a row against one would measure the probe.
         ``use_l10n`` is asserted because it is the *only* attribute the descriptor
         carries and it is the argument the compile function branches on: nothing,
@@ -2642,9 +2695,9 @@ class L10nInterpositionTests(unittest.TestCase):
         import importlib
         import inspect
 
-        l10n = importlib.import_module("django.templatetags.l10n")
+        l10n = importlib.import_module("django_rust_templates.engine.templatetags.l10n")
 
-        engine = Engine(libraries={"l10n": "django.templatetags.l10n"})
+        engine = Engine(libraries={"l10n": "django_rust_templates.engine.templatetags.l10n"})
         for source, class_name, use_l10n in [
             ("{% load l10n %}{% localize %}x{% endlocalize %}", "LocalizeNode", True),
             ("{% load l10n %}{% localize on %}x{% endlocalize %}", "LocalizeNode", True),
@@ -2686,7 +2739,7 @@ class L10nInterpositionTests(unittest.TestCase):
         import importlib
         import inspect
 
-        l10n = importlib.import_module("django.templatetags.l10n")
+        l10n = importlib.import_module("django_rust_templates.engine.templatetags.l10n")
         for name in ("localize", "unlocalize"):
             with self.subTest(name=name):
                 func = l10n.register.filters.get(name)
@@ -2703,7 +2756,7 @@ class L10nInterpositionTests(unittest.TestCase):
 class I18nInterpositionTests(unittest.TestCase):
     """M12 Task 6a: ``i18n`` is our module — eight tags, seven node classes.
 
-    ``django.templatetags.i18n`` is the fifth and last of the milestone's five
+    ``django_rust_templates.engine.templatetags.i18n`` is the fifth and last of the milestone's five
     libraries, and the largest. Task 6a landed eight of its ten tag names; Task
     6b adds ``blocktranslate``/``blocktrans`` — one body under two names, the
     node that carries the token stream rather than a nodelist — so it is 6b that
@@ -2743,21 +2796,17 @@ class I18nInterpositionTests(unittest.TestCase):
     class.
     """
 
-    @classmethod
-    def setUpClass(cls):
-        _shim.install()
-
     def _engine(self):
         # A real `Engine` with the library spelled as a dotted path, because that
         # is the route `{% load i18n %}` takes. A bare `Engine()` cannot see
-        # `django.templatetags.i18n` at all (measured — `'i18n' is not a
+        # `django_rust_templates.engine.templatetags.i18n` at all (measured — `'i18n' is not a
         # registered tag library`), so a row against one would measure the probe.
-        return Engine(libraries={"i18n": "django.templatetags.i18n"})
+        return Engine(libraries={"i18n": "django_rust_templates.engine.templatetags.i18n"})
 
     def test_i18n_resolves_to_our_file(self):
         import importlib
 
-        module = importlib.import_module("django.templatetags.i18n")
+        module = importlib.import_module("django_rust_templates.engine.templatetags.i18n")
         self.assertIn("engine", module.__file__, module.__file__)
 
     def test_each_i18n_tag_compiles_to_our_node_class(self):
@@ -2773,7 +2822,7 @@ class I18nInterpositionTests(unittest.TestCase):
         import importlib
         import inspect
 
-        i18n = importlib.import_module("django.templatetags.i18n")
+        i18n = importlib.import_module("django_rust_templates.engine.templatetags.i18n")
         engine = self._engine()
 
         for source, class_name in [
@@ -2876,7 +2925,7 @@ class I18nInterpositionTests(unittest.TestCase):
         and raises. ``{% trans %}`` is exercised against the same two messages a
         second time so the substitution is measured rather than assumed.
         """
-        from django.template import TemplateSyntaxError
+        from django_rust_templates.engine import TemplateSyntaxError
 
         engine = self._engine()
         for source, expected in [
@@ -2926,7 +2975,7 @@ class I18nInterpositionTests(unittest.TestCase):
         The refusal is its own message, and the accepted form reads a body — so
         the row asserts the node and its nodelist, not only the error.
         """
-        from django.template import TemplateSyntaxError
+        from django_rust_templates.engine import TemplateSyntaxError
 
         engine = self._engine()
         template = engine.from_string(
@@ -2958,7 +3007,7 @@ class I18nInterpositionTests(unittest.TestCase):
         five of which interpolate `bits[0]`. A port that dispatched first would
         silently ignore the second occurrence.
         """
-        from django.template import TemplateSyntaxError
+        from django_rust_templates.engine import TemplateSyntaxError
 
         engine = self._engine()
         for source, option in [
@@ -2976,7 +3025,7 @@ class I18nInterpositionTests(unittest.TestCase):
 
     def test_a_context_value_may_not_be_as_or_noop(self):
         """The `invalid_context` set is `{"as", "noop"}` (`i18n.py:410,428-432`)."""
-        from django.template import TemplateSyntaxError
+        from django_rust_templates.engine import TemplateSyntaxError
 
         engine = self._engine()
         for value in ("as", "noop"):
@@ -3008,7 +3057,7 @@ class I18nInterpositionTests(unittest.TestCase):
         Not the unknown-argument branch (`i18n.py:421-427,435-440`) — the message
         names the option that ran out of arguments.
         """
-        from django.template import TemplateSyntaxError
+        from django_rust_templates.engine import TemplateSyntaxError
 
         engine = self._engine()
         for source, expected in [
@@ -3035,7 +3084,7 @@ class I18nInterpositionTests(unittest.TestCase):
         order and not a blanket refusal. `{% timezone %}` has the identical
         shape and its row states the same thing.
         """
-        from django.template import TemplateSyntaxError
+        from django_rust_templates.engine import TemplateSyntaxError
 
         engine = self._engine()
         with self.assertRaises(TemplateSyntaxError) as caught:
@@ -3063,7 +3112,7 @@ class I18nInterpositionTests(unittest.TestCase):
         node with no ``nodelist`` is skipped silently — confirmed here rather
         than assumed (§4 trap 7).
         """
-        from django.template.base import Token, TokenType
+        from django_rust_templates.engine.base import Token, TokenType
 
         engine = self._engine()
         template = engine.from_string(
@@ -3093,7 +3142,7 @@ class I18nInterpositionTests(unittest.TestCase):
         reachable *with* ``count``: `{% plural %}`'s absence is reported by the
         singular scan, not by the final check.
         """
-        from django.template import TemplateSyntaxError
+        from django_rust_templates.engine import TemplateSyntaxError
 
         engine = self._engine()
         for source, expected in [
@@ -3137,7 +3186,7 @@ class I18nInterpositionTests(unittest.TestCase):
         held. Rust has no parameter aliasing, so this is the rule it must
         reproduce.
         """
-        from django.template import TemplateSyntaxError
+        from django_rust_templates.engine import TemplateSyntaxError
 
         engine = self._engine()
         for source, seen in [
@@ -3164,7 +3213,7 @@ class I18nInterpositionTests(unittest.TestCase):
         and a *missing argument* share one message: the ``x||y`` row is the
         malformed-filter half (§4 trap 5).
         """
-        from django.template import TemplateSyntaxError
+        from django_rust_templates.engine import TemplateSyntaxError
 
         engine = self._engine()
         for source, expected in [
@@ -3227,7 +3276,7 @@ class I18nInterpositionTests(unittest.TestCase):
         (`i18n.py:161-165`), raised at *render* time off the compiled
         expression. The two trim rows differ only by the option.
         """
-        from django.template import TemplateSyntaxError
+        from django_rust_templates.engine import TemplateSyntaxError
 
         engine = self._engine()
         for source, context, expected in [
@@ -3302,8 +3351,8 @@ class I18nInterpositionTests(unittest.TestCase):
         `{% blocktranslate %}` the scan consumes it and the parser never sees
         it.
         """
-        from django.template import TemplateSyntaxError
-        from django.templatetags.i18n import BlockTranslateNode
+        from django_rust_templates.engine import TemplateSyntaxError
+        from django_rust_templates.engine.templatetags.i18n import BlockTranslateNode
 
         engine = self._engine()
         template = engine.from_string(
@@ -3341,13 +3390,11 @@ class DefaultTagsInterpositionTests(unittest.TestCase):
     stubs — are reached for the opposite reason: Rust owns none of those names.)
     """
 
-    def setUp(self):
-        _shim.install()
 
     def test_defaulttags_resolves_to_our_file(self):
         import importlib
 
-        module = importlib.import_module("django.template.defaulttags")
+        module = importlib.import_module("django_rust_templates.engine.defaulttags")
         self.assertIn("engine", module.__file__, module.__file__)
 
     def test_the_node_classes_this_module_defines_are_not_djangos(self):
@@ -3360,14 +3407,14 @@ class DefaultTagsInterpositionTests(unittest.TestCase):
         outside it.
 
         ``Node`` is not compared, for ``LoaderTagsInterpositionTests``' reason:
-        the pinned file's ``from django.template.base import Node`` resolves
+        the pinned file's ``from django_rust_templates.engine.base import Node`` resolves
         through the shim to our ``base``, so the pinned module's ``Node`` is ours
         too and ``is not`` would fail on a correct tree.
         """
         import importlib
         import inspect
 
-        from django.template import base, defaulttags
+        from django_rust_templates.engine import base, defaulttags
 
         from tests.pinned_module import load_pinned
 
@@ -3390,7 +3437,7 @@ class DefaultTagsInterpositionTests(unittest.TestCase):
         """
         import inspect
 
-        from django.template import defaulttags
+        from django_rust_templates.engine import defaulttags
         from django_rust_templates.render import parse_template
 
         template = parse_template("{% for i in xs %}{{ i }}{% endfor %}", Engine())
@@ -3416,7 +3463,7 @@ class DefaultTagsInterpositionTests(unittest.TestCase):
         the first token bound the builtin, the second the library's. Ours must
         answer the same string, and ``AB`` is what the name-keyed arm produces.
         """
-        from django.template import Context, Engine, Library, Node
+        from django_rust_templates.engine import Context, Engine, Library, Node
 
         class ShadowIfNode(Node):
             def __init__(self, nodelist):

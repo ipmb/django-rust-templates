@@ -218,10 +218,26 @@ def scan(rev: str) -> Census:
     # A rev predating the materialiser has no `NODE_CLASSES` at all — zero keys is
     # the right answer, not a failure — but the empty set must not print as though
     # it were a successful read of a table, so the absence is recorded and shown.
-    try:
-        py = git("show", f"{rev}:python/django_rust_templates/_impl/parser.py")
-    except subprocess.CalledProcessError:
-        py = ""
+    #
+    # **Two spellings, because M18.1 moved the file.** The materialiser was
+    # `_impl/parser.py` and is now `engine/parser.py` (`511d79e`); the table did
+    # not move with it in any sense that matters — it still has 40 keys — but a
+    # reader naming only the old path reports **zero keys at every rev after the
+    # rename**, which prints as a *moved total* against the pinned baseline
+    # rather than as a missing file. Measured 2026-10-09: the single-path reader
+    # raised the `(53, 44, 40) -> (53, 44, 0)` alarm against a tree where the
+    # table was intact. Reading both is what makes the third column a
+    # measurement again at any revision, which is what this script claims.
+    py = ""
+    for candidate in (
+        "python/django_rust_templates/engine/parser.py",
+        "python/django_rust_templates/_impl/parser.py",
+    ):
+        try:
+            py = git("show", f"{rev}:{candidate}")
+            break
+        except subprocess.CalledProcessError:
+            continue
     keys: set[str] = set()
     for node in ast.walk(ast.parse(py)):
         if isinstance(node, ast.Assign) and any(

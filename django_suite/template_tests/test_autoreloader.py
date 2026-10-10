@@ -17,7 +17,7 @@ EXTRA_TEMPLATES_DIR = ROOT / "templates_extra"
             "APP_DIRS": True,
         },
         {
-            "BACKEND": "django_rust_templates.backends.RustTemplates",
+            "BACKEND": "django_rust_templates.rust.RustTemplates",
             "NAME": "django",
             "DIRS": [EXTRA_TEMPLATES_DIR],
             "OPTIONS": {
@@ -48,7 +48,7 @@ class TemplateReloadTests(SimpleTestCase):
         TEMPLATES=[
             {
                 "DIRS": [ROOT],
-                "BACKEND": "django_rust_templates.backends.RustTemplates",
+                "BACKEND": "django_rust_templates.rust.RustTemplates",
                 "NAME": "django",
             }
         ]
@@ -113,7 +113,7 @@ class TemplateReloadTests(SimpleTestCase):
         TEMPLATES=[
             {
                 "DIRS": [""],
-                "BACKEND": "django_rust_templates.backends.RustTemplates",
+                "BACKEND": "django_rust_templates.rust.RustTemplates",
                 "NAME": "django",
             }
         ]
@@ -129,7 +129,7 @@ class TemplateReloadTests(SimpleTestCase):
                     "template_tests/relative_str",
                     Path("template_tests/relative_path"),
                 ],
-                "BACKEND": "django_rust_templates.backends.RustTemplates",
+                "BACKEND": "django_rust_templates.rust.RustTemplates",
                 "NAME": "django",
             }
         ]

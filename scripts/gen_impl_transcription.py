@@ -19,17 +19,19 @@ removing, reintroduced in the one place where it would look like a legitimate
 regeneration.
 
 Not every transcribed module opens with a docstring, and M10's nine are where
-that stopped being hypothetical: ``context.py``, ``engine.py``, ``utils.py`` and
+that stopped being hypothetical: ``context.py``, ``engine.py`` and
 ``loaders/base.py`` open with imports, and ``loaders/__init__.py`` is 0 bytes
-upstream. For those the marker is a comment on line 1 followed by a blank line —
+upstream. (``utils.py`` was a fourth until ``03038e6`` deleted it.) For those the marker is a comment on line 1 followed by a blank line —
 :data:`render` picks the form from the source, and ``check_transcriptions.py``'s
 ``MARKER_WINDOW`` accepts both. **Either way the insertion is exactly two
 lines**, which is what the declared regions and every measured ``COMPARED_PATH``
 span for these files are written against.
 
 Keys are file names (``"base.py"``), not module stems, because that is the
-spelling ``DECLARED``, ``COMPARED_PATH`` and ``_shim.SHADOWING`` all use: four
-tables, one spelling of a file's identity.
+spelling ``DECLARED`` and ``COMPARED_PATH`` both use, and the spelling
+``shadowing_files()`` reports: one spelling of a file's identity. It was
+``_shim.SHADOWING``'s spelling until M18 deleted that table, and the third
+member of the set is now the filesystem rather than a table.
 
 Usage:
     python -I scripts/gen_impl_transcription.py base.py smartif.py
@@ -46,12 +48,16 @@ IMPL = ROOT / "python" / "django_rust_templates" / "engine"
 
 MODULES = {
     "context.py": "django/template/context.py",
-    "engine.py": "django/template/engine.py",
     "smartif.py": "django/template/smartif.py",
-    "utils.py": "django/template/utils.py",
+    # **Two M0-era rows left this table at M18, and neither left a hole.**
+    # `utils.py` was deleted from the tree by `03038e6` and a row here for a file
+    # `engine` does not have fails `--check` in every commit — which is the same
+    # reason the table's own comment gives for adding a row in the commit that
+    # creates its file, read backwards. `engine.py` moved to `HAND_WRITTEN`
+    # below, because M18.1's rewiring is more than this table can express.
     # M10's six loader files. The first keys in this table that are not a single
     # segment, which is the point: a key is an `engine`-relative posix path here as
-    # it is in `DECLARED`, `COMPARED_PATH` and `_shim.SHADOWING`, and the value is
+    # it is in `DECLARED` and `COMPARED_PATH`, and the value is
     # `django/template/` + the key for every row in the table — including these,
     # where the key carries the subdirectory the value has to carry too.
     "loaders/__init__.py": "django/template/loaders/__init__.py",
@@ -173,8 +179,36 @@ MODULES = {
 # without anyone noticing — `--check` had been failing on `base.py` since M9
 # wrote the delegation by hand, and nothing invoked it. M10 measured it and puts
 # it on the fast path, which is why the failure could no longer be ignored.
+#
+# **`engine.py` is the second, from M18.1, and it is the reason the sentence
+# above is about the *kind* of difference rather than about delegations.**
+# Its rewiring touches the pin in four shapes this tool cannot express, and any
+# one of them alone would have been enough:
+#
+# * `default_builtins` and the `loaders` list name this package's modules rather
+#   than `django.template`'s — three one-line replacements, which is a row shape
+#   the table *does* have;
+# * the `app_dirs` arm is **one line in and three lines out**, because the dotted
+#   path it names is longer than a line allows (`app_directories.Loader` alone
+#   would overflow), and the table's one-line-to-one-line invariant is what keeps
+#   every `COMPARED_PATH` span in `check_transcriptions.py` valid;
+# * `import functools` and the `@functools.lru_cache` on `get_default` are **two
+#   lines out and none in** — M18.1 drops the cache, because the receiver that
+#   invalidates it (`reset_template_engines`) names *Django's* class object;
+# * `get_default`'s `isinstance` grows a second arm, `RustTemplates`, which is a
+#   line upstream has no counterpart for at all.
+#
+# `base.py` is here for the first reason and `engine.py` for the other three, and
+# between them they are the whole of the list: **this tool produces "the pin plus
+# a marker", and a file whose difference is more than that is the guard's, not
+# this one's.** Keeping `base.py` in `MODULES` is what made this script stale for
+# two milestones without anyone noticing — `--check` had been failing on `base.py`
+# since M9 wrote the delegation by hand, and nothing invoked it. M10 measured it
+# and puts it on the fast path, which is why the failure could no longer be
+# ignored.
 HAND_WRITTEN = {
     "base.py": "django/template/base.py",
+    "engine.py": "django/template/engine.py",
 }
 
 # Lines an `engine` transcription does **not** take verbatim, as whole-line
@@ -247,10 +281,6 @@ TRANSFORMS = {
         "from django.template import Origin, TemplateDoesNotExist":
             "from .. import Origin, TemplateDoesNotExist",
     },
-    "loaders/app_directories.py": {
-        "from django.template.utils import get_app_template_dirs":
-            "from ..utils import get_app_template_dirs",
-    },
     "loaders/cached.py": {
         "from django.template import TemplateDoesNotExist":
             "from .. import TemplateDoesNotExist",
@@ -284,7 +314,58 @@ TRANSFORMS = {
     # upstream's. `engine/__init__.py` therefore binds `template` to itself, and
     # this import becomes an import of that binding with the body untouched.
     "templatetags/static.py": {
-        "from django import template": "from django_rust_templates.engine import template",
+        "from django import template": "from django_rust_templates import engine as template",
+    },
+}
+
+# Lines a transcription adds that upstream has **no counterpart for at all** — a
+# comment block above a line the file otherwise takes verbatim, keyed by that
+# line's exact upstream text.
+#
+# **This is the second row shape, and it is separate from `TRANSFORMS` because it
+# is the one that moves a line count.** `TRANSFORMS`' one-line-to-one-line
+# invariant is what keeps every `COMPARED_PATH` span in `check_transcriptions.py`
+# valid across a regeneration; a block here does move the spans below it, so
+# keeping the two tables apart is what stops that invariant from quietly becoming
+# "usually true". The moved spans are not silent either way: they are *measured*
+# from the committed files by `tests/test_compared_path_instrument.py`, so a
+# regeneration that inserted a block would fail there rather than here.
+#
+# **M18.2 wrote both of these, and a block rather than a `TRANSFORMS` row is the
+# honest spelling for each.** Neither comment is a rewrite of upstream's line —
+# the line underneath is either taken verbatim (`app_directories.py`'s import,
+# which is Django's own line and the whole reason this package has no
+# `engine/utils.py`) or rewritten by a row in the table above (`static.py`'s). What
+# is new is the *explanation*, and an explanation with nowhere to live in a
+# pin-plus-marker tool is how the two of them came to be hand-written and
+# unregenerable in the first place.
+#
+# Ordering is fixed and load-bearing: blocks are inserted **before** `TRANSFORMS`
+# runs, so a block's key is always upstream's text and never the table's output.
+COMMENTS = {
+    "loaders/app_directories.py": {
+        "from django.template.utils import get_app_template_dirs": [
+            "# **Django's `get_app_template_dirs`, not a copy of it**, and this line is why",
+            "# this package has no `engine/utils.py`. The function caches its answer — it",
+            "# walks every installed app and stats a directory in each — and the cache is",
+            "# invalidated by ``django.test.signals.update_installed_apps``, which clears",
+            "# ``django.template.utils.get_app_template_dirs``. A second function object holds",
+            "# a second cache that receiver cannot reach: measured, ours returned",
+            "# ``[django_suite/template_tests/templates]`` under ``override_settings(",
+            "# INSTALLED_APPS=[])`` while Django's returned ``[]``, which is the whole of",
+            "# ``test_loaders.AppDirectoriesLoaderTests.test_not_installed``.",
+        ],
+    },
+    "templatetags/static.py": {
+        "from django import template": [
+            "# Upstream's line here is `from django import template`, which binds the name",
+            "# `template` to the DTL package. Ours binds the same name to the same package",
+            "# under the name this package ships it as; the seven uses below are",
+            "# `template.Library`, `template.Node` and `template.TemplateSyntaxError`, all",
+            "# re-exported from `django_rust_templates.engine`'s root, so the body is",
+            "# unchanged. The name stays `template` because the body is what is being",
+            "# transcribed — a rename would make every later diff against upstream noisy.",
+        ],
     },
 }
 
@@ -294,16 +375,31 @@ DJANGO_VERSION = "6.0.9"
 
 
 def _transform(name: str, source: str) -> str:
-    """``source`` with ``TRANSFORMS[name]`` applied, one whole line at a time.
+    """``source`` with ``COMMENTS[name]`` and ``TRANSFORMS[name]`` applied.
 
-    **The old line must be present exactly once.** A transform that quietly
-    stopped matching — because the pin bumped and upstream reworded the import,
-    or because someone edited the table's key — would leave the transcription
-    importing from the checkout while `--check` reported a match, which is the
-    silent-degradation shape this project has refused three times over. Counting
-    the occurrences is what makes a pin bump break the generator *loudly*, in the
-    commit that takes it.
+    **The anchor line must be present exactly once, in both tables.** A row that
+    quietly stopped matching — because the pin bumped and upstream reworded the
+    line, or because someone edited the table's key — would leave the
+    transcription importing from the checkout while `--check` reported a match,
+    which is the silent-degradation shape this project has refused three times
+    over. Counting the occurrences is what makes a pin bump break the generator
+    *loudly*, in the commit that takes it.
+
+    Comments first, then transforms: a comment's key is upstream's text and a
+    transform's key is too, so the insertion has to happen while the line still
+    reads the way the pin wrote it.
     """
+    for anchor, block in COMMENTS.get(name, {}).items():
+        found = source.count(anchor + "\n")
+        if found != 1:
+            raise SystemExit(
+                f"{name}: the comment block anchored at {anchor!r} matches "
+                f"{found} line(s) of the pin, not 1 — upstream has reworded it, "
+                "or the table's key is wrong. Fix the key; do not drop the row."
+            )
+        source = source.replace(
+            anchor + "\n", "".join(line + "\n" for line in block) + anchor + "\n"
+        )
     for old, new in TRANSFORMS.get(name, {}).items():
         found = source.count(old + "\n")
         if found != 1:

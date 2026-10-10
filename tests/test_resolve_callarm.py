@@ -15,8 +15,8 @@ from tests.test_render_parity import _ParityTest, _outcome
 
 class CallArmParityTests(_ParityTest):
     def assert_calls_like_django(self, value, path="x", invalid="<<invalid>>"):
-        from django.template import Context
-        from django.template.base import Variable
+        from django_rust_templates.engine import Context
+        from django_rust_templates.engine.base import Variable
 
         from django_rust_templates import _native
 
@@ -121,8 +121,8 @@ class CallArmParityTests(_ParityTest):
         returns the value and never reaches `context.template.engine`; so must
         we.
         """
-        from django.template import Context
-        from django.template.base import Variable
+        from django_rust_templates.engine import Context
+        from django_rust_templates.engine.base import Variable
 
         from django_rust_templates import _native
 
@@ -140,8 +140,8 @@ class CallArmParityTests(_ParityTest):
         `silent_variable_failure` and re-raises. A port that swallowed it and
         substituted `""` is quiet where Django is loud.
         """
-        from django.template import Context
-        from django.template.base import Variable
+        from django_rust_templates.engine import Context
+        from django_rust_templates.engine.base import Variable
 
         from django_rust_templates import _native
 

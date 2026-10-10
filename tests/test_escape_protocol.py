@@ -34,8 +34,8 @@ DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
-from django.template import Context  # noqa: E402
-from django.template.base import Variable  # noqa: E402
+from django_rust_templates.engine import Context  # noqa: E402
+from django_rust_templates.engine.base import Variable  # noqa: E402
 from django.utils.functional import Promise, lazy  # noqa: E402
 from django.utils.safestring import SafeData, mark_safe  # noqa: E402
 from django.utils.translation import gettext_lazy  # noqa: E402

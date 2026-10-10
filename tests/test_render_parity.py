@@ -46,8 +46,8 @@ DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
-from django.template import Context, Engine  # noqa: E402
-from django.template.base import BaseContext, Parser, Variable  # noqa: E402
+from django_rust_templates.engine import Context, Engine  # noqa: E402
+from django_rust_templates.engine.base import BaseContext, Parser, Variable  # noqa: E402
 from django.utils.version import PY314  # noqa: E402
 
 from django_rust_templates import _native, render  # noqa: E402
@@ -397,7 +397,7 @@ class RenderParityTests(_ParityTest):
         the attribute list that constructor writes. That it *also* parses is
         incidental and discarded.
         """
-        from django.template import Template
+        from django_rust_templates.engine import Template
 
         source = "line one\n{{ a }}\nline three\n"
         parser = render.parser_for(source, self.engine)

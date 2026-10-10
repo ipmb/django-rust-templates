@@ -26,20 +26,52 @@ cargo fmt --all -- --check
 step "clippy"
 cargo clippy --workspace --all-targets --quiet -- -D warnings
 
-step "python unit tests"
-# Shimmed, like the Django suite, and for the same reason: the shim loads our
-# file under Django's module name, so a test module that binds `Node` before
-# `install()` holds a *different class object* than one that binds it after,
-# `isinstance` fails across the boundary, and `describe()`'s dispatch falls to
-# its memory-address arm — measured as 537 order-dependent failures in the parity
-# harness, and 8 once the shim is installed mid-run.
+step "the extension the python suites exercise"
+# The Python steps below are statements about an *artifact*, and until this line
+# existed nothing tied that artifact to the source. `cargo test` reads the source;
+# the unit suite and the acceptance run import `_native` and exercise whatever it
+# resolves to — the source tree's `python/django_rust_templates/_native.<abi>.so`,
+# reached through the editable install rather than from `site-packages`, which is
+# whatever was built last — and measured, this script ran no build at all. The
+# hazard is **staleness**, not profile: both profiles render identical bytes, so a
+# debug extension costs only speed, while one built from *older source* answers
+# questions about the old source and passes rows the current tree does not satisfy
+# — with `cargo test` green beside it, because that is the one step that reads the
+# source.
 #
-# The invocation lives in `run_unit_tests.sh` rather than here, because the
-# environment it needs is three lines long and the plan's per-task commands need
-# the same three lines: written twice, one of them is wrong. That script also
-# pins the *discovery* — `tests/test_collected_tests.py` asserts the count this
-# command collects, so a future `-p` change or a module named without `test_`
-# fails a row instead of silently running fewer tests.
+# What this line buys is cargo's own source-match check, *run* instead of inferred:
+# an incremental fingerprint is exactly "has the source moved since this artifact",
+# and `maturin develop` is how the gate reads it — measured at 1.2 s when the
+# extension is current and ~11 s when the source has moved. Nothing cheaper makes
+# the same claim: a digest against `target/{debug,release}` answers *which* build it
+# is and not *whether it is current*, and the comparison that would — a digest
+# recorded at build time against the source now — is the fingerprint cargo already
+# keeps and this step re-runs.
+#
+# One line below turns that from an assumption into a check: `assert_native_is_the_built_artifact.py`
+# resolves `_native` the way a test does and requires it to be the artifact just
+# built, so "*we ran a build*" and "*the artifact under test is the one we built*"
+# cannot come apart silently.
+#
+# `--release` rather than the default, and that is a second, smaller claim: it is
+# the profile `pip install` builds and the one `.review/m18-record.md`'s benchmark
+# figures describe, so a bench run after a gate run measures the shipping binary
+# instead of the unoptimised one `maturin develop` installs by default — which is
+# the reading that was published wrong for a round and then corrected.
+"$PROJECT_ROOT/.venv/bin/maturin" develop --release
+"$PROJECT_ROOT/.venv/bin/python" -I "$HERE/assert_native_is_the_built_artifact.py"
+
+step "python unit tests"
+# The invocation lives in `run_unit_tests.sh` rather than here because the plan's
+# per-task commands need the same arguments, and written twice one of them is
+# wrong. That script also pins the *discovery* — `tests/test_collected_tests.py`
+# asserts the count this command collects, so a future `-p` change or a module
+# named without `test_` fails a row instead of silently running fewer tests.
+#
+# Until M18 this step was a *correctness* requirement rather than a convenience,
+# and the paragraph that said why is now history in that script: the runner had to
+# put a `sitecustomize` on `PYTHONPATH` so the substitution shim was installed
+# before the first test module bound a class. There is no shim to install.
 "$HERE/run_unit_tests.sh"
 
 step "python anchor manifest"
@@ -69,13 +101,24 @@ step "python anchor manifest"
 # that `--check` counts them out loud rather than passing them as verified.
 "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_python_anchors.py" --check --frozen
 
+step "the vendored suite is generated, not edited"
+# `django_suite/` is a *copy* of the pinned `template_tests`, rewritten by
+# `scripts/gen_django_suite.py` so that every import of a module this package owns
+# points at `django_rust_templates.engine.*`. The copy is what makes the
+# acceptance run a statement about this engine; a hand edit inside it would make
+# the run a statement about the edit, and a green one either way. So the same
+# shape as the transcription pair below: one script says what the copy is allowed
+# to differ by, this one says the rest of it is still what the generator writes.
+#
+# Fast path: it reads text — 215 files and the checkout — and compiles nothing.
+"$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_django_suite.py" --check
+
 step "suite counts carry their provenance"
 # Every milestone is accepted on a *count*, and a count is the easiest claim to
-# make vacuously: measured, running `.django/tests/runtests.py` directly with
-# `DJANGO_RUST_TEMPLATES` unset produces a result byte-identical to stock
-# Django's and still reports OK. The guard requires every `Ran N tests` in our
-# prose to sit near something naming the run that produced it. On the fast path
-# because it reads text and nothing else.
+# make vacuously: measured, running `.django/tests/runtests.py` directly produces a
+# result byte-identical to stock Django's and still reports OK. The guard requires
+# every `Ran N tests` in our prose to sit near something naming the run that
+# produced it. On the fast path because it reads text and nothing else.
 "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_suite_counts.py"
 
 step "transcriptions differ from upstream only where declared"
@@ -122,21 +165,59 @@ if [ "$FAST" -eq 0 ]; then
   "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_python_word_ranges.py" --check
   "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_python_case_fixups.py" --check
 
-  # Not "(rust engine)" — but the reason has changed, and it is now measured
-  # rather than assumed. On 2026-10-09 this suite called `_native` zero times,
-  # which made the label assert what the run did not do. Re-measured on
-  # 2026-10-09 after M9 interposed `base` (instrument:
-  # `.review/m9-measurements/m9_measure_native_calls.py`): 23,263 calls from
-  # 1,176 of the 1,547 tests — `resolve` 10,180; `compile_template`,
-  # `builtin_tag_names_including_stubs` and `builtin_tag_stub_names` 4,361
-  # each. So Rust *is* on the
-  # suite's path now, and the reason the label stays is narrower: `lex` is still
-  # reached zero times (`base.Lexer` is Python at M9) and `engine.py` is still
-  # Django's, so "rust engine" would assert more than the run does. The
-  # equivalent claim in `differential.py` no longer has to be taken on trust —
-  # that harness now counts the calls and fails if the shim run reaches none.
-  step "django template_tests (shim installed)"
-  "$HERE/run_django_suite.sh" template_tests
+  # §2:31-34's acceptance run. Three commands, and each one closes a hole the
+  # other two cannot see:
+  #
+  # * `assert_checkout_pinned.py` refuses unless `.django/` is the checkout
+  #   `django.lock` pins and is unmodified — §2:33-34's "zero edited tests", the
+  #   clause where a well-intentioned fix to a failing Django test produces a
+  #   fully green and fully meaningless gate.
+  # * `django_suite/run.py` runs the *vendored* copy, whose imports the generator
+  #   rewrote to `django_rust_templates.engine`. The label is "vendored" and not
+  #   "(rust engine)" for the reason M9 measured on the old label: the suite calls
+  #   `_native` 23,263 times but reaches `lex` zero times (`base.Lexer` is Python),
+  #   so "rust engine" would assert more than the run does.
+  # * `assert_suite_outcome.py` reads the transcript, because the exit status
+  #   cannot carry §2's whole clause: `Ran 1547 tests … OK (skipped=8)` passes the
+  #   count and the status while two tests §2:64-65 requires have silently
+  #   stopped running. It pins the summary **line whole** and the six skips by
+  #   identity.
+  #
+  # The transcript is kept rather than dropped — it is the only place the skip
+  # reasons and a failure's traceback appear — and the status is checked after the
+  # gate has had its say, so a red run reports *both* the numbers and the exit.
+  #
+  # **`-v 2` is load-bearing and was measured the hard way.** At the default
+  # verbosity the runner prints a dot per test and *no skip line at all*, so this
+  # gate — whose whole subject is §2:31's "a count of six is satisfied by a different
+  # six" — refused the healthy run with `the summary says skipped=6 and 0 skip
+  # line(s) were attributed to a test`. Two ways to read that refusal and only one is
+  # right: not "the six changed" but "the transcript cannot say". `-v 2` costs 1547
+  # lines of transcript and buys the six identities.
+  #
+  # The transcript is therefore printed as a *digest* rather than whole: every skip
+  # line, and the verdict with its teardown. A red run prints all of it, because a
+  # failure's traceback sits above the verdict where `tail` would hide it.
+  step "checkout pinned"
+  "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/assert_checkout_pinned.py"
+
+  step "django template_tests (vendored)"
+  TRANSCRIPT="$(mktemp -t django-rust-suite)"
+  trap 'rm -f "$TRANSCRIPT"' EXIT
+  STATUS=0
+  "$PROJECT_ROOT/.venv/bin/python" -I "$PROJECT_ROOT/django_suite/run.py" -v 2 template_tests \
+    >"$TRANSCRIPT" 2>&1 || STATUS=$?
+  grep -E "skipped '" "$TRANSCRIPT" || true
+  if [ "$STATUS" -ne 0 ]; then
+    cat "$TRANSCRIPT"
+  else
+    tail -n 8 "$TRANSCRIPT"
+  fi
+  "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/assert_suite_outcome.py" "$TRANSCRIPT"
+  if [ "$STATUS" -ne 0 ]; then
+    echo "the acceptance suite exited $STATUS" >&2
+    exit "$STATUS"
+  fi
 
   step "packaging"
   # A wheel, three virtualenvs and a `pip install` — the one check here that

@@ -37,19 +37,28 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
-# `.django/tests` as well, since `LIBRARIES` names `template_tests.*` and
-# `Engine(libraries=…)` resolves those lazily through `import_module`. It was
-# already on `sys.path` during a full discovery run because `test_host_tags`
-# inserts it and sorts earlier — so the corpus only failed when this module ran
-# alone, which is exactly the kind of ordering dependence a test module should
-# not have.
+# **The vendored corpus, not the checkout's copy**, and the M18 rewiring is why.
+# `Engine(libraries=…)` resolves `template_tests.*` lazily through `import_module`,
+# so whichever `template_tests` is on `sys.path` decides which `Library` the
+# corpus's `{% load %}` builds. The checkout's `templatetags/custom.py` does
+# `from django.template.defaultfilters import stringfilter` and its `testtags.py`
+# does `from django.template import Library, Node` — Django's own, once the shim
+# is gone — so a harness pointed there would hand our parser Django's tag-compile
+# functions and compare Rust against a corpus that never touches our engine.
+# `django_suite/` is the same 215 files with every `django.template` path
+# repointed at this package, which is what makes the comparison a comparison.
+# `gen_django_suite.py --check` is what keeps the two in step.
 DJANGO_TESTS = DJANGO_CHECKOUT / "tests"
+CORPUS = PROJECT_ROOT / "django_suite"
 
-for _path in (DJANGO_CHECKOUT, DJANGO_TESTS):
+for _path in (DJANGO_CHECKOUT, DJANGO_TESTS, CORPUS):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
+# `insert(0, …)` in that order leaves `django_suite` *last* of the three, and the
+# checkout's `template_tests` would win every import. The corpus has to be first.
+sys.path.insert(0, str(CORPUS))
 
-from django.template.base import (  # noqa: E402
+from django_rust_templates.engine.base import (  # noqa: E402
     UNKNOWN_SOURCE,
     DebugLexer,
     Lexer,
@@ -61,9 +70,9 @@ from django.template.base import (  # noqa: E402
     Token,
     TokenType,
 )
-from django.template.base import FilterExpression, Variable  # noqa: E402
-from django.template.engine import Engine  # noqa: E402
-from django.template import smartif  # noqa: E402
+from django_rust_templates.engine.base import FilterExpression, Variable  # noqa: E402
+from django_rust_templates.engine.engine import Engine  # noqa: E402
+from django_rust_templates.engine import smartif  # noqa: E402
 from django.utils.datastructures import DeferredSubDict  # noqa: E402
 from django.utils.safestring import SafeData  # noqa: E402
 
@@ -776,7 +785,7 @@ class ShapeTests(unittest.TestCase):
         # TextNode (Review Focus item 7), so the materialiser must not produce a
         # generic node for text — and it must not produce a TextNode for anything
         # else either, since `ExtendsNode.render` skips TextNode children.
-        from django.template.base import TextNode
+        from django_rust_templates.engine.base import TextNode
 
         nodes = ours_parse("a{% csrf_token %}b")
         self.assertEqual([type(node).__name__ for node in nodes],

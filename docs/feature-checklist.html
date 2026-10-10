@@ -502,6 +502,19 @@
       it is tracked. <b>No module of the engine is left to name</b>, and the acceptance
       suite runs entirely against Rust's code.
     </p>
+    <p class="sub">
+      That last sentence used to be prose, and the place it was most likely to stop being
+      true was the one file no gate read: <code>django_suite/suite_settings.py</code> names
+      the <code>BACKEND</code> all 1547 tests run against, and it sits outside the tree
+      <code>scripts/gen_django_suite.py</code> re-derives and diffs, so renaming that one
+      string to Django's would have turned the whole acceptance run into a test of stock
+      Django with every gate still green. It is now checked — that file, the alias
+      <code>engines["django"]</code> resolves, and the seven adapter imports the vendored
+      tree is allowed to keep, each asserted against a declared set in
+      <code>tests/test_suite_isolation.py</code> and each re-derived against the pinned
+      checkout there, so the set is inheritance rather than a licence this package
+      granted itself. Prose became a refusal.
+    </p>
     <div class="tablewrap">
       <table>
         <thead>
@@ -602,36 +615,80 @@
       <b>Speed is measured, and is not yet a win.</b> The port is checked against stock
       Django 6.0.9 on four workloads — a pre-compiled 50-row i18n page, the same page parsed
       and rendered, a generated ~200-node template, and a one-variable template — by running
-      one committed script under both engines and diffing the two transcripts. Both sides
-      print the file they loaded and a hash of every rendered page, and those hashes agree, so
-      the comparison is like for like rather than two different templates. Measured
-      2026-10-09, the port is <b>1.35× to 1.85× slower</b> — the compatibility work has been
-      the priority throughout, and the measurement is published here rather than only the
-      number that would flatter it.
+      <code>scripts/bench.py</code> under both engines and diffing the two transcripts. Each
+      side is named on the command line (<code>--side rust</code>, <code>--side stock</code>)
+      and the harness prints the engine it built — and the extension it loaded, and which
+      profile built it — and refuses to print a table for any other engine;
+      both sides then load the same two template sources and print a hash of every rendered
+      page, and those four hashes agree, so the comparison is like for like rather than two
+      different templates. Measured 2026-10-09, the port is <b>1.3× to 1.8× slower</b>
+      (1.34× pre-compiled render, 1.35× parse-and-render, 1.41× the node-heavy template,
+      1.82× the one-variable one) — the compatibility work has been the priority throughout,
+      and the measurement is published here rather than only the number that would flatter it.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>That figure holds only for an optimised build, and saying which build is now part
+      of the harness.</b> <code>pip install</code> compiles the extension with
+      <code>--release</code>; <code>maturin develop</code>, which is what a development
+      checkout runs, installs the <i>unoptimised</i> profile instead — and the first honest
+      bench run after M18 measured that binary and produced <b>2.3× to 6.0×</b> (2.34×,
+      2.49×, 4.69×, 6.01×), a range that
+      says nothing about the port and everything about the build. It also went unnoticed for
+      a while: the extension sitting in a working tree is whatever was last installed, so a
+      stale or unoptimised one is invisible from the outside. <code>bench.py</code> now
+      prints the extension it loaded and which build it is, beside the engine, and the
+      1.35×–1.85× above is the figure for the <code>--release</code> build.
+      <b>The gate now builds it rather than trusting it:</b> <code>scripts/check.sh</code> runs
+      <code>maturin develop --release</code> before the Python suites, so the unit rows and the
+      1547 exercise the source instead of whatever happened to be installed. A row pins that
+      invocation <i>and its position</i> — against <i>every</i> step that reads the extension, not
+      one named step, since a build placed after any consumer cannot satisfy it — and the next
+      line checks the claim behaviourally rather than textually:
+      <code>scripts/assert_native_is_the_built_artifact.py</code> requires the <code>_native</code> the tests
+      import to be byte-identical to the artifact the build just produced. (It lives in the
+      source tree, <code>python/django_rust_templates/</code>, through the editable install —
+      not in <code>site-packages</code>.)
     </p>
     <p class="sub" style="margin-top:16px">
       <b>It installs, and it refuses a Django it was not built for.</b> <code>pip install</code>
-      from a clone or a git URL builds the extension and substitutes itself for
-      <code>django.template</code>; the wheel declares <code>Django&gt;=6.0,&lt;6.1</code>, and
-      <code>install()</code> refuses anything outside 6.0.x. Two measured outcomes are what the
-      refusal is for, and neither is visible from inside this repository, where every check runs
-      against the pinned checkout: against Django 6.1.2 the engine used to install cleanly,
-      report an empty meter and render — <i>every gate above would have said green</i> — and
-      against 5.2.7 it died with an <code>ImportError</code> that named Django. Both halves are
-      checked in a real virtualenv by <code>scripts/check_packaging.sh</code>, which also installs
-      the wheel with no Django present to prove the error is ours, and builds the source tree the
-      way <code>pip install .</code> does. <b>Switching it on is two lines before
-      <code>django.setup()</code> runs, in whatever process starts Django</b> — usually the top of
-      <code>manage.py</code>, <code>wsgi.py</code> and <code>asgi.py</code>, or a
-      <code>sitecustomize.py</code> on <code>PYTHONPATH</code> where there is no entry point to
-      edit — and never in <code>settings.py</code>, because <code>django.setup()</code> imports
-      <code>django.urls</code>, and so all of <code>django.template</code>, before it first reads
-      the settings module; a settings module therefore runs strictly too late, and
-      <code>AppConfig.ready()</code> later still. Both routes are asserted, not just documented:
-      the packaging check runs a real <code>manage.py</code> and a real <code>django-admin</code>,
-      and confirms the settings-module route is refused. No wheel is published yet,
+      from a clone or a git URL builds the extension and installs an ordinary Django template
+      backend; the wheel declares <code>Django&gt;=6.0,&lt;6.1</code>, and the backend refuses
+      anything outside 6.0.x when Django builds it from <code>TEMPLATES</code>. Two measured
+      outcomes are what the refusal is for, and neither is visible from inside this repository,
+      where every check runs against the pinned checkout: against Django 6.1.2 the engine used to
+      install cleanly, report an empty meter and render — <i>every gate above would have said
+      green</i> — and against 5.2.7 it died with an <code>ImportError</code> that named Django.
+      Both halves are checked in a real virtualenv by <code>scripts/check_packaging.sh</code>, which
+      also installs the wheel with no Django present to prove the error is ours, and builds the
+      source tree the way <code>pip install .</code> does. <b>Switching it on is one setting</b> —
+      <code>"BACKEND": "django_rust_templates.rust.RustTemplates"</code> in
+      <code>TEMPLATES</code>, with no <code>"NAME"</code> needed: the alias you reach it by
+      is derived from that path as it is for every backend, and the module is named so
+      that the derivation gives <code>rust</code> — and there is nothing else: no import
+      to perform, no finder, no <code>sitecustomize.py</code>, no environment variable,
+      and no ordering rule, because
+      <code>EngineHandler</code> resolves that string the same way it resolves any other
+      backend's. <b>Nothing of Django's is replaced</b>: the package has its own namespace, the
+      engine is <code>django_rust_templates.engine</code>, and a name you reach across the
+      boundary is Django's own object. The packaging check runs a real <code>manage.py</code>
+      against a real settings module and asserts that the same project against Django's own
+      backend renders identically; a control swaps the one line and must come out as stock
+      Django. No wheel is published yet,
       so a source install needs a Rust toolchain; the port is also <i>slower</i> than the thing it
       replaces, which is the work in front of it.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>Until M18 it was a substitution, and that machinery is gone.</b> Earlier revisions of
+      this page described a meta-path finder that served a transcription of
+      <code>django.template</code> under Django's own module names, switched on by an
+      <code>install()</code> call placed before <code>django.setup()</code> ran — which is why
+      this page used to argue about <code>manage.py</code> versus <code>settings.py</code>. That
+      whole apparatus (<code>_shim.py</code>, <code>_impl/</code>, <code>install()</code>,
+      <code>scripts/shimpath/</code>) was deleted, and the acceptance suite it existed to drive
+      in place was replaced by a copy of Django's <code>template_tests</code> vendored at
+      <code>django_suite/</code> and regenerated by <code>scripts/gen_django_suite.py</code>.
+      The same 1547 tests run; they simply import this package's engine by name instead of
+      being tricked into it.
     </p>
   </section>
 

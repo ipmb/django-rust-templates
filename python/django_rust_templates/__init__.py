@@ -5,7 +5,7 @@ names the backend in its template configuration::
 
     TEMPLATES = [
         {
-            "BACKEND": "django_rust_templates.backends.RustTemplates",
+            "BACKEND": "django_rust_templates.rust.RustTemplates",
             "DIRS": [BASE_DIR / "templates"],
             "APP_DIRS": True,
             "OPTIONS": {"context_processors": [...]},
@@ -21,7 +21,7 @@ nothing at all, which is why this module is four functions wide.
 **This package has its own namespace and does not impersonate Django's.** It
 used to substitute itself for ``django.template`` on ``sys.meta_path``, and that
 machinery is gone: the engine lives at ``django_rust_templates.engine``, the
-backend at ``django_rust_templates.backends``, and no module of Django's is
+backend at ``django_rust_templates.rust``, and no module of Django's is
 replaced, patched or shadowed at any point. The consequence worth stating is
 that a name reached across the boundary — ``engines``, ``TemplateDoesNotExist``,
 ``django.template.loader`` — is *Django's* object and behaves exactly as it does

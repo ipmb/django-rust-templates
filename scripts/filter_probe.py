@@ -42,11 +42,10 @@ measured, both are `7` — `int("4")` succeeds, so the safety of the argument ne
 reaches the answer. The claim was wrong and the example is the one filter where
 it holds.)
 
-`DJANGO_RUST_TEMPLATES=1` is set by `scripts/env.sh` and is irrelevant here:
-the shim is installed by `scripts/shimpath/sitecustomize.py`, which is only on
-`PYTHONPATH` when `scripts/run_django_suite.sh` puts it there. Importing
-`django_rust_templates` on its own changes nothing, so this script — like
-`tests/test_filter_parity.py` — has Django's real registry and `_native` in one
+Importing `django_rust_templates` changes nothing: since M18 the package has its
+own namespace and no finder, so `django.template.defaultfilters` is Django's
+module whatever this script imports. That is what lets this script — like
+`tests/test_filter_parity.py` — hold Django's real registry and `_native` in one
 process, which is the only way the two can be compared at all.
 
 Exit status is 0 when the two agree and 1 when they do not, so this doubles as a

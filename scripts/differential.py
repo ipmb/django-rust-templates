@@ -2,12 +2,22 @@
 """Differential harness.
 
 Renders a corpus of templates twice — once through stock Django, once through
-the Rust-backed shim — and compares the results. This gives a fast, granular
+this package's engine — and compares the results. This gives a fast, granular
 signal that is independent of the Django test suite: when a milestone breaks
 something, it names the template rather than a test module.
 
-Run with no arguments to compare. ``--render`` is the worker mode used by the
-subprocesses and is not meant to be called directly.
+**The two engines are two imports.** Until M18 the "ours" side was reached by
+putting a `sitecustomize` on `PYTHONPATH` and setting `DJANGO_RUST_TEMPLATES=1`, so
+that the substitution shim loaded our file *under Django's module name*; the two
+runs then had to be separate processes, because in one process there was only one
+name to import. Now `django.template.engine.Engine` and
+`django_rust_templates.engine.engine.Engine` are two ordinary names in one tree,
+and which one ran is read back off the object rather than asserted about the
+environment.
+
+Run with no arguments to compare. ``--render <ours|stock>`` is the worker mode used
+by the subprocesses and is not meant to be called directly; the subprocesses are
+kept so that neither engine's module-level state can reach the other.
 
 Exit status is 1 when any case differs, so this can gate a commit.
 """
@@ -24,8 +34,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CHECKOUT = ROOT / ".django"
 CASES_DIR = ROOT / "tests" / "differential"
-SHIM_PATH = ROOT / "scripts" / "shimpath"
 PYTHON = ROOT / ".venv" / "bin" / "python"
+
+# The two engines, by the name each is importable under. `ours` is this package's
+# transcription and `stock` is Django's own, and nothing else distinguishes them —
+# which is the point: a reader can check either one by hand.
+ENGINES = {
+    "ours": "django_rust_templates.engine.engine",
+    "stock": "django.template.engine",
+}
 
 # Sentinel keys reporting which engine actually ran and how much of it was
 # Rust. Never treated as cases.
@@ -63,21 +80,26 @@ def _counting_native():
     return lambda: total
 
 
-def render_all() -> dict[str, str]:
-    """Render every case with whichever engine is currently installed.
+def render_all(mode: str) -> dict[str, str]:
+    """Render every case through the engine `mode` names.
 
     Exceptions are captured as their repr rather than raised, so that error
     *behaviour* — types and messages — is compared too. A template that should
     raise `TemplateSyntaxError` is as much a case as one that renders.
     """
+    import importlib
+
     sys.path.insert(0, str(CASES_DIR))
     import cases  # noqa: PLC0415  (deliberately late; path set up above)
 
-    from django.template import Context, Engine
+    from django.template import Context
 
     calls = _counting_native()
 
-    engine = Engine()
+    engine_cls = getattr(
+        importlib.import_module(ENGINES[mode]), "Engine"
+    )
+    engine = engine_cls()
     results: dict[str, str] = {}
     for case in cases.CASES:
         name = case["name"]
@@ -87,37 +109,34 @@ def render_all() -> dict[str, str]:
         except Exception as exc:
             results[name] = f"!!{type(exc).__name__}: {exc}"
 
-    # A marker so the driver can prove the shim installed in one run and not the
-    # other. Without it, a shim that failed to install would make every
-    # comparison trivially identical and the harness silently worthless.
+    # A marker so the driver can prove the two runs reached *different* engines.
+    # Without it, an import that silently resolved to the same module twice would
+    # make every comparison trivially identical and the harness silently worthless.
     #
-    # **`installed()` truthfully means "the finder is up", not "Rust ran"** —
-    # measured 2026-10-09, spies on `_native.parse` and `_native.compile_template`
-    # recorded **0 calls** across this whole corpus while `base` and `engine` were
-    # still Django's. That measurement was recorded here as M9's obligation, and
-    # M9 discharged it: with `base` interposed the corpus now reaches Rust, and
-    # the count is asserted below rather than described. The two propositions
-    # coincide, which is what this sentinel was waiting for.
-    import django_rust_templates  # noqa: PLC0415
-
-    results[ENGINE_MARKER] = (
-        "shim-installed" if django_rust_templates.installed() else "stock"
-    )
+    # **It is read off the object rather than asserted about the environment**, and
+    # that is the M18 change. The sentinel used to be `installed()` — whether a
+    # finder was on `sys.meta_path` — which was a *proxy* for "our engine ran", and
+    # a proxy that was measured wrong once: spies on `_native.parse` and
+    # `_native.compile_template` recorded 0 calls across this whole corpus while
+    # the finder was up and `base` and `engine` were still Django's. `type(engine)`
+    # is the engine.
+    results[ENGINE_MARKER] = type(engine).__module__
     results[NATIVE_MARKER] = str(calls())
     return results
 
 
 def render_in_subprocess(mode: str) -> dict[str, str]:
-    """Run the corpus in a fresh interpreter, so the shim choice is isolated."""
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(SHIM_PATH), str(CHECKOUT), env.get("PYTHONPATH", "")]
-    )
-    env["DJANGO_RUST_TEMPLATES"] = "1" if mode == "shim" else "0"
+    """Run the corpus in a fresh interpreter, so neither engine's state leaks.
 
+    The isolation used to be load-bearing for a second reason — one process could
+    hold only one `django.template`, so the two engines could not coexist — and it
+    is kept now for the ordinary one: `Engine` and the modules under it keep
+    module-level caches, and a differential harness that let one warm the other
+    would be measuring the wrong thing in a way no assertion here would catch.
+    """
     proc = subprocess.run(
-        [str(PYTHON), str(Path(__file__).resolve()), "--render"],
-        env=env,
+        [str(PYTHON), str(Path(__file__).resolve()), "--render", mode],
+        env=dict(os.environ),
         capture_output=True,
         text=True,
     )
@@ -128,26 +147,28 @@ def render_in_subprocess(mode: str) -> dict[str, str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--render", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--render", choices=sorted(ENGINES), help=argparse.SUPPRESS, default=None
+    )
     args = parser.parse_args()
 
     if args.render:
-        json.dump(render_all(), sys.stdout)
+        json.dump(render_all(args.render), sys.stdout)
         return
 
     if not CHECKOUT.is_dir():
         raise SystemExit(f"no Django checkout at {CHECKOUT} — run scripts/fetch_django.sh")
 
     stock = render_in_subprocess("stock")
-    shim = render_in_subprocess("shim")
+    ours = render_in_subprocess("ours")
 
-    # Prove the harness can detect a difference before trusting it to report
-    # that there isn't one. Two propositions, and they are now separate rows:
-    # the shim installed, and — the one this harness could not make until M9 —
-    # that the shim run reached Rust while the stock run did not.
+    # Prove the harness can detect a difference before trusting it to report that
+    # there isn't one. Two propositions, and they are separate rows: the two runs
+    # reached *different* engine objects, and — the one this harness could not make
+    # until M9 — the `ours` run reached Rust while the stock run did not.
     for label, results, expected in (
-        ("stock", stock, "stock"),
-        ("shim", shim, "shim-installed"),
+        ("stock", stock, ENGINES["stock"]),
+        ("ours", ours, ENGINES["ours"]),
     ):
         actual = results.pop(ENGINE_MARKER, None)
         if actual != expected:
@@ -157,29 +178,32 @@ def main() -> None:
             )
 
     stock_calls = int(stock.pop(NATIVE_MARKER, "0"))
-    shim_calls = int(shim.pop(NATIVE_MARKER, "0"))
-    if stock_calls != 0 or shim_calls == 0:
+    ours_calls = int(ours.pop(NATIVE_MARKER, "0"))
+    if stock_calls != 0 or ours_calls == 0:
         raise SystemExit(
             "harness is not working: `_native` entry points were called "
-            f"{stock_calls} time(s) without the shim and {shim_calls} with it, "
-            "expected 0 and > 0"
+            f"{stock_calls} time(s) by stock Django and {ours_calls} by this "
+            "engine, expected 0 and > 0"
         )
 
     diffs = [
         (name, stock.get(name, "<missing>"), value)
-        for name, value in shim.items()
+        for name, value in ours.items()
         if stock.get(name, "<missing>") != value
     ]
 
     if not diffs:
-        print(f"differential: {len(shim)} cases, identical (stock vs shim-installed)")
+        print(
+            f"differential: {len(ours)} cases, identical "
+            f"({ENGINES['stock']} vs {ENGINES['ours']})"
+        )
         return
 
     print(f"differential: {len(diffs)} of {len(stock)} cases differ\n")
-    for name, stock_value, shim_value in diffs:
+    for name, stock_value, ours_value in diffs:
         print(f"  {name}")
         print(f"    stock: {stock_value!r}")
-        print(f"    shim:  {shim_value!r}")
+        print(f"    ours:  {ours_value!r}")
     raise SystemExit(1)
 
 

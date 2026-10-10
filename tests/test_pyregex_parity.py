@@ -27,7 +27,7 @@ SPLICES_PATH = PROJECT_ROOT / "tests" / "pyregex_splices.txt"
 if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
-from django.template.base import filter_raw_string  # noqa: E402
+from django_rust_templates.engine.base import filter_raw_string  # noqa: E402
 
 # The Rust spellings, as published by `template_core::pyregex`. Written here as
 # strings because at this point in the plan there is no `_native` binding for

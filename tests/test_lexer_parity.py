@@ -20,7 +20,7 @@ DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
-from django.template.base import DebugLexer, Lexer, Token, TokenType  # noqa: E402
+from django_rust_templates.engine.base import DebugLexer, Lexer, Token, TokenType  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 from tests.lexer_corpus import CORPUS  # noqa: E402

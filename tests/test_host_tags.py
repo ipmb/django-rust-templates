@@ -34,14 +34,17 @@ import unittest
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# The *vendored* corpus: the checkout's `template_tests` imports `django.template`,
+# this one imports `django_rust_templates.engine`, and the engine under test is
+# this package's. See the note in `tests/test_parser_parity.py`.
 DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
-DJANGO_TESTS = DJANGO_CHECKOUT / "tests"
+DJANGO_TESTS = PROJECT_ROOT / "django_suite"
 for _path in (DJANGO_CHECKOUT, DJANGO_TESTS):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from django.template import Context, Engine, Library  # noqa: E402
-from django.template.exceptions import TemplateSyntaxError  # noqa: E402
+from django_rust_templates.engine import Context, Engine, Library  # noqa: E402
+from django_rust_templates.engine.exceptions import TemplateSyntaxError  # noqa: E402
 
 from django_rust_templates import _native, render  # noqa: E402
 from django_rust_templates import host as host_module  # noqa: E402

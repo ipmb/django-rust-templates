@@ -38,14 +38,17 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 # `template_tests.templatetags.custom` is reached by name rather than
-# re-implemented, so the rows below exercise Django's own fixture and not a copy
-# of it that could drift — `tests/test_host_tags.py:36-41` is the precedent, and
-# it needs the same second path entry.
-for _path in (DJANGO_CHECKOUT, DJANGO_CHECKOUT / "tests"):
+# re-implemented, so the rows below exercise the fixture and not a copy of it
+# that could drift — `tests/test_host_tags.py:36-44` is the precedent, and it
+# needs the same second path entry. That entry is the *vendored* corpus, whose
+# fixtures import this package's engine; the checkout's import Django's. See the
+# note in `tests/test_parser_parity.py`.
+CORPUS = PROJECT_ROOT / "django_suite"
+for _path in (DJANGO_CHECKOUT, CORPUS):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from django.template import Engine, Library, loader_tags  # noqa: E402
+from django_rust_templates.engine import Engine, Library, loader_tags  # noqa: E402
 
 from django_rust_templates.host import ShellHost  # noqa: E402
 from django_rust_templates.render import parser_for  # noqa: E402
@@ -171,8 +174,8 @@ class MustBeFirstGateTests(unittest.TestCase):
     """
 
     def _library(self):
-        from django.template import Library
-        from django.template.base import Node
+        from django_rust_templates.engine import Library
+        from django_rust_templates.engine.base import Node
 
         class FirstNode(Node):
             must_be_first = True
@@ -195,7 +198,7 @@ class MustBeFirstGateTests(unittest.TestCase):
         return lib
 
     def _engine(self, builtin=False):
-        from django.template import Engine
+        from django_rust_templates.engine import Engine
 
         engine = Engine()
         lib = self._library()
@@ -206,7 +209,7 @@ class MustBeFirstGateTests(unittest.TestCase):
         return engine
 
     def test_a_host_node_that_must_be_first_is_refused_after_text(self):
-        from django.template import Context, TemplateSyntaxError
+        from django_rust_templates.engine import Context, TemplateSyntaxError
 
         from django_rust_templates.render import render_string
 
@@ -244,7 +247,7 @@ class MustBeFirstGateTests(unittest.TestCase):
         engine too, so a row that stopped refusing would be visible as a
         divergence rather than as a test that quietly got easier.
         """
-        from django.template import Context, TemplateSyntaxError
+        from django_rust_templates.engine import Context, TemplateSyntaxError
 
         from django_rust_templates.render import render_string
 
@@ -284,7 +287,7 @@ class MustBeFirstGateTests(unittest.TestCase):
         text — design decision 2 still gives the message to Rust, and
         `render.parse_template` is what turns the object into Django's.
         """
-        from django.template import TemplateSyntaxError
+        from django_rust_templates.engine import TemplateSyntaxError
 
         from django_rust_templates.render import render_string
 
@@ -313,7 +316,7 @@ class MustBeFirstGateTests(unittest.TestCase):
         # harness drives. Keeping it here is what makes the divergence above a
         # *choice* that is visible, rather than an error path that quietly
         # stopped having a second side.
-        from django.template.base import UNKNOWN_SOURCE, Lexer, Origin, Parser
+        from django_rust_templates.engine.base import UNKNOWN_SOURCE, Lexer, Origin, Parser
 
         parser = Parser(
             Lexer(source).tokenize(),
@@ -368,12 +371,12 @@ class IncludeCacheGateTests(unittest.TestCase):
     SOURCE = '{% for x in vars %}{% include "include" %}{% endfor %}'
 
     def _engine(self):
-        from django.template import Engine
+        from django_rust_templates.engine import Engine
 
         return Engine(
             loaders=[
                 (
-                    "django.template.loaders.locmem.Loader",
+                    "django_rust_templates.engine.loaders.locmem.Loader",
                     {
                         "template": self.SOURCE,
                         "include": '{% include "next" %}',
@@ -385,7 +388,7 @@ class IncludeCacheGateTests(unittest.TestCase):
         )
 
     def test_the_included_template_is_resolved_once(self):
-        from django.template import Context
+        from django_rust_templates.engine import Context
 
         from django_rust_templates.render import parse_template, render_string
 
@@ -428,7 +431,7 @@ class IncludeCacheGateTests(unittest.TestCase):
         materialised tree, so a second node or a stray empty one in the body
         fails here while leaving the output identical.
         """
-        from django.template import loader_tags
+        from django_rust_templates.engine import loader_tags
 
         from django_rust_templates.render import parse_template
 

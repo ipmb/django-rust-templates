@@ -259,35 +259,34 @@ class TagInventoryTests(unittest.TestCase):
                     f"inventory target is not the pinned checkout: {source_file}",
                 )
 
-    def test_the_interposed_modules_register_the_pinned_registries(self):
+    def test_the_shipped_modules_register_the_pinned_registries(self):
         """The other direction: the modules that ship register Django's sets.
 
         Reading the inventory from the pin makes the counts honest about upstream
         and opens the gap this row closes — "the source the pin names" and "the
-        registry the engine dispatches through" became two objects the moment
-        these modules were interposed. The transcription is the pin plus a
-        marker, so the two should agree name for name; nothing above would
-        notice if the shim's registration were broken, because every read now
-        goes to the pin.
+        registry the engine dispatches through" are two module objects. The
+        transcription is the pin plus a marker, so the two should agree name for
+        name; every read above goes to the pin, so nothing else here would notice
+        if ours registered something different.
 
-        It calls `install()` rather than assuming the shim, for
-        `test_filter_inventory.py`'s reason: run by hand in an unshimmed
-        interpreter the row would otherwise assert that Django's registry equals
-        Django's registry and pass.
+        **The import is by our own name, and that is the M18 change.** Until M18
+        this row reached the shipped modules as `django.template.defaulttags` and
+        `django.template.loader_tags` and had to call `install()` first, for
+        `test_filter_inventory.py`'s reason: without the finder the row would have
+        compared Django's registry with Django's registry and passed. With no
+        finder and no interposition the two sides differ by construction, which
+        `assertIsNot` states outright — so the precondition that used to carry
+        that job is gone rather than merely unused.
         """
         import importlib
 
-        from django_rust_templates import _shim
-
-        _shim.install()
-
         for name, pinned in (
-            ("django.template.defaulttags", defaulttags),
-            ("django.template.loader_tags", loader_tags),
+            ("django_rust_templates.engine.defaulttags", defaulttags),
+            ("django_rust_templates.engine.loader_tags", loader_tags),
         ):
             with self.subTest(module=name):
                 live = importlib.import_module(name)
-                self.assertIn("engine", live.__file__, live.__file__)
+                self.assertIsNot(live, pinned, "the two sides are the same module")
                 self.assertEqual(set(live.register.tags), set(pinned.register.tags))
 
 

@@ -414,12 +414,13 @@ class AnchorManifestTests(unittest.TestCase):
                 self.assertIn(snippet, text[line - 1] + text[line])
 
     def test_no_our_own_basename_exists_in_the_checkout(self):
-        """`OUR_OWN` shadows: it makes a bare `name.py:N` resolve to the repo root
-        instead of into `.django/`, so the day Django ships a file with one of
-        those names the guard resolves it to *ours* and goes quietly wrong in the
-        one direction it exists to prevent. Measured today: zero hits for all
-        five, `parser.py` being the plausible one. This assertion is what notices
-        the bump, and it is green until then."""
+        """`OUR_OWN` shadows: it stops a bare `name.py:N` before the checkout's
+        search rather than inside it, so a name of ours cannot come back as
+        Django's — the quiet wrong answer being the one direction the guard
+        exists to prevent. Measured today: zero hits for all
+        four, `parser.py` being the plausible one. (`_shim.py` was the fifth
+        until M18 deleted the shim; it left no successor.) This assertion is what
+        notices the bump, and it is green until then."""
         shadows = {}
         for basename in anchor_manifest.OUR_OWN:
             hits = [

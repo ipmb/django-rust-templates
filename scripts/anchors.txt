@@ -392,7 +392,6 @@ defaultfilters.py:965-966	django/template/defaultfilters.py	965	966	if "," not i
 defaultfilters.py:984-987	django/template/defaultfilters.py	984	987	def phone2numeric_filter(value):	return phone2numeric(value)
 defaultfilters.py:990-996	django/template/defaultfilters.py	990	996	def pprint(value):	return "Error in formatting: %s: %s" % (e.__class__.__name__, e)
 defaultfilters.py:996	django/template/defaultfilters.py	996	-	"Error in formatting: %s: %s" % (e.__class__.__name__, e)	-
-django/template/defaulttags.py:30-38	django/template/defaulttags.py	30	38	-	-
 django/template/defaulttags.py:37	django/template/defaulttags.py	37	-	-	-
 defaulttags.py:99	django/template/defaulttags.py	99	-	def __init__(self, cyclevars, variable_name=None, silent=False):	-
 defaulttags.py:104-114	django/template/defaulttags.py	104	114	def render(self, context):	return render_value_in_context(value, context)
@@ -535,6 +534,7 @@ engine.py:7	django/template/engine.py	7	-	from .base import Template	-
 engine.py:14-18	django/template/engine.py	14	18	"django.template.loader_tags",	-
 engine.py:15-16	django/template/engine.py	15	16	filters	-
 engine.py:63	django/template/engine.py	63	-	self.template_builtins = self.get_template_builtins(self.builtins)	-
+django/template/engine.py:105-107	django/template/engine.py	105	107	from django.template import engines	-
 engine.py:120-121	django/template/engine.py	120	121	return [import_library(x) for x in builtins]	-
 engine.py:194	django/template/engine.py	194	-	-	-
 library.py:85	django/template/library.py	85	-	for attr in ("expects_localtime", "is_safe", "needs_autoescape"):	-
@@ -580,6 +580,8 @@ loader_tags.py:347	django/template/loader_tags.py	347	-	-	-
 loader_tags.py:356	django/template/loader_tags.py	356	-	"Unknown argument for %r tag: %r." % (bits[0], option)	-
 loader_tags.py:360	django/template/loader_tags.py	360	-	namemap = options.get("with", {})	-
 loader_tags.py:361-365	django/template/loader_tags.py	361	365	allow_recursion=True,	-
+django/template/loaders/app_directories.py:6	django/template/loaders/app_directories.py	6	-	django.template.utils	-
+django/template/loaders/cached.py:9	django/template/loaders/cached.py	9	-	django.template.backends.django	-
 smartif.py:22-26	django/template/smartif.py	22	26	-	-
 smartif.py:40-42	django/template/smartif.py	40	42	def __repr__(self):	return "(" + " ".join(out) + ")"
 smartif.py:51	django/template/smartif.py	51	-	class Operator(TokenBase):	-
@@ -727,6 +729,7 @@ tz.py:182-200	django/templatetags/tz.py	182	200	-	-
 tz.py:193-194	django/templatetags/tz.py	193	194	# token.split_contents() isn't useful here because this tag doesn't accept	-
 tz.py:196	django/templatetags/tz.py	196	-	len(args) != 3 or args[1] != "as"	-
 tz.py:197-199	django/templatetags/tz.py	197	199	-	-
+django/test/signals.py:50	django/test/signals.py	50	-	-	-
 django/test/utils.py:108-114	django/test/utils.py	108	114	def instrumented_test_render(self, context):	-
 utils/datastructures.py:350-365	django/utils/datastructures.py	350	365	self.deferred_key = deferred_key	-
 dateformat.py:42	django/utils/dateformat.py	42	-	-	-
@@ -814,33 +817,30 @@ django/utils/translation/__init__.py:275	django/utils/translation/__init__.py	27
 django/utils/translation/__init__.py:279	django/utils/translation/__init__.py	279	-	if "-" not in lang_code:	-
 django/utils/translation/__init__.py:280	django/utils/translation/__init__.py	280	-	raise KeyError("Unknown language code %s." % lang_code)	-
 django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	290	-	info["name_translated"] = gettext_lazy(info["name"])	-
+django_suite/run.py:85	django_suite/run.py	85	-	-	-
+django_suite/template_tests/syntax_tests/test_for.py:334	django_suite/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
+django_suite/template_tests/test_partials.py:14	django_suite/template_tests/test_partials.py	14	-	engines["django"]	-
 python/django_rust_templates/engine/base.py:829	python/django_rust_templates/engine/base.py	829	-	django_own_filters().get(func)	-
 python/django_rust_templates/engine/base.py:1161	python/django_rust_templates/engine/base.py	1161	-	render_value_in_context(output, context)	-
-python/django_rust_templates/engine/parser.py:181	python/django_rust_templates/engine/parser.py	181	-	"BlockTranslateNode": BlockTranslateNode,	-
+python/django_rust_templates/engine/exceptions.py:38	python/django_rust_templates/engine/exceptions.py	38	-	-	-
+python/django_rust_templates/engine/parser.py:179	python/django_rust_templates/engine/parser.py	179	-	"BlockTranslateNode": BlockTranslateNode,	-
 python/django_rust_templates/engine/parser.py:285	python/django_rust_templates/engine/parser.py	285	-	-	-
 python/django_rust_templates/engine/parser.py:568	python/django_rust_templates/engine/parser.py	568	-	-	-
 python/django_rust_templates/engine/parser.py:669	python/django_rust_templates/engine/parser.py	669	-	-	-
-python/django_rust_templates/_shim.py:75	python/django_rust_templates/_shim.py	75	-	TARGET = "django.template"	-
-python/django_rust_templates/_shim.py:556	python/django_rust_templates/_shim.py	556	-	-	-
-python/django_rust_templates/_shim.py:755	python/django_rust_templates/_shim.py	755	-	-	-
 python/django_rust_templates/host.py:35	python/django_rust_templates/host.py	35	-	-	-
 python/django_rust_templates/host.py:422	python/django_rust_templates/host.py	422	-	-	-
+python/django_rust_templates/host.py:519	python/django_rust_templates/host.py	519	-	self._django_tags = django_own_tags()	-
 python/django_rust_templates/host.py:555	python/django_rust_templates/host.py	555	-	-	-
-python/django_rust_templates/render.py:62	python/django_rust_templates/render.py	62	-	-	-
-scripts/shimpath/sitecustomize.py:33	scripts/shimpath/sitecustomize.py	33	-	-	-
-tests/parity_target.py:62	tests/parity_target.py	62	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
-tests/parity_target.py:170	tests/parity_target.py	170	-	So this is the replacement Python side	-
+tests/milestone_ownership.py:440	tests/milestone_ownership.py	440	-	def unshimmed(scope: str = TARGET) -> list:	-
+tests/parity_target.py:63	tests/parity_target.py	63	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
+tests/parity_target.py:171	tests/parity_target.py	171	-	So this is the replacement Python side	-
 filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-
 test_unordered_list.py:143	tests/template_tests/filter_tests/test_unordered_list.py	143	-	unordered_list(item_generator()),	-
 test_unordered_list.py:148	tests/template_tests/filter_tests/test_unordered_list.py	148	-	def test_nested_generators(self):	-
-i18n/test_blocktranslate.py:9	tests/template_tests/syntax_tests/i18n/test_blocktranslate.py	9	-	from django.templatetags.i18n import BlockTranslateNode	-
 i18n/test_blocktranslate.py:881	tests/template_tests/syntax_tests/i18n/test_blocktranslate.py	881	-	-	-
-i18n/test_translate.py:7	tests/template_tests/syntax_tests/i18n/test_translate.py	7	-	from django.templatetags.l10n import LocalizeNode	-
 tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py:16	tests/template_tests/syntax_tests/i18n/test_underscore_syntax.py	16	-	-	-
-syntax_tests/test_for.py:334	tests/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 syntax_tests/test_include.py:371-397	tests/template_tests/syntax_tests/test_include.py	371	397	def test_include_cache(self):	-
 test_include.py:372-397	tests/template_tests/syntax_tests/test_include.py	372	397	CounterNode	-
-syntax_tests/test_static.py:5	tests/template_tests/syntax_tests/test_static.py	5	-	from django.templatetags.static import StaticNode	-
 bad_tag.py:6-8	tests/template_tests/templatetags/bad_tag.py	6	8	badtag	-
 custom.py:386-393	tests/template_tests/templatetags/custom.py	386	393	self.count = count + 1	-
 custom.py:396-399	tests/template_tests/templatetags/custom.py	396	399	parser.extra_data["extra_data"]	-
@@ -848,6 +848,7 @@ custom.py:396-399	tests/template_tests/templatetags/custom.py	396	399	parser.ext
 custom.py:398	tests/template_tests/templatetags/custom.py	398	-	parser.extra_data["extra_data"] = "CUSTOM_DATA"	-
 tag_27584.py:8-9	tests/template_tests/templatetags/tag_27584.py	8	9	delete_first_token	-
 tag_27584.py:13-15	tests/template_tests/templatetags/tag_27584.py	13	15	class BadNode(template.Node):	raise template.TemplateSyntaxError("error")
+.django/tests/template_tests/test_custom.py:4	tests/template_tests/test_custom.py	4	-	from django.template.base import Node	-
 tests/template_tests/test_nodelist.py:44-86	tests/template_tests/test_nodelist.py	44	86	def test_correct_exception_index(self):	debug = e.template_debug
 test_parser.py:36	tests/template_tests/test_parser.py	36	-	-	-
 test_parser.py:49	tests/template_tests/test_parser.py	49	-	<Lexer template_string="{% for i in 1 %}{{ a...", verbatim=False>	-
@@ -861,7 +862,7 @@ tests/template_tests/tests.py:12-13	tests/template_tests/tests.py	12	13	if TYPE_
 tests.py:148-155	tests/template_tests/tests.py	148	155	def test_compile_tag_extra_data(self):	self.assertEqual(t.extra_data["extra_data"], "CUSTOM_DATA")
 .django/tests/template_tests/tests.py:148-155	tests/template_tests/tests.py	148	155	-	-
 tests/template_tests/tests.py:231-243	tests/template_tests/tests.py	231	243	def test_callable_uses_deferred_annotations(self):	self.assertEqual(template.render(Context({"obj": MyObject()})), "")
-tests/test_host_tags.py:36-41	tests/test_host_tags.py	36	41	PROJECT_ROOT = Path(__file__).resolve().parent.parent	sys.path.insert(0, str(_path))
+tests/test_host_tags.py:36-44	tests/test_host_tags.py	36	44	PROJECT_ROOT = Path(__file__).resolve().parent.parent	sys.path.insert(0, str(_path))
 test_render_parity.py:533	tests/test_render_parity.py	533	-	def test_a_silent_variable_failure_is_substituted(self):	-
 test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
 .django/tests/timezones/tests.py:1051-1071	tests/timezones/tests.py	1051	1071	test_localtime_filters_do_not_raise_exceptions	-

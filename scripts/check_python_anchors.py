@@ -299,14 +299,33 @@ NOT_SCANNED_BECAUSE = {
     ),
 }
 
-# Basenames that are *ours*, so a bare `name.py:N` matching one resolves to the
-# repo root rather than into `.django/`. **Measured: none of the five exists
+# Basenames that are *ours*, and a bare `name.py:N` matching one is **refused
+# before the checkout search** rather than resolved into `.django/` — see
+# `resolve`. (This comment said "resolves to the repo root" until this window,
+# which is what that branch does *not* do: the four live under `scripts/` and
+# `tests/`, so `ROOT / name` is never a file.) **Measured: none of the four exists
 # anywhere under `.django/`**, and `test_anchor_manifest.py` asserts that rather
 # than leaving it to hold by coincidence — this is a rule that *shadows*. The
 # day a Django bump adds `django/template/parser.py`, every bare `parser.py:N`
 # in the tree silently resolves to ours and the guard goes quietly wrong in the
 # one direction it exists to prevent. `parser.py` is the plausible one.
-OUR_OWN = {"_shim.py", "differential.py", "parser.py", "test_materialise.py", "test_parser_parity.py"}
+#
+# **`_shim.py` was the fifth until M18 deleted it**, and it left no successor:
+# every name the shim introduced is gone with it.
+#
+# **`rust.py`, this package's one new public file, is deliberately not here, and
+# the reason changed under it.** It was `backends.py` until this window, and that
+# name could not be a member: `django/contrib/auth/backends.py` exists, so a bare
+# `backends.py:N` would have resolved inside the checkout, and a member has to be
+# a name the checkout does *not* hold. The rename removed the collision —
+# **measured: zero `rust.py` anywhere under `.django/`** — so the name is now
+# eligible and is still left out, for the other half of the rule: the set is not
+# "files of ours", it is the names a bare `:N` anchor in this tree might
+# plausibly be written with, and each member is a place a Django bump could
+# silently redirect. **Measured: zero citations of `rust.py:NN` in the tree**,
+# bare or qualified — M18's prose always names the path, which is the convention
+# that makes this set small. If a bare one is ever written, it belongs here.
+OUR_OWN = {"differential.py", "parser.py", "test_materialise.py", "test_parser_parity.py"}
 
 # `--triage`'s window: how far either side of an anchor a quoted code span is
 # taken to be "the claim beside it". 200 characters is the plan's figure and it
@@ -380,9 +399,15 @@ def resolve(name, checkout=None, manifest=None):
     `django/tests/filter_tests/…` has no suffix match either and
     `desc.rs:319`'s `django/tests/…` was caught exactly this way.
 
-    A bare basename that is one of `OUR_OWN` resolves to ours; otherwise it is
-    looked up under `checkout`, and exactly one hit resolves — more than one is
-    ambiguous and zero is a missing file. `manifest` carries the explicit paths
+    A bare basename that is one of `OUR_OWN` is **refused, not resolved**: the
+    four are ours and live under `scripts/` and `tests/` rather than at the root,
+    so the branch's job is to stop the name before it reaches the checkout's
+    search, which is where it would silently become Django's the day a bump adds
+    a file of that name. Without it the same bare name fails too, but with "which
+    is not under `.django/`" — a message that reads as a typo rather than as "this
+    one is ours; name the path". Everything else is looked up under `checkout`,
+    and exactly one hit resolves — more than one is ambiguous and zero is a
+    missing file. `manifest` carries the explicit paths
     the author already decided, consulted before the search, because the
     decision belongs in a reviewable file rather than in a heuristic.
 

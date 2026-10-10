@@ -198,9 +198,10 @@ def django_exception(error, host=None):
     the message stays Rust's, and `.token` is the same wire tuple turned into a
     real `Token`, which is what makes `e.token` usable by `get_exception_info`
     and by the `{% include %}` paths that read it. `UnimplementedTag` is a
-    `ParseError` subclass and is converted with the rest: outside this repository
-    the shell is a drop-in replacement, and a class Django has never heard of
-    escaping a parse is not one. Nothing is lost by that — the parity harnesses
+    `ParseError` subclass and is converted with the rest: this engine's classes
+    are what a caller catches, so a class Django has never heard of escaping a
+    parse would be a leak in the one place a project cannot see it coming —
+    inside a `try: ... except TemplateSyntaxError`. Nothing is lost by that — the parity harnesses
     that bucket on `UnimplementedTag` call `_native.parse` directly and never
     come through here.
 

@@ -4,7 +4,7 @@ A project uses this package by naming it in settings::
 
     TEMPLATES = [
         {
-            "BACKEND": "django_rust_templates.backends.RustTemplates",
+            "BACKEND": "django_rust_templates.rust.RustTemplates",
             "DIRS": [BASE_DIR / "templates"],
             "APP_DIRS": True,
             "OPTIONS": {"context_processors": [...]},
@@ -36,9 +36,14 @@ recorded at the point they occur:
 defines is overridden below, so none of its implementation is reached; what the
 subclass buys is ``isinstance``. That is how Django and its ecosystem ask "is this
 backend the DTL one?" — ``django.contrib.admin.checks.check_admin_app`` raises
-``admin.E403`` unless some configured backend is an instance of it, and all three of
-``django.template.autoreload``'s receivers return early unless it is, so a backend
-that does not subclass it is unusable with ``django.contrib.admin`` and invisible to
+``admin.E403`` unless some configured backend is an instance of it, and
+``django.template.autoreload`` asks it **three times, in two functions**:
+``get_template_directories`` once and ``reset_loaders`` twice, both of which the
+module's two ``@receiver`` callbacks call, and both of which return early unless
+the answer is yes. (The count is three checks, not three receivers — ``autoreload``
+has two of those, and writing "receivers" here is how the two numbers get
+conflated.) So a backend that does not subclass it is unusable with
+``django.contrib.admin`` and invisible to
 the template autoreloader. Neither is discoverable from this file, and both surfaced
 as failures in the vendored suite.
 

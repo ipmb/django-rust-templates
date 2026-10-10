@@ -26,7 +26,7 @@ DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
-from django.template.base import (  # noqa: E402
+from django_rust_templates.engine.base import (  # noqa: E402
     FilterExpression,
     Lexer,
     Node,
@@ -38,13 +38,13 @@ from django.template.base import (  # noqa: E402
     Variable,
     VariableNode,
 )
-from django.template.defaulttags import (  # noqa: E402
+from django_rust_templates.engine.defaulttags import (  # noqa: E402
     AutoEscapeControlNode,
     IfChangedNode,
     SpacelessNode,
     VerbatimNode,
 )
-from django.template.engine import Engine  # noqa: E402
+from django_rust_templates.engine.engine import Engine  # noqa: E402
 from django.utils.functional import Promise  # noqa: E402
 from django.utils.safestring import SafeString  # noqa: E402
 
@@ -307,7 +307,7 @@ class MaterialiseTests(unittest.TestCase):
         materialise *our* node instead of the registered class. That is the
         invisible failure; the loop alone cannot see it.
         """
-        from django.template import base, defaulttags, loader_tags
+        from django_rust_templates.engine import base, defaulttags, loader_tags
 
         for module in (base, defaulttags, loader_tags):
             self.assertFalse(

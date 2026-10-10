@@ -127,7 +127,7 @@ class RefusalTests(unittest.TestCase):
     def test_a_skip_on_a_docstringed_test_is_seen(self):
         """`-v 2` splits a documented test across two lines.
 
-        Measured on the transcript `scripts/run_django_suite.sh -v 2
+        Measured on the transcript `django_suite/run.py -v 2
         template_tests` writes: an undocumented test prints
         `name (dotted) ... skipped 'reason'` on one line, while a documented one
         prints `name (dotted)` and then `Docstring first line. ... skipped

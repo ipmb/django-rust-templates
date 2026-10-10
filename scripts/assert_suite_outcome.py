@@ -3,9 +3,9 @@
 
 §2:31-34 and §2:66, read against the tree in `.review/m15-recon.md` §3.1: the
 count, the zero-failure clause and "any *new* skip appearing later is a
-regression" are carried by prose. `check.sh:138-139` runs
-`scripts/run_django_suite.sh template_tests` and reads its exit status; the
-transcript is printed and dropped.
+regression" are carried by prose. `check.sh` runs `django_suite/run.py
+template_tests` and reads its exit status; the transcript is printed and
+dropped.
 
 The count is the weaker half of §2's own clause, and the recon probed why:
 `template_tests/syntax_tests/test_numpy.py:13`'s `@skipIf(numpy is False, …)`
@@ -233,7 +233,7 @@ def main(argv: list[str]) -> int:
         return 1
     print(
         f"{report.summary} after {report.ran} tests, and the six declared skips "
-        f"by identity (scripts/run_django_suite.sh)"
+        f"by identity (django_suite/run.py template_tests)"
     )
     return 0
 

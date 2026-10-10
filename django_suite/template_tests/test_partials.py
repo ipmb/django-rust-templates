@@ -4,7 +4,7 @@ from unittest import mock
 from django.http import HttpResponse
 from django_rust_templates.engine import Context, NodeList, Origin, PartialTemplate, Template, TemplateDoesNotExist, TemplateSyntaxError
 from django.template import engines
-from django_rust_templates.backends import RustTemplates
+from django_rust_templates.rust import RustTemplates
 from django.template.loader import render_to_string
 from django.test import TestCase, override_settings
 from django.urls import path, reverse

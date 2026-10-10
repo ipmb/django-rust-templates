@@ -1051,41 +1051,36 @@ class FilterInventoryTests(unittest.TestCase):
             f"inventory target is not the pinned checkout: {source_file}",
         )
 
-    def test_the_interposed_module_registers_the_pinned_registry(self):
+    def test_the_shipped_module_registers_the_pinned_registry(self):
         """The other direction: the module that ships registers Django's set.
 
         Reading the inventory from the pin (above) makes Metrics A–C honest about
-        upstream, and it opens the gap this row closes. The interposition made
-        "the source the pin names" and "the registry the engine dispatches
-        through" two different objects for the first time — the file under
-        `engine/` is still exactly the pin plus a marker, so the two *should*
-        agree, but nothing in this module would have noticed if the shim's
-        registration were broken, since every read above now goes to the pin.
+        upstream, and it opens the gap this row closes: "the source the pin names"
+        and "the registry the engine dispatches through" are two different module
+        objects, and the file under `engine/` is still exactly the pin plus a
+        marker, so the two *should* agree — but every read above goes to the pin,
+        so nothing in this module would notice if ours registered something else.
 
-        This is the module's own "from both directions" rule applied to the
-        interposition: `_registered` is read off the pinned file, `_live` off
-        `django.template.defaultfilters` *as the shim serves it*, and the row is
-        that the two agree name for name and flag for flag. It fails loudly if
-        the interposition moves, which is the property `parity_target.py` asks of
-        a comparison target.
+        This is the module's own "from both directions" rule: the names and flags
+        above are read off the pinned file, and this row reads them off
+        `django_rust_templates.engine.defaultfilters` — the module the engine
+        actually dispatches through — and asserts the two agree name for name and
+        flag for flag. It fails loudly if our copy moves, which is the property
+        `parity_target.py` asks of a comparison target.
 
-        **It calls `install()` rather than assuming the shim.** Every other row
-        in this class is a read of the pin and needs no shim; this one is about
-        the module that ships, and the suite's own runner installs the shim at
-        interpreter start (`scripts/run_unit_tests.sh`), so the call is a no-op
-        there. It is written anyway because the alternative is a row that, run
-        by hand in an unshimmed interpreter, asserts Django's registry equals
-        Django's registry and passes — the `install()` raises instead, which is
-        what a precondition should do.
+        **The import is by our own name, and that is the M18 change.** Until M18
+        this row reached the shipped module as `django.template.defaultfilters`
+        and had to call `install()` first, because in an interpreter without the
+        finder the row would otherwise have compared Django's registry with
+        Django's registry and passed. There is no finder and no interposition any
+        more, so the two sides are distinguishable by construction — the row no
+        longer needs a precondition, and a *missing* precondition can no longer
+        turn it into a tautology.
         """
         import importlib
 
-        from django_rust_templates import _shim
-
-        _shim.install()
-
-        live = importlib.import_module("django.template.defaultfilters")
-        self.assertIn("engine", live.__file__, live.__file__)
+        live = importlib.import_module("django_rust_templates.engine.defaultfilters")
+        self.assertNotEqual(live, defaultfilters, "the two sides are the same module")
         self.assertEqual(
             set(live.register.filters), set(defaultfilters.register.filters)
         )

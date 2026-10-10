@@ -76,7 +76,7 @@ class GetDefaultTests(SimpleTestCase):
         TEMPLATES=[
             {
                 "NAME": "default",
-                "BACKEND": "django_rust_templates.backends.RustTemplates",
+                "BACKEND": "django_rust_templates.rust.RustTemplates",
                 "OPTIONS": {"file_charset": "abc"},
             }
         ]
@@ -88,12 +88,12 @@ class GetDefaultTests(SimpleTestCase):
         TEMPLATES=[
             {
                 "NAME": "default",
-                "BACKEND": "django_rust_templates.backends.RustTemplates",
+                "BACKEND": "django_rust_templates.rust.RustTemplates",
                 "OPTIONS": {"file_charset": "abc"},
             },
             {
                 "NAME": "other",
-                "BACKEND": "django_rust_templates.backends.RustTemplates",
+                "BACKEND": "django_rust_templates.rust.RustTemplates",
                 "OPTIONS": {"file_charset": "def"},
             },
         ]

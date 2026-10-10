@@ -1,9 +1,11 @@
-"""The pinned checkout's copy of a module we have interposed.
+"""The pinned checkout's copy of a module we have transcribed.
 
-A transcription under ``engine`` wears a real module's name, so
-``importlib.import_module("django.template.context")`` cannot reach Django's file
-— that is the whole point of the shim. The only way to hold both objects at once
-is to read and execute the pinned file directly, and that is what this does.
+A transcription under ``engine`` is a second copy of a real module, so
+``importlib.import_module("django.template.context")`` reaches Django's file and
+never ours, and importing ours never reaches Django's. That is the point of the
+two namespaces, and it is also why a parity row cannot hold both objects by
+importing either one. The only way to hold both at once is to read and execute
+the pinned file directly, and that is what this does.
 
 **Under a private module name, with ``__package__`` set to the real package.**
 Several of these files import relatively (``engine.py``'s ``from .base import
@@ -25,8 +27,8 @@ on a *class* read out of the pin raises ``TypeError: is a built-in class``:
 than as a fact about the target, so ``tests/test_filter_parity.py``'s guard —
 which has to name a pinned class — could not use
 ``assert_target_is_not_rust_owned`` at all when the entry was missing. The name
-is ``pinned_*``, which the shim does not serve and ``unshimmed()`` does not
-count, so nothing in the tree resolves through it.
+is ``pinned_*``, which no real module of either tree holds and no row of
+``milestone_ownership`` counts, so nothing in the tree resolves through it.
 """
 
 import importlib.util

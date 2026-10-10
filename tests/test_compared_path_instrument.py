@@ -19,7 +19,9 @@ latent rather than live, which is the only reason it cost nothing to find late.
 
 The rows are shaped like ``tests/test_shim.py``'s: each names the object it is
 about and asserts on a measurement rather than on the table's contents, so the
-instrument and the pin cannot agree with each other about a wrong number.
+instrument and the pin cannot agree with each other about a wrong number. That
+module left the tree with the substitution in the M18 rewiring; the shape is
+still the right one and the sentence stays as the record of where it came from.
 """
 
 import inspect
@@ -33,8 +35,6 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 if str(PROJECT_ROOT / ".django") not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT / ".django"))
-
-from django_rust_templates import _shim  # noqa: E402
 
 
 class HandRolledDescriptor:
@@ -93,10 +93,6 @@ class ForeignKind:
 
 
 class DescriptorCountingTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        _shim.install()
-
     def test_a_staticmethod_is_counted_and_called_correctly(self):
         """The case that was invisible, exercised the way ``base.py`` calls it.
 
@@ -107,9 +103,16 @@ class DescriptorCountingTests(unittest.TestCase):
         ``TypeError`` — a *loud* failure, which is why it would not have gone
         unnoticed for two milestones. The silent half is the counting.
         """
-        import django.template.base as base
+        # **Our** `base`, and the M18 rewiring is why. The row used to say
+        # `import django.template.base as base` and get ours, because the shim
+        # served our file under that name; without the shim it gets Django's, and
+        # the subject and the wrapper would then be in two different files — the
+        # count would read 0 while our `Engine().from_string` ran the *other*
+        # `FilterExpression`. That is the failure this row was written to catch,
+        # arriving as its own subject.
+        import django_rust_templates.engine.base as base
 
-        from django.template import Engine
+        from django_rust_templates.engine import Engine
 
         from tests.compared_path import instrumented
 
@@ -147,9 +150,16 @@ class DescriptorCountingTests(unittest.TestCase):
         ``get_app_template_dirs`` — three members of three modules, each the
         first of its kind in the tree, and none of them counted before.
         """
-        import django.template.base as base
-        import django.template.engine as engine
+        # Two of the three are this package's, and the third is Django's — a
+        # split the M18 rewiring made and not a tidiness. `get_app_template_dirs`
+        # lived at `engine/utils.py` until `03038e6` deleted the module, and
+        # `engine/loaders/app_directories.py` now imports Django's. The kind under
+        # test is `lru_cache`, and it is Django's own function that carries it, so
+        # the subject follows the function.
         import django.template.utils as utils
+
+        import django_rust_templates.engine.base as base
+        import django_rust_templates.engine.engine as engine
 
         from tests.compared_path import instrumented
 
@@ -184,9 +194,14 @@ class DescriptorCountingTests(unittest.TestCase):
         the previous sweep did for ``context.py``'s three
         ``@contextlib.contextmanager`` methods.
         """
-        import django.template.base as base
-        import django.template.context as context
-        import django.template.engine as engine
+        # This package's modules, not Django's: the spans asserted below are the
+        # *transcription's* line numbers, and `django.template.base` answers with
+        # Django's (822-839 where ours is 860-877). Read from the wrong tree the
+        # row is not merely off by a constant — it is measuring a file no clause
+        # of the guard has ever read.
+        import django_rust_templates.engine.base as base
+        import django_rust_templates.engine.context as context
+        import django_rust_templates.engine.engine as engine
 
         from tests.compared_path import definitions
 
@@ -209,8 +224,16 @@ class DescriptorCountingTests(unittest.TestCase):
                     f"{label} spans {span}, which does not contain its own def",
                 )
 
+        # 111, not 89: `Engine.get_default` is the function the M18.1 region at
+        # ours 91-110 (the argued case for *not* caching it) sits directly above,
+        # and that region is twenty lines of prose that upstream does not have —
+        # so the `def` moved by the length of the argument, not by an edit to it.
+        # The span starts at 111 and not 112 because `co_firstlineno` names the
+        # `@staticmethod` line, which the `cached_property` two functions down
+        # confirms independently: `template_context_processors` spans (153, 157)
+        # and its decorator is on 153.
         self.assertEqual(
-            definitions(engine)["Engine.get_default"][0], 89, definitions(engine)
+            definitions(engine)["Engine.get_default"][0], 111, definitions(engine)
         )
 
     def test_the_residue_check_fires_on_a_kind_with_no_case(self):
@@ -281,6 +304,78 @@ class DescriptorCountingTests(unittest.TestCase):
             ),
             "a declared region covering the compared path was not refused: "
             f"{failures}",
+        )
+
+    def test_the_namespace_exception_admits_the_two_regions_and_no_others(self):
+        """Clause (4)'s M18 exception, driven in both directions on the real files.
+
+        The rename gave the engine a namespace of its own, so the two regions of
+        ``engine.py`` that name our loaders are the *forced* half of clause (4):
+        they cannot be avoided, and refusing them would leave the guard unable to
+        describe the file it is reading. ``scripts/check_transcriptions.py``'s
+        ``_namespace_only`` admits them, and this row is what keeps that from
+        becoming a licence.
+
+        **The refusals are the load-bearing half and they are chosen from the
+        same function.** ``Engine.__init__`` holds both the admitted regions and
+        the `else: raise ImproperlyConfigured` block nine lines below them, so the
+        second subtest is a *decision* sitting inside the same compared span as
+        the names the exception exists for — if the exception were keyed on the
+        span rather than on the text, that one would pass too.
+
+        The third subtest is the scenario clause (4) was written for, and it is
+        here rather than in the row above because the two are one question: that
+        row asserts the guard *reports* a region on ``FilterExpression.args_check``,
+        and this one asserts the new exception is not the door it walks through.
+
+        The fourth is a near-miss — one path segment changed, ``locmem`` for
+        ``filesystem`` — because whitespace-insensitive comparison is the one
+        place this could be too loose, and a rule that admits ``filesystem`` must
+        still refuse its neighbour.
+        """
+        import scripts.check_transcriptions as guard
+
+        ours = (guard.IMPL / "engine.py").read_text().splitlines()
+        upstream = guard.DECLARED["engine.py"][0]
+        theirs = (guard.CHECKOUT / upstream).read_text().splitlines()
+
+        for ours_span, theirs_span in (((38, 38), (38, 38)), ((40, 45), (40, 41))):
+            with self.subTest(ours=ours_span):
+                self.assertTrue(
+                    guard._namespace_only(ours, ours_span, theirs, theirs_span),
+                    f"the forced region ours:{ours_span} was refused",
+                )
+
+        # A decision inside the same compared span. Its text is upstream's own,
+        # so only the namespace control can be what refuses it.
+        self.assertEqual(
+            ours[45].strip(),
+            "else:",
+            "the region this subtest is about moved; re-read it before trusting "
+            "the refusal below",
+        )
+        self.assertFalse(
+            guard._namespace_only(ours, (46, 50), theirs, (46, 48)),
+            "a region carrying a decision was excused by the namespace rule",
+        )
+
+        # Clause (4)'s original scenario: a region naming no namespace at all.
+        self.assertFalse(
+            guard._namespace_only(
+                ["def args_check(name, func, provided):"] * 18,
+                (860, 877),
+                ["def args_check(name, func, provided):"] * 18,
+                (855, 872),
+            ),
+            "the args_check region was excused",
+        )
+
+        # The near-miss: one segment of one dotted path.
+        near = list(ours)
+        near[37] = 'loaders = ["django_rust_templates.engine.loaders.locmem.Loader"]'
+        self.assertFalse(
+            guard._namespace_only(near, (38, 38), theirs, (38, 38)),
+            "a changed path segment was excused as a namespace-only difference",
         )
 
     def test_a_descriptor_from_another_module_is_reported(self):
@@ -593,10 +688,6 @@ class ComparedPathAgreementTests(unittest.TestCase):
     spans and ``definitions`` is where those come from, and ``definitions`` is
     not the half that has been wrong.
     """
-
-    @classmethod
-    def setUpClass(cls):
-        _shim.install()
 
     def test_the_path_that_runs_is_the_path_that_was_measured(self):
         """Per module in ``COMPARED_PATH``: the same functions, two observers.

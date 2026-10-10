@@ -40,7 +40,7 @@ DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 if str(DJANGO_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(DJANGO_CHECKOUT))
 
-from django.template import Context, Engine, Library, defaultfilters  # noqa: E402
+from django_rust_templates.engine import Context, Engine, Library, defaultfilters  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 from django_rust_templates.render import materialiser, parser_for, render_string  # noqa: E402

@@ -11,8 +11,9 @@ content it was guarding never ran.
 
 It was found by the unit count not moving — 323 where 330 was expected. That is
 the detector, and this module is it written as a row instead of as a number in a
-message. Same shape as ``_shim.unshimmed()``'s pinned count: the number moves in
-the commit that changes it, so the commit has to say by how much and why.
+message. Same shape as the meter's pinned count in
+``tests/milestone_ownership.py``: the number moves in the commit that changes it,
+so the commit has to say by how much and why.
 
 What a count sees that a sweep over file names cannot:
 
@@ -253,7 +254,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # `test_shim.py`: `test_strict_mode_refuses_under_the_production_ordering`. The
 # two rows the task added are each other's control but both `uninstall()` first,
 # so neither has the shim installed when the strict call happens — and that is
-# the state `scripts/shimpath/sitecustomize.py:33` guarantees in a real run,
+# the state the sitecustomize shim (`scripts/shimpath/`, deleted with the rest of
+# the substitution apparatus in M18) guaranteed in a real run,
 # where the check used to sit behind `install`'s early return and could not fire
 # at all. The row stages a module, installs non-strict, and asserts the refusal
 # twice; the fix is `_refuse_if_incomplete()`, called from both paths. `git diff
@@ -386,7 +388,158 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # named nothing they tested. That case is covered end-to-end in
 # `scripts/check_packaging.sh`, against a real venv with no Django, which is the
 # population it actually occurs in. 487 + 5 = 492.
-PINNED = 492
+#
+# 492 → 463 is M18, a **net −29**, and it is the first entry in this ledger whose
+# largest terms are *deletions* rather than renames. M18 removed the substitution
+# apparatus — `_shim.py`, `_impl/`, `install()`/`uninstall()`/`unshimmed()` and
+# `scripts/shimpath/` — and moved the engine to `django_rust_templates.engine`, so the
+# only activation left is `TEMPLATES[0]["BACKEND"]`. The rows followed their subjects:
+#
+# * `tests/test_shim.py`, deleted whole: **−23**. Its subject was the finder, and there
+#   is no finder.
+# * `tests/test_acceptance_preflight.py`, deleted whole: **−5**. Its one surviving
+#   question — does anything of ours shadow a module of Django's? — is now
+#   `test_interposition.py::test_our_package_shadows_nothing_and_djangos_siblings_are_intact`,
+#   asserted against the filesystem rather than against a finder's mapping.
+# * `tests/test_interposition.py`: **+3/−8**, a net **−5** (88 → 83). Each of the eight
+#   read the finder's table — `test_utils_resolves_to_our_file`,
+#   `test_the_engine_handler_class_is_not_djangos`,
+#   `test_the_package_still_reaches_djangos_siblings`; the three that arrived are the
+#   same claims about names that are ordinary package names now, among them
+#   `test_every_empty_pin_is_a_measurement_and_not_a_silence`.
+# * `tests/test_milestone_ownership.py`: **+4/−7**, a net **−3** (10 → 7). The seven had
+#   `_shim.NOT_THE_ENGINE` or the meter for a subject (and the meter is gone: there is
+#   nothing left to not-own); the four carry what survives — §3's declaration against
+#   the *tables* rather than the shim's constant, and
+#   `test_the_coverage_count_is_empty_in_both_scopes`.
+# * `tests/test_packaging_guard.py`: **+8/−2**, a net **+6** (5 → 11). The one file that
+#   grew, because its *door* moved: the guard used to be reached by a row calling
+#   `install()` and is now reached by constructing `RustTemplates`, so the rows were
+#   re-pointed at the constructor and the two `_shim` rows went with the ones it
+#   replaced.
+# * `tests/test_compared_path_instrument.py`: **+1/−0**, a net **+1** (16 → 17).
+#
+# So 492 − 23 − 5 − 5 − 3 + 6 + 1 = 463.
+#
+# **The whole delta is accounted for, and that is measured rather than asserted.**
+# `git diff --name-status 14f5fe4 -- tests/` is two deletions and thirty-seven
+# modifications; running this ledger's own command over every one of those modified
+# modules — its `^    def test_` count now against `git show 14f5fe4:<path>` — prints
+# exactly the four names above and no others. A file that had moved its row count
+# without appearing in that list would be a delta arriving from nowhere, which is the
+# failure the M13 Task 4 entry below is long enough to have seen.
+#
+# This entry leans harder than its predecessors on one thing worth naming: the four
+# deltas, and both deleted files, are counts of `^    def test_` lines — a *proxy* for
+# what discovery collects, not the thing itself. It is not assumed. Discovery over the
+# present tree was compared against that grep per module, for all 34 modules, and the
+# two agree: 463 either way, no module differing. A class that did not inherit
+# `TestCase`, or a row assembled in a loop, would separate them; separating them is
+# what the row below this comment is for. On this tree the proxy and the count are the
+# same number, which is what makes the deltas above the deltas discovery reports.
+#
+# 463 → 470 is **+7**, one new file and nothing else: `tests/test_suite_isolation.py`,
+# seven rows. It is not part of M18's −29 because it is not a row following a subject
+# that moved — it is a row for a hole M18 *left*, found while revising the spec rather
+# than while building the milestone. The seventh arrived a turn later, in the review of
+# that revision: the first six assert the declared adapter set, and the seventh
+# re-derives each entry against the pinned checkout, so the set is **inheritance** —
+# each is an import Django's own file makes — rather than a licence somebody granted.
+#
+# The hole: `django_suite/suite_settings.py` names the `BACKEND` the whole acceptance
+# run uses, and **no gate read it**. `gen_django_suite.py`'s `TREES` covers
+# `django_suite/template_tests` and `django_suite/i18n` only, so `check()` walks those
+# two subtrees and neither diffs nor sweeps the file at the suite's root. Changing its
+# one `BACKEND` string to Django's turns the 1547 into a test of stock Django, with
+# `gen_django_suite.py --check` still exiting 0 and every other gate still green —
+# the arrival `test_interposition.py`'s docstring names, in the one place where it
+# costs the most. The other three rows close the second half: the vendored tree's
+# remaining imports of `django.template*` are asserted against a **declared closed
+# set** of seven adapter statements, so a new one fails instead of arriving green.
+#
+# Both halves are driven by a fabricated input as well as by the real file, because a
+# row that only ever reads the real file cannot show it would refuse a wrong one —
+# and both were confirmed to fire by mutating the real tree (the `BACKEND` string, and
+# a fabricated `from django.template.base import Node`), each restored byte-exact and
+# checked by sha256. Counts at close: 470 collected, and the `^    def test_` proxy
+# agrees with discovery for all **36** modules. That 36 is measured per module and not
+# derived from the deltas above: `tests/test_*.py` is 36 files and discovery collects
+# from 36, a bijection with no module either way. The earlier entries in this ledger
+# say 34, and that number is not re-derived here — it belongs to the tree it was taken
+# on, and this entry is about a different one.
+#
+# 470 → 472 is **+2**, in the same file and in the same round, and the two are **the
+# eighth row and its control** — the ninth. A first draft of this sentence said "one a
+# fix and one a row", which is the arithmetic failing: the fix is a one-token change to
+# the *seventh* row and adds no test, so a round described as one fix plus one row can
+# move the count by one, not two. The module holds nine rows and 463 + 9 = 472, which
+# is what settles it. **The fix first, because it is the one that changes a verdict.**
+# The seventh
+# row re-derives each declared adapter against the pin, and it built each pair's
+# *name* from the pin while taking its *module* from the statement under test. Every
+# module `django_imports_in` yields is a `django.template` path by construction of the
+# walk, so the module half of the key was in the set whatever the pin contained:
+# `from django.template import mock` — `unittest`'s name, bound by no Django module —
+# passed a row whose entire job is refusing exactly that. One token, `node.module`.
+# Re-measured over the real tree and the real pin
+# (`.review/m18-measurements/probe_adapter_module_axis.py`, with its transcript), the
+# two constructions differ on three pairs — which the old key admits and the new one
+# refuses — and on **none** of the seven declared adapters, so this is a change of
+# question that the set happens to answer the same way, not a change of policy that
+# leaves it green.
+#
+# **The eighth row is the other finding, and it is not a fix to the seventh**: no
+# amount of repair to "is this import Django's own?" makes it ask "is this import the
+# engine?". `from django.template.base import Node` is
+# `.django/tests/template_tests/test_custom.py:4` — upstream's own line — so the
+# seventh row passes it, and it is the one statement the declared set exists to
+# refuse. A person adding it to `DECLARED_ADAPTERS` would have been waved through by
+# the row written to catch them. The two questions now have a row each: *inherited?*
+# and *plumbing rather than engine?* The second reads §3's declaration out of
+# `milestone_ownership.NOT_THE_ENGINE` instead of restating eleven names here, and
+# derives its one non-module licence — `from django.template import engines`, an
+# attribute of the package root, which no module key can hold — from the pin's
+# `engines = EngineHandler()` rather than from a name typed in this file. Its control
+# drives the predicate with eight cases, and one of them is that upstream line
+# verbatim. Counts at close: 472 collected, proxy and discovery agreeing for all
+# **36** modules — the same 36, since neither row arrived in a new file.
+#
+# 472 → 474 is **+2**, both in `tests/test_suite_isolation.py`, and the delta is the
+# rows: `GateBuildTests`' "the gate builds the extension before every consumer" (named
+# "…before the python suites" when it landed, and renamed by the entry below), and
+# `VendoredImportTests`' "the closure propagates a name across two hops". Neither
+# is a repair to an existing row, so the count moves by exactly the two — measured
+# the other way as well, since that is what this ledger's own rule asks: the module
+# now holds **11** rows where the previous entry records nine, and 472 + 2 = 474.
+# Both came from a review that failed on the *gate* rather than on the predicate: the
+# first because `check.sh` ran no build at all, so the 472 unit rows and the 1547
+# acceptance tests exercised whatever `.so` was installed — a **debug** build, for
+# several rounds of green runs — and the second because the fixed point's propagation
+# branch is empty on the pin, so nothing could tell the loop from a single pass.
+# Counts at close: 474 collected, proxy and discovery agreeing for all **36**
+# modules, the same 36 again.
+#
+# 474 → 477 is **+3**, all in one **new** module, `tests/test_native_is_the_built_artifact.py`,
+# and the three are the rows that drive `scripts/assert_native_is_the_built_artifact.py`: the
+# positive control, the refusal (twice over — a foreign build, and the same-length
+# file a *size* comparison would admit), and the release-profile glob's `.d`
+# exclusion. Measured the other way, as this ledger's rule asks: the new module holds
+# **3** rows, `tests/test_suite_isolation.py` still holds 11 — the round renamed and
+# strengthened its build row rather than adding one — and 474 + 3 = 477.
+#
+# **The round is the behavioural half of the previous one's fix, and the reason it
+# needed a new file is the reason the previous entry is not enough.** `GateBuildTests`
+# pins the `maturin develop --release` invocation and its position, and it is
+# *textual*: it cannot fail if the build succeeds and installs somewhere the tests do
+# not read. So the count moves by the rows that check the artifact rather than the
+# script, and the build row itself moved without adding a test — from "before the
+# python suites", which named one step, to "before every consumer", which asserts the
+# build precedes the first line invoking the venv's Python or a script under
+# `scripts/`. The old form pinned a proxy: it was equivalent to the property only
+# while the unit run happened to be the first consumer, which it did not assert, and
+# `differential.py`, `check_transcriptions.py` and the acceptance run all read the
+# extension. Counts at close: 477 collected, proxy and discovery agreeing.
+PINNED = 477
 
 
 def collected() -> unittest.TestSuite:

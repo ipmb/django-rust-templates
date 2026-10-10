@@ -681,9 +681,10 @@ class ShellHost:
         level (`python/django_rust_templates/host.py:35`) and is how `register.tags` is reached, so a *second*,
         deferred route to the same module would be a difference that reads like a
         reason. Bound at module level, as every other Django class here is, and
-        for the reason the shim's own contract gives: the module is resolved once
-        at interpreter start, after `sitecustomize` has installed it, so the
-        binding and the suite's `isinstance` rows name one object.
+        for the reason the namespace gives: `django.template.defaulttags` is
+        Django's module and nothing of ours is served under that name, so the
+        binding and the suite's `isinstance` rows name one object by construction
+        rather than by timing.
         """
         return _defaulttags.PartialNode(
             name, partial_mapping=DeferredSubDict(self.parser.extra_data, "partials")

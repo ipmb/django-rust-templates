@@ -66,6 +66,14 @@ MARKER = re.compile(
 # is "inside the docstring", which four lines covers for both forms.
 MARKER_WINDOW = 4
 
+# This package's dotted root, and the one it transcribes. The M18 rename gave the
+# engine a namespace of its own, so every dotted path a transcription *names* —
+# `default_builtins`, the default loaders, the backend — is this package's
+# rather than Django's, and the two spellings differ by exactly this
+# substitution. Clause (4) consults both; see `_namespace_only`.
+OURS_NAMESPACE = "django_rust_templates.engine."
+UPSTREAM_NAMESPACE = "django.template."
+
 # The functions a parity harness executes, with the lines they occupy in the
 # transcription — measured by `.review/m9-measurements/m9_measure_parse_path.py`
 # over both parity corpora (the hand-written one and the generator; the
@@ -214,34 +222,20 @@ COMPARED_PATH = {
         (197, 204, "IfParser.parse"),
         (206, 214, "IfParser.expression"),
     ],
-    # 0 functions, measured rather than assumed: the parity harness executes
-    # nothing in this file. The reason is worth stating, because the tempting
-    # one is wrong: the harness *does* build a fresh `Engine` per call
-    # (`tests/test_parser_parity.py:114`), so this is not about when the Engine
-    # is constructed. It is about *which* route the harness takes. `EngineHandler`
-    # is reached only through the `django.template.engines` singleton
-    # (`engines.all()`, `engines[alias]`), and the harness resolves no template
-    # alias; `get_app_template_dirs` is reached only by the `app_directories`
-    # loader, and the harness builds no loaders. It passes `libraries=` straight
-    # to `Engine`, whose `get_template_libraries` calls `import_library` — which
-    # lives in `library.py`, not here.
-    #
-    # Measured with `.review/m10-measurements/m10_measure_compared_path.py`,
-    # which interposes all nine M10 files verbatim in a scratch universe and
-    # runs both corpora through `django_parse`; re-measured live on every unit
-    # run by `test_the_compared_path_is_the_measured_one`.
-    #
-    # **Which harness, because the tree has two and they differ in exactly the
-    # dimension a timing premise is about.** This is measured through
-    # `django_parse`, the *parity* harness (`test_parser_parity.py:108`), which
-    # builds a fresh `Engine` per call. The *error* harness
-    # (`test_parser_errors.py:63`) holds `_ENGINE = Engine(libraries=LIBRARIES)`
-    # at module level, built at import — so a premise about when the Engine is
-    # constructed is true there and false here. The route argument above does
-    # not transfer either: a module reached only on an error path would need its
-    # own measurement. Naming the harness is the difference between a premise
-    # that can be checked and one that merely sounds right.
-    "utils.py": [],
+    # **`utils.py` was a key here until the M18 rewiring, and its removal is the
+    # point of this note rather than a tidy-up.** It held `EngineHandler` and
+    # `get_app_template_dirs`, and its entry was `[]` — nothing a parity harness
+    # executes — for a reason that was itself the argument for the module's
+    # deletion: `EngineHandler` is reached only through the `django.template.engines`
+    # singleton (`engines.all()`, `engines[alias]`), and this package no longer
+    # binds one, because Django's own registry already resolves
+    # `TEMPLATES[0]["BACKEND"]` for our backend exactly as for any other. The
+    # module is gone from the tree and the name is on
+    # `tests/milestone_ownership.py`'s `NOT_THE_ENGINE`, so a key here would be a
+    # declaration about a file that does not exist — which the guard reports as
+    # `declared but not present`, and did, for as long as the stale key survived.
+    # `app_directories` now imports Django's `get_app_template_dirs` outright; see
+    # that module's region below.
     # 3 functions, spans 31-155 of 309. The parity harness is a *parsing*
     # harness, and `Context` is a rendering object — so the reach here is not
     # the render path but one line of `defaulttags`: `do_verbatim` renders its
@@ -273,10 +267,22 @@ COMPARED_PATH = {
     # whose lines the guard has to be able to name; a declared region placed in
     # either belongs to that region and not to `__init__`'s.
     # Measured with `.review/m10-measurements/m10_measure_compared_path.py`.
+    #
+    # **Re-measured in the M18 rewiring, and all three spans moved — none of them
+    # because a function joined or left the path.** Two changes stacked: the file
+    # itself grew (the `get_default` region added twenty lines below `__init__`),
+    # and the instrument that reads the reach had to be repaired first, because
+    # its two `sys.modules` sweeps still filtered on ``startswith("django.")`` —
+    # a shim-era scope under which *every* engine member's holders measured zero.
+    # Read from the broken instrument, seven of the twenty keys looked changed and
+    # all seven looked *smaller*; read from the repaired one, only `engine.py`
+    # does, and by exactly the line shift. The other six are the instrument's, and
+    # the re-pin that would have recorded them is the failure this note exists to
+    # keep anyone from repeating. See `tests/compared_path.py`'s `swayable`.
     "engine.py": [
-        (22, 65, "Engine.__init__"),
-        (122, 123, "Engine.get_template_builtins"),
-        (125, 129, "Engine.get_template_libraries"),
+        (20, 67, "Engine.__init__"),
+        (159, 160, "Engine.get_template_builtins"),
+        (162, 166, "Engine.get_template_libraries"),
     ],
     # 0 functions each: nothing a parity harness executes reaches the loaders.
     # Measured with `.review/m10-measurements/m10_measure_compared_path.py`; the
@@ -554,14 +560,55 @@ DECLARED = {
     "__init__.py": (
         "django/template/__init__.py",
         [
-            # The `# TRANSCRIBED:` marker, its blank separator, and the
-            # rewritten docstring — see the module docstring's reason and design
-            # spec §6. The upstream span reaches line 39 because the matcher
-            # pairs our closing prose against the tail of upstream's docstring.
-            # No executable line, so the snippet is clause (5)'s note rather
-            # than a list of statements: 23 of our lines stand against 39 of
-            # upstream's, and what moved is the docstring.
-            ((1, 23), (1, 39), "rewritten module docstring and the marker line"),
+            # The rewritten docstring — see the module docstring's own reason and
+            # design spec §6. One region, because it is one decision, even though
+            # `difflib` splits it into five: our prose happens to share blank
+            # lines with upstream's, so the matcher pairs them and reports the
+            # block as alternating replacements and equal runs. A declaration
+            # per opcode would be five numbers for one edit. Ours 1-21 against
+            # upstream 1-39 is the tightest span that holds all five: our closing
+            # `"""` on 22 matches upstream's on 40, and the blank after it matches
+            # too. No executable line in ours — the whole span is inside the
+            # docstring, which `executable_lines` excludes — so the snippet is
+            # clause (5)'s required note, not a list of statements.
+            ((1, 21), (1, 39), '"""The Django Template Language, as this package implements it.'),
+            # **The `engines` registry is absent, and this is the region M18.1
+            # rewrote from a two-line guard into twelve lines of prose.** Until
+            # then ours read `try: from .utils import EngineHandler / except
+            # ImportError: pass` and *bound* nothing — the guard existed to keep
+            # the module importable under both names. There is no second name
+            # now, no `utils` to import, and no handler: upstream's singleton
+            # consults `settings.TEMPLATES`, which is what puts our backend in
+            # front of a project, and it is Django's object that
+            # `django.test.signals.reset_template_engines` and the three
+            # `django.template.autoreload` receivers name. A handler built here
+            # would be a registry nothing resets — measured, as
+            # `test_response.TemplateResponseTest.test_render` reading a backend
+            # built from the settings a class-level `override_settings` had
+            # already replaced. Clause (5) wants the note: 12 of our lines
+            # against one of upstream's, and the line that went is executable, so
+            # the shape is not readable off the diff.
+            (
+                (28, 39),
+                (47, 47),
+                "no `engines = EngineHandler()` here: upstream's own registry is "
+                "what resolves TEMPLATES[0]['BACKEND'], and a second handler "
+                "would be a registry no receiver resets",
+            ),
+            # `engines` leaves `__all__` with it. One line for one line, so the
+            # diff is readable and no note is needed; the snippet is our line.
+            ((41, 41), (49, 49), '__all__ = ("Engine",)'),
+            # M18.1's: `from .utils import EngineHandler` is upstream's line and
+            # ours has no counterpart — a pure deletion, hence `None` on our
+            # side. The module it names is not in this tree; see the note on the
+            # `engines` region above, and `tests/milestone_ownership.py` for the
+            # declaration that says so in the ownership table.
+            (
+                None,
+                (45, 45),
+                "upstream's `from .utils import EngineHandler` has no counterpart here: "
+                "this package ships no handler and no `utils` module",
+            ),
             # Upstream's `# NOQA isort:skip` markers are **stripped**, not added.
             # Django runs isort on this file and needs them; our transcription
             # does not carry Django's lint directives (design spec §6: the file
@@ -577,69 +624,41 @@ DECLARED = {
             # declaration named only the first import and the guard refused it,
             # which is the rule earning its place on its first run.
             (
-                (39, 41),
+                (47, 49),
                 (55, 57),
                 "from .base import VariableDoesNotExist\n"
                 "from .context import Context, ContextPopException, RequestContext\n"
                 "from .exceptions import TemplateDoesNotExist, TemplateSyntaxError",
             ),
-            ((44, 44), (60, 60), "from .base import ("),
-            ((54, 54), (70, 70), "from .library import Library"),
-            # The second, unrelated deviation on these lines: upstream's comment
-            # reads "the registrations of signals", ours "the registration of
-            # signals", and the import below it is guarded. **Guarded rather than
-            # transcribed**, because upstream's `django/template/autoreload.py` is
-            # not the engine: it is a `django.utils.autoreload` signal receiver
-            # over `engines.all()` that keeps only `DjangoTemplates` backends, so
-            # it exists to reset *Django's* loaders on file change and nothing in
-            # it is ours to own — which is why `autoreload` is one of the ten
-            # names `tests/milestone_ownership.py` declares `NOT_THE_ENGINE`, and
-            # why there is no `engine/autoreload.py` for this region to import.
+            ((52, 52), (60, 60), "from .base import ("),
+            ((62, 62), (70, 70), "from .library import Library"),
+            # Upstream imports its `autoreload` sibling here, and this file does
+            # not, and nothing is lost. `django/template/autoreload.py` is not the
+            # engine: it is three `django.utils.autoreload` receivers that walk
+            # `engines.all()`, keep the `DjangoTemplates` instances and reset
+            # their loaders when a template file changes. It is Django's view of
+            # a *project's* configuration, declared `NOT_THE_ENGINE`, and there is
+            # no module here to transcribe in its place.
             #
-            # The guard is not a behaviour change in the mode this tree runs in
-            # today: loaded as `django.template`, the relative import still finds
-            # upstream's file on the package's fallback `__path__`, so every
-            # signal registration upstream makes is still made. It is the mode
-            # this package *ships* in that has no such sibling — and there the
-            # receivers would skip our loaders anyway, since they are not
-            # `DjangoTemplates`. The region is 17 lines of prose against upstream's
-            # 2, so clause (5) wants the note as well as the snippet, and the
-            # snippet names all three of its executable lines.
+            # The receivers are registered by Django's **own**
+            # `django/template/__init__.py`, which a project imports whether or
+            # not it uses this package — `django.template.loader` imports it, and
+            # Django's forms, admin and test utilities all import that. They still
+            # cover this package's backend, because `RustTemplates` subclasses
+            # `DjangoTemplates` precisely so that `isinstance` holds; that
+            # subclass is a marker, not an inheritance, and this is one of two
+            # places the marker buys something. Measured rather than reasoned:
+            # `test_autoreloader` is green with this import absent, including the
+            # two rows that assert `reset_loaders()` reaches a configured
+            # backend's loaders. Clause (5) wants the note: 18 of our lines
+            # against 2 of upstream's, and the second of those two is the import
+            # that went.
             (
-                (56, 72),
+                (64, 81),
                 (72, 73),
-                "try:\n"
-                "    from . import autoreload\n"
-                "except ImportError:\n"
-                "    pass",
-            ),
-            # M18.1's: the name this package can be reached by from either mode,
-            # appended after `__all__`. A pure insertion (`None` upstream), so the
-            # region is a note as well as a snippet, and it names all of its
-            # executable lines.
-            #
-            # It exists because `templatetags/*.py` is served as
-            # `django.templatetags.*` — a *sibling* of `django.template` — so `..`
-            # there is `django` and no relative spelling reaches this package from
-            # it. Two names need the resulting alias. `template` is the package
-            # itself, which `static.py` opens by importing (`from django import
-            # template`) and reaches at seven sites as `template.X`;
-            # `django_rust_templates.engine` is what the other four templatetags
-            # transcriptions and `parser.py`'s five library imports use.
-            #
-            # **Four lines here and not a hundred.** The finder that makes the
-            # alias total — rather than aliasing only the siblings imported above,
-            # which left `defaulttags` to `PathFinder` and cost 56 identity
-            # failures — lives in `django_rust_templates/_impl_alias.py`, outside
-            # the shimmed tree, as `host.py` and `render.py` do. The measurements
-            # behind it are documented there.
-            (
-                (75, 101),
-                None,
-                "import sys as _sys\n"
-                "from django_rust_templates._impl_alias import install as _install_alias\n"
-                "template = _sys.modules[__name__]\n"
-                "_install_alias(__name__)",
+                "no `from . import autoreload`: Django's own `django/template/__init__.py` "
+                "registers those receivers, and they name our backend because "
+                "`RustTemplates` subclasses `DjangoTemplates`",
             ),
         ],
     ),
@@ -652,6 +671,17 @@ DECLARED = {
             # list of statements: two of our lines against none of upstream's,
             # and what moved is the marker.
             ((2, 3), None, "# TRANSCRIBED: django/template/base.py (Django 6.0.9)"),
+            # M18.1's, and the one edit in this file that the rename forced
+            # rather than chose: upstream's `from django.template.context import
+            # BaseContext` becomes `from .context import BaseContext`. **The
+            # binding changes, not just the route** — and it has to. `Node.render`
+            # and `Template` are transcribed here and are handed a `Context` the
+            # caller built; if this file reached Django's `BaseContext` while our
+            # `context.py` defines its own, then `Context` would subclass Django's
+            # and every `isinstance(context, BaseContext)` in this file would be
+            # testing an ancestry that no longer holds. One line for one line, so
+            # no note is needed under clause (5); the snippet is our line.
+            ((61, 61), (59, 59), "from .context import BaseContext"),
             # M16's module-level `_native` binding, ours only — a pure
             # insertion, `None` upstream. **This region is the one that changes
             # this file's diff shape on purpose, and the reason is the
@@ -889,21 +919,17 @@ DECLARED = {
             ((2, 3), None, "# TRANSCRIBED: django/template/smartif.py (Django 6.0.9)"),
         ],
     ),
-    "utils.py": (
-        "django/template/utils.py",
-        [
-            # The marker and its blank separator, ours only — a pure insertion
-            # (`None` upstream). Upstream has no docstring here, so the marker
-            # is a comment on line 1 rather than a docstring's first line, which
-            # is why this region is `(1, 2)` where `smartif.py`'s is `(2, 3)`;
-            # `MARKER_WINDOW` accepts both. No executable line either way, so
-            # the snippet is clause (5)'s required note.
-            #
-            # Like `smartif`, and unlike `base.py`, **that is the entire file**:
-            # no delegation, nothing to read past the marker.
-            ((1, 2), None, "# TRANSCRIBED: django/template/utils.py (Django 6.0.9)"),
-        ],
-    ),
+    # **`utils.py` had an entry here until the M18 rewiring and its deletion is
+    # a decision, not a gap.** The module held `EngineHandler` and
+    # `get_app_template_dirs`, and the file was removed in `03038e6`: the handler
+    # is Django's own registry, which resolves `TEMPLATES[0]["BACKEND"]` for our
+    # backend as for any other, and `app_directories` now imports Django's
+    # `get_app_template_dirs` directly. The name is on
+    # `tests/milestone_ownership.py`'s `NOT_THE_ENGINE`, and the key set here is
+    # asserted equal to that table's scope by
+    # `tests/test_milestone_ownership.py`, so a key left behind would be a
+    # declaration about a file that does not exist — which is exactly what this
+    # guard reported, as `declared but not present`, until the key went.
     "context.py": (
         "django/template/context.py",
         [
@@ -925,16 +951,119 @@ DECLARED = {
     "engine.py": (
         "django/template/engine.py",
         [
-            # The marker and its blank separator, ours only. Upstream opens with
-            # `import functools`, so the marker is a comment on line 1; no
-            # executable line, hence clause (5)'s note rather than statements.
+            # The marker, which sits on the line upstream's `import functools`
+            # occupied — one line against one, so the shape is readable and the
+            # snippet is `None` (clause 2: a region with no executable line and
+            # an unchanged shape declares nothing and must not pretend to).
             #
-            # **This is the entire file**, like `context.py` and `smartif.py` —
-            # 236 lines against upstream's 234, and the diff is the two lines of
-            # marker. The four imports below the marker are upstream's
-            # (`functools`, `ImproperlyConfigured`, `cached_property`,
-            # `import_string`) and so is every line after them.
-            ((1, 2), None, "# TRANSCRIBED: django/template/engine.py (Django 6.0.9)"),
+            # **That the two lines collided is worth stating rather than hiding
+            # behind the marker's usual `None` upstream.** This file no longer
+            # imports `functools` because `Engine.get_default` no longer caches —
+            # see the region at ours 91-110 and the deleted `@functools.lru_cache`
+            # at upstream 88, both below. So the marker did not displace an import
+            # that is still in use; it landed where a now-unused one used to be,
+            # and `difflib` paired them because both are single lines at the top
+            # of the file.
+            ((1, 1), (1, 1), None),
+            # M18.1's: the three built-in libraries named by this package's dotted
+            # path rather than Django's. The strings are data, not code — the class
+            # body that holds them is one statement starting at line 14 — but
+            # `executable_lines` marks the whole `Assign`, so the three lines the
+            # region covers are all executable and the snippet names all three.
+            (
+                (15, 17),
+                (15, 17),
+                '"django_rust_templates.engine.defaulttags",\n'
+                '"django_rust_templates.engine.defaultfilters",\n'
+                '"django_rust_templates.engine.loader_tags",',
+            ),
+            # M18.1's: the default loader path, one line for one line.
+            (
+                (38, 38),
+                (38, 38),
+                'loaders = ["django_rust_templates.engine.loaders.filesystem.Loader"]',
+            ),
+            # M18.1's, and this one is a shape change rather than a rename:
+            # upstream adds one loader and then wraps the list in one entry, while
+            # ours takes six lines to do the same thing — the `app_directories`
+            # append was reflowed to three lines by the formatter once the string
+            # grew past the line limit, and so was the `cached` pair. Six of our
+            # lines against two of upstream's, so clause (5) wants the note, and
+            # all six lines are executable (two `Assign`s spanning three lines
+            # each), so the snippet names all six.
+            (
+                (40, 45),
+                (40, 41),
+                "loaders += [\n"
+                '    "django_rust_templates.engine.loaders.app_directories.Loader"\n'
+                "]\n"
+                "loaders = [\n"
+                '    ("django_rust_templates.engine.loaders.cached.Loader", loaders)\n'
+                "]",
+            ),
+            # **`Engine.get_default` is deliberately not cached, and this region
+            # is the argument for it.** Upstream caches on a function that reads
+            # `settings.TEMPLATES` through the engine registry, and can, because
+            # Django's own `django.test.signals.reset_template_engines` receiver
+            # calls `django.template.engine.Engine.get_default.cache_clear()` on
+            # every `TEMPLATES`, `DEBUG` or `INSTALLED_APPS` change. That receiver
+            # names *Django's* class object; this package's `Engine` is a
+            # different class object, so a cache here is one nothing can ever
+            # invalidate — it would hold the settings from the first call for the
+            # life of the process. Measured, as three red rows in
+            # `test_engine.GetDefaultTests`: with `override_settings(TEMPLATES=[...])`
+            # in force, `get_default()` returned the engine built from the
+            # *unoverridden* settings, and `test_no_engines_configured` could not
+            # raise because a previous answer was already memoised. The work it
+            # saves is a dict lookup per configured backend against a registry
+            # that caches the backends themselves. Clause (5) wants the note: 20
+            # of our lines against none of upstream's, and the lines are prose.
+            (
+                (91, 110),
+                None,
+                "no `@functools.lru_cache` on `Engine.get_default`: its answer is a "
+                "function of `settings.TEMPLATES`, and the receiver that clears "
+                "Django's cache names Django's class object, not this one",
+            ),
+            # The other half of that edit, and the half a reader meets first:
+            # upstream's decorator is gone from ours. A pure deletion — `None` on
+            # our side — so clause (5)'s note is required and there are no
+            # executable lines of ours for the snippet to name.
+            (
+                None,
+                (88, 88),
+                "upstream's `@functools.lru_cache` on `Engine.get_default` is deleted "
+                "with the cache it decorates; see the region at ours 91-110",
+            ),
+            # M18's second arm. Upstream's `get_default` looks for `DjangoTemplates`
+            # and nothing else, because upstream ships one backend; this package
+            # ships a second, and a caller who configured *this* one and then used
+            # the historical API would otherwise be handed stock Django's engine,
+            # or nothing. The import is the executable line the snippet names.
+            (
+                (132, 142),
+                None,
+                "from django_rust_templates.rust import RustTemplates",
+            ),
+            # The widened test itself, one line for one line.
+            (
+                (144, 144),
+                (110, 110),
+                "if isinstance(engine, (DjangoTemplates, RustTemplates)):",
+            ),
+            # `ImproperlyConfigured`'s message stays upstream's wording, and this
+            # note is the reason: `template_tests.test_engine` asserts the exact
+            # string, so naming both backends in it would buy a clearer message at
+            # the price of a red acceptance run. It is also reachable only when
+            # *neither* backend is configured, which is the case it describes.
+            # Clause (5) wants the note: five of our lines against none of
+            # upstream's, all prose.
+            (
+                (146, 150),
+                None,
+                "the message on `ImproperlyConfigured` stays upstream's wording — "
+                "`template_tests.test_engine` asserts the exact string",
+            ),
         ],
     ),
     # M10's six loader files. Three shapes among them, and the shape decides
@@ -1011,10 +1140,28 @@ DECLARED = {
                 None,
                 "# TRANSCRIBED: django/template/loaders/app_directories.py (Django 6.0.9)",
             ),
-            # M18.1's — `utils` is transcribed too, so the sibling is the right
-            # module to reach; the function has no identity requirement, which is
-            # why this row is uniformity rather than a defect being repaired.
-            ((8, 8), (6, 6), "from ..utils import get_app_template_dirs"),
+            # M18.1's, and it *removed* a deviation rather than adding one. Until
+            # then ours read `from ..utils import get_app_template_dirs` and this
+            # package transcribed that function; the rewiring deleted `utils`
+            # along with the handler, so the import is now upstream's own line and
+            # the only thing left on ours is the note explaining why. **That is
+            # the right way round and worth saying, because the function's identity
+            # is load-bearing**: it caches its answer and the cache is invalidated
+            # by `django.test.signals.update_installed_apps`, which clears
+            # `django.template.utils.get_app_template_dirs`. A second function
+            # object holds a second cache that receiver cannot reach — measured,
+            # ours returned `[django_suite/template_tests/templates]` under
+            # `override_settings(INSTALLED_APPS=[])` while Django's returned `[]`,
+            # which is the whole of `test_loaders.AppDirectoriesLoaderTests.
+            # test_not_installed`. A pure insertion with no executable line of ours
+            # (nine lines of prose), so clause (5) wants the note.
+            (
+                (8, 16),
+                None,
+                "import Django's `get_app_template_dirs` rather than a copy of it: its "
+                "cache is cleared by `update_installed_apps`, and a second function "
+                "object would hold a second cache that receiver cannot reach",
+            ),
         ],
     ),
     "loaders/cached.py": (
@@ -1181,16 +1328,26 @@ DECLARED = {
             ),
             # M18.1's, and the only import rewrite in the tree that changes what
             # is bound rather than where it is looked up. Upstream's `from django
-            # import template` binds the *package*; this binds `engine`'s own name
-            # for itself (`engine/__init__.py`'s `template = _sys.modules[__name__]`)
-            # through the stable alias, so the line is one-for-one and **the seven
-            # `template.X` uses in the body below are untouched** — which is the
-            # whole point, since the body's claim is that it is upstream's.
+            # import template` binds the *package*; this binds this package's own
+            # engine, which `engine/__init__.py` re-exports the same three names
+            # from, so the line is one-for-one and **the seven `template.X` uses in
+            # the body below are untouched** — which is the whole point, since the
+            # body's claim is that it is upstream's.
             #
-            # Like `cache.py`'s, this is absolute rather than relative because the
-            # file is served as `django.templatetags.static`: `..` is `django`, and
-            # standalone it is the engine package. No one relative spelling is both.
-            ((5, 5), (3, 3), "from django_rust_templates.engine import template"),
+            # **Eight of our lines against one of upstream's, and the seven extra
+            # are the note above the import.** The region was declared as the
+            # single line for as long as the note did not exist; the note is what
+            # moved it, so the span is the note plus the line it explains and
+            # clause (5) wants a snippet as well as the note. Only line 12 is
+            # executable — an `ImportFrom` — and the snippet is that line verbatim,
+            # not the paraphrase this declaration used to carry: the guard compares
+            # the snippet against the source, and a snippet written from memory
+            # named a line that is not in the file.
+            (
+                (5, 12),
+                (3, 3),
+                "from django_rust_templates import engine as template",
+            ),
         ],
     ),
     # M12 Task 4's, the third of the five and the same shape as the two above:
@@ -1449,24 +1606,30 @@ def declared_regions(name: str) -> list:
 
 
 def module_of(name: str) -> str:
-    """The dotted import path of the interposed module for transcription ``name``.
+    """The dotted import path of this package's module for transcription ``name``.
 
-    Derived from the declared upstream path rather than written a second time,
-    so the two cannot disagree: ``django/template/base.py`` is
-    ``django.template.base`` and ``django/template/__init__.py`` is the package
-    ``django.template``, whose last segment the ``__init__`` does not name.
+    Derived from ``name`` — the ``engine``-relative posix path every table here is
+    keyed by — rather than from the declared upstream path, so the two cannot
+    disagree: ``loaders/base.py`` is ``django_rust_templates.engine.loaders.base``,
+    and ``__init__.py`` is the package itself, whose last segment the filename
+    does not name.
 
-    That this is the *interposed* module rather than the checkout's is the point
-    of the name — the shim loads our file under Django's name, so importing it
-    gets ours, and a measurement of "what the parity harness executes" has to be
-    a measurement of what the harness would actually run.
+    **It was derived from the upstream path until the M18 rewiring, and that
+    spelling stopped being true when the shim left.** It used to answer
+    ``django.template.base``: the shim loaded our file under Django's name, so
+    importing that path got ours, and "what the parity harness executes" was a
+    measurement of what the harness actually ran. There is no second name now.
+    Left as it was, it would have answered with *Django's* modules, and a row
+    that measures the compared path against the checkout's copy of a file passes
+    for the wrong module whenever the two happen to have the same function
+    names — which is every transcription, by construction.
     """
-    upstream = DECLARED[name][0]
-    if upstream.endswith("/__init__.py"):
-        upstream = upstream[: -len("/__init__.py")]
-    elif upstream.endswith(".py"):
-        upstream = upstream[: -len(".py")]
-    return upstream.replace("/", ".")
+    if name.endswith("/__init__.py"):
+        name = name[: -len("/__init__.py")]
+    elif name.endswith(".py"):
+        name = name[: -len(".py")]
+    stem = name.replace("/", ".")
+    return "django_rust_templates.engine" + (f".{stem}" if stem else "")
 
 
 def _within(span, first: int, last: int) -> bool:
@@ -1495,6 +1658,54 @@ def overlaps(span, first: int, last: int) -> bool:
     if span is None:
         return False
     return not (last < span[0] or first > span[1])
+
+
+def _namespace_only(ours, ours_span, theirs, theirs_span) -> bool:
+    """Is a region's whole divergence the engine's own namespace?
+
+    **Clause (4) exists so the parity harness cannot certify code the
+    transcription has already declared divergent** — the harness compares Rust's
+    parse against the *transcription's* parse, and `assert_target_is_not_rust_owned`
+    admits a declared transcription as a target only because this guard has
+    already checked it against Django line by line. A divergence inside a function
+    the harness executes breaks the second link of that chain, and clause (4)
+    refuses it.
+
+    The M18 rename is the one thing that makes that unsatisfiable at two lines of
+    ``engine.py``. Every dotted path a transcription *names* has to be this
+    package's rather than Django's — `default_builtins` names our three libraries,
+    `Engine.__init__` names our three loaders, `get_default` names our backend —
+    and those are not choices: the engine is a different package and its loaders
+    live at different names. Two of them fall inside `Engine.__init__` (ours
+    20-67), which the harness executes to obtain `template_builtins`; `difflib`
+    reports them as ours 38 and ours 40-45. Refusing them leaves the guard with no
+    legal way to describe the file it is reading, and deleting the clause opens
+    the hole it was written against.
+
+    So the exception is drawn exactly as narrowly as the architecture forces,
+    and it is a **rule rather than a waiver**: permitted only when the whole of
+    the region is upstream's text with `django.template.` replaced by
+    `django_rust_templates.engine.` — whitespace removed, so the formatter's
+    reflow of a now-longer string literal does not count as a difference. Every
+    token has to match, so a reordered keyword, a changed condition or one new
+    statement anywhere in the region fails it.
+
+    **Both constants are the control, and they are checked rather than assumed.**
+    The substitution is only offered when our span actually says
+    `OURS_NAMESPACE` and upstream's actually says `UPSTREAM_NAMESPACE`; a region
+    that names neither — which is every region carrying a *decision* rather than a
+    *name* — cannot reach the exception however its text reads. The scenario
+    clause (4) was written for, a region on `FilterExpression.args_check`, still
+    fails, and `tests/test_compared_path_instrument.py` drives both directions.
+    """
+    if ours_span is None or theirs_span is None:
+        return False
+    mine = "\n".join(ours[ours_span[0] - 1 : ours_span[1]])
+    upstream = "\n".join(theirs[theirs_span[0] - 1 : theirs_span[1]])
+    if OURS_NAMESPACE not in mine or UPSTREAM_NAMESPACE not in upstream:
+        return False
+    squash = lambda text: "".join(text.split())  # noqa: E731 — one expression
+    return squash(mine) == squash(upstream.replace(UPSTREAM_NAMESPACE, OURS_NAMESPACE))
 
 
 def _marked(path: pathlib.Path) -> bool:
@@ -1600,9 +1811,9 @@ def check() -> list:
     # key it `base.py`, which is *another* transcription's key, so the entry it
     # looked up would be the wrong file's while every clause passed.
     #
-    # `loaders/base.py` is also the spelling `_shim.shadowing_files()` reports
-    # and the one `m10_measure_compared_path.py` prints `COMPARED_PATH` rows in,
-    # so this is the fourth table agreeing with the other three rather than a
+    # `loaders/base.py` is also the spelling `milestone_ownership.shadowing_files()`
+    # reports and the one `m10_measure_compared_path.py` prints `COMPARED_PATH` rows
+    # in, so this is the fourth table agreeing with the other three rather than a
     # fourth convention.
     marked = sorted(
         path.relative_to(IMPL).as_posix() for path in IMPL.rglob("*.py") if _marked(path)
@@ -1668,12 +1879,20 @@ def check() -> list:
             # lesser problem. Measured by
             # `.review/m9-measurements/m9_guard_teeth.py` scenario 3.
             for first, last, label in COMPARED_PATH.get(name, []):
-                if overlaps(ours_span, first, last):
-                    failures.append(
-                        f"{name}: region ours:{_fmt(ours_span)} covers "
-                        f"{label} ({first}-{last}), which the parity harness "
-                        "executes, so the comparison would be Rust against Rust"
-                    )
+                if not overlaps(ours_span, first, last):
+                    continue
+                # The architecture-forced half of clause (4): a region whose whole
+                # divergence is this package's namespace in place of Django's. A
+                # region carrying a decision cannot reach it — see
+                # `_namespace_only`, which is where the narrowness is argued and
+                # what the two constants are the control for.
+                if _namespace_only(ours, ours_span, theirs, theirs_span):
+                    continue
+                failures.append(
+                    f"{name}: region ours:{_fmt(ours_span)} covers "
+                    f"{label} ({first}-{last}), which the parity harness "
+                    "executes, so the comparison would be Rust against Rust"
+                )
 
             # (5) A region whose two spans differ in length is a region the line
             # diff cannot describe, so prose is the only witness and the guard

@@ -84,7 +84,7 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templat
 TEMPLATES = [
     {
         "NAME": "django",
-        "BACKEND": "django_rust_templates.backends.RustTemplates",
+        "BACKEND": "django_rust_templates.rust.RustTemplates",
         "DIRS": [TEMPLATE_DIR],
         "APP_DIRS": True,
         "OPTIONS": {

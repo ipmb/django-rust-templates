@@ -80,12 +80,31 @@ WINDOW = 12
 # this tree are spelled ``source scripts/env.sh && .venv/bin/python -I -m
 # unittest <module>`` and an interpreter path with flags in it is the normal
 # case, not the exception.
+#
+# **Three of these name instruments that no longer exist**, and they are kept
+# deliberately. `run_django_suite.sh` was the substituted runner, `unshimmed()`
+# the meter its pre-flight printed and `engine installed` the line that meter sat
+# on; M18 deleted all three. But this gate's scope is every `.md` under `docs/` and
+# `.review/` — the acceptance records, the recon notes and the review dispatches —
+# and those 120-odd count lines are *dated*: each one was licensed by the
+# instrument of its day, and a reader of `.review/m14-record.md` is reading a run
+# that happened. Editing the marker list to forget them would red the gate on true
+# statements about the past, which is the wrong repair. The current invocation is
+# named below it, so a *live* document citing the run it just made has a spelling
+# to use.
+#
+# The residue is real and named rather than hidden: nothing here distinguishes a
+# dated record from a live document, so a spec written today could license a
+# current count with a deleted instrument's name. `DECLARED_SKIPS`-style tying to a
+# record/current split is the repair, and it is deferred rather than half-done.
 MARKERS = (
     # The command.
+    r"django_suite/run\.py",
     r"run_django_suite\.sh",
     r"check\.sh",
     r"-m unittest",
     # The pre-flight and the progress meter it prints.
+    r"checkout pinned and unmodified",
     r"module\(s\) still served by Django",
     r"engine installed",
     r"unshimmed\(\)",
@@ -166,10 +185,10 @@ def main() -> int:
         for relative, line_number, text in failures:
             print(f"  {relative}:{line_number}: {text[:90]}", file=sys.stderr)
         print(
-            "\nName the run in the surrounding prose: `scripts/run_django_suite.sh` "
+            "\nName the run in the surrounding prose: `django_suite/run.py` "
             "or `python -m unittest` for the invocation, "
-            "`module(s) still served by Django` for the meter, `stock Django` when "
-            "the figure is the baseline rather than ours.",
+            "`checkout pinned and unmodified` for the pre-flight, `stock Django` "
+            "when the figure is the baseline rather than ours.",
             file=sys.stderr,
         )
         return 1

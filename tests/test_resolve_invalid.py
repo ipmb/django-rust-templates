@@ -16,8 +16,8 @@ from tests.test_render_parity import _ParityTest, _outcome
 
 class InvalidSubstitutionParityTests(_ParityTest):
     def assert_substitutes_like_django(self, value, path="x", invalid="<<invalid>>"):
-        from django.template import Context
-        from django.template.base import Variable
+        from django_rust_templates.engine import Context
+        from django_rust_templates.engine.base import Variable
 
         from django_rust_templates import _native
 
@@ -94,8 +94,8 @@ class InvalidSubstitutionParityTests(_ParityTest):
         Not `assert_substitutes_like_django`: that helper binds a template,
         which is precisely the condition this row must not create.
         """
-        from django.template import Context
-        from django.template.base import Variable
+        from django_rust_templates.engine import Context
+        from django_rust_templates.engine.base import Variable
 
         from django_rust_templates import _native
 

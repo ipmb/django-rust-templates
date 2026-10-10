@@ -573,18 +573,51 @@ def definitions(module):
     return out
 
 
+def swayable():
+    """Every module the sweeps below may rewrite — which is ``sys.modules``.
+
+    **This is the whole of ``sys.modules``, and it was ``startswith("django.")``
+    until the M18 rewiring.** The old scope carried its reason in a sentence —
+    *"nothing else imports from ``django.template``"* — and that sentence was
+    true while our modules wore Django's names, because then every consumer of
+    the engine was by construction a ``django.*`` module. M18 moved the engine to
+    ``django_rust_templates.engine`` and the sentence inverted: for every member
+    of every engine module, the number of holding modules under ``django.``
+    measured **zero**. Printed for ``base.Lexer``, ``base.Parser``,
+    ``base.Node``, ``engine.Engine`` and the rest: holders are
+    ``django_rust_templates.*`` (the engine's own cross-imports, ``render.py``,
+    ``host.py``), ``tests.*`` (the parity harness's own bindings), and
+    ``template_tests.*`` (the vendored corpus). Not one ``django.*`` among them.
+
+    **The direction of that error is the dangerous one.** A sweep that finds no
+    binding does not fail; it reports a smaller reach set, and clause (4) reads
+    a smaller reach set as a *larger* region it is safe to declare on. The
+    re-pin that followed would have been
+    ``defaulttags.do_for: (809, 908)`` shrinking to its node constructors —
+    which is exactly what ``remeasure.py`` printed before this line changed,
+    and it was an artifact of the instrument and not a fact about the engine.
+
+    Nothing narrower than the whole of ``sys.modules`` is defensible here, and
+    a list of prefixes is the same guess that just failed: three roots would
+    have covered today's measurement and missed tomorrow's. The sweep is safe
+    because it is an *identity* sweep — :func:`rebind` and
+    :func:`rebind_registries` only ever touch a slot that holds an object this
+    instrument itself made — and it is cheap enough to be uninteresting: 497
+    modules and ~379k attributes measure 1.4 ms in a full pass, against ~21
+    wrapped members per engine module, so a window costs tens of milliseconds.
+    """
+    return [m for m in list(sys.modules.values()) if m is not None]
+
+
 def bindings(reference):
     """Every ``(module, attribute)`` in ``sys.modules`` whose value *is* it.
 
     Identity, not equality: ``counting`` closes over its original, and two
     distinct wrappers are never ``==``, but the point is to find the exact
-    binding rather than a similar one. Only ``django.*`` modules are visited —
-    nothing else imports from ``django.template``, and rewriting a stranger's
-    namespace would be a side effect this instrument has no business having.
+    binding rather than a similar one. The scope is :func:`swayable`, and why it
+    is that wide is argued there.
     """
-    for other in list(sys.modules.values()):
-        if other is None or not getattr(other, "__name__", "").startswith("django."):
-            continue
+    for other in swayable():
         for attr, value in list(vars(other).items()):
             if value is reference:
                 yield other, attr
@@ -635,10 +668,13 @@ def registries():
     staticfiles storage, which ran ``_setup()`` and raised
     ``ImproperlyConfigured`` under the unit suite's settings. A probe that can
     execute the code it is probing is not a probe.
+
+    The scope is :func:`swayable`, so it is now the whole of ``sys.modules``
+    where it used to be ``django.*`` — and the tables this function exists for
+    are the ones that move: ``engine/defaulttags.py``'s own ``register`` is held
+    by a module nobody's ``django.`` prefix reaches.
     """
-    for other in list(sys.modules.values()):
-        if other is None or not getattr(other, "__name__", "").startswith("django."):
-            continue
+    for other in swayable():
         for value in list(vars(other).values()):
             try:
                 attributes = vars(value)

@@ -32,13 +32,13 @@ import pathlib
 import tempfile
 import unittest
 
-from django.template import Context, Engine
-from django.template.exceptions import TemplateDoesNotExist
+from django_rust_templates.engine import Context, Engine
+from django_rust_templates.engine.exceptions import TemplateDoesNotExist
 
 
 def sources(dirs, name):
     """The template origins a filesystem loader produces for ``name``."""
-    engine = Engine(loaders=[("django.template.loaders.filesystem.Loader", dirs)])
+    engine = Engine(loaders=[("django_rust_templates.engine.loaders.filesystem.Loader", dirs)])
     loader = engine.template_loaders[0]
     return [origin.name for origin in loader.get_template_sources(name)]
 
@@ -47,7 +47,7 @@ class CaseSensitivityTests(unittest.TestCase):
     def setUp(self):
         import importlib
 
-        filesystem = importlib.import_module("django.template.loaders.filesystem")
+        filesystem = importlib.import_module("django_rust_templates.engine.loaders.filesystem")
         self.assertIn("engine", filesystem.__file__, filesystem.__file__)
 
     def test_djangos_row_holds_without_its_platform_guard(self):
@@ -112,7 +112,7 @@ class CaseSensitivityTests(unittest.TestCase):
 
             pathlib.Path(tmpdir, "Index.html").write_text("{{ name }}")
             engine = Engine(
-                loaders=[("django.template.loaders.filesystem.Loader", [tmpdir])]
+                loaders=[("django_rust_templates.engine.loaders.filesystem.Loader", [tmpdir])]
             )
 
             if case_sensitive:

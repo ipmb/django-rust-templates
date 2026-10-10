@@ -296,7 +296,7 @@ class RequestContextTests(SimpleTestCase):
     @override_settings(
         TEMPLATES=[
             {
-                "BACKEND": "django_rust_templates.backends.RustTemplates",
+                "BACKEND": "django_rust_templates.rust.RustTemplates",
                 "NAME": "django",
                 "OPTIONS": {
                     "context_processors": [

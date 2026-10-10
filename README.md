@@ -1,18 +1,28 @@
 # django-rust-templates
 
-Django's template backend, reimplemented in Rust. A drop-in replacement for
-`django.template`.
+Django's template engine, reimplemented in Rust, as an ordinary template backend.
 
 **Experimental. All code in this repository was written by AI.**
 
-- Django's own `tests/template_tests/` passes unmodified: `Ran 1547 tests … OK
-  (skipped=6)`. The six skips are Django's, not ours.
-- Currently **1.35× to 1.85× slower** than stock Django 6.0.9. Making it faster
-  is the work in progress.
-- No wheel is published, so installing builds the Rust extension from source.
-  You need a Rust toolchain — [rustup](https://rustup.rs).
+- Django's own `tests/template_tests/` passes: `Ran 1547 tests … OK (skipped=6)`.
+  The six skips are Django's, not ours. The copy this runs against is generated
+  from the pinned checkout by `scripts/gen_django_suite.py`.
+- **Slower than stock Django**: 1.3× to 1.8× on the four workloads in
+  `scripts/bench.py` — 1.34× pre-compiled render, 1.35× parse-and-render, 1.41× a
+  ~200-node template, 1.82× a one-variable one. It renders the same templates
+  under both engines and prints a hash of each page, so the comparison is like for
+  like. Measured 2026-10-09 against Django 6.0.9, **with the extension built
+  `--release`** — `pip install` builds that profile, but `maturin develop` installs
+  an unoptimised one that is about three times slower, which is what the harness
+  now prints. `scripts/check.sh` builds that profile itself before running the
+  suites, so the gate's numbers are about the source and not about whatever
+  extension happened to be installed. Correctness has been the priority; the
+  number is here rather than only a flattering one.
+- No wheel is published, so installing builds the Rust extension from source. You
+  need a Rust toolchain — [rustup](https://rustup.rs).
 - Requires Python 3.12 or later — only 3.14.4 has actually been run — and Django
-  6.0.x; `install()` refuses any Django outside 6.0.x.
+  6.0.x. The backend refuses any Django outside 6.0.x; see `allow_django_mismatch`
+  below.
 
 ## Install
 
@@ -25,43 +35,35 @@ From a clone, `pip install .` works too.
 
 ## Use
 
-**The intended interface is the stock one — name this backend in `TEMPLATES`,
-the way any third-party template backend is configured. It is not implemented
-yet.** Today the engine is a *substitution for `django.template`* rather than a
-backend, and it is switched on by calling `install()` before Django is imported.
-
-The two are not interchangeable, and the reason is worth stating because it is
-what the next milestone is about: Django imports a backend class lazily, after
-`django.setup()` has already imported all 20 of the `django.template` and
-`django.templatetags` modules — so a backend cannot be the point at which the
-engine is activated. Until the engine can stand on its own without the finder,
-pointing `TEMPLATES` at it gets you stock Django's parser. That work is specified
-in `docs/superpowers/specs/2026-10-09-rust-template-backend-design.md` §2 and §7.
-
-Until then, the route that works:
-
-Call `install()` before Django is imported — the substitution serves modules by
-name, so a module that already took a binding from Django keeps it.
-
-**The rule is: before `django.setup()` runs, in whatever process starts Django.**
-In a project from `django-admin startproject`, that is usually the top of
-`manage.py`, `wsgi.py` and `asgi.py`:
+Point `BACKEND` at the backend class, the way you would any other:
 
 ```python
-import django_rust_templates
-
-django_rust_templates.install()
+TEMPLATES = [
+    {
+        "BACKEND": "django_rust_templates.rust.RustTemplates",
+        "DIRS": [BASE_DIR / "templates"],
+        "APP_DIRS": True,
+        "OPTIONS": {"context_processors": [...]},
+    }
+]
 ```
 
-Not in `settings.py`, and not in `AppConfig.ready()`. `django.setup()` imports
-`django.urls` — and so all of `django.template` — before it reads the settings
-module, so both run too late. Where there is no entry point to edit — a
-`pytest-django` plugin, a Celery worker, `django-admin` with
-`DJANGO_SETTINGS_MODULE` — put those two lines in a `sitecustomize.py` on your
-`PYTHONPATH`.
+`NAME` is optional. `EngineHandler` derives an entry's alias from the
+second-to-last segment of the backend path — `django.template.backends.jinja2.
+Jinja2` becomes `jinja2`, which is why templates usually go unnamed — and this
+path's segment is `rust`, so an unnamed entry is reachable as `engines["rust"]`.
+Add `"NAME"` only to choose a different alias.
 
-Calling `install()` too late raises, naming the modules that already took a
-binding from Django.
+### `OPTIONS`
+
+Everything Django's own backend accepts, plus:
+
+- `allow_django_mismatch` — the backend refuses to run against a Django it was not
+  transcribed from, because its correctness rests on reproducing one version's
+  behaviour and every test here was run against that one. Set this to `True` if you
+  mean to try it against another Django anyway. Note that `pip` refuses the pairing
+  first, from the declared `Django>=6.0,<6.1`, so this is for a resolver that has
+  been bypassed (`--no-deps`, a vendored wheel, another installer).
 
 ## Development
 

@@ -36,7 +36,7 @@ LIBRARIES = {
     # `django.templatetags.i18n` resolves to Django's own file here (this module
     # is not the shim's), and its node classes are the ones the materialiser's
     # `NODE_CLASSES` builds from our descriptors.
-    "i18n": "django.templatetags.i18n",
+    "i18n": "django_rust_templates.engine.templatetags.i18n",
 }
 
 

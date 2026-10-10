@@ -4,11 +4,11 @@
 #
 # Why this is not a unit test
 # --------------------------
-# Every other gate in this repository runs against `.django/` on `PYTHONPATH`,
-# with the shim installed at interpreter start by `scripts/shimpath/`. That is
-# the environment the *engine* is developed in, and it is not the environment a
-# user is in. Four things differ, and all four are invisible from inside the
-# checkout:
+# Every other gate in this repository runs against the working tree, with the
+# pinned checkout in `.django/` and the extension built in place by
+# `maturin develop`. That is the environment the *engine* is developed in, and it
+# is not the environment a user is in. Four things differ, and all four are
+# invisible from inside the checkout:
 #
 #   1. a user gets the files `maturin` chose to put in the wheel, not the working
 #      tree — a module excluded from `python-source`, or a `.so` matched by
@@ -24,17 +24,25 @@
 # The subjects here are a wheel and a venv, and the probes are run with that
 # venv's interpreter rather than ours.
 #
-# Case 1 is the README's *instruction*, executed
-# ----------------------------------------------
-# It activates from an entry point and then calls `django.setup()` against a real
-# settings module, because that is what the README tells a reader to write. The
-# first version of this case called `settings.configure()` and then `django.setup()`
-# in a bare script, which is a route no Django project actually takes — and that
-# difference hid a false instruction for a whole milestone: the README said to
-# activate from `settings.py`, which cannot work, and this case passed anyway,
-# because it never had a settings module to be too late in. Case 1b now pins the
-# ordering claim directly. A gate whose fixture is not the reader's route is a
-# gate for a program nobody runs.
+# Case 1 is the README's instruction, executed
+# -------------------------------------------
+# The README tells a reader to write one thing: a `TEMPLATES` entry naming
+# `django_rust_templates.rust.RustTemplates`. Case 1 writes exactly that entry
+# into a real settings module, runs a real `manage.py`, and renders through the
+# loader stack by name. The first version of this case called `settings.configure()`
+# and then `django.setup()` in a bare script, which is a route no Django project
+# actually takes — and that difference hid a false instruction for a whole
+# milestone, because it never had a settings module to be too late in. A gate whose
+# fixture is not the reader's route is a gate for a program nobody runs.
+#
+# **Case 1b is the control, and it is why case 1 is worth anything.** A render of
+# `{{ name|upper }}` proves nothing about which engine rendered it — stock Django
+# produces the same string, and did for the whole period when the README's
+# instruction was wrong. So the same project files are run a second time with one
+# line changed: the `BACKEND` string. The render must be byte-identical and the
+# engine object behind it must be Django's. Both runs print the class of the object
+# they reached, read off the object rather than asserted about the environment, and
+# the shell compares the two.
 #
 # Network
 # -------
@@ -154,9 +162,14 @@ install_into() {
 
 # --- the reader's project, written out ---------------------------------------
 # A settings module and an entry point, in the shape `django-admin startproject`
-# produces and the README tells you to write. Both cases 1 and 1b install *this*,
-# because the ordering claim below is about a real settings import and cannot be
-# made with `settings.configure()`.
+# produces. The `TEMPLATES` entry is the README's, plus one line: naming the
+# backend is the *whole* of what this package asks a project to do, so a check
+# that reached the engine any other way would be checking a program nobody writes.
+# The extra line is `"NAME"`, and it is here for the control rather than for the
+# reader — `sed` derives `settings_stock.py` from this file by swapping one dotted
+# path for another, so a lookup by *derived* alias would have to be spelled two
+# different ways in one command. Case 4, which has no control, omits `NAME`, and
+# that is where the derivation is exercised.
 rm -rf "$PROJ"
 mkdir -p "$PROJ/templates"
 cat > "$PROJ/settings.py" <<'PY'
@@ -175,7 +188,8 @@ INSTALLED_APPS = [
 DATABASES = {}
 TEMPLATES = [
     {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "NAME": "rust",
+        "BACKEND": "django_rust_templates.rust.RustTemplates",
         "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {},
@@ -187,60 +201,13 @@ cat > "$PROJ/templates/hello.html" <<'HTML'
 {{ name|upper }} has {{ items|length }} item{{ items|length|pluralize }}
 HTML
 
-# A real app with a management command, so the render below is reached through
-# `manage.py` — the entry point under test — rather than by a second script
-# repeating its two lines. `install()` is per-process, so a probe in its own
-# process would be measuring its own activation, not this one's; running the
-# assertion *inside* `manage.py`'s process is what makes case 1 a statement about
-# the README's instruction. Listing the app also puts a real `apps.populate()` on
-# the path between activation and render.
-mkdir -p "$PROJ/engine_check/management/commands"
-: > "$PROJ/engine_check/__init__.py"
-: > "$PROJ/engine_check/management/__init__.py"
-: > "$PROJ/engine_check/management/commands/__init__.py"
-cat > "$PROJ/engine_check/management/commands/check_engine.py" <<'PY'
-from django.core.management.base import BaseCommand
+# The control's settings module: the same file, one line different. `sed` rather
+# than a second heredoc, so that "differs in exactly one thing" is a property of
+# the fixture construction and not a promise in a comment.
+sed 's|django_rust_templates\.rust\.RustTemplates|django.template.backends.django.DjangoTemplates|' \
+  "$PROJ/settings.py" > "$PROJ/settings_stock.py"
 
-
-class Command(BaseCommand):
-    help = "Render a template through the engine and assert the engine served it."
-
-    def handle(self, *args, **options):
-        import django
-        import django.template.base as base
-        from django.template.loader import render_to_string
-
-        import django_rust_templates
-
-        # A template rendered the way a user renders one: by name, through the
-        # DjangoTemplates backend and the loader stack, not by handing `Template`
-        # a string. Loaders are engine modules too, so this exercises the
-        # substitution rather than the constructor alone.
-        rendered = render_to_string("hello.html", {"name": "pete", "items": [1, 2]})
-        assert rendered.strip() == "PETE has 2 items", f"rendered {rendered!r}"
-
-        # The point of the whole substitution: Django's own name resolves to the
-        # file the wheel shipped, not to Django's. The render alone would pass on
-        # stock Django — it is the same template either way.
-        assert base.__file__.endswith("django_rust_templates/engine/base.py"), base.__file__
-        assert django_rust_templates.unshimmed() == [], django_rust_templates.unshimmed()
-        self.stdout.write(
-            f"  {django.get_version()} | {rendered.strip()} | "
-            f"{base.__file__.split('site-packages/')[-1]}"
-        )
-PY
-
-say ""
-say "=== case 1: activate from an entry point, then run a real project ==="
-V="$(make_venv match)"
-install_into "$V" "Django==$PINNED_DJANGO" "$WHEEL" || fail "pip install failed for case 1"
-
-# The entry point, verbatim from the README: two lines, before Django.
 cat > "$PROJ/manage.py" <<'PY'
-import django_rust_templates
-
-django_rust_templates.install()
-
 import os
 import sys
 
@@ -256,48 +223,108 @@ if __name__ == "__main__":
     main()
 PY
 
-# `check` walks the app registry, the template backends and the system-check
-# framework with the substitution in place — machinery, not just a `Template()`.
-# `check_engine` is the render, asserted from inside this same process.
-( cd "$PROJ" && "$V/bin/python" manage.py check ) >/dev/null \
-  || fail "manage.py check failed against the shimmed engine"
-( cd "$PROJ" && "$V/bin/python" manage.py check_engine ) || fail "case 1 failed"
+# A real app with a management command, so the render below is reached through
+# `manage.py` — the entry point a project has — rather than by a second script
+# repeating its two lines. Listing the app also puts a real `apps.populate()` on
+# the path between settings and render.
+mkdir -p "$PROJ/engine_check/management/commands"
+: > "$PROJ/engine_check/__init__.py"
+: > "$PROJ/engine_check/management/__init__.py"
+: > "$PROJ/engine_check/management/commands/__init__.py"
+
+# **It reports the engine rather than asserting it**, and that split is deliberate:
+# which engine *should* have run is a fact about the two runs compared against each
+# other, so the comparison lives in the shell where both runs meet. What the command
+# asserts is the part that is the same either way — that the template renders, by
+# name, through the loader stack.
+cat > "$PROJ/engine_check/management/commands/check_engine.py" <<'PY'
+from django.core.management.base import BaseCommand
+
+
+class Command(BaseCommand):
+    help = "Render by name and report which backend and engine actually served it."
+
+    def handle(self, *args, **options):
+        import django
+        import django.template.base as django_base
+        from django.conf import settings
+        from django.template import engines
+        from django.template.loader import render_to_string
+
+        # Read out of the setting rather than spelled, so the control's `sed`-derived
+        # settings module needs no second copy of this command. The `NAME` it reads
+        # is the fixture's, and the fixture's reason is here: with no `NAME`,
+        # `EngineHandler` derives the alias from the second-to-last dotted segment of
+        # `BACKEND` — `django.template.backends.jinja2.Jinja2` becomes `jinja2`, which
+        # is why templates normally go unnamed, and `django_rust_templates.rust.
+        # RustTemplates` becomes `rust`. The control's `sed` swaps that path for
+        # `django.template.backends.django.DjangoTemplates`, whose segment is
+        # `django`, so one lookup by derived alias could not find both. Case 4 has no
+        # control and no `NAME`, and is where the derivation is proven.
+        backend = engines[settings.TEMPLATES[0]["NAME"]]
+
+        rendered = render_to_string("hello.html", {"name": "pete", "items": [1, 2]})
+        assert rendered.strip() == "PETE has 2 items", f"rendered {rendered!r}"
+
+        # **Django's own name still means Django's own file.** This is the claim
+        # the M18 rewrite is about — the package has its own namespace and replaces
+        # nothing — and it is the one thing a render cannot show, because the
+        # render is identical either way. Read off the module object, so a package
+        # that had taken the name over would fail here and nowhere else.
+        assert django_base.__file__.endswith("django/template/base.py"), (
+            django_base.__file__
+        )
+
+        self.stdout.write(
+            f"  {django.get_version()}"
+            f"|{type(backend).__module__}"
+            f"|{type(backend.engine).__module__}"
+            f"|{rendered.strip()}"
+        )
+PY
+
+# `manage.py check` walks the app registry, the template backends and the
+# system-check framework — machinery, not just a `Template()`.
+run_project() {
+  local venv="$1" settings="$2"
+  ( cd "$PROJ" && DJANGO_SETTINGS_MODULE="$settings" "$venv/bin/python" manage.py check ) \
+    >/dev/null || fail "manage.py check failed under $settings"
+  ( cd "$PROJ" && DJANGO_SETTINGS_MODULE="$settings" "$venv/bin/python" manage.py check_engine )
+}
 
 say ""
-say "=== case 1b: the settings module is too late, and says so ==="
-# The README tells readers *not* to activate from `settings.py`, and gives a
-# reason: `django.setup()` imports `django.urls` (and so all of `django.template`)
-# before the line that first reads the settings module. A warning in prose is a
-# claim like any other, so it is measured here — in the same venv, against the
-# same wheel, differing from case 1 in one thing: where `install()` is called.
-#
-# If this case ever starts *passing*, Django's `setup()` changed the order and the
-# README's warning is stale. It fails; do not delete it.
-sed 's/^SECRET_KEY/import django_rust_templates\n\ndjango_rust_templates.install()\n\nSECRET_KEY/' \
-  "$PROJ/settings.py" > "$PROJ/settings_activates.py"
-( cd "$PROJ" && "$V/bin/python" - <<'PY'
-import os
+say "=== case 1: name the backend in settings, then run the project ==="
+V="$(make_venv match)"
+install_into "$V" "Django==$PINNED_DJANGO" "$WHEEL" || fail "pip install failed for case 1"
 
-os.environ["DJANGO_SETTINGS_MODULE"] = "settings_activates"
-import django
+ours="$(run_project "$V" settings)" || fail "case 1 failed"
+say "$ours"
+case "$ours" in
+  *"|django_rust_templates.rust|django_rust_templates.engine.engine|"*)
+    ;;
+  *)
+    fail "case 1 did not reach this package's backend and engine: $ours"
+    ;;
+esac
 
-from django_rust_templates import _shim, installed
-
-try:
-    django.setup()
-except _shim.ShimError as exc:
-    message = str(exc)
-    assert "django.template" in message, f"not our ordering error: {message}"
-    assert not installed(), "a refused install left a finder in sys.meta_path"
-    print(f"  refused, naming {message.count('django.template')} module(s) already imported")
-else:
-    raise SystemExit(
-        "install() from a settings module SUCCEEDED. Django's setup() no longer "
-        "imports django.template before it reads settings, so the README's "
-        "'activate from your entry point' warning is stale and should be rewritten."
-    )
-PY
-) || fail "case 1b failed"
+say ""
+say "=== case 1b: the control — the same project, stock Django's backend ==="
+# One line of the settings module changed, nothing else: same interpreter, same
+# wheel, same template, same command. If this run reaches our engine, the check's
+# subject is not what it says; if its render differs, case 1's render was not the
+# one a project gets.
+theirs="$(run_project "$V" settings_stock)" || fail "case 1b failed"
+say "$theirs"
+case "$theirs" in
+  *"|django.template.backends.django|django.template.engine|"*)
+    ;;
+  *)
+    fail "the control did not run stock Django, so case 1 proves nothing: $theirs"
+    ;;
+esac
+[ "${ours##*|}" = "${theirs##*|}" ] || fail "the two backends rendered differently:
+     ours=$ours
+     stock=$theirs"
 
 say ""
 say "=== case 2: a Django the engine was not transcribed from ==="
@@ -309,28 +336,55 @@ say "=== case 2: a Django the engine was not transcribed from ==="
 # a resolver that has been *bypassed* — `--no-deps`, a vendored wheel, another
 # installer, a venv whose Django arrived some other way — which is exactly how
 # the mismatched Django in this script's own history was produced.
+#
+# **It is driven through `TEMPLATES`, not through a function call**, because that
+# is the only door in: `_require_django` runs from `RustTemplates.__init__`, which
+# `EngineHandler` reaches exactly once per project. A probe calling the function
+# directly would be testing a name rather than the route.
 V="$(make_venv mismatch)"
 install_into "$V" --no-deps "$WHEEL" || fail "could not place the wheel for case 2"
 install_into "$V" "Django==$MISMATCHED_DJANGO" || fail "could not place Django for case 2"
 "$V/bin/python" - <<'PY' || fail "case 2 failed"
 import django
-from django_rust_templates import _shim, install, installed
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
+from django.template import engines
+
+settings.configure(
+    INSTALLED_APPS=[],
+    TEMPLATES=[
+        {
+            "NAME": "rust",
+            "BACKEND": "django_rust_templates.rust.RustTemplates",
+            "DIRS": [],
+            "APP_DIRS": False,
+            "OPTIONS": {},
+        }
+    ],
+)
+django.setup()
 
 try:
-    install()
-except _shim.ShimError as exc:
+    engines["rust"]
+except ImproperlyConfigured as exc:
     message = str(exc)
     assert "6.0.9" in message, f"the pin is not named: {message}"
-    assert "6.1.2" in message, f"the version found is not named: {message}"
-    assert not installed(), "a refused install left a finder in sys.meta_path"
-    print(f"  refused {django.get_version()}: {message.splitlines()[0][:96]}…")
+    assert django.get_version() in message, f"the version found is not named: {message}"
+    assert "allow_django_mismatch" in message, f"the hatch is not named: {message}"
+    print(f"  refused {django.get_version()}: {message.splitlines()[0][:88]}…")
 else:
-    raise AssertionError(f"install() accepted Django {django.get_version()}")
+    raise AssertionError(f"the backend accepted Django {django.get_version()}")
 
-# The hatch, on the same interpreter, so the two outcomes differ in one thing.
-install(allow_django_mismatch=True)
-assert installed(), "the escape hatch did not install"
-print(f"  escape hatch installed against {django.get_version()}")
+# The hatch, in the same process, so the two outcomes differ in one thing. The
+# mutation is visible to `EngineHandler` because its `templates` property merges
+# `**tpl` into a new dict and so carries a *reference* to this `OPTIONS` object
+# rather than a copy of it.
+settings.TEMPLATES[0]["OPTIONS"]["allow_django_mismatch"] = True
+backend = engines["rust"]
+assert type(backend.engine).__module__ == "django_rust_templates.engine.engine", (
+    type(backend.engine)
+)
+print(f"  allow_django_mismatch built the backend against {django.get_version()}")
 PY
 
 say ""
@@ -351,20 +405,32 @@ printf '%s\n' "$out" | grep -q "conflicting dependencies" || fail "pip refused, 
 say "  pip refused the pairing, citing the declared bound"
 
 say ""
-say "=== case 3: no Django at all produces our error, not Django's ==="
+say "=== case 3: with no Django at all, the package still answers for itself ==="
+# **This case says less than it used to, and the difference is the M18 rewrite.**
+# It used to assert that `install()` in a Django-less interpreter named our package
+# before naming Django. There is no `install()` any more, and no route to the guard
+# that does not go through Django: `TEMPLATES` is a Django setting, so a project
+# with no Django has no templates to configure. What is left is the honest half —
+# the *package* imports, and reports its own engine version, with no Django present
+# at all; the *backend* is Django's adapter and cannot be imported without Django,
+# which is true of every backend Django ships.
 V="$(make_venv nodjango)"
 install_into "$V" --no-deps "$WHEEL" || fail "could not place the wheel for case 3"
 "$V/bin/python" - <<'PY' || fail "case 3 failed"
-from django_rust_templates import _shim
+import django_rust_templates
+
+assert django_rust_templates.engine_version(), "the extension did not load"
+assert django_rust_templates.TRANSCRIBED_DJANGO == (6, 0, 9)
 
 try:
-    _shim.install()
-except _shim.ShimError as exc:
-    message = str(exc)
-    assert "django-rust-templates" in message, f"our package is not named: {message}"
-    print(f"  {message.splitlines()[0][:96]}…")
+    import django
+except ImportError:
+    pass
 else:
-    raise AssertionError("install() succeeded with no Django importable")
+    raise AssertionError("Django is importable in the no-Django venv")
+
+print(f"  no Django | engine {django_rust_templates.engine_version()} | "
+      f"transcribed from {'.'.join(map(str, django_rust_templates.TRANSCRIBED_DJANGO))}")
 PY
 
 say ""
@@ -385,118 +451,63 @@ install_into "$V" "Django==$PINNED_DJANGO" maturin || fail "could not place the 
 "$V/bin/python" -m pip install --isolated --quiet --no-index --find-links "$WHEELS" \
   --no-build-isolation "$PROJECT_ROOT" || fail "pip install of the source tree failed"
 "$V/bin/python" - <<'PY' || fail "case 4 failed"
-import django_rust_templates
-
-django_rust_templates.install()
-assert django_rust_templates.installed(), "install() did not take"
-assert django_rust_templates.unshimmed() == [], django_rust_templates.unshimmed()
-
+import django
 from django.conf import settings
 
 settings.configure(
     INSTALLED_APPS=[],
     TEMPLATES=[
         {
-            "BACKEND": "django.template.backends.django.DjangoTemplates",
+            # **No `NAME`**, unlike case 1 and for the opposite reason: this is the
+            # one case with no `sed`-derived control to share a command with, so it
+            # is where the README's entry can be taken literally. The lookup below
+            # names `"rust"`, which nothing in this file spells — it is what
+            # `EngineHandler` derives from the second-to-last dotted segment of the
+            # path, and the assertion is that the derivation is right.
+            "BACKEND": "django_rust_templates.rust.RustTemplates",
             "DIRS": [],
             "APP_DIRS": False,
             "OPTIONS": {},
         }
     ],
 )
-import django
-
 django.setup()
 
-from django.template import Context, Template
+from django.template import engines
 
-rendered = Template("{{ a|upper }}-{% for i in xs %}{{ i }}{% endfor %}").render(
-    Context({"a": "hi", "xs": [1, 2, 3]})
-)
+backend = engines["rust"]
+assert type(backend).__module__ == "django_rust_templates.rust", type(backend)
+
+rendered = backend.from_string(
+    "{{ a|upper }}-{% for i in xs %}{{ i }}{% endfor %}"
+).render({"a": "hi", "xs": [1, 2, 3]})
 assert rendered == "HI-123", f"rendered {rendered!r}"
-
-import django.template.base as base
-
-assert "site-packages" in base.__file__, base.__file__
-assert base.__file__.endswith("engine/base.py"), base.__file__
-print(f"  source install | {django.get_version()} | {rendered} | {base.__file__.split('site-packages/')[-1]}")
+print(f"  source install | {django.get_version()} | {rendered}")
 PY
 
 say ""
-say "=== case 5: the activation an entry point cannot reach ==="
-# The README states the rule — *before `django.setup()` runs, in whatever process
-# starts Django* — and then names `manage.py`, `wsgi.py` and `asgi.py` as where
-# that usually is. It is not the rule. It does not reach `django-admin` driven by
-# `DJANGO_SETTINGS_MODULE` with no project file to edit, a `pytest-django` plugin
-# that calls `django.setup()` itself, a Celery worker whose `proj/celery.py`
-# triggers setup, or a library that does setup on import. For those the README
-# names a `sitecustomize.py` on `PYTHONPATH`, which runs during interpreter
-# start-up before any entry point exists, and this is that route measured against
-# the installed wheel with *nothing* edited.
-#
-# The control drops one directory from `PYTHONPATH` — the one holding
-# `sitecustomize.py` — and must come out as **stock** Django. A row asserting our
-# engine is present proves nothing unless the same command, without the
-# activation, is shown to produce Django's; that is the population, and the two
-# runs differ in exactly one thing.
-V="$CACHE/venv-match"   # still on disk from case 1: the same wheel, the same Django
-SITE="$CACHE/activation"
-rm -rf "$SITE"
-mkdir -p "$SITE/site" "$SITE/app"
-cat > "$SITE/site/sitecustomize.py" <<'PY'
-import django_rust_templates
-
-django_rust_templates.install()
-PY
-cat > "$SITE/app/settings.py" <<'PY'
-SECRET_KEY = "packaging-check"
-INSTALLED_APPS = ["django.contrib.contenttypes", "django.contrib.auth"]
-DATABASES = {}
-TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
-        "APP_DIRS": False,
-        "OPTIONS": {},
-    }
-]
-USE_TZ = True
-PY
-
-out="$(cd "$SITE/app" && PYTHONPATH="$SITE/app" DJANGO_SETTINGS_MODULE=settings \
-  "$V/bin/python" -c 'import django; django.setup(); import django.template.base as b; print("engine" if "engine" in b.__file__ else "stock")' 2>&1)" \
-  || fail "the control run failed: $out"
-[ "$out" = "stock" ] || fail "the control is not a control: without sitecustomize.py on
-     PYTHONPATH this still resolved our engine ('$out'), so the subject below proves nothing"
-say "  control (no sitecustomize): $out"
-
-# `django-admin` from the venv's own bin, with no project file in sight.
-( cd "$SITE/app" && PYTHONPATH="$SITE/site:$SITE/app" DJANGO_SETTINGS_MODULE=settings \
-  "$V/bin/django-admin" check ) >/dev/null || fail "django-admin check failed under sitecustomize"
-
-# The subject: same interpreter, same settings module, one directory added to
-# PYTHONPATH. It inherits both, so the activation it is testing is the one under
-# test rather than one this heredoc performs for itself.
-( cd "$SITE/app" && PYTHONPATH="$SITE/site:$SITE/app" DJANGO_SETTINGS_MODULE=settings \
-  "$V/bin/python" - <<'PY'
-import django
-
-django.setup()
-
-import django.template.base as base
-
-import django_rust_templates
-
-assert "django_rust_templates/engine" in base.__file__, base.__file__
-assert django_rust_templates.unshimmed() == [], django_rust_templates.unshimmed()
-print(f"  django-admin, nothing edited | {django.get_version()} | "
-      f"{base.__file__.split('site-packages/')[-1]}")
-PY
-) || fail "case 5 failed"
+say "=== there is no case 5, and its absence is the M18 rewrite ==="
+# The old case 5 existed because `install()` had to run before `django.setup()`,
+# and three routes — `django-admin` driven by `DJANGO_SETTINGS_MODULE`, a
+# `pytest-django` plugin, a Celery worker — had no entry point to edit, so the
+# README sent readers to a `sitecustomize.py` on `PYTHONPATH`. Naming the backend
+# in `TEMPLATES` is reached by all three routes already, because all three build
+# the backend the ordinary way, and there is nothing left for a fifth case to
+# measure. The control that case carried — "without the activation, you get stock
+# Django" — is case 1b's, on the population that still has two outcomes.
 
 say ""
-say "packaging: a wheel installs, is activated from an entry point the way the"
-say "           README says, refuses a settings-module activation and a Django it"
-say "           was not transcribed from, keeps pip from pairing it with one, names"
-say "           itself when Django is absent, builds from the source tree, and can"
-say "           be activated where no entry point exists to edit"
+# The legend, at the point of output, for the same reason the bench table states
+# which statistic its ratio column is: a reader counting banners finds a mismatch
+# before finding the explanation 200 lines up at `:489`. There are **six** banners
+# and the numbering stops at **four**; both counts are right, and the difference is
+# the two lettered controls.
+say "packaging: six banners — cases 1, 1b, 2, 2b, 3 and 4. The numbering stops at"
+say "           four because case 5 was removed by the M18 rewrite; 'six' counts the"
+say "           two lettered controls. In them: a wheel installs, a real project"
+say "           activates it by naming the backend"
+say "           in TEMPLATES and renders through the loader stack, the same project"
+say "           against Django's own backend produces the same render, the backend"
+say "           refuses a Django it was not transcribed from and opens under"
+say "           allow_django_mismatch, pip refuses the pairing first, the package"
+say "           stands alone with no Django, and the source tree builds"

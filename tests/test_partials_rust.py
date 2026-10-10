@@ -37,16 +37,20 @@ import sys
 import unittest
 from pathlib import Path
 
-from django.template import Engine
-from django.template.exceptions import TemplateSyntaxError
+from django_rust_templates.engine import Engine
+from django_rust_templates.engine.exceptions import TemplateSyntaxError
 from django_rust_templates import _native, render
 from django_rust_templates import host as host_module
 from scripts.filter_probe import ensure_settings
 
-# `.django/tests` on the path so `find_library` resolves
+# The *vendored* corpus on the path so `find_library` resolves
 # `template_tests.templatetags.custom` — the fixture `CounterNode` lives in, and
-# the same one `test_include.py:372-397` uses for "was this node built once".
-_DJANGO_TESTS = Path(__file__).resolve().parent.parent / ".django" / "tests"
+# the same one `test_include.py:372-397` uses for "was this node built once". It
+# is `django_suite` and not `.django/tests` because `CounterNode`'s module does
+# `import django_rust_templates.engine as template`, and under M18 that is what
+# makes it the engine under test rather than Django's. See the longer note in
+# `tests/test_parser_parity.py`.
+_DJANGO_TESTS = Path(__file__).resolve().parent.parent / "django_suite"
 if str(_DJANGO_TESTS) not in sys.path:
     sys.path.insert(0, str(_DJANGO_TESTS))
 

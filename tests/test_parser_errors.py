@@ -21,22 +21,23 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 
-DJANGO_TESTS = DJANGO_CHECKOUT / "tests"
+# The vendored corpus; see the note in `tests/test_parser_parity.py`.
+DJANGO_TESTS = PROJECT_ROOT / "django_suite"
 
 for _path in (DJANGO_CHECKOUT, DJANGO_TESTS):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from django.template import defaulttags  # noqa: E402
-from django.template.base import (  # noqa: E402
+from django_rust_templates.engine import defaulttags  # noqa: E402
+from django_rust_templates.engine.base import (  # noqa: E402
     UNKNOWN_SOURCE,
     DebugLexer,
     Lexer,
     Origin,
     Parser,
 )
-from django.template.engine import Engine  # noqa: E402
-from django.template.exceptions import TemplateSyntaxError  # noqa: E402
+from django_rust_templates.engine.engine import Engine  # noqa: E402
+from django_rust_templates.engine.exceptions import TemplateSyntaxError  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 from django_rust_templates.host import ShellHost  # noqa: E402

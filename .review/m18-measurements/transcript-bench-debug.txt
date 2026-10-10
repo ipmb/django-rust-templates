@@ -1,0 +1,45 @@
+# scripts/bench.py under both engines, on the **debug** extension — the profile
+# `maturin develop` installs and `pip install` does not.
+#
+# This is the same measurement as transcript-bench-rebased.txt, taken again after
+# the harness learned to print which build it measured. The two agree (2.4x/2.6x/
+# 4.8x/6.0x then, 2.34x/2.49x/4.69x/6.01x now), which is what makes the older
+# transcript's numbers attributable: they were the debug binary, and the range
+# they produced says nothing about the port.
+#
+# Built with: maturin develop   (no --release)
+# Taken on M18's tree, 2026-10-10T01:44:04Z (UTC), Django 6.0.9.
+# Ratios (ours/stock): 2.338, 2.488, 4.694, 6.006 — i.e. 2.34x to 6.01x.
+# Compare transcript-bench-release.txt: same tree, same templates, same four
+# sha256, and the parse-heavy rows move by 3.3x on the build profile alone.
+
+# .venv/bin/python -I scripts/bench.py --side stock
+engine:  django.template.engine.Engine
+django:  6.0.9
+native:  _native.cpython-314-darwin.so 9386112 bytes -> debug (target/debug/lib_native.dylib) (installed here; this side does not render through it)
+
+realistic/render      1238.0 us/call   (worst    1251.3, 200 iters)
+realistic/parse       1328.7 us/call   (worst    1369.4, 100 iters)
+large/parse           2300.9 us/call   (worst    2344.0, 100 iters)
+tiny/parse              16.1 us/call   (worst      16.6, 2000 iters)
+
+sha256 realistic/render   72a0693dbb80e085
+sha256 realistic/parse    72a0693dbb80e085
+sha256 large/parse        7c4227d7dd292ee8
+sha256 tiny/parse         787ec76dcafd20c1
+
+# ---- rust ----
+# .venv/bin/python scripts/bench.py --side rust
+engine:  django_rust_templates.engine.engine.Engine
+django:  6.0.9
+native:  _native.cpython-314-darwin.so 9386112 bytes -> debug (target/debug/lib_native.dylib)
+
+realistic/render      2894.0 us/call   (worst    2936.2, 200 iters)
+realistic/parse       3304.5 us/call   (worst    3418.3, 100 iters)
+large/parse          10800.6 us/call   (worst   11001.3, 100 iters)
+tiny/parse              96.7 us/call   (worst      99.0, 2000 iters)
+
+sha256 realistic/render   72a0693dbb80e085
+sha256 realistic/parse    72a0693dbb80e085
+sha256 large/parse        7c4227d7dd292ee8
+sha256 tiny/parse         787ec76dcafd20c1

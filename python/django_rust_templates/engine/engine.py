@@ -129,7 +129,7 @@ class Engine:
         from django.template import engines
         from django.template.backends.django import DjangoTemplates
 
-        from django_rust_templates.backends import RustTemplates
+        from django_rust_templates.rust import RustTemplates
 
         # **``RustTemplates`` is the second arm, and it is not decoration.** This
         # method exists for the historical API that has no engine to hand —

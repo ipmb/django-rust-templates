@@ -1,7 +1,8 @@
 """What a ``fresh`` ``engine`` file owes, stated as rows rather than as a promise.
 
 Every file under ``engine`` that wears a real module's name is one of two things
-(``_shim.SHADOWING``): **transcribed** — a copy of the pinned file, differing
+(``milestone_ownership.shadowing_files()`` is the list): **transcribed** — a copy
+of the pinned file, differing
 only where ``scripts/check_transcriptions.py``'s ``DECLARED`` says — or
 **fresh** — written from scratch with Django as the specification. The two carry
 different obligations, and until M10 only the first had a guard:
@@ -15,9 +16,9 @@ different obligations, and until M10 only the first had a guard:
 So ``fresh`` is the honest choice only when the equivalence can be **stated as a
 row**, and this module is where it is stated. ``EQUIVALENCE`` maps an ``engine``
 file to the test case that states its equivalence;
-``ShadowingTests.test_each_kind_is_the_transcription_guards_own_answer`` fails
-when a ``fresh`` file is missing from the table, and the rows below are what make
-the entry mean something.
+``test_interposition.py``'s ``CollisionTests.test_every_colliding_file_has_a_warrant``
+fails when a ``fresh`` file is missing from the table, and the rows below are what
+make the entry mean something.
 
 ``exceptions.py`` is the only ``fresh`` file in the tree, and it is the one that
 made the rule necessary: written from scratch at M0, behaviourally upstream's,

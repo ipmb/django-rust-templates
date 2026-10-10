@@ -81,18 +81,20 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PINNED_BASE = PROJECT_ROOT / ".django" / "django" / "template" / "base.py"
 
-# ``.django/tests`` as well, because ``Engine(libraries=…)`` resolves its
+# ``django_suite`` as well, because ``Engine(libraries=…)`` resolves its
 # dotted paths lazily through ``import_module`` and the fixtures name
-# ``template_tests.templatetags.bad_tag``. The same guarded insertion
+# ``template_tests.templatetags.bad_tag``. The same insertion
 # ``tests/test_parser_parity.py`` makes, and for the same reason: without it the
 # rows pass only when some earlier module happened to put the path there,
 # because ``tests/test_host_tags.py`` inserts it and sorts between us.
-DJANGO_TESTS = PROJECT_ROOT / ".django" / "tests"
+# The *vendored* corpus and not the checkout's, so the fixture the row resolves
+# is the one `gen_django_suite.py` repointed at this package — see the note in
+# ``tests/test_parser_parity.py``.
+DJANGO_TESTS = PROJECT_ROOT / "django_suite"
 if str(DJANGO_TESTS) not in sys.path:
     sys.path.insert(0, str(DJANGO_TESTS))
 
 import django_rust_templates  # noqa: E402
-from django_rust_templates import _shim  # noqa: E402
 
 _PINNED_CACHE = {}
 
@@ -120,7 +122,7 @@ def _pinned(name):
     else:  # pragma: no cover - the pinned tree has it
         raise AssertionError(f"{name} is not a top-level function in {PINNED_BASE}")
 
-    base = importlib.import_module("django.template.base")
+    base = importlib.import_module("django_rust_templates.engine.base")
     namespace = dict(base.__dict__)
     exec(compile(ast.get_source_segment(source, node), str(PINNED_BASE), "exec"), namespace)
     _PINNED_CACHE[name] = namespace[name]
@@ -172,9 +174,8 @@ class RenderValueInContextTests(unittest.TestCase):
         from scripts.filter_probe import ensure_settings
 
         ensure_settings()
-        _shim.install()
 
-        base = importlib.import_module("django.template.base")
+        base = importlib.import_module("django_rust_templates.engine.base")
         cls.base = base
         # ``staticmethod``, or ``self.ours`` is a *bound method*: a plain function
         # stored as a class attribute is the descriptor protocol's method case,
@@ -198,43 +199,30 @@ class RenderValueInContextTests(unittest.TestCase):
     def test_the_modules_that_copied_it_hold_ours(self):
         """The out-of-module call sites, which are copies taken at *import* time.
 
-        Two of the modules that call the function reach it through a from-import
-        at module scope — defaulttags, at `django/template/defaulttags.py:37`,
-        and the i18n library, at `django/templatetags/i18n.py:5` — so each holds
-        whatever the module attribute was when it was imported, and nothing this
-        project does to django.template.base afterwards can change it. That is
-        the difference from our own file's
-        call, at `python/django_rust_templates/engine/base.py:1161`, which reads
-        the module global at call time and therefore always follows.
+        Two of this package's modules call the function through a from-import at
+        module scope — ``engine/defaulttags.py``, at upstream's
+        ``django/template/defaulttags.py:37``, and ``engine/templatetags/i18n.py``,
+        at upstream's ``django/templatetags/i18n.py:5`` — so each holds whatever
+        the module attribute was when it was imported. That is the difference from
+        ``engine/base.py``'s own call, which reads the module global at call time
+        and therefore always follows.
 
-        **One of the two is now ours and the hazard is unchanged, which is the
-        point of keeping it in the row.** `defaulttags` is Django's file; `i18n`
-        became ours in M12 Task 6, so the *copy it takes* is taken by our
-        transcription — but it is still a copy, and it is still frozen at the
-        moment the module executes. If that moment is before `install()`, our
-        transcribed i18n binds Django's function while every other module binds
-        ours. Interposing a module does not make its captures late-binding.
-
-        **Measured, in both import orders.** With ``install()`` first — the order
-        ``scripts/check.sh`` establishes for every unit-test process, via the
-        ``sitecustomize`` on ``shimpath`` — both bindings are ours. Import
-        Django's ``Engine`` and ``defaulttags`` *before* ``install()`` and they
-        stay Django's: ``django.template.base`` resolves to ``engine/base.py``
-        while ``defaulttags.render_value_in_context`` resolves to the pinned
-        file, and ``is`` between the two is ``False``. So ``{% cycle %}`,
-        ``{% firstof %}` and ``{% translate %}` would render through Django's
-        copy while every ``VariableNode`` went through ours — the interposition
-        *silently partial*, which is the failure this file exists to catch, one
-        module out.
-
-        The row is therefore an assertion about startup order as much as about
-        the function, and it is the reason the ordering is not incidental: a
-        consumer who imports Django's template machinery and *then* installs the
-        shim gets this state, and nothing raises.
+        **What this row was before the M18 rewiring, and what it is now.** It was
+        an interposition row: it imported ``django.template.defaulttags`` and
+        ``django.templatetags.i18n``, which under the shim *were* those two files,
+        and asserted that the copies they had taken were ours — a statement about
+        whether the shim had been installed before they executed, and the reason
+        ``scripts/check.sh`` fixed the startup order. There is no shim and there
+        are no two names: both modules are this package's, both import from this
+        package's ``base``, and the row is now the simpler and stricter claim that
+        the three files agree. The hazard it was written for — a copy frozen
+        before the module it copies from is final — is unchanged in shape; it just
+        has one tree to be wrong in rather than two.
         """
-        import django.template.defaulttags as defaulttags
-        import django.templatetags.i18n as i18n
+        import django_rust_templates.engine.defaulttags as defaulttags
+        import django_rust_templates.engine.templatetags.i18n as i18n
 
+        self.assertIsNot(defaulttags, i18n, "the two call sites are one module")
         for module in (defaulttags, i18n):
             with self.subTest(module=module.__name__):
                 self.assertIs(module.render_value_in_context, self.ours)
@@ -249,7 +237,7 @@ class RenderValueInContextTests(unittest.TestCase):
         the escaping: ``str(SafeString('<b>&</b>'))`` is still the raw text and
         ``conditional_escape`` would escape it.
         """
-        from django.template import Context
+        from django_rust_templates.engine import Context
         from django.utils.safestring import SafeString, mark_safe
 
         value = mark_safe("<b>&</b>")
@@ -275,7 +263,7 @@ class RenderValueInContextTests(unittest.TestCase):
         because the two arms return ``str`` and ``SafeString`` respectively. The
         marked case is kept below as the falsifier rather than as the claim.
         """
-        from django.template import Context
+        from django_rust_templates.engine import Context
         from django.utils.safestring import SafeData, SafeString, mark_safe
 
         off = Context(autoescape=False)
@@ -302,7 +290,7 @@ class RenderValueInContextTests(unittest.TestCase):
         ``conditional_escape``'s ``__html__`` arm by the ``isinstance`` form.
         Measured on the pinned tree before either number was written down.
         """
-        from django.template import Context
+        from django_rust_templates.engine import Context
 
         context = Context(autoescape=True)
         value = _IsAStringButSaysSoWithClass()
@@ -325,7 +313,7 @@ class RenderValueInContextTests(unittest.TestCase):
         that kept the three rows above green and changed an arm would have to
         survive this too.
         """
-        from django.template import Context
+        from django_rust_templates.engine import Context
         from django.utils.functional import lazy
         from django.utils.safestring import mark_safe
 
@@ -359,7 +347,7 @@ class RenderValueInContextTests(unittest.TestCase):
         built from upstream's own body with that one expression replaced, so the
         difference measured is the expression and not a rewrite.
         """
-        from django.template import Context
+        from django_rust_templates.engine import Context
 
         source = inspect.getsource(self.ours).replace(
             "issubclass(type(value), str)", "isinstance(value, str)"
@@ -446,10 +434,9 @@ class RenderAnnotationTests(unittest.TestCase):
         from scripts.filter_probe import ensure_settings
 
         ensure_settings()
-        _shim.install()
 
     def _engine(self, debug=True, **kwargs):
-        from django.template import Engine
+        from django_rust_templates.engine import Engine
 
         options = {"libraries": {"bad_tag": "template_tests.templatetags.bad_tag"}}
         options.update(kwargs)
@@ -457,7 +444,7 @@ class RenderAnnotationTests(unittest.TestCase):
 
     def _render_error(self, template, data=None):
         """The exception the fixture raises, or an assertion failure if it does not."""
-        from django.template import Context
+        from django_rust_templates.engine import Context
 
         try:
             template.render(Context({} if data is None else data))
@@ -476,7 +463,7 @@ class RenderAnnotationTests(unittest.TestCase):
         node object is the assertion, and the span is kept beside it as the part
         that pins *which* text the annotation describes.
         """
-        from django.template.defaulttags import ForNode
+        from django_rust_templates.engine.defaulttags import ForNode
 
         engine = self._engine()
         template = engine.from_string(self.NESTED)
@@ -532,9 +519,9 @@ class RenderAnnotationTests(unittest.TestCase):
         ``template_debug`` is withheld, because it is the comparison and not the
         ``hasattr`` guard that withholds it.
         """
-        from django.template import Context
-        from django.template.library import SimpleNode
-        from django.template.loader_tags import BlockNode
+        from django_rust_templates.engine import Context
+        from django_rust_templates.engine.library import SimpleNode
+        from django_rust_templates.engine.loader_tags import BlockNode
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

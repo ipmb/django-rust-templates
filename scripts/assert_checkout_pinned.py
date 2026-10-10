@@ -11,8 +11,10 @@ Both halves are checked because either alone is satisfiable while the other is
 false: a clean tree at the wrong tag is a different Django, and the right tag
 with a patched file is not stock Django.
 
-This runs for every invocation of `run_django_suite.sh`, shimmed or not: the
-clause is about the suite, not about our engine.
+This runs before every acceptance run, and it is about the suite rather than about
+our engine: the vendored copy under `django_suite/` is rewritten from this
+checkout by `scripts/gen_django_suite.py`, so an edited checkout would be vendored
+in its edited form and the copy would certify the edit.
 """
 
 from __future__ import annotations
