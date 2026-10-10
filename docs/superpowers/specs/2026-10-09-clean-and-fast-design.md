@@ -399,7 +399,7 @@ protocol, so it is on the walk's path by construction.
 data exists — the Rust parser's tokens carry correct positions, and
 `python/django_rust_templates/render.py:264` cites a `{% for %}` at (9, 25) — but
 there is no protocol for handing one back, and
-`python/django_rust_templates/host.py:649` already notes that Rust can carry the
+`python/django_rust_templates/host.py:677` already notes that Rust can carry the
 class's token but not the object.
 
 The review's three non-blocking checks on this area all pass and are recorded

@@ -837,7 +837,12 @@ means the bytes matched the <code>django</code> control, &ne; that they did not,
 engine&rsquo;s floor &mdash; the cost of a template that renders nothing, printed
 above &mdash; as a share of the cell, capped at 100% because the two are separate
 measurements: a row near <b>call 100%</b> is a measurement of the call, and a row
-near <b>call 2%</b> is a measurement of the construct.</p>
+near <b>call 2%</b> is a measurement of the construct. <b>Read it down a column,
+not across a row</b>: each cell divides by <i>its own engine&rsquo;s</i> floor, and
+the floors are not equal &mdash; Jinja2&rsquo;s is about twice stock Django&rsquo;s
+&mdash; so two shares in one row have different numerators and are not comparable.
+Down a column the floor is fixed and the share answers one question: how much of
+<i>this</i> engine&rsquo;s time on this row is the call.</p>
 @@TABLE@@
 
 <h2>Where the engines do not agree</h2>

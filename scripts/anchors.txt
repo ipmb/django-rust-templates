@@ -836,7 +836,7 @@ django/utils/translation/__init__.py:279	django/utils/translation/__init__.py	27
 django/utils/translation/__init__.py:280	django/utils/translation/__init__.py	280	-	raise KeyError("Unknown language code %s." % lang_code)	-
 django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	290	-	info["name_translated"] = gettext_lazy(info["name"])	-
 python/django_rust_templates/render.py:264	python/django_rust_templates/render.py	264	-	(measured — a `{% for %}` node at ``(9, 25)``), so this parser's tokens are	-
-python/django_rust_templates/host.py:649	python/django_rust_templates/host.py	649	-	and its `_culprit_node` attached. Rust can only carry the class's	-
+python/django_rust_templates/host.py:677	python/django_rust_templates/host.py	677	-	and its `_culprit_node` attached. Rust can only carry the class's	-
 django_suite/run.py:85	django_suite/run.py	85	-	-	-
 django_suite/template_tests/syntax_tests/test_for.py:334	django_suite/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 django_suite/template_tests/test_partials.py:14	django_suite/template_tests/test_partials.py	14	-	engines["django"]	-
@@ -849,7 +849,7 @@ python/django_rust_templates/engine/parser.py:568	python/django_rust_templates/e
 python/django_rust_templates/engine/parser.py:669	python/django_rust_templates/engine/parser.py	669	-	-	-
 python/django_rust_templates/host.py:35	python/django_rust_templates/host.py	35	-	-	-
 python/django_rust_templates/host.py:422	python/django_rust_templates/host.py	422	-	-	-
-python/django_rust_templates/host.py:519	python/django_rust_templates/host.py	519	-	self._django_tags = django_own_tags()	-
+python/django_rust_templates/host.py:547	python/django_rust_templates/host.py	547	-	self._django_tags = django_own_tags()	-
 python/django_rust_templates/host.py:555	python/django_rust_templates/host.py	555	-	-	-
 tests/milestone_ownership.py:440	tests/milestone_ownership.py	440	-	def unshimmed(scope: str = TARGET) -> list:	-
 tests/parity_target.py:63	tests/parity_target.py	63	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-

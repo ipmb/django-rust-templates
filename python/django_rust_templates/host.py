@@ -449,6 +449,83 @@ def _wire_token(token):
     )
 
 
+# `_rust_owned` — the names Rust has a real compile function for — computed
+# **once at import** rather than once per parse.
+#
+# It is a module-level constant because nothing in it varies: all three
+# `_native` calls are argument-free reads of compile-time-static Rust tables
+# (`REGISTRY`, `LIBRARY_REGISTRY`), so the set is the same for every `ShellHost`
+# in the process. It used to be built inside `ShellHost.__init__`, which pays it
+# on every compile of every template — measured at M19, the whole expression is
+# **4.86 us**, against a stock-Django compile floor of ~1.45 us. Hoisting it took
+# the empty-template compile from **9.89 us to 4.38 us**, i.e. from 6.8x stock to
+# **3.0x**, with no behavioural change: the tests that read `host._rust_owned`
+# (`tests/test_interposition.py`) still see it, because `__init__` binds
+# `self._rust_owned` to this constant.
+#
+# It is *not* a cache, and it must not become one in the mutable sense: the
+# tables are constants of the built artefact, so there is nothing to invalidate.
+# If a future milestone makes any of the three calls depend on runtime state,
+# this hoist is the line that goes wrong.
+
+# The names Rust has a real compile function for, which as of M12 is the
+# registry in *two* tables: `builtin_tag_names_including_stubs()` minus
+# `builtin_tag_stub_names()` — the built-ins — unioned with
+# `library_tag_names()`, the `django.templatetags` tags Rust compiles. The first alone is the built-in registry's *keys*,
+# and a stub is a key with a body that raises `Unimplemented`, so taking
+# it whole claimed `partial` and `partialdef` for Rust and the identity
+# clause below then declined them on the host's behalf — measured, that
+# is 245 failures in the 1547, every one of them
+# `'partial' is a built-in tag this engine does not implement yet (M13)`
+# where `template_tests.syntax_tests.test_partials` expected either a
+# render or Django's own syntax error.
+#
+# The subtraction is not a new rule, it is the one the rest of the tree
+# already uses: `tests/test_parser_parity.py` derives "implemented" as
+# `set(builtin_tag_names_including_stubs()) -
+# set(builtin_tag_stub_names())`, and `tests/test_tag_inventory.py`
+# pins the stub set. The host was the one place that read the keys as the
+# registry.
+#
+# **The subtraction is a no-op as of M13's Task 4**, because the stub set
+# is empty: every built-in in the table has a real body now. It stays
+# written this way rather than collapsing to the keys, because the
+# derivation is what makes the two agree by construction — a future
+# milestone that adds a half-built entry to the table gets the correct
+# answer from this line without anyone remembering to come back to it.
+# The subtrahend's derivation is pinned in Rust, one layer down:
+# `crates/template-core/src/parser/registry.rs`'s
+# `the_stub_derivation_is_not_a_copy_of_the_table` derives the stubs by
+# *asking each compile function* rather than reading a list, and hands
+# that derivation a fabricated table containing one stub so the row still
+# distinguishes it from a copy — with the live table's stub set empty, the
+# derivation and a hardcoded empty list give the same answer, which is the
+# one thing that row is for.
+# M12 widens this with the `django.templatetags` names Rust has a real
+# body for — `cache`, `static` and the two prefix tags, plus `tz`'s three
+# tag names as of Task 4, `l10n`'s one (`localize`) as of Task 5,
+# `i18n`'s eight as of Task 6a, and `blocktranslate`/`blocktrans` as of
+# Task 6b. That is the full eighteen: `library_tag_names()` is now every
+# name the five libraries register, so the library half of this union is
+# **0 of 18 Python's / eighteen Rust bodies**.
+#
+# **The union and the table are the same set now, and that was not so a
+# commit ago.** `library_tag_loaded` below answers `command in
+# parser.tags`, true for *every* name a loaded library contributes, and
+# the Rust arm it feeds compiles exactly when `LIBRARY_REGISTRY` has a
+# body for the name. Until Task 6b the two disagreed by
+# `blocktranslate`/`blocktrans`, and claiming them would have routed a
+# loaded `{% blocktranslate %}` past `has_tag`'s "the registered callable
+# is still Django's, so the host compiles it" clause into Rust's
+# `Invalid block tag` — a template Django renders, refused by us. Both
+# bodies are here now, so the coarse question and the body question give
+# the same answer for every library name.
+_RUST_OWNED = (
+    set(_native.builtin_tag_names_including_stubs())
+    - set(_native.builtin_tag_stub_names())
+) | set(_native.library_tag_names())
+
+
 class ShellHost:
     """The `has_tag`/`call_tag` pair for one parse.
 
@@ -460,62 +537,13 @@ class ShellHost:
 
     def __init__(self, parser):
         self.parser = parser
-        # The names Rust has a real compile function for, which as of M12 is the
-        # registry in *two* tables: `builtin_tag_names_including_stubs()` minus
-        # `builtin_tag_stub_names()` — the built-ins — unioned with
-        # `library_tag_names()`, the `django.templatetags` tags Rust compiles. The first alone is the built-in registry's *keys*,
-        # and a stub is a key with a body that raises `Unimplemented`, so taking
-        # it whole claimed `partial` and `partialdef` for Rust and the identity
-        # clause below then declined them on the host's behalf — measured, that
-        # is 245 failures in the 1547, every one of them
-        # `'partial' is a built-in tag this engine does not implement yet (M13)`
-        # where `template_tests.syntax_tests.test_partials` expected either a
-        # render or Django's own syntax error.
-        #
-        # The subtraction is not a new rule, it is the one the rest of the tree
-        # already uses: `tests/test_parser_parity.py` derives "implemented" as
-        # `set(builtin_tag_names_including_stubs()) -
-        # set(builtin_tag_stub_names())`, and `tests/test_tag_inventory.py`
-        # pins the stub set. The host was the one place that read the keys as the
-        # registry.
-        #
-        # **The subtraction is a no-op as of M13's Task 4**, because the stub set
-        # is empty: every built-in in the table has a real body now. It stays
-        # written this way rather than collapsing to the keys, because the
-        # derivation is what makes the two agree by construction — a future
-        # milestone that adds a half-built entry to the table gets the correct
-        # answer from this line without anyone remembering to come back to it.
-        # The subtrahend's derivation is pinned in Rust, one layer down:
-        # `crates/template-core/src/parser/registry.rs`'s
-        # `the_stub_derivation_is_not_a_copy_of_the_table` derives the stubs by
-        # *asking each compile function* rather than reading a list, and hands
-        # that derivation a fabricated table containing one stub so the row still
-        # distinguishes it from a copy — with the live table's stub set empty, the
-        # derivation and a hardcoded empty list give the same answer, which is the
-        # one thing that row is for.
-        # M12 widens this with the `django.templatetags` names Rust has a real
-        # body for — `cache`, `static` and the two prefix tags, plus `tz`'s three
-        # tag names as of Task 4, `l10n`'s one (`localize`) as of Task 5,
-        # `i18n`'s eight as of Task 6a, and `blocktranslate`/`blocktrans` as of
-        # Task 6b. That is the full eighteen: `library_tag_names()` is now every
-        # name the five libraries register, so the library half of this union is
-        # **0 of 18 Python's / eighteen Rust bodies**.
-        #
-        # **The union and the table are the same set now, and that was not so a
-        # commit ago.** `library_tag_loaded` below answers `command in
-        # parser.tags`, true for *every* name a loaded library contributes, and
-        # the Rust arm it feeds compiles exactly when `LIBRARY_REGISTRY` has a
-        # body for the name. Until Task 6b the two disagreed by
-        # `blocktranslate`/`blocktrans`, and claiming them would have routed a
-        # loaded `{% blocktranslate %}` past `has_tag`'s "the registered callable
-        # is still Django's, so the host compiles it" clause into Rust's
-        # `Invalid block tag` — a template Django renders, refused by us. Both
-        # bodies are here now, so the coarse question and the body question give
-        # the same answer for every library name.
-        self._rust_owned = (
-            set(_native.builtin_tag_names_including_stubs())
-            - set(_native.builtin_tag_stub_names())
-        ) | set(_native.library_tag_names())
+        # The Rust-owned name set is a module-level constant (`_RUST_OWNED`)
+        # because it does not vary per parse; see there for the derivation and
+        # for why the per-parse computation was 4.86 us of every compile. The
+        # instance binding is kept so `has_tag`'s membership test stays an
+        # instance-dict lookup, and so the tests that stage a name into
+        # `host._rust_owned` keep working.
+        self._rust_owned = _RUST_OWNED
         self._django_tags = django_own_tags()
         # The exception object `call_tag` last let past, for the shell to
         # re-raise by identity. `None` until one does. See `call_tag`.

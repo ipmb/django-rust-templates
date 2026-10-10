@@ -622,10 +622,10 @@
       like rather than three different templates — and the harness prints the engine it
       built, the extension it loaded and which profile built it, refusing to print a table
       for any other engine. Measured 2026-10-09 local, the day the report stamps its run in
-      UTC (2026-10-10 03:54): the port is <b>1.38× slower at render and
-      1.40× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
-      run 1.27×–1.48×), and the worst row in the corpus is compile of a template with no
-      nodes in it at all — <b>3.74×</b>, 14.7 µs against stock's 3.9 µs. Compatibility has
+      UTC (2026-10-10 04:02): the port is <b>1.36× slower at render and
+      1.35× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
+      run 1.26×–1.45×), and the worst row in the corpus is compile of a template that is
+      almost nothing but the call — <b>2.21×</b>, 8.64 µs against stock's 3.91 µs. Compatibility has
       been the priority throughout, and the measurement is published here rather than only
       the number that would flatter it. <b>Every chart, tile and table block states which
       way "better" runs</b>, and the word is read from the payload (<code>bench.py</code>'s
@@ -640,8 +640,8 @@
       <b>The micro family's rows say how much of themselves is the call, because the old note
       claimed one family where there are two.</b> Every row pays its engine's per-call
       overhead before it does any template work, and the overheads are not equal: measured,
-      stock Django and the port are both <b>1.73 µs</b> on a template that renders nothing and
-      Jinja2 is <b>3.52 µs</b>. So <code>bench.py</code> measures that empty-template
+      stock Django is <b>1.74 µs</b> on a template that renders nothing, the port is
+      <b>1.72 µs</b> and Jinja2 is <b>3.50 µs</b>. So <code>bench.py</code> measures that empty-template
       <b>floor</b> per engine and mode, prints it, and every table cell carries its
       <b>call share</b> — the floor as a share of that cell. The range settles the question
       the old note answered wrongly: over the micro rows it runs <b>2%–100%</b>, so
@@ -656,6 +656,24 @@
       inside a column claiming to be per-item work.
       (Both numbers are computed from the payload the table prints, not typed into a caption —
       the first draft of that caption said 51%–96% while the cells under it said 32%–100%.)
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>The compile floor was a per-parse Python set, not Rust work — and it is gone.</b>
+      Compilation was the port's worst row, and the cause turned out not to be in Rust at all:
+      <code>ShellHost.__init__</code> rebuilt its Rust-owned tag-name set on <i>every parse</i>,
+      from three argument-free <code>_native</code> calls over registry tables that are
+      compile-time constants. Nothing in that set varies per parse, so it is now a module-level
+      constant — a pure speedup, not a behaviour change (the tests that read
+      <code>host._rust_owned</code> still pass unchanged). Measured with the report's own
+      instrument, the port's empty-template <code>parse</code> floor — compile plus render, the
+      row the table prints — fell from <b>12.37 µs to 6.44 µs</b>, i.e. <b>3.7× stock to 1.90×</b>;
+      compiled with no render at all (<code>from_string("")</code>) it fell <b>9.89 µs to
+      4.38 µs</b>, <b>6.8× to 3.0×</b>. The corpus's worst row, <code>micro/text</code>
+      parse, went from <b>3.74× to 2.21×</b>. Render is untouched — its floor is unchanged at
+      1.72 µs — because the hoisted set is read only on the compile path. The two compile
+      figures are different estimators and are quoted apart deliberately: the report's
+      <code>parse</code> mode is compile <i>and</i> render, so the ratio it prints for an
+      empty template is about half the compile-only one.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>That figure holds only for an optimised build, and saying which build is now part
