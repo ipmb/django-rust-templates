@@ -750,14 +750,17 @@
       <code>parse</code> — the inverse of the filter-routing row above. The port now
       <b>beats stock Django on <code>real-world/normal</code> render</b> (0.95×) and ties it
       on <code>large</code> (1.00×).
-      On §1.2's own per-variable instrument — <b>rebuilt</b>, because the copy the review
-      kept under <code>.review/m19-measurements/</code> no longer exists — <b>the slice's
-      number finally sits beside §2's prediction</b>: <b>1.387 (N=50) / 1.407 (N=200) µs
-      per variable before, 0.731 / 0.731 after</b> (a second run on the same commit gave
-      0.758 / 0.757, so the slice is −47% ± 2 pts), against a predicted <b>0.34 µs</b>.
-      <b>~0.39 µs of the gap remains — 53% of it.</b> Stock is flat at 1.077 either way,
-      so ours/stock on this instrument moves <b>1.28× → 0.68×</b>: the port now beats
-      stock per variable, where before this slice it lost.
+      On §1.2's own instrument —
+      <code>.review/m19-measurements/production_render_path.py</code> §2, which is still
+      in the tree — run against a control that is <b>the same file at
+      <code>8d1e74b</code></b>, same extension (<code>sha256:df7413aa6eeeb7b3</code>), same
+      interpreter, so only <code>engine/base.py</code> differs between the columns:
+      <b>1.416 (N=50) / 1.385 (N=200) µs per variable before, 0.732 / 0.729 after</b>
+      — <b>−48%</b> — and <b>the slice's number finally sits beside §2's prediction</b>:
+      <b>0.73 µs against a predicted 0.34</b>. <b>~0.39 µs of the gap remains — 53% of
+      it.</b> Stock is ~1.07 µs either side, so ours/stock on this instrument moves
+      <b>1.30× → 0.69×</b> (medians over 5 rounds; ranges 1.274–1.305 and 0.678–0.693):
+      the port now beats stock per variable, where before this slice it lost.
       <b>The factor that is left is not overhead.</b> On a template that renders nothing the
       port is 1.73 µs against Jinja2's 3.45 µs, yet Jinja2 renders every whole page
       <b>2.4×–3.4× faster</b> — so the remaining gap is per-node work in the Python walk,

@@ -567,15 +567,18 @@ the identity check are **not** re-specified here — §0's correction.
    takes an exact-`str` fast path into Rust's `html_escape` and declines
    everything else (subclasses, lone surrogates) to the slow path unchanged, so
    only the ~0.76 µs row of §1.2's table is in play and the lookup and the Python
-   frames are still there to measure against. On §1.2's instrument — rebuilt,
-   since the original lived under `.review/m19-measurements/`, which no longer
-   exists — **§2's prediction is now checkable, and this is the number beside it:
-   0.73 µs per variable against a predicted 0.34.** Ours was 1.387 (N=50) /
-   1.407 (N=200) before the slice and 0.731 / 0.731 after; a second run of the
-   same instrument on the same commit gave 0.758 / 0.757, so the slice is
-   **−47% ± 2 pts** and **~0.39 µs of the gap remains — 53% of it**. Stock is flat
-   at 1.077 both ways, so ours/stock on this instrument moves **1.28× → 0.68×**:
-   the port now beats stock per variable, where before the slice it lost. The
+   frames are still there to measure against. **§2's prediction is now
+   checkable, and this is the number beside it: 0.73 µs per variable against a
+   predicted 0.34.** Measured on §1.2's own instrument —
+   `.review/m19-measurements/production_render_path.py` §2, which is still in the
+   tree, run against a control that is the same file at `8d1e74b`: **1.416
+   (N=50) / 1.385 (N=200) µs per variable before, 0.732 / 0.729 after**, so the
+   slice is **−48%**, and **~0.39 µs of the gap remains — 53% of it**. Stock is
+   ~1.07 µs either side, so ours/stock on this instrument moves **1.30× (median
+   over 5 rounds, range 1.274–1.305) → 0.69× (0.678–0.693)**: the port now beats
+   stock per variable, where before the slice it lost. Both sides ran the same
+   extension (`sha256:df7413aa6eeeb7b3`) on the same interpreter (3.14.4), so the
+   only thing that differs between the two columns is `engine/base.py`. The
    render/parse pair moves together (micro/escape render 3.485 → 2.793 µs and its
    parse row with it), which is the signature of a per-render cost and the exact
    inverse of the filter-routing row above — the one that was per-compile and so
