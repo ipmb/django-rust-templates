@@ -35,22 +35,48 @@ import sys
 from pathlib import Path
 
 # The cells this slice should move, with the mechanism, and the cells that must
-# not.  Both lists are read off `node_census.slice2-before.txt` against
-# `node_census.step5-slice2.txt`, not guessed: these are the only two rows whose
-# partition changed, and the two rows whose `{% for %}` is asserted to still
-# refuse.
-SUBJECT = {
+# not.  Both lists are read off the census partitions, not guessed.
+#
+# **Slice 2's lists.**  The two rows whose partition changed were the two loops
+# that gained a delegate-bearing body, and the two asserted to still refuse were
+# `complex` (a nested `{% for %}`) and `for-tags` (a `forloop` read).
+#
+# **Slice 3's lists invert those two roles, which is the whole point of the
+# slice.**  `real-world/complex`'s outer loop no longer refuses, so it is the
+# subject; `django-only/for-tags` still refuses — for the *other* reason, its
+# body's own `{{ forloop.counter }}` — so it is the control that says the
+# refusal `sealable` keeps is still the one that fires.  Every other row is a
+# control, which for this slice is a much larger population than slice 2's 46:
+# `real-world/complex` is the only corpus row with a nested loop (verified over
+# all 18 workloads: max `for`-nesting depth 2, 1 row), so nothing else can act.
+SUBJECT_SLICE2 = {
     ("django-only/realistic", "render"): "loop body holds `{% blocktranslate %}` -> seals",
     ("django-only/realistic", "parse"): "same loop, reached by `from_string` too",
     ("django-only/i18n", "render"): "loop body holds `{% translate %}` -> seals",
     ("django-only/i18n", "parse"): "same loop",
 }
-REFUSAL = {
+REFUSAL_SLICE2 = {
     ("real-world/complex", "render"): "outer body holds a nested `{% for %}` -> must still refuse",
     ("real-world/complex", "parse"): "same loop, must still refuse",
     ("django-only/for-tags", "render"): "body references `forloop` -> must still refuse",
     ("django-only/for-tags", "parse"): "same loop, must still refuse",
 }
+SUBJECT_SLICE3 = {
+    ("real-world/complex", "render"): "nested `{% for %}` seals -> the inner loop leaves Python",
+    ("real-world/complex", "parse"): "same loop; parse is compile + a cold render, so it owes this too",
+}
+REFUSAL_SLICE3 = {
+    ("django-only/for-tags", "render"): "body reads `forloop` -> the refusal that stays must still fire",
+    ("django-only/for-tags", "parse"): "same loop, must still refuse",
+}
+
+# Which slice's lists this run reports.  The two sets are kept rather than
+# overwritten because the slice-2 output beside it (`cross_build_floor.slice2.txt`)
+# is the record of a run this file made, and a file edited in place would leave
+# that record describing a script that no longer exists.
+SLICES = {"slice2": (SUBJECT_SLICE2, REFUSAL_SLICE2), "slice3": (SUBJECT_SLICE3, REFUSAL_SLICE3)}
+SLICE = "slice3"
+SUBJECT, REFUSAL = SLICES[SLICE]
 
 
 def ratios(pay):

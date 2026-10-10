@@ -1,0 +1,30 @@
+### cross_build_floor.py (slice2 pair = before, slice3 pair = after)
+before: 2 run(s), artifact sha256:1ec2563e926cb649
+after: 2 run(s), artifact sha256:e6a72702ba5877cb
+  before same-build scatter |rel|: median 1.06%  p90 2.67%  max 3.91%
+  after  same-build scatter |rel|: median 0.67%  p90 1.47%  max 2.71%
+
+cells compared: 54
+  named subject/refusal: 4
+  control (this change cannot act): 50
+
+CONTROL floor, cross-build, 50 cells the change cannot reach:
+  median 0.84%   p90 1.61%   max 2.51%  (micro/escape compile)
+  every named delta below has to clear the max to be a move
+
+--- SUBJECT (must move)
+  MOVE real-world/complex parse             -3.98%   same loop; parse is compile + a cold render, so it owes this too
+  MOVE real-world/complex render            -3.38%   nested `{% for %}` seals -> the inner loop leaves Python
+
+--- REFUSAL (must not move)
+       django-only/for-tags parse           +0.27%   same loop, must still refuse
+       django-only/for-tags render          +0.14%   body reads `forloop` -> the refusal that stays must still fire
+
+--- CONTROL cells furthest from zero (the floor's right tail, named)
+     micro/escape compile                 -2.51%
+     micro/if parse                       -2.01%
+     micro/text compile                   +1.92%
+     django-only/escape-table compile     +1.78%
+     micro/loop-var compile               +1.64%
+     micro/filter render                  -1.61%
+FLOOR EXIT: 0

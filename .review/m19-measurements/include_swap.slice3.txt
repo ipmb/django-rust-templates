@@ -1,0 +1,13 @@
+### include_swap.py on the slice-3 build (sha256:e6a72702ba5877cb)
+iters=200 repeats=7, django 6.0.9 pin, best-of-7
+swapped out: '<tr><td>{{ line.sku|upper }}</td><td>{{ line.note }}</td><td>{{ line.qty }}</td></tr>'
+
+engine   variant             us         sha256  vs jinja2
+------------------------------------------------------------
+rust     include          528.8   de9ea13d5279       1.54
+jinja2   include          344.5   de9ea13d5279       1.00
+rust     inlined          189.5   de9ea13d5279       1.02
+jinja2   inlined          186.4   de9ea13d5279       1.00
+
+removing the 72 inner includes: ours -339.4 us, jinja2 -158.1 us -> ours pays +181.2 us more than jinja2 for the include path
+SWAP EXIT: 0

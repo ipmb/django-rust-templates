@@ -612,20 +612,21 @@
       green.
     </p>
     <p class="sub" style="margin-top:16px">
-      <b>Speed is measured, and is not yet a win.</b> The port is checked against stock
-      Django 6.0.9 and Jinja2 on 18 workloads × 2 modes = 36 rows in three families — micro templates
+      <b>Speed is measured, and the port wins render and parse on the real-world pages while
+      compile of them still loses.</b> The port is checked against stock
+      Django 6.0.9 and Jinja2 on 18 workloads × 3 modes = 54 cells in three families — micro templates
       that isolate one construct each, three "real-world" whole pages of increasing
       complexity, and the constructs that fall outside the three engines' shared syntax.
       <code>scripts/bench.py --html</code> writes <code>docs/bench.html</code>: charts, a
       table, and the provenance for every row. Each row hashes the bytes each engine
-      rendered — <b>26 of 26 three-engine rows byte-agree</b>, so the comparison is like for
+      rendered — <b>39 of 39 three-engine rows byte-agree</b>, so the comparison is like for
       like rather than three different templates — and the harness prints the engine it
       built, the extension it loaded and which profile built it, refusing to print a table
-      for any other engine. Measured 2026-10-09 local, the day the report stamps its run in
-      UTC (2026-10-10 04:49): the port is <b>1.02× at render and
-      1.14× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
-      run 0.95×–1.27×), and the worst row in the corpus is compile of a template that is
-      almost nothing but the call — <b>2.23×</b>, 8.81 µs against stock's 3.95 µs. Compatibility has
+      for any other engine. Measured 2026-10-10 local, the day the report stamps its run in
+      UTC (2026-10-10 11:02): the port is <b>0.39× at render and
+      0.75× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
+      run 0.30×–1.11×), and the worst row in the corpus is compile of a template that is
+      almost nothing but the call — <b>3.52×</b>, 6.73 µs against stock's 1.91 µs. Compatibility has
       been the priority throughout, and the measurement is published here rather than only
       the number that would flatter it. <b>Every chart, tile and table block states which
       way "better" runs</b>, and the word is read from the payload (<code>bench.py</code>'s
@@ -633,15 +634,19 @@
       inherit the wrong direction silently. The fastest-engine tile is scoped for the same
       reason: counted over every row it used to read "django 19, jinja2 7", which reads as
       <i>Django is faster</i>, while <b>Jinja2 wins every whole-page render</b> at
-      0.30×–0.41× stock's time. Both are true; <code>parse</code> is where they invert,
+      0.30×–0.42× stock's time. Both are true; <code>parse</code> is where they invert,
       because Jinja2 compiles to Python source and Django does not.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>The micro family's rows say how much of themselves is the call, because the old note
       claimed one family where there are two.</b> Every row pays its engine's per-call
       overhead before it does any template work, and the overheads are not equal: measured,
-      stock Django is <b>1.73 µs</b> on a template that renders nothing, the port is
-      <b>1.73 µs</b> and Jinja2 is <b>3.45 µs</b>. So <code>bench.py</code> measures that empty-template
+      stock Django is <b>1.70 µs</b> on a template that renders nothing, the port is
+      <b>1.84 µs</b> and Jinja2 is <b>3.45 µs</b> — so the port's empty-render call is
+      <i>above</i> stock's, not level with it. That is a correction: this sentence read
+      1.73/1.73 when it was written, and the port's figure is 1.81–1.85 across six runs
+      on both sides of step 5's slices, i.e. the render walk raised it and step 5 did
+      not, while stock and Jinja2 are unmoved. So <code>bench.py</code> measures that empty-template
       <b>floor</b> per engine and mode, prints it, and every table cell carries its
       <b>call share</b> — the floor as a share of that cell. The range settles the question
       the old note answered wrongly: over the micro rows it runs <b>2%–100%</b>, so
@@ -1190,6 +1195,69 @@
       banners green. Nothing the slice changes is on a path the vendored suite reaches
       differently — a seal decision and a boolean — and that is what makes the ratios above safe
       to read as a pure render saving.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>A nested <code>{% for %}</code> now seals too, and the rule that unsealed it turned out
+      not to be about delegates at all.</b> Slice 2's refusal keyed on "the body holds a node
+      Python still renders", which was a proxy: what a loop body actually needs is Django's
+      per-iteration context state, because the inner loop's sequence resolves through the
+      <i>context</i> (<code>{% for line in s.lines %}</code> needs <code>s</code> there, not only
+      in the frame) and because a nested loop that reads <code>forloop</code> wants
+      <code>parentloop</code>. So the predicate is renamed <code>needs_context_state</code> and
+      answers <code>true</code> for <code>Act::For</code> as well as <code>Act::Delegate</code>.
+      The row that moves is <code>real-world/complex</code>, the corpus's only depth-2 loop over
+      all 18 workloads: the census goes <b>516/524 nodes (1.5% delegated) → 625/704 (11.2%)</b>,
+      its outer <code>ForNode</code> leaves <code>delegated:</code>, thirteen <code>ForNode</code>s
+      and twelve <code>IfNode</code>s join <code>handled:</code>, <code>applied:</code> gains
+      <code>title=12</code> (the section head the delegate used to run), and the meter that says
+      Rust actually computed it rather than merely routed it — <code>body xings:</code> — goes
+      <b>0 → 12</b>.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>The win is small and the slice says why rather than rounding it up: the loop it
+      un-delegated has 72 <code>{% include %}</code> tags in its body.</b> Cross-build the move is
+      render <b>0.613× → 0.599×</b> (−3.38%) and parse <b>0.694× → 0.673×</b> (−3.98%), both
+      clearing a floor whose max is 2.51% over the 50 cells the change cannot reach — while the
+      refusal that stays (<code>django-only/for-tags</code>, a body reading <code>forloop</code>)
+      reads +0.14%/+0.27%, inside it. A construct ladder over the page is what explains the size:
+      inlining the 72 inner includes moves the row from <b>1.49× Jinja2 to 0.98×</b> — ours falls
+      327.6 µs, Jinja2 156.3 — so the include path costs us ~171 µs more than Jinja2, and sealing
+      the loop only changed <i>who drives</i> those 72 calls. <b>The prediction for this slice had
+      priced them the other way round</b>, reading <code>include_swap.py</code>'s slice-2 value
+      (+77.2 µs <i>in our favour</i>); the same probe on this build reads <b>−181.2</b>. Both
+      numbers are right and they measure two routes — on slice 2 the includes were called from
+      inside a delegated Python <code>ForNode</code> — which is the project's own
+      "a measurement names a code path" lesson, now bought with a prediction that missed
+      (0.55–0.65× predicted, 1.49× measured).
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>The rename is load-bearing, and a mutant says so.</b> Keeping <code>sealable</code> as it
+      is but dropping <code>Act::For</code> from <code>needs_context_state</code> produces a build
+      that seals the outer loop without writing <code>context[loopvar]</code>, so the inner loop's
+      sequence resolves to nothing: <b>13 of 17</b> nested-loop shapes render <i>empty</i> instead
+      of raising, and the vendored suite catches it independently with <b>3 failures</b>, all
+      nested-<code>for</code> <code>regroup</code> sites. The parity probe that found them renders
+      17 nested-loop templates (direct nesting, <code>parentloop</code> two deep, an inner loop in
+      an <code>{% if %}</code>, an empty inner, a refused filter in the inner, three-deep nesting)
+      under stock and this build and requires byte-identical output; on the shipped artifact it is
+      <b>17/17 ok</b>. Its silent-truncation signature is the point: a regression here produces
+      empty output, not an exception, which an exception-based gate would miss.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>What this slice did not do, priced.</b> The per-render
+      <code>get_nodes_by_type(BlockNode)</code> walk over an inherited page's parent is still paid
+      every render, and <code>ExtendsNode.render</code> is still a delegate — <code>micro/extends</code>
+      is unchanged and is the control that says so. The walk is worth 2.18% of
+      <code>normal</code>, 0.60% of <code>complex</code>, 0.56% of <code>realistic</code> and
+      23.19% of the 11.6 µs <code>micro/extends</code> row — real only on the row that is almost
+      nothing but the call — and it is deferred because its natural site,
+      <code>NodeList.get_nodes_by_type</code>, is on the compared path and needs a
+      <code>TRANSFORMS</code> row for the generated <code>loader_tags.py</code> verified to be
+      picking the new line up. The corpus aggregate barely moves, which is the honest headline:
+      the report on this build reads render <b>0.39×</b>, parse <b>0.75×</b>, compile <b>1.36×</b>
+      ours-vs-stock real-world, <b>39/39</b> three-engine rows byte-agreeing. Acceptance is
+      unmoved: <b>1547 tests, OK (skipped=6)</b>, the six skips by identity, differential harness
+      48 cases identical.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>Until M18 it was a substitution, and that machinery is gone.</b> Earlier revisions of

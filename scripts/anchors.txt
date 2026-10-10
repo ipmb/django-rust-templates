@@ -53,7 +53,7 @@ crates/template-py/src/lib.rs:2149	crates/template-py/src/lib.rs	2149	-	let resu
 crates/template-py/src/lib.rs:2170	crates/template-py/src/lib.rs	2170	-	Python::attach(|py| self.dir(py, bit))	-
 crates/template-py/src/lib.rs:2716-2717	crates/template-py/src/lib.rs	2716	2717	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
 crates/template-py/src/lib.rs:2773-2778	crates/template-py/src/lib.rs	2773	2778	fn resolve_lookups(	resolve_components(py, &lookups, context)
-crates/template-py/src/lib.rs:4868	crates/template-py/src/lib.rs	4868	-	fn render_value_in_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {	-
+crates/template-py/src/lib.rs:4917	crates/template-py/src/lib.rs	4917	-	fn render_value_in_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-

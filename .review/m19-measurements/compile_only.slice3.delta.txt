@@ -1,0 +1,22 @@
+### compile_only_delta.py: slice2-after{,-b,-c} (1ec2563e) -> slice3-after{,-b,-c} (e6a72702)
+### both sides: 5 default micro rows + 6 corpus rows, 11 rows, 2 NOT MEASURED (i18n) on both sides
+before: 3 run(s), sha256:1ec2563e926cb649 (2720496 bytes)
+after: 3 run(s), sha256:e6a72702ba5877cb (2720544 bytes)
+
+cross-build delta, ours/stock, median of each side's runs; each row judged
+against its own scatter over the 3/3 runs a side (the larger of its two sides), not the page's:
+  row                     before   after    delta   own band  verdict
+  micro/extends            1.443   1.470   +1.87%      2.44%  inside
+  micro/variable           2.106   2.137   +1.47%      3.03%  inside
+  micro/filter             1.649   1.628   -1.27%      2.67%  inside
+  micro/if                 2.086   2.109   +1.10%      1.82%  inside
+  micro/loop-text          1.572   1.558   -0.89%      3.14%  inside
+  django-only/for-tags     1.273   1.277   +0.31%      1.75%  inside
+  micro/text               3.578   3.569   -0.25%      2.19%  inside
+  real-world/normal        1.346   1.348   +0.15%      1.51%  inside
+  real-world/complex       1.254   1.254   +0.00%      1.93%  inside
+
+  same-build scatter, before side: median 1.95%  max 3.14%
+  same-build scatter, after  side: median 1.82%  max 3.03%
+  rows whose own band is exceeded: 0  (none)
+DELTA EXIT: 0

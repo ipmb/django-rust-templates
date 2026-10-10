@@ -1,0 +1,31 @@
+### complex_ladder.py on the slice-3 build (sha256:e6a72702ba5877cb)
+iters=200 repeats=7 best-of-7, django 6.0.9 pin
+
+rung               rust us  jinja us  ours/them   d rust  d jinja  d ours-them
+------------------------------------------------------------------------------
+full                 509.3     341.6       1.49        -        -            -
+no-include           181.7     185.3       0.98   -327.6   -156.3       -171.2
+no-inner              61.4      44.1       1.39   -120.3   -141.1        +20.8
+no-outer-head         50.4      28.7       1.76    -10.9    -15.5         +4.5
+bare-section          30.2      19.0       1.59    -20.3     -9.7        -10.6
+
+digest prefixes (rust == jinja2 on every rung):
+  full             de9ea13d52
+  no-include       de9ea13d52
+  no-inner         6dd55369f2
+  no-outer-head    ca0f48c03f
+  bare-section     673cb48134
+
+Every rung: rust and jinja2 rendered the same bytes (sha256 prefix per row above is the pair, and they matched). `d ours-them` is the change in
+(ours - jinja2) when this rung's construct is removed, i.e. jinja2's cost
+for the construct minus ours; a NEGATIVE number is a construct we pay more
+for, and the rungs before it can be read as the page's floor.
+
+That sign convention is a correction. Both this file and `include_swap.py`
+printed the opposite word until step 5 slice 3: `d ours-them` is
+`d_rust - d_jinja` = `(ours_inlined - ours_full) - (jinja2_inlined -
+jinja2_full)`, which is `C_jinja2 - C_ours` for the construct, so it is
+negative when the construct costs us more. The slice-2 record read the
+slice-2 value (+77.4) correctly as "jinja2's disadvantage" while the caption
+under the table said the reverse; the number was never wrong, its label was.
+LADDER EXIT: 0
