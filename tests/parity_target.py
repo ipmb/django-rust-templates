@@ -133,9 +133,15 @@ def assert_target_is_not_rust_owned(testcase, target, module_name):
     # `extend_nodelist`, `compile_filter`, `invalid_block_tag` and every tag's
     # compile function, so a region declared inside a helper is on the compared
     # path while sitting outside `parse`'s own lines. The measured reach for
-    # `base.py` is 29 functions spanning lines 116-1181 — nearly the whole
-    # module — so for a transcription with a `COMPARED_PATH` entry the practical
-    # rule is that no region may be in the module body at all.
+    # `base.py` is **30 functions spanning lines 118-1302** — nearly the whole
+    # module (1302 lines) — so for a transcription with a `COMPARED_PATH` entry
+    # the practical rule is that no region may be in the module body at all.
+    # **Both numbers in this sentence were stale and are re-measured here**: it
+    # read "29 functions spanning lines 116-1181", which is the count *before*
+    # the instrument learned to see through `staticmethod` (`args_check`) and a
+    # span three arms old. `tests/compared_path.py`'s docstring had already
+    # flagged this copy as unverified; it is the same sentence in two files, so
+    # a re-quote that lands in one of them is the state this file was in.
     compared = guard.COMPARED_PATH.get(key, [])
     executed = [
         (label, first_line, last_line)

@@ -2469,7 +2469,7 @@ fn log_resolution_failure(
 /// comparison's Python side, Django's — and routing the five harnesses through
 /// the shell's `_resolve_lookup` changes **our** side, not the target, which
 /// stays the ast-extraction out of the pinned checkout
-/// (`tests/parity_target.py:171`). That is the whole job of
+/// (`tests/parity_target.py:177`). That is the whole job of
 /// `pinned_resolve_lookup()`, so the guard would be satisfied and unmoved. The
 /// sentence conflated the side under test with the oracle.
 ///

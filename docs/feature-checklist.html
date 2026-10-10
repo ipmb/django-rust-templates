@@ -777,6 +777,74 @@
       wider than one filter, and it is recorded rather than repaired inside a speed commit.
     </p>
     <p class="sub" style="margin-top:16px">
+      <b>The next leaf down was the <code>int</code>, and it was the largest per-value cost
+      in the engine — 3.42 µs, more than four times a plain <code>str</code>.</b> Django's
+      own <code>numberformat.format</code> has a fast path for exactly this input
+      (<code>if isinstance(number, int) and not use_grouping and not decimal_pos: return
+      mark_safe(number)</code>), but <code>render_value_in_context</code> reaches it through
+      <code>template_localtime</code> → <code>localize</code> → <code>number_format</code>,
+      and <b>3.0 of the 3.42 µs is <code>get_language()</code> and three
+      <code>get_format()</code> calls whose answer that fast path then ignores</b>. Those two
+      statements run <i>before</i> the autoescape branch, so this is a placement question
+      rather than a micro-optimism: the arm sits above both. Its predicate is the exact type
+      plus <code>context.use_l10n is False or not settings.USE_THOUSAND_SEPARATOR</code>, and
+      it <b>declines in exactly the four settings states where grouping could change the
+      answer</b> — <code>USE_THOUSAND_SEPARATOR</code> on, with a default
+      <code>use_l10n</code>, still renders <code>'12,345'</code> through Django's own path.
+      Measured on <code>int_fast_path.py</code> (best of 7, one run, release extension): the
+      same call falls <b>3.42 → 0.40 µs</b>, and <b>28.9% of the values a real-world page
+      resolves</b> in this engine's own render are exact <code>int</code> — 385 of 1330,
+      against stock's 185 of 1077 on the same corpus.
+      <b>A type defect was found on the way and is fixed rather than recorded.</b> With
+      <code>autoescape=False</code>, upstream's answer for an exact <code>int</code> is
+      <code>str(localize(value))</code>, and <code>str()</code> is the <i>identity</i> on the
+      <code>SafeString</code> that <code>mark_safe(number)</code> returned — so the answer is
+      a <code>SafeString</code> unless <code>use_l10n is False</code>. The first version of
+      the arm returned a plain <code>str</code> in both cases. <b>No render of any template
+      can see it</b> (<code>NodeList.render</code> joins), the first draft of the probe ran
+      one autoescape setting and printed <code>agree</code> on every row, and it took a
+      <code>(repr, type)</code> comparison under <code>autoescape=False</code> to find. The
+      row that pins it now asserts the type beside the characters across all eight settings
+      states, and was confirmed to fail on the old code — six assertions, one per value —
+      before it was kept.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>The differential harness was reporting a green it had not earned, and that is worth
+      a line more than the fix.</b> It renders 48 cases through both engines and compares the
+      results; <b>11 of the 48 resolve an <code>int</code></b>, and with settings
+      unconfigured both engines <i>refuse</i> to render one — so those 11 columns were two
+      <code>ImproperlyConfigured</code> reprs, matching because both engines read the same
+      setting first. The case was covering nothing, and it said so only when the first
+      setting read changed, which the <code>int</code> arm did. The harness now configures
+      settings (48 of 48 identical, the 11 comparing <code>'12345'</code> against
+      <code>'12345'</code>), and the divergence it exposed is <b>pinned rather than
+      hidden</b>: a row runs both engines in a fresh interpreter with no settings and asserts
+      that ours names <code>USE_THOUSAND_SEPARATOR</code> where stock names
+      <code>USE_I18N</code>.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>A value Django renders, this engine refuses — and the crossing is one line.</b>
+      Rust's <code>&amp;str</code> is UTF-8 and a Python <code>str</code> is not, so
+      <code>crates/template-py/src/filters.rs:156</code>'s
+      <code>obj.cast::&lt;PyString&gt;()?.to_str()</code> cannot hold a lone surrogate. Measured
+      (census in <code>surrogate_boundary.py</code>): <b>all 57 built-in filter names raise
+      <code>UnicodeEncodeError</code> on <code>'\ud800'</code></b> — 37 of them take only the
+      value and raise, the 20 that take an argument raise with one supplied — where Django's own
+      body answers <b>33 of those 37</b>. So <code>{{ x|upper }}</code> with
+      <code>x = '\ud800'</code> raises here and renders <code>'\ud800'</code> in stock; that is
+      a drop-in divergence reachable from a public template today, not a step-2 risk.
+      <b>The refusal pattern is one function away and this milestone already uses it</b>:
+      <code>{{ x }}</code> renders that same value, because <code>_native.html_escape</code>
+      returns <code>None</code>, the arm reads it as "go the long way", and Django's
+      <code>conditional_escape</code> answers. For filters the fall-through already exists —
+      <code>engine/base.py:862</code> routes to <code>_native.filter</code> only when the name
+      is a builtin, and the <code>else</code> path is Django's own callable — so the repair is
+      to make the seam say "I cannot hold this value" instead of raising from inside
+      <code>to_str()</code>. <b>Ordered before the walk and as its own commit</b>: the walk
+      crosses this boundary per node and must know whether it crosses with a refusal path, and
+      a correctness fix folded into a speed change makes the speed number unreviewable.
+    </p>
+    <p class="sub" style="margin-top:16px">
       <b>That figure holds only for an optimised build, and saying which build is now part
       of the harness.</b> <code>pip install</code> compiles the extension with
       <code>--release</code>; <code>maturin develop</code>, which is what a development

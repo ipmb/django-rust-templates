@@ -59,6 +59,7 @@ import warnings
 from enum import Enum
 
 from .context import BaseContext
+from django.conf import settings
 from django.utils.deprecation import django_file_prefixes
 from django.utils.formats import localize
 from django.utils.html import conditional_escape
@@ -1183,6 +1184,43 @@ def render_value_in_context(value, context):
         escaped = _native.html_escape(value)
         if escaped is not None:
             return SafeString(escaped)
+    # §2's other large line, and the same shape. An exact `int` is a no-op for
+    # `localize` whenever grouping is off, because `numberformat.format` has its
+    # own fast path -- `if isinstance(number, int) and not use_grouping and not
+    # decimal_pos: return mark_safe(number)` -- which returns the *int*, so the
+    # only thing that ever makes it a string is the `str()` below, in this
+    # function. Upstream still pays `get_language()` and three `get_format()`
+    # calls to arrive at that line: 3.34 us against this arm's 0.385, measured
+    # on `int_fast_path.py` §2. `use_grouping` is `use_l10n and
+    # settings.USE_THOUSAND_SEPARATOR and grouping != 0`, and the two disjuncts
+    # below cover it -- the first because `localize` short-circuits on
+    # `use_l10n is False` before `number_format` is entered at all, the second
+    # because the setting alone makes `use_grouping` false whatever the locale
+    # says. A locale that sets `NUMBER_GROUPING` to 0 reaches `mark_safe(number)`
+    # upstream even with `USE_THOUSAND_SEPARATOR` on and takes the slow path
+    # here: we lose the win, never the answer. Exact type again, and here it
+    # also excludes `bool`, which `localize` sends down its own arm.
+    if type(value) is int and (
+        context.use_l10n is False or not settings.USE_THOUSAND_SEPARATOR
+    ):
+        text = str(value)
+        if context.autoescape:
+            escaped = _native.html_escape(text)
+            if escaped is not None:
+                return SafeString(escaped)
+            return conditional_escape(text)
+        # **The unescaped answer is not always a plain `str`, and which one it
+        # is tracks *why* the arm fired.** Upstream's last statement here is
+        # `str(value)`, over whatever `localize` returned: for `use_l10n is
+        # False` that is `localize`'s own `str(value)` (plain), but otherwise it
+        # is `numberformat.format`'s `mark_safe(number)` — and `str()` is the
+        # identity on a `SafeString`, so the answer is a `SafeString`. Measured
+        # for all four settings states in `int_fast_path.py` §1; the render
+        # output is the same string either way, so only a type comparison sees
+        # it, which is why this comment is the whole cost of being exact.
+        if context.use_l10n is False:
+            return text
+        return mark_safe(text)
     value = template_localtime(value, use_tz=context.use_tz)
     value = localize(value, use_l10n=context.use_l10n)
     if context.autoescape:

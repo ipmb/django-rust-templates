@@ -86,10 +86,47 @@ def render_all(mode: str) -> dict[str, str]:
     Exceptions are captured as their repr rather than raised, so that error
     *behaviour* — types and messages — is compared too. A template that should
     raise `TemplateSyntaxError` is as much a case as one that renders.
+
+    **Settings are configured, and until M19's `int` arm this harness ran with
+    none.** That is the whole reason the line is here, and the measurement is
+    what makes it more than tidiness: of the **48** cases, **11** render a value
+    whose type is `int` — `integer_literal`, `a_bare_number`, the three
+    `for_*` loops (the counter), `length_filter` and `add_filter` (both return
+    one), `ifchanged_tag`, `nested_for` and two more — and with settings
+    unconfigured *both* engines refuse to render those at all, because
+    `render_value_in_context` reaches `number_format` and `get_format` reads a
+    setting. So the two columns were **two `ImproperlyConfigured` reprs**, and
+    they matched because both engines read the same setting first. The case was
+    covering nothing and said so only when the first setting read changed.
+
+    That is exactly what M19's `int` arm does: the arm reads
+    `settings.USE_THOUSAND_SEPARATOR` *before* the slow path reaches
+    `get_language()`'s `USE_I18N`, so the 11 reprs parted — `11 of 48 cases
+    differ`, both sides naming a setting rather than rendering a number. That
+    was the first thing the harness had ever said about those cases, and what it
+    said was that it had never been showing their output.
+
+    Configured, the same corpus is **48 of 48 identical**, and the 11 now compare
+    `'12345'` against `'12345'` instead of one error string against another. The
+    settings are the tree's shared helper rather than a local `configure(...)`,
+    for the reason `scripts/filter_probe.py` gives: `USE_I18N` and
+    `django.setup()` are two separate requirements and a hand-built fixture got
+    it wrong for the benchmark harness once already.
+
+    **The unconfigured behaviour is not deleted with the fixture — it is pinned
+    where it can be seen.** `tests/test_base_parity.py`'s
+    `UnconfiguredSettingsTests` runs both engines in a fresh interpreter with no
+    settings and asserts the pair: same exception type, and ours naming
+    `USE_THOUSAND_SEPARATOR` where stock names `USE_I18N`. A divergence that a
+    harness change hides is worse than one the harness reports.
     """
     import importlib
 
     sys.path.insert(0, str(CASES_DIR))
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from filter_probe import ensure_settings  # noqa: PLC0415
+
+    ensure_settings()
     import cases  # noqa: PLC0415  (deliberately late; path set up above)
 
     from django.template import Context

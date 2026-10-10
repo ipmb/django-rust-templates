@@ -209,18 +209,23 @@ class DescriptorCountingTests(unittest.TestCase):
         from tests.compared_path import definitions
 
         base_defs = definitions(base)
-        # 892, not 860: M19's routing cache inserts 23 lines inside
+        # 893, not 860: M19's routing cache inserts 23 lines inside
         # `FilterExpression.resolve`, which is above this `def` and below the
         # nineteen functions the M16 note shifts by +1, so this one moved by
         # **+24**; the `if self.filters:` guard then adds 8 more at the same
-        # place, so it moved by **+32** in all. Both numbers are re-measured, not
-        # shifted by arithmetic.
-        self.assertEqual(base_defs["FilterExpression.args_check"], (892, 909))
-        # 135, not 134: M16's module-level `_native` import is one line above
+        # place, and step 2's second slice adds the last one — the `int` arm's
+        # `from django.conf import settings`, a single line at the top of the
+        # module, above every definition here — so it moved by **+33** in all.
+        # The figure is re-measured from `definitions`, not shifted by
+        # arithmetic; the decomposition is a reading aid beside it.
+        self.assertEqual(base_defs["FilterExpression.args_check"], (893, 910))
+        # 136, not 134: M16's module-level `_native` import is one line above
         # this `def`, and `args_check` on the line above is unmoved because the
-        # line it gained there is cancelled by the one `resolve` lost. Both
-        # numbers are re-measured, not shifted by arithmetic.
-        self.assertEqual(base_defs["Origin.loader_name"][0], 135)
+        # line it gained there is cancelled by the one `resolve` lost. The second
+        # is the same one line as above — the `settings` import sits above this
+        # `def` too, which is why both rows moved together. Both numbers are
+        # re-measured, not shifted by arithmetic.
+        self.assertEqual(base_defs["Origin.loader_name"][0], 136)
         self.assertIsNone(base_defs.get("TokenType.__new__"))
 
         for label in ("Context.bind_template", "RenderContext.push_state"):

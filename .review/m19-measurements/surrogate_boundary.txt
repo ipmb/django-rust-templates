@@ -1,0 +1,102 @@
+stock django.template.base: /Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/base.py
+native extension:           /Users/pete/projects/lincolnloop/django-rust-templates/python/django_rust_templates/_native.cpython-314-darwin.so
+filter_names():             66
+
+1. the seam, `_native.filter(name, value, (), True, True)`
+   upper   'plain'      -> 'PLAIN'
+   upper   'MiXeD'      -> 'MIXED'
+   upper   '\ud800'     -> RAISE UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800' in position 0: surrogates not allowed
+   upper   'a\ud800b'   -> RAISE UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800' in position 1: surrogates not allowed
+   upper   '\udfff'     -> RAISE UnicodeEncodeError: 'utf-8' codec can't encode character '\udfff' in position 0: surrogates not allowed
+   length  'plain'      -> 5
+   length  'MiXeD'      -> 5
+   length  '\ud800'     -> RAISE UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800' in position 0: surrogates not allowed
+   length  'a\ud800b'   -> RAISE UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800' in position 1: surrogates not allowed
+   length  '\udfff'     -> RAISE UnicodeEncodeError: 'utf-8' codec can't encode character '\udfff' in position 0: surrogates not allowed
+   escape  'plain'      -> 'plain'
+   escape  'MiXeD'      -> 'MiXeD'
+   escape  '\ud800'     -> RAISE UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800' in position 0: surrogates not allowed
+   escape  'a\ud800b'   -> RAISE UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800' in position 1: surrogates not allowed
+   escape  '\udfff'     -> RAISE UnicodeEncodeError: 'utf-8' codec can't encode character '\udfff' in position 0: surrogates not allowed
+
+2. Django's own body on the same inputs
+   upper   'plain'      -> 'PLAIN'
+   upper   'MiXeD'      -> 'MIXED'
+   upper   '\ud800'     -> '\ud800'
+   upper   'a\ud800b'   -> 'A\ud800B'
+   upper   '\udfff'     -> '\udfff'
+   length  'plain'      -> 5
+   length  'MiXeD'      -> 5
+   length  '\ud800'     -> 1
+   length  'a\ud800b'   -> 3
+   length  '\udfff'     -> 1
+   escape  'plain'      -> 'plain'
+   escape  'MiXeD'      -> 'MiXeD'
+   escape  '\ud800'     -> '\ud800'
+   escape  'a\ud800b'   -> 'a\ud800b'
+   escape  '\udfff'     -> '\udfff'
+
+3. a whole template: `{{ x|upper }}` through our engine
+   'plain'      -> 'PLAIN'
+   'MiXeD'      -> 'MIXED'
+   '\ud800'     -> RAISE UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800' in position 0: surrogates not allowed
+   'a\ud800b'   -> RAISE UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800' in position 1: surrogates not allowed
+   '\udfff'     -> RAISE UnicodeEncodeError: 'utf-8' codec can't encode character '\udfff' in position 0: surrogates not allowed
+
+4. the contrast — the escape arm this milestone landed: `{{ x }}`
+   '\ud800'     -> '\ud800'
+   'a\ud800b'   -> 'a\ud800b'
+   '\udfff'     -> '\udfff'
+
+5. the census, over 66 filter name(s)
+   take only the value: 37
+   need an argument:    20
+
+   with no argument given, 37 of 37 raise:
+     addslashes               UnicodeEncodeError
+     capfirst                 UnicodeEncodeError
+     date                     UnicodeEncodeError
+     escape                   UnicodeEncodeError
+     escapejs                 UnicodeEncodeError
+     escapeseq                UnicodeEncodeError
+     filesizeformat           UnicodeEncodeError
+     first                    UnicodeEncodeError
+     floatformat              UnicodeEncodeError
+     force_escape             UnicodeEncodeError
+     iriencode                UnicodeEncodeError
+     json_script              UnicodeEncodeError
+     last                     UnicodeEncodeError
+     length                   UnicodeEncodeError
+     linebreaks               UnicodeEncodeError
+     linebreaksbr             UnicodeEncodeError
+     linenumbers              UnicodeEncodeError
+     lower                    UnicodeEncodeError
+     make_list                UnicodeEncodeError
+     phone2numeric            UnicodeEncodeError
+     pluralize                UnicodeEncodeError
+     pprint                   UnicodeEncodeError
+     random                   UnicodeEncodeError
+     safe                     UnicodeEncodeError
+     safeseq                  UnicodeEncodeError
+     slugify                  UnicodeEncodeError
+     striptags                UnicodeEncodeError
+     time                     UnicodeEncodeError
+     timesince                UnicodeEncodeError
+     timeuntil                UnicodeEncodeError
+     title                    UnicodeEncodeError
+     unordered_list           UnicodeEncodeError
+     upper                    UnicodeEncodeError
+     urlencode                UnicodeEncodeError
+     urlize                   UnicodeEncodeError
+     wordcount                UnicodeEncodeError
+     yesno                    UnicodeEncodeError
+   and ours returns a value for 0: []
+
+   Django's own bodies raise for 4: [('iriencode', 'UnicodeEncodeError'), ('timesince', 'AttributeError'), ('timeuntil', 'AttributeError'), ('urlencode', 'UnicodeEncodeError')]
+
+6. the argument-taking filters, with one argument supplied
+   20 of 20 raise: [('add', 'UnicodeEncodeError'), ('center', 'UnicodeEncodeError'), ('cut', 'UnicodeEncodeError'), ('default', 'UnicodeEncodeError'), ('default_if_none', 'UnicodeEncodeError'), ('dictsort', 'UnicodeEncodeError'), ('dictsortreversed', 'UnicodeEncodeError'), ('divisibleby', 'UnicodeEncodeError')] …
+
+   Django has a body for 57 of the 66 names, and
+   **all 57 raise on a lone surrogate** — ours returns a value
+   for none of them, where Django's own body answers for 33 of the 37

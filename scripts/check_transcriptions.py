@@ -146,6 +146,18 @@ UPSTREAM_NAMESPACE = "django.template."
 # the table's tail because the insertion is inside a table member's own span;
 # this one cannot, because the function it lands in is not a member, which is
 # the distinction a reader should take from the three together.
+#
+# **A fourth move, +38, is M19 step 2's two arms**, and it is the first one that
+# is three insertions rather than one: `from django.conf import settings` at 62
+# (**+1**), the `int` arm at 1187 (**+26**), and the arm's unescaped branch
+# (**+11**). All three sit above `VariableNode`, so the tail moves as one block —
+# `VariableNode.__init__` 1199-1200 → 1237-1238 and `token_kwargs` 1220-1264 →
+# 1258-1302, and the file is **1302** lines. The `+38` is `git diff --numstat`
+# against `7e71226`, and it is quoted because the three components are *not*
+# derivable from the table: a reader who measured only the two moved spans would
+# get 38 and have no way to say how it split, while a reader who measured only
+# the arm would get 37 and be one line short. `token_kwargs` keeps its 45 lines
+# and `VariableNode.__init__` its two, so nothing here resized.
 # Stated as arithmetic so that it can be checked; the spans
 # themselves are re-measured with the instrument, because the instrument is the
 # evidence, and the *set* of functions is the part that could have moved for a
@@ -190,36 +202,36 @@ COMPARED_PATH = {
     # stopped transcribing, so the row is deleted rather than emptied: a key
     # with an empty list still asserts that the module *is* a transcription.
     "base.py": [
-        (117, 120, "Origin.__init__"),
-        (307, 314, "PartialTemplate.__init__"),
-        (365, 387, "Token.__init__"),
-        (396, 409, "Token.split_contents"),
-        (413, 415, "Lexer.__init__"),
-        (424, 436, "Lexer.tokenize"),
-        (438, 470, "Lexer.create_token"),
-        (508, 530, "Parser.__init__"),
-        (535, 597, "Parser.parse"),
-        (599, 604, "Parser.skip_past"),
-        (606, 623, "Parser.extend_nodelist"),
-        (625, 636, "Parser.error"),
-        (638, 654, "Parser.invalid_block_tag"),
-        (665, 666, "Parser.next_token"),
-        (668, 669, "Parser.prepend_token"),
-        (671, 672, "Parser.delete_first_token"),
-        (674, 676, "Parser.add_library"),
-        (678, 682, "Parser.compile_filter"),
-        (684, 688, "Parser.find_filter"),
-        (745, 789, "FilterExpression.__init__"),
-        (892, 909, "FilterExpression.args_check"),
-        (941, 992, "Variable.__init__"),
-        (994, 1010, "Variable.resolve"),
-        (1115, 1127, "Node.get_nodes_by_type"),
-        (1135, 1136, "NodeList.render"),
-        (1138, 1143, "NodeList.get_nodes_by_type"),
-        (1149, 1150, "TextNode.__init__"),
-        (1158, 1165, "TextNode.render_annotated"),
-        (1199, 1200, "VariableNode.__init__"),
-        (1220, 1264, "token_kwargs"),
+        (118, 121, "Origin.__init__"),
+        (308, 315, "PartialTemplate.__init__"),
+        (366, 388, "Token.__init__"),
+        (397, 410, "Token.split_contents"),
+        (414, 416, "Lexer.__init__"),
+        (425, 437, "Lexer.tokenize"),
+        (439, 471, "Lexer.create_token"),
+        (509, 531, "Parser.__init__"),
+        (536, 598, "Parser.parse"),
+        (600, 605, "Parser.skip_past"),
+        (607, 624, "Parser.extend_nodelist"),
+        (626, 637, "Parser.error"),
+        (639, 655, "Parser.invalid_block_tag"),
+        (666, 667, "Parser.next_token"),
+        (669, 670, "Parser.prepend_token"),
+        (672, 673, "Parser.delete_first_token"),
+        (675, 677, "Parser.add_library"),
+        (679, 683, "Parser.compile_filter"),
+        (685, 689, "Parser.find_filter"),
+        (746, 790, "FilterExpression.__init__"),
+        (893, 910, "FilterExpression.args_check"),
+        (942, 993, "Variable.__init__"),
+        (995, 1011, "Variable.resolve"),
+        (1116, 1128, "Node.get_nodes_by_type"),
+        (1136, 1137, "NodeList.render"),
+        (1139, 1144, "NodeList.get_nodes_by_type"),
+        (1150, 1151, "TextNode.__init__"),
+        (1159, 1166, "TextNode.render_annotated"),
+        (1237, 1238, "VariableNode.__init__"),
+        (1258, 1302, "token_kwargs"),
     ],
     # 8 functions, spans 56-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
@@ -714,9 +726,25 @@ DECLARED = {
             # caller built; if this file reached Django's `BaseContext` while our
             # `context.py` defines its own, then `Context` would subclass Django's
             # and every `isinstance(context, BaseContext)` in this file would be
-            # testing an ancestry that no longer holds. One line for one line, so
-            # no note is needed under clause (5); the snippet is our line.
-            ((61, 61), (59, 59), "from .context import BaseContext"),
+            # testing an ancestry that no longer holds.
+            #
+            # **M19's `settings` import is the second line, and it shares this
+            # region because `difflib` cannot separate them** — an insertion
+            # adjacent to a replacement is one hunk, however independent the two
+            # decisions are. `from django.conf import settings` is there because
+            # §2's `int` arm has to read `USE_THOUSAND_SEPARATOR`, and upstream's
+            # `base.py` imports no settings at all: `localize` reaches the
+            # setting one call deeper, inside `django/utils/numberformat.py`,
+            # which is exactly the indirection the arm exists to skip. Upstream
+            # has no line here to pair it with, so the region's shape is 2 of
+            # ours against 1 of upstream's and clause (5) wants the note: the
+            # added line is an import, and the snippet names both.
+            (
+                (61, 62),
+                (59, 59),
+                "from .context import BaseContext\n"
+                "from django.conf import settings",
+            ),
             # M16's module-level `_native` binding, ours only — a pure
             # insertion, `None` upstream. **This region is the one that changes
             # this file's diff shape on purpose, and the reason is the
@@ -738,7 +766,7 @@ DECLARED = {
             # `FilterExpression` region loses its first line, and every span
             # from here down shifts by one — the region count is unchanged at
             # six, which is the number the note says is the review surface.
-            ((73, 73), None, "from django_rust_templates import _native"),
+            ((74, 74), None, "from django_rust_templates import _native"),
             # M19's slot, and the only line in this class that is not upstream's.
             # `FilterExpression` declares `__slots__`, so a per-expression cache
             # has to be named here or there is nowhere to put it — a module-level
@@ -749,13 +777,13 @@ DECLARED = {
             #
             # **The region clears clause (4) by two lines, and that margin is the
             # whole reason the cache is filled where it is.** The compared path's
-            # entry for `FilterExpression.__init__` is `(745, 789)`; `__slots__` is
+            # entry for `FilterExpression.__init__` is `(746, 790)`; `__slots__` is
             # above it, so this line is declared and legal, while a line *inside*
             # `__init__` would make the parity comparison Rust against Rust. That
             # is what forced the lazy fill below, and it is why the two entries are
             # in this file together.
             (
-                (743, 743),
+                (744, 744),
                 (737, 737),
                 '__slots__ = ("token", "filters", "var", "is_var", "_rust_names")',
             ),
@@ -776,12 +804,12 @@ DECLARED = {
             # `COMPARED_PATH` and why that absence is a measurement rather than
             # an oversight.
             (
-                (188, 202),
+                (189, 203),
                 (185, 196),
                 "from django_rust_templates.render import parse_template",
             ),
             (
-                (205, 207),
+                (206, 208),
                 (199, 201),
                 "parsed = parse_template(self.source, self.engine, self.origin)\n"
                 "self.extra_data = parsed.extra_data\n"
@@ -879,7 +907,7 @@ DECLARED = {
             # path, where the answer is kept, and on expressions carrying more
             # than one filter.
             (
-                (809, 839),
+                (810, 840),
                 None,
                 "if self.filters:\n"
                 "try:\n"
@@ -926,7 +954,7 @@ DECLARED = {
             # `test_filter_parity.py::test_the_comparison_target_is_not_rust_owned`
             # is what watches *that*.
             (
-                (847, 879),
+                (848, 880),
                 None,
                 "from django_rust_templates.host import (\n"
                 "effective_autoescape,\n"
@@ -1017,15 +1045,23 @@ DECLARED = {
             # not — a non-raising signature carries the bit on an ordinary return
             # value) is what makes the alternative live rather than closed.
             (
-                (1027, 1073),
+                (1028, 1074),
                 (957, 1028),
                 'return _native.resolve_lookups(self.lookups, context)',
             ),
-            # M19's, and §2's largest single line: the autoescape fast path for a
-            # value whose **exact** type is `str`. A pure insertion, hence `None`
-            # upstream — upstream's `render_value_in_context` has no branch here
-            # at all — and the snippet is its four executable lines verbatim,
-            # because clause (2) requires every statement in a region to be named.
+            # M19's, and §2's two largest single lines: the fast paths for a value
+            # whose **exact** type is `str` and for one whose exact type is `int`.
+            # A pure insertion, hence `None` upstream — upstream's
+            # `render_value_in_context` has no branch here at all — and the snippet
+            # is all fourteen executable lines verbatim, because clause (2)
+            # requires every statement in a region to be named.
+            #
+            # **One region, added in two slices, because `difflib` sees one hunk
+            # either way.** The `int` arm was appended directly below the `str` arm
+            # in the same insertion slot, so re-declaring a second region adjacent
+            # to the first would be two numbers for what the matcher reports as one
+            # difference — the same argument the `__init__.py` docstring region
+            # records for collapsing five opcodes into one span.
             #
             # **Exact type rather than `isinstance`, and that is the whole safety
             # argument rather than a micro-optimisation.** The value this branch
@@ -1052,12 +1088,24 @@ DECLARED = {
             # here; it is not this region's, and widening this branch would not
             # reach it.
             (
-                (1174, 1185),
+                (1175, 1223),
                 None,
                 "if context.autoescape and type(value) is str:\n"
                 "escaped = _native.html_escape(value)\n"
                 "if escaped is not None:\n"
-                "return SafeString(escaped)",
+                "return SafeString(escaped)\n"
+                "if type(value) is int and (\n"
+                "context.use_l10n is False or not settings.USE_THOUSAND_SEPARATOR\n"
+                "):\n"
+                "text = str(value)\n"
+                "if context.autoescape:\n"
+                "escaped = _native.html_escape(text)\n"
+                "if escaped is not None:\n"
+                "return SafeString(escaped)\n"
+                "return conditional_escape(text)\n"
+                "if context.use_l10n is False:\n"
+                "return text\n"
+                "return mark_safe(text)",
             ),
             # **M18.1's seventh region was here, and it was removed on the day it
             # was written** — the reason is the region count rather than the line.

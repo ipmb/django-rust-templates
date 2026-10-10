@@ -1,0 +1,99 @@
+interpreter : 3.14.4
+extension   : _native.cpython-314-darwin.so
+sha256      : df7413aa6eeeb7b3
+django      : 6.0.9
+recorded    : one run. This is a timing probe, so a second run differs in most
+              of its numbers. The sha above pins the *artifact*; it does not
+              make the digits repeat.
+settings    : USE_I18N=True USE_THOUSAND_SEPARATOR=False LANGUAGE_CODE='en-us'
+
+1. faithfulness: stock vs ours, by (repr, type)
+   -- context.autoescape=True
+   value                                 stock                 ours  agree
+   small int              ("'12345'", <class 'django.utils.safestring.SafeString'>) ("'12345'", <class 'django.utils.safestring.SafeString'>)  yes
+   zero                   ("'0'", <class 'django.utils.safestring.SafeString'>) ("'0'", <class 'django.utils.safestring.SafeString'>)  yes
+   negative               ("'-7'", <class 'django.utils.safestring.SafeString'>) ("'-7'", <class 'django.utils.safestring.SafeString'>)  yes
+   big int                ("'1000000000000000000000000000000'", <class 'django.utils.safestring.SafeString'>) ("'1000000000000000000000000000000'", <class 'django.utils.safestring.SafeString'>)  yes
+   bool True              ("'True'", <class 'django.utils.safestring.SafeString'>) ("'True'", <class 'django.utils.safestring.SafeString'>)  yes
+   bool False             ("'False'", <class 'django.utils.safestring.SafeString'>) ("'False'", <class 'django.utils.safestring.SafeString'>)  yes
+   float                  ("'3.5'", <class 'django.utils.safestring.SafeString'>) ("'3.5'", <class 'django.utils.safestring.SafeString'>)  yes
+   Decimal                ("'3.50'", <class 'django.utils.safestring.SafeString'>) ("'3.50'", <class 'django.utils.safestring.SafeString'>)  yes
+   str                    ("'hi'", <class 'django.utils.safestring.SafeString'>) ("'hi'", <class 'django.utils.safestring.SafeString'>)  yes
+   str markup             ("'a &amp; b &lt; c'", <class 'django.utils.safestring.SafeString'>) ("'a &amp; b &lt; c'", <class 'django.utils.safestring.SafeString'>)  yes
+   SafeString             ("'hi'", <class 'django.utils.safestring.SafeString'>) ("'hi'", <class 'django.utils.safestring.SafeString'>)  yes
+   int subclass           ("'12'", <class 'django.utils.safestring.SafeString'>) ("'12'", <class 'django.utils.safestring.SafeString'>)  yes
+   int subclass __str__   ("'<w12>'", <class 'django.utils.safestring.SafeString'>) ("'<w12>'", <class 'django.utils.safestring.SafeString'>)  yes
+   None                   ("'None'", <class 'django.utils.safestring.SafeString'>) ("'None'", <class 'django.utils.safestring.SafeString'>)  yes
+   list                   ("'[1, 2]'", <class 'django.utils.safestring.SafeString'>) ("'[1, 2]'", <class 'django.utils.safestring.SafeString'>)  yes
+   -- context.autoescape=False
+   value                                 stock                 ours  agree
+   small int              ("'12345'", <class 'django.utils.safestring.SafeString'>) ("'12345'", <class 'django.utils.safestring.SafeString'>)  yes
+   zero                   ("'0'", <class 'django.utils.safestring.SafeString'>) ("'0'", <class 'django.utils.safestring.SafeString'>)  yes
+   negative               ("'-7'", <class 'django.utils.safestring.SafeString'>) ("'-7'", <class 'django.utils.safestring.SafeString'>)  yes
+   big int                ("'1000000000000000000000000000000'", <class 'django.utils.safestring.SafeString'>) ("'1000000000000000000000000000000'", <class 'django.utils.safestring.SafeString'>)  yes
+   bool True              ("'True'", <class 'str'>) ("'True'", <class 'str'>)  yes
+   bool False             ("'False'", <class 'str'>) ("'False'", <class 'str'>)  yes
+   float                  ("'3.5'", <class 'str'>) ("'3.5'", <class 'str'>)  yes
+   Decimal                ("'3.50'", <class 'str'>) ("'3.50'", <class 'str'>)  yes
+   str                    ("'hi'", <class 'str'>) ("'hi'", <class 'str'>)  yes
+   str markup             ("'a & b < c'", <class 'str'>) ("'a & b < c'", <class 'str'>)  yes
+   SafeString             ("'hi'", <class 'django.utils.safestring.SafeString'>) ("'hi'", <class 'django.utils.safestring.SafeString'>)  yes
+   int subclass           ("'12'", <class 'django.utils.safestring.SafeString'>) ("'12'", <class 'django.utils.safestring.SafeString'>)  yes
+   int subclass __str__   ("'<w12>'", <class 'django.utils.safestring.SafeString'>) ("'<w12>'", <class 'django.utils.safestring.SafeString'>)  yes
+   None                   ("'None'", <class 'str'>) ("'None'", <class 'str'>)  yes
+   list                   ("'[1, 2]'", <class 'str'>) ("'[1, 2]'", <class 'str'>)  yes
+
+2. per-value cost, stock vs ours  (best of 7)
+   value                   stock us   ours us   arm?
+   small int                  3.341     0.385   True
+   zero                       3.330     0.351   True
+   negative                   3.366     0.381   True
+   big int                    3.369     0.463   True
+   bool True                  0.812     0.842  False
+   bool False                 0.827     0.856  False
+   float                      3.847     3.913  False
+   Decimal                    4.221     4.278  False
+   str                        0.782     0.184  False
+   str markup                 0.842     0.234  False
+   SafeString                 0.231     0.254  False
+   int subclass               3.367     3.389  False
+   int subclass __str__       3.427     3.500  False
+   None                       1.017     1.043  False
+   list                       1.083     1.109  False
+
+3. where the int cost goes, over Django's own functions  (best of 7)
+   template_localtime(12345)              0.065
+     ...isinstance gate only              0.046
+   localize(12345)                        3.138
+   number_format(12345)                   3.018
+     get_language()                       1.886
+     get_format(DECIMAL_SEPARATOR)        1.958
+     get_format(NUMBER_GROUPING)          1.962
+     get_format(THOUSAND_SEPARATOR)       2.002
+     numberformat.format inner            0.792
+   str(12345)                             0.059
+   _native.html_escape('12345')           0.092
+   settings.USE_THOUSAND_SEPARATOR        0.141
+   context.use_l10n                       0.024
+   type(v) is int                         0.028
+
+4. the predicate, per settings state
+   USE_THOUSAND_SEPARATOR=False use_l10n=None  autoescape=True  grouping=3    use_grouping=False inner=False stock='12345'    SafeString  ours='12345'    SafeString  arm=True  sound=yes faithful=yes [numberformat.format] agree
+   USE_THOUSAND_SEPARATOR=False use_l10n=None  autoescape=False grouping=3    use_grouping=False inner=False stock='12345'    SafeString  ours='12345'    SafeString  arm=True  sound=yes faithful=yes [numberformat.format] agree
+   USE_THOUSAND_SEPARATOR=False use_l10n=False autoescape=True  grouping=None use_grouping=False inner=False stock='12345'    SafeString  ours='12345'    SafeString  arm=True  sound=yes faithful=yes [localize short-circuits] agree
+   USE_THOUSAND_SEPARATOR=False use_l10n=False autoescape=False grouping=None use_grouping=False inner=False stock='12345'    str         ours='12345'    str         arm=True  sound=yes faithful=yes [localize short-circuits] agree
+   USE_THOUSAND_SEPARATOR=True  use_l10n=None  autoescape=True  grouping=3    use_grouping=True  inner=True  stock='12,345'   SafeString  ours='12,345'   SafeString  arm=False sound=yes faithful=yes [numberformat.format] agree
+   USE_THOUSAND_SEPARATOR=True  use_l10n=None  autoescape=False grouping=3    use_grouping=True  inner=True  stock='12,345'   str         ours='12,345'   str         arm=False sound=yes faithful=yes [numberformat.format] agree
+   USE_THOUSAND_SEPARATOR=True  use_l10n=False autoescape=True  grouping=None use_grouping=False inner=False stock='12345'    SafeString  ours='12345'    SafeString  arm=True  sound=yes faithful=yes [localize short-circuits] agree
+   USE_THOUSAND_SEPARATOR=True  use_l10n=False autoescape=False grouping=None use_grouping=False inner=False stock='12345'    str         ours='12345'    str         arm=True  sound=yes faithful=yes [localize short-circuits] agree
+
+5. census: values a real-world page resolves
+   -- rust: 1330 values
+        str                         792   59.5%
+        int                         385   28.9%
+        str subclass SafeString     150   11.3%
+        other:__proxy__               3    0.2%
+   -- django: 1077 values
+        str                         792   73.5%
+        int                         185   17.2%
+        str subclass SafeString     100    9.3%

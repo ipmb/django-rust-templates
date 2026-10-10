@@ -36,6 +36,7 @@ crates/template-core/src/parser/tags/mod.rs:231	crates/template-core/src/parser/
 crates/template-core/src/parser/tags/url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
 crates/template-core/src/parser/tags/with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
 crates/template-py/src/filters.rs:69-71	crates/template-py/src/filters.rs	69	71	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
+crates/template-py/src/filters.rs:156	crates/template-py/src/filters.rs	156	-	obj.cast::<PyString>()?.to_str()	-
 crates/template-py/src/filters.rs:248-257	crates/template-py/src/filters.rs	248	257	*self.raised.borrow_mut() = Some(err)	-
 crates/template-py/src/filters.rs:871	crates/template-py/src/filters.rs	871	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
 crates/template-py/src/filters.rs:1675-1683	crates/template-py/src/filters.rs	1675	1683	match args.len()	-
@@ -749,6 +750,7 @@ dateformat.py:44-48	django/utils/dateformat.py	44	48	TypeError	-
 dateformat.py:326-329	django/utils/dateformat.py	326	329	-	-
 dateformat.py:332-335	django/utils/dateformat.py	332	335	-	-
 .django/django/utils/encoding.py:107-135	django/utils/encoding.py	107	135	isinstance(iri, Promise)	-
+django/utils/formats.py:100-140	django/utils/formats.py	100	140	def get_format(format_type, lang=None, use_l10n=None):	_format_cache[cache_key] = val
 formats.py:113	django/utils/formats.py	113	-	str(format_type)	-
 formats.py:147-157	django/utils/formats.py	147	157	-	-
 formats.py:155-157	django/utils/formats.py	155	157	-	-
@@ -832,10 +834,11 @@ django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	29
 django_suite/run.py:85	django_suite/run.py	85	-	-	-
 django_suite/template_tests/syntax_tests/test_for.py:334	django_suite/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 django_suite/template_tests/test_partials.py:14	django_suite/template_tests/test_partials.py	14	-	engines["django"]	-
-python/django_rust_templates/engine/base.py:861	python/django_rust_templates/engine/base.py	861	-	names.get(func)	-
-engine/base.py:1073	python/django_rust_templates/engine/base.py	1073	-	return _native.resolve_lookups(self.lookups, context)	-
-engine/base.py:1089	python/django_rust_templates/engine/base.py	1089	-	def render_annotated(self, context):	-
-python/django_rust_templates/engine/base.py:1213	python/django_rust_templates/engine/base.py	1213	-	render_value_in_context(output, context)	-
+python/django_rust_templates/engine/base.py:862	python/django_rust_templates/engine/base.py	862	-	names.get(func)	-
+engine/base.py:1074	python/django_rust_templates/engine/base.py	1074	-	return _native.resolve_lookups(self.lookups, context)	-
+engine/base.py:1090	python/django_rust_templates/engine/base.py	1090	-	def render_annotated(self, context):	-
+engine/base.py:1203	python/django_rust_templates/engine/base.py	1203	-	if type(value) is int and (	-
+python/django_rust_templates/engine/base.py:1251	python/django_rust_templates/engine/base.py	1251	-	render_value_in_context(output, context)	-
 engine/defaulttags.py:1253	python/django_rust_templates/engine/defaulttags.py	1253	-	partials = parser.extra_data.setdefault("partials", {})	-
 engine/engine.py:233	python/django_rust_templates/engine/engine.py	233	-	extra_data = getattr(template, "extra_data", {})	-
 python/django_rust_templates/engine/exceptions.py:38	python/django_rust_templates/engine/exceptions.py	38	-	-	-
@@ -854,7 +857,7 @@ python/django_rust_templates/host.py:737	python/django_rust_templates/host.py	73
 python/django_rust_templates/render.py:264	python/django_rust_templates/render.py	264	-	(measured — a `{% for %}` node at ``(9, 25)``), so this parser's tokens are	-
 tests/milestone_ownership.py:440	tests/milestone_ownership.py	440	-	def unshimmed(scope: str = TARGET) -> list:	-
 tests/parity_target.py:63	tests/parity_target.py	63	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
-tests/parity_target.py:171	tests/parity_target.py	171	-	So this is the replacement Python side	-
+tests/parity_target.py:177	tests/parity_target.py	177	-	So this is the replacement Python side	-
 filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-
 test_unordered_list.py:143	tests/template_tests/filter_tests/test_unordered_list.py	143	-	unordered_list(item_generator()),	-
 test_unordered_list.py:148	tests/template_tests/filter_tests/test_unordered_list.py	148	-	def test_nested_generators(self):	-

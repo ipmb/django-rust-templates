@@ -13,7 +13,7 @@ teeth has a row with teeth.
 6071 of those calls come from frames named render — VariableNode.render,
 CycleNode.render and TranslateNode.render — and 434 from a nested function
 called render_value inside the blocktranslate tag. The call sites are
-`python/django_rust_templates/engine/base.py:1213`, which is ours, and
+`python/django_rust_templates/engine/base.py:1251`, which is ours, and
 `django/template/defaulttags.py:114`, `django/templatetags/i18n.py:91` and
 `django/templatetags/i18n.py:185`, which are not. The two out-of-module modules
 reach it through a from-import of render_value_in_context at module scope, and
@@ -52,6 +52,13 @@ required, and conversion to a string. If value is a string, it's expected to
 already be translated." The *body* the step prints is right, which is why the
 mistake would have gone unnoticed — a row written from the quoted docstring
 would have asserted nothing about the code.
+
+**A third subject arrived from a gate going red, and it is the smallest.** With
+*nothing* configured — no settings at all — both engines refuse to render a
+variable, and M19's `int` arm made them name different settings in the refusal.
+`UnconfiguredSettingsTests` pins that pair, because the harness that found it
+now configures settings and would no longer show it. It is not a compatibility
+claim: stock Django cannot render a variable without settings either.
 
 The oracle is Django's own function, executed from the pinned file by
 ``_pinned`` below rather than retyped here: a row that compared our function
@@ -304,6 +311,103 @@ class RenderValueInContextTests(unittest.TestCase):
         )
         self.assertEqual(self.theirs(value, context), self.ours(value, context))
 
+    def test_the_int_arm_declines_when_grouping_is_on(self):
+        """The settings half of the arm's predicate, in both directions.
+
+        The arm is `type(value) is int and (context.use_l10n is False or not
+        settings.USE_THOUSAND_SEPARATOR)`. Everywhere else in this file the
+        setting is False, so *both* disjuncts are true and a version that
+        dropped either one would pass every row above. Here the setting is on,
+        and the pair of cases separates them:
+
+          - a default context (``use_l10n`` is ``None``) must **decline**, so
+            ``12345`` comes out ``'12,345'`` — Django's grouped number, from
+            ``numberformat.format``;
+          - ``use_l10n=False`` must still **fire**, so the same value comes out
+            ``'12345'``, because upstream's ``localize`` short-circuits on
+            ``use_l10n is False`` *before* ``number_format`` is entered at all.
+
+        Both are asserted against the pinned function rather than against a
+        literal, and the first is then asserted to *differ* from ``str(value)``
+        — the arm's own answer — because equality with the oracle alone cannot
+        tell a correct slow path from an arm that fired and agreed by luck.
+        That second assertion only has teeth on a value grouping would change:
+        for ``-7`` and ``0`` the grouped and ungrouped answers are the same
+        string, so the row would pass with the arm firing. Hence two tuples, and
+        the first assertion is applied to the one where it discriminates — which
+        is not a stylistic split, it is the difference between a row that can
+        fail and one that cannot.
+
+        Measured on the pinned tree at 6.0.9, over ``12345``, ``-7``, ``0``,
+        ``10**30``, ``7`` and ``1234567``: all **48** combinations of the two
+        settings states, two ``use_l10n`` values and two autoescape values agree
+        with the pinned function, and the arm declines exactly when
+        ``USE_THOUSAND_SEPARATOR`` is on *and* ``use_l10n`` is not ``False``.
+
+        **Both settings states are exercised here, not just the on one.** The
+        first version of this row ran the loop inside the ``override_settings``
+        block, so it only ever saw ``True`` — and the arm's *other* disjunct is
+        the one that fires in production, where the setting is ``False``. The
+        default state is also where the one defect this row has caught lives, so
+        a row that could not reach it was a row that could not fail on it.
+
+        **And the type is asserted beside the characters**, because that is
+        where the defect was: upstream's ``autoescape=False`` answer for an exact
+        ``int`` is ``str(localize(value))``, and ``str()`` is the identity on the
+        ``SafeString`` that ``numberformat.format`` returns for an ungrouped
+        number — so the answer is a ``SafeString`` unless ``use_l10n is False``,
+        where ``localize`` returns ``str(value)`` and it is a plain ``str``. The
+        arm returned a plain ``str`` in both cases. No render can see the
+        difference (``NodeList.render`` joins), which is exactly why the row has
+        to compare types rather than output.
+        """
+        from django.test.utils import override_settings
+        from django_rust_templates.engine import Context
+
+        # Grouping changes the output for these three, so a decline is visible.
+        grouped = (12345, 10**30, 1234567)
+        # These read the same either way — Django's own comment calls the answer
+        # ``mark_safe(number)`` and ``str()`` is what makes it text — so they
+        # pin the oracle and the types but cannot pin the route.
+        unchanged = (-7, 0, 7)
+        values = grouped + unchanged
+
+        for grouping_on in (False, True):
+            with override_settings(USE_THOUSAND_SEPARATOR=grouping_on):
+                for use_l10n in (None, False):
+                    # The predicate's answer, restated from the arm: it declines
+                    # when grouping could change the value, which is the setting
+                    # *and* ``localize`` not having short-circuited.
+                    declines = grouping_on and use_l10n is not False
+                    for autoescape in (True, False):
+                        context = Context(autoescape=autoescape, use_l10n=use_l10n)
+                        for value in values:
+                            with self.subTest(
+                                grouping_on=grouping_on,
+                                use_l10n=use_l10n,
+                                autoescape=autoescape,
+                                value=value,
+                            ):
+                                rendered = self.ours(value, context)
+                                oracle = self.theirs(value, context)
+                                self.assertEqual(rendered, oracle)
+                                self.assertIs(type(rendered), type(oracle))
+                                if declines:
+                                    # Only visible where grouping changes the
+                                    # answer; ``str(value)`` is the arm's own.
+                                    if value in grouped:
+                                        self.assertNotEqual(
+                                            rendered,
+                                            str(value),
+                                            "the arm fired with grouping on",
+                                        )
+                                else:
+                                    # The arm fired. Its characters are the
+                                    # slow path's here, so this pins the arm's
+                                    # *answer* rather than its route — which is
+                                    # the most a character can do.
+                                    self.assertEqual(rendered, str(value))
+
     def test_it_agrees_with_the_pinned_source(self):
         """The table, run against Django's own function from the pinned file.
 
@@ -363,6 +467,163 @@ class RenderValueInContextTests(unittest.TestCase):
             namespace["render_value_in_context"](value, context),
             self.ours(value, context),
         )
+
+
+class NativeEscapeTests(unittest.TestCase):
+    """`_native.html_escape`, the binding both fast arms trust to be *escape*.
+
+    M19's two arms call it on every `str` and every `int` a template renders, and
+    nothing in the gate called it *directly* until this class: the rows above
+    reach it only through ``render_value_in_context``, where ``None`` and a
+    correct answer are indistinguishable unless the input is chosen to tell them
+    apart. Its contract has two sides, and the second one is the one that
+    matters.
+
+    **It returns ``None`` for a string it cannot answer for; it does not raise,
+    and ``None`` does not mean "unescaped".** Measured on the installed
+    extension — ``_native.cpython-314-darwin.so``, sha256 ``df7413aa…``, Django
+    6.0.9, interpreter 3.14.4 — a lone surrogate makes Python's UTF-8 encoding
+    impossible, and Django's own ``django.utils.html.escape`` returns such a
+    string **unescaped but otherwise intact** (`escape('a & \\ud800')` is
+    `'a &amp; \\ud800'`; upstream never encodes, so it is not a refusal there
+    either). The native fast path cannot produce that answer, so it declines —
+    and both arms read the decline as "go the long way", falling through to
+    ``conditional_escape``, which is Django's function and gives Django's
+    answer. ``test_the_refused_value_still_gets_djangos_answer`` is that claim
+    as a row, and it is why the refusal is *safe* rather than merely
+    non-fatal: the ``None`` is a control-flow signal, not an output.
+
+    Every literal in these rows is a measured output rather than a recollection
+    — the two sides are printed ``repr``-for-``repr`` by the probe whose output
+    they were written from — and the values are deliberately the ones where the
+    two differ from a naive `str.replace`, i.e. ``'`` becoming ``&#x27;`` and not
+    ``&#39;``.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from scripts.filter_probe import ensure_settings
+
+        ensure_settings()
+        cls.base = importlib.import_module("django_rust_templates.engine.base")
+        cls.native = cls.base._native
+        cls.ours = staticmethod(cls.base.render_value_in_context)
+
+    def test_it_agrees_with_djangos_escape_on_every_string_it_answers(self):
+        """The positive side, against Django's function rather than a literal.
+
+        ``assertIs(type(...), str)`` as well as the value, because the arms wrap
+        the answer in a ``SafeString`` themselves and a binding that returned an
+        already-wrapped value would be double-marking what the arm then marks
+        again.
+        """
+        from django.utils.html import escape
+
+        for text in ("", "plain", "a & b", "<b>", "it's", 'say "hi"', "a</b>", "&amp;", "é"):
+            with self.subTest(text=text):
+                got = self.native.html_escape(text)
+                self.assertIs(type(got), str)
+                self.assertEqual(got, escape(text))
+
+    def test_a_lone_surrogate_is_refused_with_none_rather_than_raised(self):
+        """The negative side, and "refused" is the whole claim.
+
+        A binding that raised would be *caught* by neither arm — the arms test
+        ``is not None`` — so the exception would escape ``render_value_in_context``
+        and turn a value Django renders fine into a 500. Three spellings, because
+        the encoding failure depends on the whole string and not on the character:
+        a lone surrogate alone, one with ASCII either side, and a different
+        unpaired code point.
+        """
+        for text in ("\ud800", "a\ud800b", "\udfff"):
+            with self.subTest(text=repr(text)):
+                self.assertIsNone(self.native.html_escape(text))
+
+    def test_the_refused_value_still_gets_djangos_answer(self):
+        """The refusal read the way an arm reads it, on input where it shows.
+
+        The surrogate is mixed with text that *is* escaped, so the two failure
+        modes a fallback could have are both visible: dropping the string
+        entirely, and skipping the escape on the way past. Autoescaping off is
+        the other half — the answer there is the raw string, which is what
+        Django gives too.
+        """
+        from django_rust_templates.engine import Context
+
+        for text in ("\ud800", "a\ud800b", "a & \ud800", "<\ud800>", "\ud800\ud800"):
+            for autoescape in (True, False):
+                with self.subTest(text=repr(text), autoescape=autoescape):
+                    context = Context(autoescape=autoescape)
+                    self.assertEqual(
+                        self.ours(text, context),
+                        _pinned("render_value_in_context")(text, context),
+                    )
+
+
+class UnconfiguredSettingsTests(unittest.TestCase):
+    """What the two engines do when there are no settings at all.
+
+    Not a supported configuration — stock Django cannot render a variable
+    without settings either — so this is not a compatibility claim and not a row
+    about rendering. It is here because M19's `int` arm made the two engines
+    disagree *visibly* here, and the disagreement was found by the differential
+    harness going red: **11 of its 48 cases differ**, both sides an
+    `ImproperlyConfigured` repr. With no settings, both engines refuse, and
+    which setting they name is whichever the code happens to read first. Stock
+    reaches `get_language()`'s `USE_I18N`; the arm reads
+    `settings.USE_THOUSAND_SEPARATOR` before it, because that is the setting its
+    predicate is about. The *type* is unchanged.
+
+    **A divergence a harness change hides is worse than one the harness
+    reports.** `scripts/differential.py` now configures settings precisely so
+    that its 11 int-bearing cases compare rendered numbers rather than these two
+    strings — and that change erases the only place the difference showed. So it
+    is pinned here, both halves spelled out: same exception type, and the setting
+    each engine names. Not asserted equal and not deleted.
+
+    A fresh interpreter, because settings are first-writer-wins for the process
+    and every class above this one has already called `ensure_settings()`.
+    """
+
+    def test_both_engines_refuse_and_name_the_setting_they_read_first(self):
+        import subprocess
+
+        script = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(PROJECT_ROOT / 'python')!r})\n"
+            "from django.template.base import render_value_in_context as stock\n"
+            "from django.template.context import Context\n"
+            "from django_rust_templates.engine import base as ours\n"
+            "for label, fn in (('stock', stock),"
+            " ('ours', ours.render_value_in_context)):\n"
+            "    try:\n"
+            "        print(label, 'RENDERED', repr(fn(12345, Context())))\n"
+            "    except Exception as exc:\n"
+            "        print(label, type(exc).__name__, '|', exc)\n"
+        )
+        # ``-I``, so neither `PYTHONPATH` nor the user site can put a shim in
+        # front of the two names this row is about; the package's own directory
+        # is then put on the path explicitly, which is the half `-I` closes.
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        lines = dict(
+            line.split(" ", 1) for line in proc.stdout.splitlines() if " " in line
+        )
+        self.assertEqual(set(lines), {"stock", "ours"}, proc.stdout)
+        for engine in ("stock", "ours"):
+            with self.subTest(engine=engine):
+                self.assertTrue(
+                    lines[engine].startswith(
+                        "ImproperlyConfigured | Requested setting "
+                    ),
+                    lines[engine],
+                )
+        self.assertIn("Requested setting USE_I18N,", lines["stock"])
+        self.assertIn("Requested setting USE_THOUSAND_SEPARATOR,", lines["ours"])
 
 
 class RenderAnnotationTests(unittest.TestCase):

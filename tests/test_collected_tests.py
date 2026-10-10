@@ -550,8 +550,29 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # the other way, as this ledger's rule asks: no module lost a row, no other module
 # gained one, and 477 + 2 = 479. See `.review/m19-measurements/lookup_roundtrip.txt`.
 #
-# Counts at close: 479 collected, proxy and discovery agreeing.
-PINNED = 479
+# 479 → 484 is **+5**, all in `tests/test_base_parity.py`, and they are the two
+# halves the reviewer asked for before step 2's boundary widened plus one the gate
+# asked for. Three are `NativeEscapeTests` — `_native.html_escape` against
+# `django.utils.html.escape` on the strings it answers, `None` rather than a raise
+# for a lone surrogate, and the refusal read the way an arm reads it, on input
+# where a dropped escape would show. The fourth is `RenderValueInContextTests`'
+# `test_the_int_arm_declines_when_grouping_is_on`, which is the only row in the
+# tree that runs the `int` arm's predicate with `USE_THOUSAND_SEPARATOR=True`, so
+# it is the only one that can see the `settings` read at all. The fifth,
+# `UnconfiguredSettingsTests`, arrived from `scripts/differential.py` going red:
+# with no settings configured the two engines refuse to render an `int` and the
+# `int` arm makes them name different settings in the refusal, and the harness now
+# configures settings — so the row is where that difference stays visible.
+# Measured the other way, as this ledger's rule asks: `git diff -U0 tests/` for
+# this round adds **5** `def test_` lines and removes none, and no module but this
+# one is touched by the added rows — the other test files in the diff changed a
+# comment and two line numbers. The grep that counts them returns **six** matches
+# on this commit, because the sentence you are reading contains the string it
+# searches for; the count is the five `def`s and the sixth is this prose.
+# 479 + 5 = 484.
+#
+# Counts at close: 484 collected, proxy and discovery agreeing.
+PINNED = 484
 
 
 def collected() -> unittest.TestSuite:

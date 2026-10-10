@@ -136,7 +136,7 @@ a three-variable template rendered `'1|2|3'` with `{'_native.resolve': 3,
 `LookupScope::resolve` is the *floor prototype's* path, and the prototype is not
 what ships.
 
-**Step 1 has since landed**, and the call is now `engine/base.py:1073`,
+**Step 1 has since landed**, and the call is now `engine/base.py:1074`,
 `_native.resolve_lookups(self.lookups, context)`, entering at
 `crates/template-py/src/lib.rs:2692-2697`, with no `parse_variable` between the
 shell and the walk. The row above it is what that bought, measured rather than
@@ -260,42 +260,104 @@ Three things follow, and the second and third are defects in the corpus:
 - `SafeString` appears 150 times in the corpus. Every one of them is a value
   §3.1's predicate has to *decline* (§3.1, BLOCKING 2).
 
-### 1.5 `render_value_in_context` by value type
+### 1.5 `render_value_in_context` by value type, and the `int` arm
 
-| value | µs | renders |
-|---|---|---|
-| `str "hello world"` | 0.794 | `'hello world'` |
-| `str "a & b < c"` | 0.851 | `'a &amp; b &lt; c'` |
-| `SafeString(mark_safe('x'))` | 0.239 | `'x'` |
-| `int 12` | 3.492 | `'12'` |
-| `float 12.5` | 4.144 | `'12.5'` |
-| `Decimal('12.50')` | 4.451 | `'12.50'` |
-| `datetime(2026, 10, 8, 12, 0)` | 13.229 | `'Oct. 8, 2026, noon'` |
+Both columns, because one of the two arms §3.1 predicts has landed since this
+section was written
+(`.review/m19-measurements/int_fast_path.py`, best of 7, one run, `--release`
+extension sha256 `df7413aa…`):
 
-These reproduce the review's numbers within ~3% (3.388 / 3.922 / 4.371 /
-13.040), and **revision 1 did not**: its first probe configured
+| value | stock µs | ours µs | arm | renders |
+|---|---|---|---|---|
+| `str "hello world"` | 0.782 | **0.184** | fires | `'hello world'` |
+| `str "a & b < c"` | 0.842 | **0.234** | fires | `'a &amp; b &lt; c'` |
+| `SafeString(mark_safe('x'))` | 0.231 | 0.254 | declines | `'x'` |
+| `int 12345` | 3.341 | **0.385** | fires | `'12345'` |
+| `int` subclass | 3.367 | 3.389 | declines | `'12'` |
+| `bool True` | 0.812 | 0.842 | declines | `'True'` |
+| `float 3.5` | 3.847 | 3.913 | declines | `'3.5'` |
+| `Decimal('3.50')` | 4.221 | 4.278 | declines | `'3.50'` |
+| `None` | 1.017 | 1.043 | declines | `'None'` |
+
+The stock column reproduces the review's numbers within ~3% (3.388 / 3.922 /
+4.371 / 13.040), and **revision 1 did not**: its first probe configured
 `USE_I18N=False` and every non-`str` row came out at half. `localize`
 short-circuits on the setting, so 1.67 µs becomes 3.49 µs. Django's default is
 `True`, and so is `filter_probe.ensure_settings()`'s. **A probe must run the
 harness's settings**, and this one now does.
 
-The consequence for §2: for an `int`, essentially all of the cost is
-`localize`/`number_format` — locale-dependent Python the walk cannot remove
-without reimplementing `django.utils.formats` — and `template_localtime` and
-`localize` run **before** the autoescape branch, so a fast path has to clear both
-before it is a fast path at all.
+**The `int` row's 3.34 µs is not escaping, and revision 2's §2 said it was** — it
+priced the row as "*0.79 (`str`), 3.49 (`int`)*" against a native "~0.03 / ~0.10",
+imputing the 3.49 to the escape. The decomposition, over Django's own functions:
+
+| piece | µs |
+|---|---|
+| `template_localtime(12345)` | 0.065 |
+| `localize(12345)` | 3.138 |
+| `  number_format(12345)` | 3.018 |
+| `    get_language()` | **1.886** |
+| `    get_format(DECIMAL_SEPARATOR)` | 1.958 |
+| `    get_format(NUMBER_GROUPING)` | 1.962 |
+| `    get_format(THOUSAND_SEPARATOR)` | 2.002 |
+| `    numberformat.format` inner | 0.792 |
+| `_native.html_escape('12345')` | **0.092** |
+
+**The three `get_format` rows are not additive with `get_language`, and a reader
+will take them as if they were**: each is called *with `lang=None`*, so each
+pays `get_language()` itself, which is why they land at ~1.97 against each
+other and against `get_language`'s 1.89. Inside `number_format` the language is
+resolved **once** and the three calls are dictionary hits on `_format_cache`
+(`django/utils/formats.py:100-140`). Read as a decomposition of the standalone
+calls the table would not close — 1.89 + 3×1.97 = 7.8 against `number_format`'s
+3.02 — and it is not meant to; the row that closes it is `inner` 0.797.
+
+So for an exact `int` with grouping off, **3.0 of the 3.34 µs is locale machinery
+that `numberformat.format` then ignores**: its own fast path is
+`if isinstance(number, int) and not use_grouping and not decimal_pos: return
+mark_safe(number)`. The escape a rendered `int` actually pays is **0.092 µs**,
+and 0.385 is what the whole call costs once the arm answers instead. What §2
+inherits from this is a *third* removable cost, not a bigger version of the
+first.
+
+**The arm is landed, and it is `engine/base.py:1203`** — the predicate is
+`type(value) is int and (context.use_l10n is False or not
+settings.USE_THOUSAND_SEPARATOR)`, exact type so that `bool` (which `localize`
+sends down its own arm anyway) and an `int` subclass that overrides `__str__`
+both decline. **It sits above `template_localtime` and `localize` because both
+run before the autoescape branch**, so a fast path for anything must clear them
+first — which is what makes this a placement question and not a micro-optimism.
+It fires on **28.9% of the values a real-world page resolves** in this engine's
+own render — 385 of 1330, against stock's 185 of 1077 on the same corpus (the
+two columns are two populations, and the instrument prints both) — and it
+declines in exactly the four settings states where grouping could change the
+answer, with the answer's *(repr, type)* equal to upstream's in all eight states
+(`int_fast_path.py` §1 and §4,
+`tests/test_base_parity.py:test_the_int_arm_declines_when_grouping_is_on`).
+
+**The type half of that is not decoration, and it was the one defect this
+section found.** With `autoescape=False` upstream's answer for an exact `int` is
+`str(localize(value))`, and `str()` is the *identity* on the `SafeString` that
+`mark_safe(number)` returned — so the answer is a `SafeString` unless `use_l10n
+is False`, where `localize` returns a plain `str`. The first version of the arm
+returned a plain `str` in both cases. Same characters, and `NodeList.render`
+joins, so **no render of any template can see it**: it took a `(repr, type)`
+comparison under `autoescape=False` to find, and the first draft of the
+instrument ran one context (`autoescape=True`) and printed `agree` on every row.
 
 ## 2. The thesis
 
 Every cost centre above is a Python cost a Rust renderer does not have to pay,
 and each is individually removable. Revision 1 headlined the lookup row; the
 review is right that the escape row is the headline, and it is restated here
-with the operand §1.5 supplies:
+with the operand §1.5 supplies. **Two rows carry a landed number rather than a
+prediction**, marked *landed*: they are the two per-value costs the milestone
+has already taken, and every other row is still the old measurement.
 
 | cost | today | native | note |
 |---|---|---|---|
-| **escaping one value** | **0.79 (`str`), 3.49 (`int`)** | **~0.03 / ~0.10** | the headline. `html_escape` exists in Rust (`filters/html_escape.rs`); the fast path is exact-`str` only (§3.1) |
-| a variable's lookup | 0.52 | ~0.30 | 0.22 of it is the re-join re-parse (§1.3a); the rest is the `Python::attach` per `PyTarget` method (§3.1) |
+| **escaping one value** | **0.78 (`str`) → 0.18, 0.84 → 0.23 *landed* ** | **~0.03** | the headline. `html_escape` exists in Rust (`filters/html_escape.rs`); the fast path is exact-`str` only (§3.1) |
+| **an `int` through `localize`** | **3.34 → 0.39 *landed*** | — | the row revision 2 mispriced: it imputed these 3.34 µs to "escaping one value". 3.0 of them are `get_language()` + three `get_format()` calls that `numberformat.format` then ignores, and the rendered text was always going to pay 0.09 to escape (§1.5) |
+| a variable's lookup | 0.65 | ~0.30 | the *after*-step-1 number is the "today" column now, and the ~0.30 is stock's own — the target is par, not a guess. 0.081 of the 0.73 was the re-join re-parse, and it landed (§1.3a). The rest is the `Python::attach` per `PyTarget` method (§3.1) |
 | Python frames per node | 0.16 | ~0 | `Variable.render`, `render_annotated`, `NodeList.render` |
 | a filter application | 0.208 crossing + a Python frame | ~0 | 66 filter bodies already in `crates/template-core/src/filters/` |
 | node dispatch | a Python method call | a jump table | |
@@ -353,6 +415,48 @@ Unchanged from M18 §4 and not re-argued here; the boundary is the whole design:
    lookup and a jump rather than a lookup, a crossing, a callback and a Python
    frame.
 
+4. **What the boundary does with a `str` Rust cannot hold is decided here, not
+   after the walk — and today the answer is a live divergence.** Rust's `&str`
+   is UTF-8; a Python `str` is not, and the crossing is **one conversion**:
+   `crates/template-py/src/filters.rs:156` is
+   `obj.cast::<PyString>()?.to_str()`, which cannot encode a lone surrogate. So
+   this is a property of the seam and not of any filter's signature, and the
+   measured consequence is that **all 57 built-in filter names raise
+   `UnicodeEncodeError` on `'\ud800'`** — 37 of them take only the value and
+   raise, and the 20 that take an argument raise with one supplied. Django's own
+   body answers **33 of those 37**, and `{{ x|upper }}` with `x = '\ud800'`
+   therefore raises in this engine and renders `'\ud800'` in Django. That is a
+   drop-in divergence reachable from a public template today, not a step-2
+   risk: `.review/m19-measurements/surrogate_boundary.py` is the census and
+   prints the four filter bodies Django *itself* raises for (two of them —
+   `iriencode`, `urlencode` — because they encode, and `timesince`/`timeuntil`
+   because they want a date).
+
+   **The decision is that the boundary carries a refusal, and the walk
+   generalises the pattern one function away rather than inventing one.** The
+   escape arm landed in step 2 slice 1 already refuses: `_native.html_escape`
+   returns `None` for a string it cannot answer for, the arm reads the `None` as
+   "go the long way", and the value gets `conditional_escape`'s answer — which
+   is why `{{ x }}` renders `'\ud800'` above while `{{ x|upper }}` raises. The
+   analogue for filters is cheaper than the pattern it copies, because the
+   fall-through already exists:
+   `python/django_rust_templates/engine/base.py:862` routes to `_native.filter`
+   only when `names.get(func)` finds the builtin, and the `else` path is
+   Django's own callable. So the refusal route is the *same branch*, and the
+   repair is to make
+   `classify` say "I cannot hold this value" rather than raise from inside
+   `to_str()` — `Result<Value>` becoming `Result<Option<Value>>`, or the
+   equivalent at the seam.
+
+   Two things follow for sequencing (§5). The **decision** is an input to the
+   walk, because a walk that crosses the boundary per node must know whether it
+   crosses with a refusal path; retrofitting one afterwards means a fallback in
+   every node type. The **repair** is its own commit with its own acceptance
+   evidence, because it is a correctness fix and folding it into a speed change
+   makes the speed number unreviewable — and because the row that proves it is
+   an equality row against Django for a value this tree currently renders with a
+   `UnicodeEncodeError`.
+
 ### 3.2 Materialisation becomes lazy — and `extra_data` must not
 
 The acceptance suite inspects `.nodelist`: it calls `get_nodes_by_type`,
@@ -383,7 +487,7 @@ laziness must not reach it.* The test that enforces it is
 ### 3.3 The debug contract: a native node needs a span
 
 **BLOCKING 5 is correct and revision 1 missed it too**, and it is the stronger of
-the two: `Node.render_annotated` (`engine/base.py:1089`) sets
+the two: `Node.render_annotated` (`engine/base.py:1090`) sets
 `e._culprit_node = self` first-writer-wins, then builds `template_debug` from
 `e._culprit_node.token`. A natively-rendered node has no Python `Node` to be the
 culprit and no `.token`, so `e.template_debug` is absent and
@@ -583,6 +687,17 @@ the identity check are **not** re-specified here — §0's correction.
    parse row with it), which is the signature of a per-render cost and the exact
    inverse of the filter-routing row above — the one that was per-compile and so
    showed only in parse.
+
+   **Slice 1b — the boundary's refusal — is decided (§3.1 item 4) and is its own
+   commit, and it lands *before* the walk.** The decision is already made: the
+   boundary carries a refusal the way `html_escape` does, and the walk
+   generalises that pattern rather than adding a fallback per node type
+   afterwards. What is scheduled here is the *repair*, and it is scheduled first
+   because it is not an optimisation — `{{ x|upper }}` with `x = '\ud800'`
+   raises where Django renders, so the row that closes it is an equality row
+   against Django for a value this tree currently refuses. Its own commit, per
+   §3.1's second consequence: folding a correctness fix into a speed change makes
+   the speed number unreviewable.
 3. **`LookupTarget` takes `py`.** The signature change across `template-core`
    that removes the per-method `Python::attach` (§3.1 item 2). Its own step
    because it touches a trait the whole walk is written against, and because
@@ -670,7 +785,7 @@ committed), the NIT (`iters` is pinned per row).
 
 **Disputed, with a measurement: B1's premise.** The render path does call
 `_native.resolve` — three calls for a three-variable template, reached from
-`engine/base.py:1073` — so `LookupScope::resolve` is the prototype's path and not the
+`engine/base.py:1074` — so `LookupScope::resolve` is the prototype's path and not the
 shipped one, and revision 1's 2.24× was a true statement about the shipped engine
 with a wrong account of why. The review's decomposition of that 0.522 is exactly
 right and is adopted; its *conclusion* that the engine's resolver is "at parity

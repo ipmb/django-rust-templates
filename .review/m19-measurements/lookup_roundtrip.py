@@ -1,11 +1,17 @@
 #!/usr/bin/env python
 """Is `".".join(self.lookups)` a faithful input to `parse_variable`?
 
-M19 §1.3a's cheap win is to stop re-joining: `engine/base.py:1033` builds
-`".".join(self.lookups)` and hands it to `_native.resolve`, which re-parses it back
+M19 §1.3a's cheap win is to stop re-joining: engine/base.py:1033 built
+`".".join(self.lookups)` and handed it to `_native.resolve`, which re-parsed it back
 into the same components one frame later. The spec prices that at 0.22 us per
 variable. This probe asks the prior question — **is the round trip exact?** — because
 a cheap win that changes behaviour is not a win.
+
+**Present tense in the paragraph above only as of the probe's own date.** The join
+it cites has since been removed — step 1 landed the component handover, so at
+`e139d89` no `".".join(self.lookups)` remains in `engine/base.py` and the number
+`1033` there names no such line. This file is the record of the question, not of
+the shipped code; the shipped state is the commit.
 
 **It is not exact, and this probe found a reachable render divergence because of
 it.** `1.3a`'s premise survives the finding — the repair is still to stop re-joining —

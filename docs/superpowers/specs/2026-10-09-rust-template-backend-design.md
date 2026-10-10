@@ -425,7 +425,7 @@ the `tree:` line discriminates.
 > That second clause is a reachability claim, and a first draft supported it the
 > way one supports such things badly: by naming two call sites
 > (`python/django_rust_templates/host.py:607`,
-> `python/django_rust_templates/engine/base.py:861`) and calling the audit
+> `python/django_rust_templates/engine/base.py:862`) and calling the audit
 > representative. It is measured instead, because it is one run and four seconds:
 > wrap each helper in a counter, then run the pinned suite in that process
 > (`.venv/bin/python -I`, `django_suite/run.py template_tests`, `Ran 1547 tests …
