@@ -8,6 +8,7 @@ use pyo3::exceptions::{
     PyAttributeError, PyException, PyIndexError, PyKeyError, PyNotImplementedError, PyRuntimeError,
     PyStopIteration, PyTypeError, PyUnicodeDecodeError, PyValueError, PyZeroDivisionError,
 };
+use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyDict, PyList, PyString, PyTuple, PyType};
@@ -3048,7 +3049,17 @@ struct ForPlan {
     /// `self.loopvars[0]` — the name the loop writes into the context on every
     /// iteration, after the counters, as `ForNode.render` writes it
     /// (`engine/defaulttags.py:248`).
-    loopvar: String,
+    ///
+    /// **A `Py<PyString>` and not a `String`, because this is a dict key on a
+    /// per-iteration path.** Passing the `&str` to `Context.__setitem__` builds a
+    /// fresh `PyString` on every iteration of every loop — one build per item,
+    /// forever, for a name the plan knew before the first render. The name is
+    /// fixed at plan time, so the string is built once, here, and reused.
+    /// `PyString::new` and not `PyString::intern`: the name comes from the
+    /// template, and the interpreter's intern table is permanent, so interning a
+    /// template-supplied name would let any template grow it without bound. See
+    /// §5.5's first lever in `.review/m19-measurements/frame-rewrite-fix.md`.
+    loopvar: Py<PyString>,
 }
 
 /// Which nodes the walk rendered and which it handed back, over every render
@@ -3584,7 +3595,7 @@ fn plan_for(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResul
     let Some(empty) = plan_list(py, empty_desc, &python_empty)? else {
         return Ok(None);
     };
-    let mut loopvars: Vec<String> = node.getattr("loopvars")?.extract()?;
+    let loopvars: Vec<String> = node.getattr("loopvars")?.extract()?;
     // An unpacking loop writes one context entry per name and pops them back
     // per iteration, and each name is a frame of its own. Declined rather than
     // half-done.
@@ -3601,7 +3612,7 @@ fn plan_for(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResul
         empty,
         sequence: node.getattr("sequence")?.unbind(),
         is_reversed: node.getattr("is_reversed")?.extract()?,
-        loopvar: loopvars.remove(0),
+        loopvar: PyString::new(py, &loopvars[0]).unbind(),
     }))
 }
 
@@ -4409,9 +4420,9 @@ impl<'py> Walk<'py> {
         // delegate reads `forloop.parentloop.length` off this dict, and a dict
         // missing it is a `KeyError` where Django has a number.
         let forloop = PyDict::new(py);
-        forloop.set_item("parentloop", parentloop)?;
-        forloop.set_item("length", length)?;
-        self.context.set_item("forloop", &forloop)?;
+        forloop.set_item(intern!(py, "parentloop"), parentloop)?;
+        forloop.set_item(intern!(py, "length"), length)?;
+        self.context.set_item(intern!(py, "forloop"), &forloop)?;
         // **The state is written on every iteration, for every loop, and that is
         // the whole of this fix.** A body used to be able to *seal* — the walk
         // elided these writes and served the body's reads from a Rust frame — and
@@ -4439,17 +4450,33 @@ impl<'py> Walk<'py> {
         // from Python's `len()`, so it fits `i64` by construction; `index` passing
         // `i64::MAX` would take 9.2e18 iterations.
         let signed_length = length as i64;
+        // **The keys are hoisted out of the iteration, and that is the whole of
+        // this change.** `forloop.set_item(&str, …)` builds a `PyString` from the
+        // `&str` on *every* call: six counters, six builds per iteration, 300 for
+        // a 50-item loop, for names that are literals here and identical on every
+        // pass. `intern!` answers with the same `PyString` each time, as CPython
+        // does with the literal keys of Django's own `loop_dict = {"counter0":
+        // …}`. On the **write** — the only path this loop pays — that is three
+        // things: no build at all, a hash computed once per key object and cached
+        // instead of 350 times, and from the second iteration a lookup that hits
+        // on *identity*. `plan.loopvar` is the seventh, pre-built on the plan ([`ForPlan::loopvar`]).
+        let key_counter0 = intern!(py, "counter0");
+        let key_counter = intern!(py, "counter");
+        let key_revcounter = intern!(py, "revcounter");
+        let key_revcounter0 = intern!(py, "revcounter0");
+        let key_first = intern!(py, "first");
+        let key_last = intern!(py, "last");
         for (index, item) in values.try_iter()?.enumerate() {
             let item = item?;
             let counter = index + 1;
             let revcounter = signed_length - index as i64;
-            forloop.set_item("counter0", index)?;
-            forloop.set_item("counter", counter)?;
-            forloop.set_item("revcounter", revcounter)?;
-            forloop.set_item("revcounter0", revcounter - 1)?;
-            forloop.set_item("first", index == 0)?;
-            forloop.set_item("last", index == length - 1)?;
-            self.context.set_item(&plan.loopvar, &item)?;
+            forloop.set_item(key_counter0, index)?;
+            forloop.set_item(key_counter, counter)?;
+            forloop.set_item(key_revcounter, revcounter)?;
+            forloop.set_item(key_revcounter0, revcounter - 1)?;
+            forloop.set_item(key_first, index == 0)?;
+            forloop.set_item(key_last, index == length - 1)?;
+            self.context.set_item(plan.loopvar.bind(py), &item)?;
             self.run(&plan.body, depth)?;
         }
         Ok(())
@@ -4961,7 +4988,7 @@ mod walk_depth {
                 empty: Vec::new(),
                 sequence: sequence.clone_ref(py),
                 is_reversed: false,
-                loopvar: "item".to_string(),
+                loopvar: PyString::new(py, "item").unbind(),
             })),
             node: py.None(),
             class_name: FOR_NODE.to_string(),

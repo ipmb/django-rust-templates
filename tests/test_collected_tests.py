@@ -748,7 +748,25 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # saturating repair as well.
 #
 # Counts at close: 516 collected, proxy and discovery agreeing.
-PINNED = 516
+#
+# 516 → 518 is **+2**, and it is this slice's — §5.5's *first* cost lever, which
+# pre-builds the loop's seven dict keys instead of letting every `set_item` build
+# a fresh `PyString` from a `&str`. A performance change owes a row that would
+# notice it going *wrong*, not a row that repeats its numbers, and the pre-built
+# key has exactly two observable edges. The loop variable's name now travels as a
+# `PyString` built at plan time, so
+# `test_a_non_ascii_loop_variable_name_reaches_the_context` pins that the name
+# survives the round trip for a character outside ASCII — invisible in every row
+# whose loop variable is `item`. And
+# `test_a_loop_named_forloop_writes_the_item_over_the_dict` pins the one place
+# this lever's identity reasoning is testable: the dict is written under the
+# *interned* `"forloop"` while the item is written under a different object
+# carrying the same text, so the second write must displace the first **by
+# equality** (`engine/defaulttags.py:248`); a dict keyed on identity would keep
+# both entries and `{{ forloop }}` would still print the dict.
+#
+# Counts at close: 518 collected, proxy and discovery agreeing.
+PINNED = 518
 
 
 def collected() -> unittest.TestSuite:

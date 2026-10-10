@@ -1,0 +1,70 @@
+before: /Users/pete/.claude/jobs/627577b5/tmp/headline-a2.json
+after:  /Users/pete/.claude/jobs/627577b5/tmp/headline-b2.json
+  /Users/pete/.claude/jobs/627577b5/tmp/headline-a2.json: artifact sha256:dc174855d926defc, repeats=7 target=0.05
+  /Users/pete/.claude/jobs/627577b5/tmp/headline-a2.json: python -I scripts/bench.py --json /Users/pete/.claude/jobs/627577b5/tmp/headline-a2.json
+  /Users/pete/.claude/jobs/627577b5/tmp/headline-b2.json: artifact sha256:3d3e99e63eddc036, repeats=7 target=0.05
+  /Users/pete/.claude/jobs/627577b5/tmp/headline-b2.json: python -I scripts/bench.py --json /Users/pete/.claude/jobs/627577b5/tmp/headline-b2.json
+  rows: 54 (key, mode) cells, engines django, rust, jinja2
+
+band: two runs of sha256:dc174855d926defc — 54 shared rows, median |rel| 2.01%, max 8.67%
+      (a row's own figure where the band pair has that row, the band's max where it does not)
+
+row                                before    after       rel     band  verdict
+--------------------------------------------------------------------------
+micro/loop-text render              1.287    0.670  -47.93%   0.70%  outside
+micro/loop-text parse               1.380    1.013  -26.59%   1.06%  outside
+micro/loop-var render               0.581    0.447  -23.14%   2.18%  outside
+micro/loop-var parse                0.736    0.616  -16.40%   1.62%  outside
+real-world/complex render           0.631    0.582   -7.76%   4.05%  outside
+real-world/large render             0.409    0.378   -7.58%   2.64%  outside
+real-world/complex parse            0.715    0.666   -6.85%   4.32%  outside
+real-world/normal render            0.478    0.449   -6.12%   1.44%  outside
+micro/variable compile              2.062    1.939   -5.93%   1.79%  outside
+django-only/for-tags render         0.529    0.498   -5.80%   5.70%  outside
+django-only/i18n render             0.575    0.544   -5.35%   1.08%  outside
+django-only/i18n parse              0.646    0.616   -4.64%   2.66%  outside
+django-only/filter-arg render       1.212    1.157   -4.51%   1.51%  outside
+real-world/normal parse             0.686    0.657   -4.30%   1.40%  outside
+micro/text parse                    2.305    2.400   +4.13%   4.28%  inside
+real-world/large compile            1.409    1.463   +3.88%   8.67%  inside
+micro/text compile                  3.435    3.558   +3.59%   2.58%  outside
+micro/loop-var compile              1.473    1.420   -3.58%   2.23%  outside
+django-only/for-tags parse          0.602    0.581   -3.42%   3.58%  inside
+django-only/realistic render        0.862    0.835   -3.20%   0.94%  outside
+real-world/complex compile          1.304    1.265   -3.00%   3.55%  inside
+micro/lookup parse                  1.568    1.615   +2.99%   3.64%  inside
+micro/include compile               1.382    1.345   -2.74%   1.35%  outside
+micro/extends render                1.020    0.993   -2.64%   2.44%  outside
+micro/escape parse                  1.287    1.319   +2.44%   0.15%  outside
+real-world/large parse              1.140    1.114   -2.30%   7.44%  inside
+micro/variable parse                1.570    1.537   -2.08%   0.95%  outside
+micro/filter render                 0.864    0.847   -2.07%   0.93%  outside
+micro/extends parse                 1.266    1.290   +1.89%   5.46%  inside
+micro/if parse                      1.825    1.795   -1.62%   2.83%  inside
+micro/lookup compile                2.023    2.054   +1.52%   5.20%  inside
+django-only/filter-arg compile      1.869    1.841   -1.49%   0.09%  outside
+micro/include parse                 1.043    1.028   -1.43%   1.99%  inside
+micro/include render                0.699    0.709   +1.39%   0.64%  outside
+django-only/for-tags compile        1.264    1.247   -1.35%   2.46%  inside
+micro/text render                   1.076    1.062   -1.33%   2.23%  inside
+micro/lookup render                 0.843    0.832   -1.26%   2.34%  inside
+django-only/escape-table compile    1.462    1.480   +1.25%   2.79%  inside
+micro/filter compile                1.561    1.580   +1.20%   1.39%  inside
+django-only/realistic compile       1.435    1.450   +1.00%   2.19%  inside
+django-only/escape-table render     0.590    0.586   -0.78%   0.04%  outside
+micro/filter parse                  1.393    1.403   +0.67%   2.97%  inside
+micro/if render                     0.938    0.944   +0.64%   1.00%  inside
+django-only/realistic parse         0.910    0.905   -0.54%   1.55%  inside
+micro/loop-text compile             1.473    1.467   -0.45%   0.20%  outside
+micro/extends compile               1.417    1.411   -0.40%   2.04%  inside
+django-only/i18n compile            1.581    1.587   +0.38%   0.95%  inside
+real-world/normal compile           1.352    1.348   -0.31%   3.92%  inside
+micro/variable render               0.760    0.758   -0.28%   1.61%  inside
+micro/escape compile                1.672    1.676   +0.23%   0.32%  inside
+django-only/filter-arg parse        1.241    1.238   -0.19%   2.50%  inside
+micro/if compile                    2.003    2.005   +0.11%   1.12%  inside
+micro/escape render                 0.759    0.759   +0.08%   1.55%  inside
+django-only/escape-table parse      1.193    1.193   +0.03%   1.46%  inside
+
+26 outside its row's band, 28 inside.
+A row marked `inside` is *not resolvable to better than the band* — that is not the same finding as `did not move`.

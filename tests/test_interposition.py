@@ -181,7 +181,7 @@ class InterpositionTests(unittest.TestCase):
         ``{% if %}`` grammar into ``crates/template-core/src/parser/smartif.rs``,
         which the parse seam drives inside ``compile_template``, and the shell
         then materialises the resulting ``IfCondition`` tree into real
-        ``smartif`` objects (``crates/template-py/src/lib.rs:851``). A row
+        ``smartif`` objects (``crates/template-py/src/lib.rs:852``). A row
         named after the plan's premise would have asserted something untrue
         about a call that does not happen, so it is renamed and rewritten here;
         the substitution is recorded in the plan's Task 3 corrections.
@@ -2198,6 +2198,82 @@ class FilterRoutingTests(unittest.TestCase):
             stock,
             "the third iteration's counters wrapped: the walk printed "
             "`18446744073709551615/18446744073709551614` for `-1/-2`",
+        )
+
+    def test_a_non_ascii_loop_variable_name_reaches_the_context(self):
+        """The loop's seventh key is a `PyString` built once, not a `&str` passed
+        per iteration — and the name it carries is the template's.
+
+        `Walk::run_loop_body` used to hand `plan.loopvar` to
+        `Context.__setitem__` as a `&str`, so PyO3 built a `PyString` from it on
+        every iteration; the lever pre-builds one at plan time and reuses it. The
+        saving is the build, and the risk is that the pre-built string is not the
+        name the template wrote — a conversion that is lossy for anything outside
+        ASCII would be invisible in every row whose loop variable is `item`.
+
+        Django's own `Variable` accepts `Ω` as a name (`\\w` is Unicode-aware for
+        a `str` pattern), so the row asserts stock's answer first and only then
+        that ours equals it.
+        """
+        from django.template.engine import Engine as StockEngine
+        from django.template.context import Context as StockContext
+
+        from django_rust_templates.engine import Context, Engine
+
+        source = "{% for Ω in xs %}{{ Ω }}:{{ forloop.counter }};{% endfor %}"
+        stock = (
+            StockEngine().from_string(source).render(StockContext({"xs": ["a", "b"]}))
+        )
+        our = Engine().from_string(source).render(Context({"xs": ["a", "b"]}))
+
+        self.assertEqual(
+            stock,
+            "a:1;b:2;",
+            "the expectation itself: a non-ASCII loop variable resolves, and the "
+            "counters are written beside it",
+        )
+        self.assertEqual(
+            our,
+            stock,
+            "the pre-built key and the template's name disagree",
+        )
+
+    def test_a_loop_named_forloop_writes_the_item_over_the_dict(self):
+        """Two keys that are *equal* but not the same object, and the order that
+        decides which one the body reads.
+
+        `ForNode.render` writes `context["forloop"] = loop_dict` and then, per
+        iteration, `context[loopvars[0]] = item` (`engine/defaulttags.py:248`) —
+        so a loop named `forloop` has the *item* written over the dict, and the
+        body reads an `int` where it might expect the state. That order is only
+        observable when the two writes collide, which is this row.
+
+        It is also the one place the lever's identity claim is testable: the dict
+        is written with the interned `"forloop"` and the item with a `PyString`
+        built at plan time, so the second write replaces the first *by equality*
+        and not by identity. A dict that keyed on identity would grow a second
+        entry here and `{{ forloop }}` would keep printing the dict.
+        """
+        from django.template.engine import Engine as StockEngine
+        from django.template.context import Context as StockContext
+
+        from django_rust_templates.engine import Context, Engine
+
+        source = "{% for forloop in xs %}{{ forloop }}:{{ forloop.counter }};{% endfor %}"
+        stock = StockEngine().from_string(source).render(StockContext({"xs": [1, 2]}))
+        our = Engine().from_string(source).render(Context({"xs": [1, 2]}))
+
+        self.assertEqual(
+            stock,
+            "1:;2:;",
+            "the expectation itself: the item is written over the dict, so "
+            "`{{ forloop }}` is the item and `{{ forloop.counter }}` is the "
+            "empty string — an `int` has no `.counter`",
+        )
+        self.assertEqual(
+            our,
+            stock,
+            "the plan-time key did not displace the interned dict key",
         )
 
     def test_the_parser_finds_our_defaultfilters(self):

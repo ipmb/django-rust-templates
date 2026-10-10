@@ -624,17 +624,20 @@
       like rather than three different templates — and the harness prints the engine it
       built, the extension it loaded and which profile built it, refusing to print a table
       for any other engine. Measured 2026-10-10 local, the day the report stamps its run in
-      UTC (2026-10-10 17:30, regenerated on the tree that deletes the sealed loop's frame
-      route): the port is
-      <b>0.50× at render and
-      0.82× at parse</b> on the real-world pages (geometric mean of three pages; the six
-      whole-page render rows run 0.42×–1.22×), and the worst row in the corpus is compile of a template that is
-      almost nothing but the call — <b>3.51×</b>, 6.74 µs against stock's 1.92 µs. The three
-      tiles hold to a unit in the second decimal across four runs of that one build
-      (0.50/0.49/0.50/0.50 render, 0.82/0.80/0.82/0.82 parse, 1.36/1.36/1.36/1.37 compile), so
-      they are the build's and not a run's — and the render tile reads <b>0.50× against the
-      0.41×</b> the ordered pass published, which is the cost of that deletion stated where
-      the goal is stated. Compatibility has
+      UTC (2026-10-10 19:32, the stamp <code>docs/bench.html</code> itself carries from the run
+      that wrote it, on the tree that pre-builds a loop's seven state
+      keys once per plan instead of once per iteration): the port is
+      <b>0.46× at render and
+      0.79× at parse</b> on the real-world pages (geometric mean of three pages; the three
+      whole-page render rows run 0.38×–0.59×), and the worst row in the corpus is compile of a template that is
+      almost nothing but the call — <b>3.64× / 3.56×</b>, 7.02 / 6.93 µs against stock's
+      1.93 / 1.95 µs. The three
+      tiles are the build's and not a run's: four runs alternating two builds put render at
+      <b>0.494 / 0.498</b> before the loop-key lever and <b>0.466 / 0.462</b> after, parse at
+      0.830 / 0.824 and 0.797 / 0.787, compile at 1.398 / 1.354 and 1.384 / 1.356. The
+      render tile therefore reads <b>0.46×</b>, against the <b>0.50×</b> the deletion
+      published and the <b>0.41×</b> the ordered pass before it — the loop-key lever returns
+      0.04 of the 0.09 that deletion cost, stated where the goal is stated. Compatibility has
       been the priority throughout, and the measurement is published here rather than only
       the number that would flatter it. <b>Every chart, tile and table block states which
       way "better" runs</b>, and the word is read from the payload (<code>bench.py</code>'s
@@ -644,7 +647,12 @@
       <i>Django is faster</i>, while <b>Jinja2 is fastest on every whole-page render</b> at
       0.30×–0.42× stock's time — on the tree before this deletion it was fastest on two of
       the three, <code>normal</code> being ours at 132.81 µs against Jinja2's 169.84, and
-      this change hands <code>normal</code> back. Both statements are true of this tree;
+      this change hands <code>normal</code> back. The port's time as a multiple of Jinja2's,
+      per run, is now <b>1.09× / 1.07×</b> on <code>normal</code>, <b>1.46× / 1.42×</b> on
+      <code>complex</code> and <b>1.32× / 1.26×</b> on <code>large</code>, from 1.11× / 1.12×,
+      1.52× / 1.56× and 1.44× / 1.35× before the loop-key lever: below both of each page's
+      before figures, so closer on all three and reached on
+      none. Both statements are true of this tree;
       <code>parse</code> is where they invert,
       because Jinja2 compiles to Python source and Django does not.
     </p>
@@ -1436,6 +1444,54 @@
       <i>section</i>; the <code>__TEXT</code> <i>segment</i> around it holds the load commands too,
       so some of the 86 are inside that — and zero in <code>__DATA</code>. Measured by diffing the
       two images, and written up in the record's §7.1.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>The first of the deletion's three owed cost levers is taken, and it is the seven key
+      strings.</b> Every iteration of every loop the walk owns wrote Django's six counters and
+      the loop variable with <code>forloop.set_item(&amp;str, …)</code> and
+      <code>Context.__setitem__(&amp;str, …)</code> — and a <code>&amp;str</code> is not a key:
+      PyO3 built a fresh <code>PyString</code> from it on every call, seven per iteration, 350
+      for a fifty-row loop, for names that cannot change between the first iteration and the
+      last. Six are literals and now go through <code>intern!</code> — the same
+      <code>PyString</code> object on every call, which is what CPython already does with the
+      literal keys of Django's own <code>loop_dict</code> — and the seventh, the loop variable,
+      is a <code>Py&lt;PyString&gt;</code> built once in <code>plan_for</code>. That one is
+      <code>PyString::new</code> and deliberately not interned: the name comes from the
+      template, and interning a template-controlled name would let any template grow the
+      interpreter's permanent intern table without bound.
+      <b>The unit is measured on a purpose-built instrument rather than a reused one.</b>
+      <code>frame_rewrite_ab.py</code> has no control for this change — all four of its rows hold
+      a <code>{% for %}</code>, so its line calling <code>C</code> a "no-loop control (this
+      change cannot touch it)" is false here — and
+      <code>.review/m19-measurements/loop_keys_ab.py</code> therefore carries its own: four loop
+      lengths give <code>cost(n) = a + b·n</code>, so the slope <em>is</em> the per-iteration
+      cost, and a fifty-<code>{{ a }}</code> row holding no loop at all is the control. Over 12
+      alternating rounds of two builds it reads <b>+0.2770 → +0.0993 µs per iteration</b> in
+      render and <b>+0.2779 → +0.0998</b> in parse — four independent fits agreeing to 0.015 µs,
+      i.e. <b>−0.18 µs off every iteration</b>, 25 ns a key — while the control moves 0.64% /
+      0.17% / 0.02% across the three modes and compile, where the loop does not run, is flat at
+      ±0.0002 µs/iteration.
+      <b>On the page, where the lever was aimed.</b> Four full <code>bench.py</code> runs, ABBA
+      over the two artifacts with the artifact's sha asserted after every swap:
+      <code>micro/loop-text</code> render goes <b>19.14 → 9.94 µs</b>, from <b>1.29× stock</b> to
+      <b>0.66×</b> — a loop of text nodes the port took 29% more time over and now takes 34% less —
+      and <code>micro/loop-var</code> render <b>45.66 → 36.01 µs</b> (0.58× → 0.45×). All three
+      whole-page renders move down in both pairings (−3.5%/−5.3% <code>normal</code>,
+      −2.6%/−7.0% <code>complex</code>, −8.4%/−7.2% <code>large</code>), which is the
+      <b>0.50× → 0.46×</b> render tile above. Under the wider of the two same-build bands
+      (median 2.01%, max 8.67%), each pairing puts 26 of the 54 cells outside their own band and
+      only <b>15 are outside in both</b>; the four loop rows are the largest of those
+      (−14% to −50%, against a next-largest −9%),
+      while the cells outside in one pairing only include several <em>positive</em> compile rows
+      with no loop in them — drift, and not reported as a finding.
+      <b>One number does not close, and is recorded rather than explained.</b> Iterations times
+      that unit predicts the page's saving: <code>normal</code>'s 50 × 0.18 = 9.0 µs against
+      −8.7 µs measured, which closes; <code>complex</code>'s 84 × 0.18 = 15.1 against −25.6 and
+      <code>large</code>'s 60 × 0.18 = 10.8 against −22.2, which are 1.7× and 2.1×. The unit was
+      measured on a loop whose context holds one list and whose body is empty or a single read,
+      and those pages are neither; which of the two readings is right is not settled here, and
+      the number to trust on a page is the page's own measured delta. The slice's own record is
+      <code>.review/m19-measurements/loop-keys.md</code>.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>Until M18 it was a substitution, and that machinery is gone.</b> Earlier revisions of

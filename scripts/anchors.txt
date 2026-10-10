@@ -42,17 +42,17 @@ crates/template-py/src/filters.rs:311-320	crates/template-py/src/filters.rs	311	
 crates/template-py/src/filters.rs:958	crates/template-py/src/filters.rs	958	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
 crates/template-py/src/filters.rs:1833-1841	crates/template-py/src/filters.rs	1833	1841	match args.len()	-
 crates/template-py/src/filters.rs:1903-1906	crates/template-py/src/filters.rs	1903	1906	host.take_raised()	-
-crates/template-py/src/lib.rs:146	crates/template-py/src/lib.rs	146	-	fn filter_flags	-
-crates/template-py/src/lib.rs:851	crates/template-py/src/lib.rs	851	-	fn if_condition_to_py	-
+crates/template-py/src/lib.rs:147	crates/template-py/src/lib.rs	147	147	fn filter_flags	-
+crates/template-py/src/lib.rs:852	crates/template-py/src/lib.rs	852	852	fn if_condition_to_py	-
 crates/template-py/src/lib.rs:1104	crates/template-py/src/lib.rs	1104	-	-	-
 crates/template-py/src/lib.rs:1251	crates/template-py/src/lib.rs	1251	-	-	-
-crates/template-py/src/lib.rs:2123	crates/template-py/src/lib.rs	2123	-	Python::attach(|py| {	-
-crates/template-py/src/lib.rs:2133	crates/template-py/src/lib.rs	2133	-	let result = Python::attach(|py| {	-
-crates/template-py/src/lib.rs:2144	crates/template-py/src/lib.rs	2144	-	Python::attach(|py| self.value.bind(py).getattr(bit)	-
-crates/template-py/src/lib.rs:2149	crates/template-py/src/lib.rs	2149	-	let result = Python::attach(|py| -> PyResult<Py<PyAny>> {	-
-crates/template-py/src/lib.rs:2170	crates/template-py/src/lib.rs	2170	-	Python::attach(|py| self.dir(py, bit))	-
-crates/template-py/src/lib.rs:2716-2717	crates/template-py/src/lib.rs	2716	2717	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
-crates/template-py/src/lib.rs:2773-2778	crates/template-py/src/lib.rs	2773	2778	fn resolve_lookups(	resolve_components(py, &lookups, context)
+crates/template-py/src/lib.rs:2124	crates/template-py/src/lib.rs	2124	2124	Python::attach(|py| {	-
+crates/template-py/src/lib.rs:2134	crates/template-py/src/lib.rs	2134	2134	let result = Python::attach(|py| {	-
+crates/template-py/src/lib.rs:2145	crates/template-py/src/lib.rs	2145	2145	Python::attach(|py| self.value.bind(py).getattr(bit)	-
+crates/template-py/src/lib.rs:2150	crates/template-py/src/lib.rs	2150	2150	let result = Python::attach(|py| -> PyResult<Py<PyAny>> {	-
+crates/template-py/src/lib.rs:2171	crates/template-py/src/lib.rs	2171	2171	Python::attach(|py| self.dir(py, bit))	-
+crates/template-py/src/lib.rs:2717-2718	crates/template-py/src/lib.rs	2717	2718	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
+crates/template-py/src/lib.rs:2774-2779	crates/template-py/src/lib.rs	2774	2779	fn resolve_lookups(	resolve_components(py, &lookups, context)
 crates/template-py/src/lib.rs:4573	crates/template-py/src/lib.rs	4573	-	-	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-

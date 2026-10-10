@@ -149,13 +149,13 @@ a three-variable template rendered `'1|2|3'` with `{'_native.resolve': 3,
 'Variable._resolve_lookup': 3}`. The chain was `VariableNode.render` →
 `FilterExpression.resolve` → `Variable._resolve_lookup` →
 `_native.resolve(".".join(self.lookups), context)` →
-`crates/template-py/src/lib.rs:2716-2717`, `parse_variable(path)`.
+`crates/template-py/src/lib.rs:2717-2718`, `parse_variable(path)`.
 `LookupScope::resolve` is the *floor prototype's* path, and the prototype is not
 what ships.
 
 **Step 1 has since landed**, and the call is now `engine/base.py:1119`,
 `_native.resolve_lookups(self.lookups, context)`, entering at
-`crates/template-py/src/lib.rs:2773-2778`, with no `parse_variable` between the
+`crates/template-py/src/lib.rs:2774-2779`, with no `parse_variable` between the
 shell and the walk. The row above it is what that bought, measured rather than
 predicted.
 
@@ -421,11 +421,11 @@ Unchanged from M18 §4 and not re-argued here; the boundary is the whole design:
 2. **The walk resolves with the GIL already held.** The review measured this
    rather than leaving it open, and the answer is that every `LookupTarget`
    method on `PyTarget` re-enters `Python::attach` — `has_getitem`
-   (`crates/template-py/src/lib.rs:2123`), `get_item`
-   (`crates/template-py/src/lib.rs:2133`), `get_attr`
-   (`crates/template-py/src/lib.rs:2144`), `get_index`
-   (`crates/template-py/src/lib.rs:2149`) and `in_dir`
-   (`crates/template-py/src/lib.rs:2170`) — because the trait in `template-core`
+   (`crates/template-py/src/lib.rs:2124`), `get_item`
+   (`crates/template-py/src/lib.rs:2134`), `get_attr`
+   (`crates/template-py/src/lib.rs:2145`), `get_index`
+   (`crates/template-py/src/lib.rs:2150`) and `in_dir`
+   (`crates/template-py/src/lib.rs:2171`) — because the trait in `template-core`
    carries no `py`. A depth-1 lookup is
    ≥2 attaches plus a real `hasattr(type(v), "__getitem__")`. It is not fatal
    today and it is why depth 3 inverts. **Removing it is a `LookupTarget`

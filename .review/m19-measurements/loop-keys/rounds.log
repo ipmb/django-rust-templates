@@ -1,0 +1,28 @@
+prefix artifact sha256:dc174855d926defc
+fixed artifact sha256:3d3e99e63eddc036
+calibrated (on the artifact in place); pins in .review/m19-measurements/loop-keys/pins.json
+round  1  prefix sha dc174855d926defc
+round  1  fixed  sha 3d3e99e63eddc036
+round  2  fixed  sha 3d3e99e63eddc036
+round  2  prefix sha dc174855d926defc
+round  3  prefix sha dc174855d926defc
+round  3  fixed  sha 3d3e99e63eddc036
+round  4  fixed  sha 3d3e99e63eddc036
+round  4  prefix sha dc174855d926defc
+round  5  prefix sha dc174855d926defc
+round  5  fixed  sha 3d3e99e63eddc036
+round  6  fixed  sha 3d3e99e63eddc036
+round  6  prefix sha dc174855d926defc
+round  7  prefix sha dc174855d926defc
+round  7  fixed  sha 3d3e99e63eddc036
+round  8  fixed  sha 3d3e99e63eddc036
+round  8  prefix sha dc174855d926defc
+round  9  prefix sha dc174855d926defc
+round  9  fixed  sha 3d3e99e63eddc036
+round 10  fixed  sha 3d3e99e63eddc036
+round 10  prefix sha dc174855d926defc
+round 11  prefix sha dc174855d926defc
+round 11  fixed  sha 3d3e99e63eddc036
+round 12  fixed  sha 3d3e99e63eddc036
+round 12  prefix sha dc174855d926defc
+done: 24 runs

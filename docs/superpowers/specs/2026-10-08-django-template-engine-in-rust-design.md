@@ -323,7 +323,7 @@ propagates like a copied citation.
 | `LookupError` | `Step` (`crates/template-core/src/parser/resolve.rs:28`) + `LookupOutcome` (`crates/template-core/src/parser/resolve.rs:253`) | **split**; a per-bit verdict and a whole-path verdict are different lifetimes |
 | `ExtensionHost` | `Host` + `FilterHost` | **split**; the tag half and the value half have no method in common |
 | `ExtensionHost::call_tag` | `Host::call_tag` | **real**, in service |
-| `ExtensionHost::filter_flags` | `_native.filter_flags` (`crates/template-py/src/lib.rs:146`) | **real**, but a free function: `template-core` never reads a flag, the binding does |
+| `ExtensionHost::filter_flags` | `_native.filter_flags` (`crates/template-py/src/lib.rs:147`) | **real**, but a free function: `template-core` never reads a flag, the binding does |
 | `ExtensionHost::call_filter` | — | **retired** |
 | `ExtensionHost::render_foreign_node` | — | **retired** |
 | `ExtensionHost::annotate_exception` | — | **open obligation** |

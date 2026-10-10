@@ -1,0 +1,259 @@
+
+=== cargo test ===
+
+running 787 tests
+....................................................................................... 87/787
+....................................................................................... 174/787
+....................................................................................... 261/787
+....................................................................................... 348/787
+....................................................................................... 435/787
+....................................................................................... 522/787
+....................................................................................... 609/787
+....................................................................................... 696/787
+....................................................................................... 783/787
+....
+test result: ok. 787 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.74s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+=== cargo test, the crate that embeds an interpreter ===
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+=== rustfmt ===
+
+=== clippy ===
+
+=== the extension the python suites exercise ===
+🍹 Building a mixed python/rust project
+🐍 Found CPython 3.14 at /Users/pete/projects/lincolnloop/django-rust-templates/.venv/bin/python
+🔗 Found pyo3 bindings
+Requirement already satisfied: django<6.1,>=6.0 in ./.venv/lib/python3.14/site-packages (6.0.9)
+Requirement already satisfied: asgiref>=3.9.1 in ./.venv/lib/python3.14/site-packages (from django<6.1,>=6.0) (3.12.1)
+Requirement already satisfied: sqlparse>=0.5.0 in ./.venv/lib/python3.14/site-packages (from django<6.1,>=6.0) (0.6.0)
+    Finished `release` profile [optimized] target(s) in 0.05s
+📦 Built wheel for CPython 3.14 to /var/folders/mb/mm44lt7x7zv0fgy8br_ry48r0000gn/T/.tmprpaX66/django_rust_templates-0.1.0-cp314-cp314-macosx_11_0_arm64.whl
+✏️ Setting installed package as editable
+🛠 Installed django-rust-templates-0.1.0
+the extension under test is the one just built: _native.cpython-314-darwin.so
+  sha256:3d3e99e63eddc036  ==  target/release/lib_native.dylib
+
+=== python unit tests ===
+..tests/example.py: `base.py:616` — django/template/base.py:616 does not contain 'node.token = token' (it starts 'node.origin = self.origin')
+1 anchor occurrence(s) checked, 1 cited of 1 manifest entr(ies), 1 failure(s)
+.dead: 1 manifest entr(ies) are cited nowhere in the tree
+scripts/anchors.txt: `base.py:616` is cited nowhere in the tree
+1 anchor occurrence(s) checked, 1 cited of 2 manifest entr(ies), 1 failure(s)
+...tests/example.py: `defaulttags.py:99999` has no entry in scripts/anchors.txt
+1 anchor occurrence(s) checked, 0 cited of 0 manifest entr(ies), 1 failure(s)
+..........1 anchor occurrence(s) checked, 1 cited of 1 manifest entr(ies), 0 failure(s)
+.....tests/example.py: `base.py:660-668` — the tree cites line 660, scripts/anchors.txt records 670. `--update` writes the line the entry's snippet is on, so one of these two numbers is wrong
+1 anchor occurrence(s) checked, 1 cited of 1 manifest entr(ies), 1 failure(s)
+.............................................................../Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/base.py:70: DeprecationWarning: __package__ != __spec__.parent
+  from .exceptions import TemplateSyntaxError
+...................................../Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/base.py:70: DeprecationWarning: __package__ != __spec__.parent
+  from .exceptions import TemplateSyntaxError
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/utils/html.py:326: RemovedInDjango2028Warning: The default protocol will be changed from HTTP to HTTPS in Django 2028. Set the URLIZE_ASSUME_HTTPS transitional setting to True to opt into using HTTPS as the new default protocol.
+  urlized_word = self.handle_word(
+............................./Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/defaulttags.py:20: DeprecationWarning: __package__ != __spec__.parent
+  from .base import (
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/defaulttags.py:40: DeprecationWarning: __package__ != __spec__.parent
+  from .context import Context
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/defaulttags.py:41: DeprecationWarning: __package__ != __spec__.parent
+  from .defaultfilters import date
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/defaulttags.py:42: DeprecationWarning: __package__ != __spec__.parent
+  from .library import Library
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/defaulttags.py:43: DeprecationWarning: __package__ != __spec__.parent
+  from .smartif import IfParser, Literal
+......../Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/base.py:70: DeprecationWarning: __package__ != __spec__.parent
+  from .exceptions import TemplateSyntaxError
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/defaultfilters.py:27: DeprecationWarning: __package__ != __spec__.parent
+  from .base import VARIABLE_ATTRIBUTE_SEPARATOR
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/defaultfilters.py:28: DeprecationWarning: __package__ != __spec__.parent
+  from .library import Library
+......................./Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/defaultfilters.py:27: DeprecationWarning: __package__ != __spec__.parent
+  from .base import VARIABLE_ATTRIBUTE_SEPARATOR
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/defaultfilters.py:28: DeprecationWarning: __package__ != __spec__.parent
+  from .library import Library
+....................................../Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/loader_tags.py:6: DeprecationWarning: __package__ != __spec__.parent
+  from .base import Node, Template, TemplateSyntaxError, TextNode, Variable, token_kwargs
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/loader_tags.py:7: DeprecationWarning: __package__ != __spec__.parent
+  from .library import Library
+........../Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/loaders/filesystem.py:9: DeprecationWarning: __package__ != __spec__.parent
+  from .base import Loader as BaseLoader
+..../Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/engine.py:7: DeprecationWarning: __package__ != __spec__.parent
+  from .base import Template
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/engine.py:8: DeprecationWarning: __package__ != __spec__.parent
+  from .context import Context, _builtin_context_processors
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/engine.py:9: DeprecationWarning: __package__ != __spec__.parent
+  from .exceptions import TemplateDoesNotExist
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/engine.py:10: DeprecationWarning: __package__ != __spec__.parent
+  from .library import import_library
+./Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/loaders/filesystem.py:9: DeprecationWarning: __package__ != __spec__.parent
+  from .base import Loader as BaseLoader
+./Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/loaders/filesystem.py:9: DeprecationWarning: __package__ != __spec__.parent
+  from .base import Loader as BaseLoader
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/loaders/app_directories.py:8: DeprecationWarning: __package__ != __spec__.parent
+  from .filesystem import Loader as FilesystemLoader
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/loaders/cached.py:11: DeprecationWarning: __package__ != __spec__.parent
+  from .base import Loader as BaseLoader
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/loaders/locmem.py:7: DeprecationWarning: __package__ != __spec__.parent
+  from .base import Loader as BaseLoader
+../Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/engine.py:7: DeprecationWarning: __package__ != __spec__.parent
+  from .base import Template
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/engine.py:8: DeprecationWarning: __package__ != __spec__.parent
+  from .context import Context, _builtin_context_processors
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/engine.py:9: DeprecationWarning: __package__ != __spec__.parent
+  from .exceptions import TemplateDoesNotExist
+/Users/pete/projects/lincolnloop/django-rust-templates/.django/django/template/engine.py:10: DeprecationWarning: __package__ != __spec__.parent
+  from .library import import_library
+.........................................................................................................................................................................................................................................................................................
+----------------------------------------------------------------------
+Ran 518 tests in 16.939s
+
+OK
+
+  utils=18 ['date', 'filesizeformat', 'floatformat', 'iriencode', 'json_script', 'slugify', 'striptags', 'time', 'timesince', 'timeuntil', 'truncatechars', 'truncatechars_html', 'truncatewords', 'truncatewords_html', 'urlize', 'urlizetrunc', 'wordwrap', 'yesno']
+  stdlib_engine=3 ['pprint', 'random', 'urlencode']
+  string_method=2 ['lower', 'title']
+  lazy_decorator=1 ['phone2numeric']
+  union=24 rust_derived=33
+
+=== python anchor manifest ===
+unquoted: 231 entr(ies) record no source text, so only the line number is checked (not a failure)
+  231 of them are cited only from files with no remaining shorthand, so no naming pass will requote them (--frozen does not fail on these)
+name-only: 45 entr(ies) quote a bare identifier where a line of source was meant — its span contains it by construction, so the comparison cannot fail (not a failure)
+1583 anchor occurrence(s) checked, 927 cited of 927 manifest entr(ies), 0 failure(s)
+
+=== the vendored suite is generated, not edited ===
+215 vendored file(s) match the generator exactly
+
+=== suite counts carry their provenance ===
+suite counts: 24 line(s), every one with its provenance
+
+=== transcriptions differ from upstream only where declared ===
+pinned checkout: Django 6.0.9
+__init__.py: 8 declared region(s), 12 differing region(s) in the file, 0 executed function(s) guarded against
+base.py: 14 declared region(s), 14 differing region(s) in the file, 30 executed function(s) guarded against
+context.py: 1 declared region(s), 1 differing region(s) in the file, 3 executed function(s) guarded against
+defaultfilters.py: 1 declared region(s), 1 differing region(s) in the file, 1 executed function(s) guarded against
+defaulttags.py: 1 declared region(s), 1 differing region(s) in the file, 48 executed function(s) guarded against
+engine.py: 9 declared region(s), 9 differing region(s) in the file, 3 executed function(s) guarded against
+library.py: 1 declared region(s), 1 differing region(s) in the file, 12 executed function(s) guarded against
+loader_tags.py: 3 declared region(s), 3 differing region(s) in the file, 7 executed function(s) guarded against
+loaders/__init__.py: 1 declared region(s), 1 differing region(s) in the file, 0 executed function(s) guarded against
+loaders/app_directories.py: 2 declared region(s), 2 differing region(s) in the file, 0 executed function(s) guarded against
+loaders/base.py: 1 declared region(s), 1 differing region(s) in the file, 0 executed function(s) guarded against
+loaders/cached.py: 2 declared region(s), 2 differing region(s) in the file, 0 executed function(s) guarded against
+loaders/filesystem.py: 2 declared region(s), 2 differing region(s) in the file, 0 executed function(s) guarded against
+loaders/locmem.py: 2 declared region(s), 2 differing region(s) in the file, 0 executed function(s) guarded against
+smartif.py: 1 declared region(s), 1 differing region(s) in the file, 8 executed function(s) guarded against
+templatetags/cache.py: 2 declared region(s), 2 differing region(s) in the file, 0 executed function(s) guarded against
+templatetags/i18n.py: 2 declared region(s), 2 differing region(s) in the file, 2 executed function(s) guarded against
+templatetags/l10n.py: 1 declared region(s), 1 differing region(s) in the file, 0 executed function(s) guarded against
+templatetags/static.py: 2 declared region(s), 2 differing region(s) in the file, 0 executed function(s) guarded against
+templatetags/tz.py: 2 declared region(s), 2 differing region(s) in the file, 0 executed function(s) guarded against
+every transcription differs from upstream only where it declares
+
+=== the transcriptions are generated, not edited ===
+context.py matches the generator
+defaultfilters.py matches the generator
+defaulttags.py matches the generator
+loader_tags.py matches the generator
+loaders/__init__.py matches the generator
+loaders/app_directories.py matches the generator
+loaders/base.py matches the generator
+loaders/cached.py matches the generator
+loaders/filesystem.py matches the generator
+loaders/locmem.py matches the generator
+smartif.py matches the generator
+templatetags/cache.py matches the generator
+templatetags/i18n.py matches the generator
+templatetags/l10n.py matches the generator
+templatetags/static.py matches the generator
+templatetags/tz.py matches the generator
+
+=== differential harness ===
+differential: 59 cases, identical (django.template.engine vs django_rust_templates.engine.engine)
+
+=== generated files are current ===
+pyregex_word_ranges.txt is current: 771 ranges, 142940 code points
+crates/template-core/src/pyunicode/case.rs is current (28 upper entries)
+
+=== checkout pinned ===
+checkout pinned and unmodified
+
+=== django template_tests (vendored) ===
+test_get_template_directories (template_tests.test_autoreloader.Jinja2TemplateReloadTests.test_get_template_directories) ... skipped 'this test requires jinja2'
+test_reset_all_loaders (template_tests.test_autoreloader.Jinja2TemplateReloadTests.test_reset_all_loaders) ... skipped 'this test requires jinja2'
+test_watch_for_template_changes (template_tests.test_autoreloader.Jinja2TemplateReloadTests.test_watch_for_template_changes) ... skipped 'this test requires jinja2'
+test_case_sensitivity (template_tests.test_loaders.FileSystemLoaderTests.test_case_sensitivity) ... skipped 'This test only runs on case-sensitive file systems.'
+test_using (template_tests.test_response.SimpleTemplateResponseTest.test_using) ... skipped 'this test requires jinja2'
+test_using (template_tests.test_response.TemplateResponseTest.test_using) ... skipped 'this test requires jinja2'
+
+----------------------------------------------------------------------
+Ran 1547 tests in 3.758s
+
+OK (skipped=6)
+Destroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+ OK
+System check identified no issues (0 silenced).
+OK (skipped=6) after 1547 tests, and the six declared skips by identity (django_suite/run.py template_tests)
+
+=== packaging ===
+=== build the wheel ===
+🍹 Building a mixed python/rust project
+🐍 Found CPython 3.14 at /Users/pete/projects/lincolnloop/django-rust-templates/.venv/bin/python
+🔗 Found pyo3 bindings
+💻 Using `MACOSX_DEPLOYMENT_TARGET=11.0` for aarch64-apple-darwin by default
+    Finished `release` profile [optimized] target(s) in 0.02s
+📦 Built wheel for CPython 3.14 to /Users/pete/projects/lincolnloop/django-rust-templates/target/packaging/dist/django_rust_templates-0.1.0-cp314-cp314-macosx_11_0_arm64.whl
+wheel: django_rust_templates-0.1.0-cp314-cp314-macosx_11_0_arm64.whl
+
+=== case 1: name the backend in settings, then run the project ===
+  6.0.9|django_rust_templates.rust|django_rust_templates.engine.engine|PETE has 2 items
+
+=== case 1b: the control — the same project, stock Django's backend ===
+  6.0.9|django.template.backends.django|django.template.engine|PETE has 2 items
+
+=== case 2: a Django the engine was not transcribed from ===
+ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
+django-rust-templates 0.1.0 requires django<6.1,>=6.0, but you have django 6.1.2 which is incompatible.
+  refused 6.1.2: this engine is a transcription of Django 6.0.9, but Django 6.1.2 is installed. The Rust …
+  allow_django_mismatch built the backend against 6.1.2
+
+=== case 2b: pip's resolver refuses the pairing, from the declared bound ===
+  pip refused the pairing, citing the declared bound
+
+=== case 3: with no Django at all, the package still answers for itself ===
+  no Django | engine 0.1.0 | transcribed from 6.0.9
+
+=== case 4: the source tree, which is what 'pip install .' builds ===
+  source install | 6.0.9 | HI-123
+
+=== there is no case 5, and its absence is the M18 rewrite ===
+
+packaging: six banners — cases 1, 1b, 2, 2b, 3 and 4. The numbering stops at
+           four because case 5 was removed by the M18 rewrite; 'six' counts the
+           two lettered controls. In them: a wheel installs, a real project
+           activates it by naming the backend
+           in TEMPLATES and renders through the loader stack, the same project
+           against Django's own backend produces the same render, the backend
+           refuses a Django it was not transcribed from and opens under
+           allow_django_mismatch, pip refuses the pairing first, the package
+           stands alone with no Django, and the source tree builds
+
+all checks passed
+check.sh exit=0
