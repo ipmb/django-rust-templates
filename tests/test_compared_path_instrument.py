@@ -209,17 +209,20 @@ class DescriptorCountingTests(unittest.TestCase):
         from tests.compared_path import definitions
 
         base_defs = definitions(base)
-        # 911, not 860: M19's routing cache inserts 23 lines inside
+        # 938, not 860: M19's routing cache inserts 23 lines inside
         # `FilterExpression.resolve`, which is above this `def` and below the
         # nineteen functions the M16 note shifts by +1, so this one moved by
         # **+24**; the `if self.filters:` guard then adds 8 more at the same
         # place, slice 1b's refusal guard adds 18 more at the same place again —
         # and step 2's second slice adds the last one, the `int` arm's
         # `from django.conf import settings`, a single line at the top of the
-        # module, above every definition here — so it moved by **+51** in all.
+        # module, above every definition here. The render walk then adds the
+        # final 27, all three of its pieces sitting above this `def` too (the
+        # `_native_plan` class attribute, the `_render` arm, and
+        # `compile_nodelist`'s assignment) — so it moved by **+78** in all.
         # The figure is re-measured from `definitions`, not shifted by
         # arithmetic; the decomposition is a reading aid beside it.
-        self.assertEqual(base_defs["FilterExpression.args_check"], (911, 928))
+        self.assertEqual(base_defs["FilterExpression.args_check"], (938, 955))
         # 136, not 134: M16's module-level `_native` import is one line above
         # this `def`, and `args_check` on the line above is unmoved because the
         # line it gained there is cancelled by the one `resolve` lost. The second

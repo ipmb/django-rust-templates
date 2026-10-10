@@ -314,7 +314,7 @@ class InterpositionTests(unittest.TestCase):
         equal = sum(i2 - i1 for tag, i1, i2, _j1, _j2 in opcodes if tag == "equal")
         differing = [op for op in opcodes if op[0] != "equal"]
 
-        # The structure, which is what the guard reads: ten edits — the marker
+        # The structure, which is what the guard reads: eleven edits — the marker
         # and its blank line as one pure insertion of ours, M18.1's `BaseContext`
         # import substitution, M16's module-level `_native` import as a second
         # pure insertion, two pairs for `compile_nodelist`'s delegation, then
@@ -323,7 +323,8 @@ class InterpositionTests(unittest.TestCase):
         # one replacement for `Variable._resolve_lookup`'s, then M19's third —
         # the render leaf's fast path as a fifth pure insertion, and the only
         # one of the five that lands *outside* every span the compared-path
-        # table names. Asserted here too
+        # table names — and then M19's fourth, the render walk, as a sixth.
+        # Asserted here too
         # because a re-alignment that merged two edits into one would move
         # `equal` in a way this row could not explain on its own.
         #
@@ -439,11 +440,33 @@ class InterpositionTests(unittest.TestCase):
         # `if self.filters:` guard and the comment stating why, which is *inside*
         # the same run: an insertion with no equal line in it stays one op, so the
         # list's length is the check on that too.
+        #
+        # **The render walk is the eleventh edit and the eleventh and twelfth
+        # `difflib` op, and it is the first whose op count the reader can
+        # *derive* rather than measure.** Three insertions, and the list gains
+        # two: the `_native_plan` class attribute at ours 146-153 and the walk's
+        # arm inside `_render` at ours 178-188 are each a run of our lines with no
+        # upstream counterpart and no equal line inside, so each is one `delete`;
+        # `compile_nodelist`'s plan copy extends the `replace` already there to
+        # ours 225-235 against upstream's 199-201, and an insertion into a
+        # replaced run extends it without adding an op. Both new `delete`s land
+        # **adjacent to the existing `_native` `delete` at ours 74** — the
+        # module-scope region M16 made — so the head of the list now reads
+        # `delete, replace, delete, delete, delete`, and the run of three is the
+        # assertion: three separate insertions in three separate classes of the
+        # file, with no equal line between any two of them. `equal` does not move
+        # at all, because an insertion on one side only is the shape that cannot
+        # take a line out of a matched block — unlike M18's substitution, which
+        # did so without changing either file's length. Re-measured rather than
+        # derived: ours is 1347 lines, 229 of them differ, upstream's 1207 with 89
+        # differing, and 1347-229 = 1207-89 = 1118.
         self.assertEqual(
             [op[0] for op in differing],
             [
                 "delete",
                 "replace",
+                "delete",
+                "delete",
                 "delete",
                 "replace",
                 "replace",
@@ -1303,20 +1326,38 @@ class ResolverDelegationTests(unittest.TestCase):
         return logger, handler, records
 
     def test_variable_resolution_reaches_rust(self):
-        """A render that resolves a variable calls `_native.resolve_lookups`.
+        """A render that resolves a variable resolves it in Rust, not in Python.
 
         The meter and the file check above say `base` is ours; neither says the
         *lookup* is. A transcription that kept upstream's loop would pass both,
         which is finding 3's shape applied to this method.
 
+        **The seam moved in M19, so the row names two trees and asserts a
+        different thing about each.** Until the walk landed, every render was
+        Python's: the shell looped the nodes and a variable's lookup crossed to
+        `_native.resolve_lookups`, which is what the old row counted. `{{ a.b }}`
+        — one plain lookup, no filter — is now planned as `Act::Emit` and renders
+        with no Python at all, so the honest assertion for it is the *stronger*
+        one: neither seam is reached, because the lookup never leaves Rust.
+
+        **The word for the second tree is *delegated*, not *declined*, and the
+        two are different failures.** `plan_slot` answers `Act::Delegate` for
+        `{{ a.b|upper }}` — a filtered variable is a node the walk hands back to
+        `render_annotated` — and that node keeps the old route, so there the row
+        asserts the old property. But the *plan* still exists; `_native_plan is
+        None` is reserved for `plan_list` rejecting the whole template, and it is
+        False here. A reader who took "declined template" from the first draft of
+        this docstring would reach for the wrong flag, and it cannot tell the two
+        apart — only the meter can.
+
         **And it must be the components, not a re-joined path.** Until M19 the
         shell called `_native.resolve(".".join(self.lookups), context)`, which is
         one `parse_variable` per variable — 0.25 µs of a 0.74 µs resolve at the
         depth this corpus uses — and, worse, a re-*classification*: `"2."` parses
-        back as a number, which is how `{{ 2. }}` rendered `2.0`. So the row asserts
-        both halves. Without the second, a revert to the join passes the first:
-        `resolve` still reaches Rust, still returns the right value for `a.b`, and
-        the cost and the divergence come back silently.
+        back as a number, which is how `{{ 2. }}` rendered `2.0`. So the delegated
+        half asserts both halves. Without the second, a revert to the join passes
+        the first: `resolve` still reaches Rust, still returns the right value for
+        `a.b`, and the cost and the divergence come back silently.
         """
         from django_rust_templates.engine import Context, Engine
 
@@ -1338,12 +1379,22 @@ class ResolverDelegationTests(unittest.TestCase):
         _native.resolve_lookups = counting_lookups
         _native.resolve = counting_resolve
         try:
-            Engine().from_string("{{ a.b }}").render(Context({"a": {"b": 1}}))
+            native = Engine().from_string("{{ a.b }}").render(Context({"a": {"b": 1}}))
+            delegated = Engine().from_string("{{ a.b|upper }}").render(
+                Context({"a": {"b": "x"}})
+            )
         finally:
             _native.resolve_lookups = original_lookups
             _native.resolve = original_resolve
 
-        self.assertEqual(components, [["a", "b"]], components)
+        self.assertEqual(native, "1")
+        self.assertEqual(delegated, "X", "the delegated tree's premise")
+        self.assertEqual(
+            components,
+            [["a", "b"]],
+            "the `Act::Emit` tree left the lookup to Python, or the delegated "
+            f"node stopped crossing the seam: {components}",
+        )
         self.assertEqual(
             paths,
             [],

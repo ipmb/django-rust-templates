@@ -916,6 +916,56 @@
       replaces, which is the work in front of it.
     </p>
     <p class="sub" style="margin-top:16px">
+      <b>The render walk landed, and it is the first thing that beats Jinja2 on a loop.</b>
+      A template that the Rust planner can render end to end — text, plain variables, and a
+      <code>{% for %}</code> whose body is itself walkable — is now walked in Rust by
+      <code>_native.render_plan</code> instead of by Python's
+      <code>NodeList.render</code>. The plan is <b>not</b> sold as the win: M18.0 already
+      measured that dispatch is not where the time is, and the minijinja study falsified the
+      jump-table mechanism outright. The plan is what makes three <i>removals</i> reachable —
+      the per-node Python frame, the per-iteration <code>forloop</code> dict that
+      <code>ForNode.render</code> writes to the context and pops again, and the two
+      render-invariant lookups below.
+      Measured on <code>scripts/bench.py</code>, release extension,
+      <code>.venv/bin/python -I</code>, one machine, the pre-walk tree built from the same
+      checkout so only the extension differs:
+      <b>the real-world render geometric mean against stock goes 0.765 → 0.583</b>, and the
+      loop rows are the reason. <code>micro/loop-text</code> render falls
+      <b>15.4 → 3.7 µs</b> — <b>0.25× stock, against Jinja2's 5.6, so the row closes on
+      Jinja2</b>, which is the acceptance line this slice was held to.
+      <code>micro/loop-var</code> render falls <b>69.3 → 20.3 µs</b> (0.25×; Jinja2 33.3), and
+      <code>real-world/large</code> render <b>483 → 220 µs</b> (0.32×). Output is unchanged:
+      every row of the three-engine intersection is byte-identical to stock's, which the
+      benchmark's own equality gate asserts rather than the report asserting it.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>Two per-render costs were found by measuring, not by reading, and both are gone.</b>
+      The walk's fixed cost was <b>1.2 µs above Python's path on a template that renders one
+      text node</b> — invisible in the loop rows, where a per-iteration win dominates, and
+      the whole of the <code>micro/text</code> row. Splitting the call showed
+      <code>_native.render_plan</code> itself at <b>0.656 µs for an empty plan</b>, and the
+      split further showed where it went: the escape function and <code>mark_safe</code> were
+      each an <code>import</code> plus a <code>getattr</code> <i>per render</i>. Both are now
+      resolved once per process through <code>PyOnceLock</code>. The larger half was the
+      constructor choice: <b><code>mark_safe("")</code> costs 0.484 µs and
+      <code>SafeString("")</code> costs 0.072</b> — <code>mark_safe</code> is Django's public
+      helper, wrapped in <code>keep_lazy_text</code>, while the expression being replaced,
+      <code>NodeList.render</code>, constructs <code>SafeString</code> directly. The faithful
+      call is also the fast one. <b>The empty-plan <code>render_plan</code> is now 0.221 µs</b>,
+      <code>micro/text</code> render is 1.9 µs against stock's 1.8, and the walk costs
+      essentially nothing on a template it cannot win on.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>What is left, stated against the same table.</b> The single-node <i>parse</i> rows are
+      still ~1.5×–2.3× stock — that is the compile path, not the render path, and it is the
+      next leaf (materialising Python node objects eagerly). <code>micro/include</code>
+      (0.78× stock, 7.9 µs against Jinja2's 6.1) and <code>micro/extends</code> (1.03×, 10.0
+      against 5.3) are the two rows Jinja2 still wins outright, because it precompiles
+      inheritance and this engine still crosses into Python for <code>{% include %}</code>.
+      <code>django-only/filter-arg</code> remains the one row both slower than stock (1.37×)
+      and outside the three-engine intersection, for the reason recorded above.
+    </p>
+    <p class="sub" style="margin-top:16px">
       <b>Until M18 it was a substitution, and that machinery is gone.</b> Earlier revisions of
       this page described a meta-path finder that served a transcription of
       <code>django.template</code> under Django's own module names, switched on by an

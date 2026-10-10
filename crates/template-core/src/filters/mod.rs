@@ -217,7 +217,7 @@ pub struct FilterEntry {
 /// against Django's callable. Filters have no such question: the Python seam is
 /// `names.get(func)` — the per-expression name table `host.django_own_filter_names`
 /// builds from `django_own_filters()` — keyed on the **function object**
-/// (`python/django_rust_templates/engine/base.py:862`), so a library filter's handle is in the map only once
+/// (`python/django_rust_templates/engine/base.py:889`), so a library filter's handle is in the map only once
 /// `{% load %}` registered it — "loaded" is implied by the key being present at
 /// all. A second Rust filter table would be a routing distinction the seam does
 /// not make, and `django_own_filters()` would have to guess which table to search.

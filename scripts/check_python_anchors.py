@@ -1068,7 +1068,11 @@ def main(argv=None):
         default=None,
         metavar="BASE",
         help="derive cited numbers for one base: --update=django or --update=crates; "
-        "bare --update reports both and writes neither",
+        "bare --update reports both and writes neither. It moves the manifest's "
+        "first/last columns but never re-keys the anchor string in column 1 and "
+        "never touches prose, so a cited span that shifted can come back with an "
+        "inverted span (first > last) or with the citation still naming the old "
+        "line. Read the diff before keeping it.",
     )
     group.add_argument(
         "--seed", action="store_true", help="fill missing entries from the prose"

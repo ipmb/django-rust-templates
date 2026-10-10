@@ -143,6 +143,14 @@ class Origin:
 
 
 class Template:
+    # The native render plan, or `None` (M19 step 2). A class attribute rather
+    # than an instance one because `Template` is built by `__new__` in more than
+    # one place — `engine/parser.py::template_for`, and every hand-built fixture
+    # in the suite — and a missing attribute would be an `AttributeError` in
+    # `_render` rather than a fallback. `None` is "render the nodelist", which is
+    # exactly what this class did before the walk existed.
+    _native_plan = None
+
     def __init__(self, template_string, origin=None, name=None, engine=None):
         # If Template is instantiated directly rather than from an Engine and
         # exactly one Django template engine is configured, use that engine.
@@ -167,6 +175,17 @@ class Template:
         )
 
     def _render(self, context):
+        # The native walk (M19 step 2). `_native_plan` is set by
+        # `engine/parser.py::template_for` and copied by `compile_nodelist`; it is
+        # `None` for every `Template` this package did not build, which is every
+        # hand-built fixture in the test suite, and `None` for a template whose
+        # plan the Rust side declined. Both cases are the Python path below,
+        # unchanged — a declined plan is a lost optimisation, never a different
+        # answer. `_native.render_plan` returns the same `SafeString`
+        # `NodeList.render` does.
+        plan = self._native_plan
+        if plan is not None:
+            return _native.render_plan(plan, context)
         return self.nodelist.render(context)
 
     def render(self, context):
@@ -205,6 +224,14 @@ class Template:
         try:
             parsed = parse_template(self.source, self.engine, self.origin)
             self.extra_data = parsed.extra_data
+            # The one line of the delegation that upstream has no counterpart
+            # for. `parse_template` returns a `Template` already carrying the
+            # plan; upstream returns only the nodelist and this constructor
+            # discards the object, so the plan has to be copied across or a
+            # `Template(source)` — which is every `Engine.from_string`, and the
+            # suite's most common construction — would render on the Python path
+            # while the identical `render_string` walked natively.
+            self._native_plan = parsed._native_plan
             return parsed.nodelist
         except Exception as e:
             if self.engine.debug:

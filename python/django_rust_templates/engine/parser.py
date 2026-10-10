@@ -454,7 +454,7 @@ def _materialise_operand(lookup, value, parser=None):
     return (lookup, variable if lookup else variable.resolve({}))
 
 
-def template_for(nodelist, engine=None, parser=None, origin=None, source=None):
+def template_for(nodelist, engine=None, parser=None, origin=None, source=None, plan=None):
     """A real :class:`~django.template.base.Template` around a materialised tree.
 
     The render goes through this rather than calling ``nodelist.render(context)``
@@ -544,6 +544,12 @@ def template_for(nodelist, engine=None, parser=None, origin=None, source=None):
     template.origin = origin
     template.source = "" if source is None else source
     template.extra_data = {} if parser is None else parser.extra_data
+    # The seventh name, added by M19 step 2, and the only one whose absence is
+    # *safe*: `_native_plan` defaults to `None` on the class, and `None` is the
+    # Python render path. Set unconditionally rather than by `if plan is not
+    # None`, because the assignment is what keeps the instance attribute from
+    # shadowing anything and the class default from being the only spelling.
+    template._native_plan = plan
     return template
 
 

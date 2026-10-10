@@ -90,7 +90,7 @@ UPSTREAM_NAMESPACE = "django.template."
 # re-runs the instrument and fails if the two disagree. A pinned table with a
 # live re-measurement behind it is the same shape as the module meter.
 #
-# 30 functions, spanning 117-1264 in a file of 1264 lines — nearly the whole
+# 30 functions, spanning 118-1347 in a file of 1347 lines — nearly the whole
 # file, which is the finding.
 # A guard that checked only the named target's own lines would miss a region
 # declared in any of the other 29.
@@ -158,6 +158,21 @@ UPSTREAM_NAMESPACE = "django.template."
 # get 38 and have no way to say how it split, while a reader who measured only
 # the arm would get 37 and be one line short. `token_kwargs` keeps its 45 lines
 # and `VariableNode.__init__` its two, so nothing here resized.
+#
+# **A fifth move, +45, is the render walk** — the last of the four M19 steps and
+# the first whose insertions are all *above* the whole table, so every entry but
+# `Origin.__init__` moves by the same number. Three insertions again, and this
+# time the split is derivable from what they are: the `_native_plan` class
+# attribute and its blank (**+8** at 146), the walk's arm inside `_render`
+# (**+11** at 178), and the plan copy inside `compile_nodelist` (**+8** at 227).
+# `_render` is not a table member — no parity harness renders — so the walk's arm
+# shifts the tail without resizing it, exactly as the render leaf's did, while
+# `compile_nodelist`'s copy is *also* outside the table (clause (4)'s note on its
+# `DECLARED` region says why). So the arithmetic and the table agree for the
+# first time in this block's history: `PartialTemplate.__init__` 308-315 →
+# 335-342 through `token_kwargs` 1276-1320 → 1303-1347, all `+27`, and the file
+# is **1347** lines. `Origin.__init__` is above all three and keeps its M16
+# number, which is the check that the shift is a shift rather than a re-measure.
 # Stated as arithmetic so that it can be checked; the spans
 # themselves are re-measured with the instrument, because the instrument is the
 # evidence, and the *set* of functions is the part that could have moved for a
@@ -203,35 +218,35 @@ COMPARED_PATH = {
     # with an empty list still asserts that the module *is* a transcription.
     "base.py": [
         (118, 121, "Origin.__init__"),
-        (308, 315, "PartialTemplate.__init__"),
-        (366, 388, "Token.__init__"),
-        (397, 410, "Token.split_contents"),
-        (414, 416, "Lexer.__init__"),
-        (425, 437, "Lexer.tokenize"),
-        (439, 471, "Lexer.create_token"),
-        (509, 531, "Parser.__init__"),
-        (536, 598, "Parser.parse"),
-        (600, 605, "Parser.skip_past"),
-        (607, 624, "Parser.extend_nodelist"),
-        (626, 637, "Parser.error"),
-        (639, 655, "Parser.invalid_block_tag"),
-        (666, 667, "Parser.next_token"),
-        (669, 670, "Parser.prepend_token"),
-        (672, 673, "Parser.delete_first_token"),
-        (675, 677, "Parser.add_library"),
-        (679, 683, "Parser.compile_filter"),
-        (685, 689, "Parser.find_filter"),
-        (746, 790, "FilterExpression.__init__"),
-        (911, 928, "FilterExpression.args_check"),
-        (960, 1011, "Variable.__init__"),
-        (1013, 1029, "Variable.resolve"),
-        (1134, 1146, "Node.get_nodes_by_type"),
-        (1154, 1155, "NodeList.render"),
-        (1157, 1162, "NodeList.get_nodes_by_type"),
-        (1168, 1169, "TextNode.__init__"),
-        (1177, 1184, "TextNode.render_annotated"),
-        (1255, 1256, "VariableNode.__init__"),
-        (1276, 1320, "token_kwargs"),
+        (335, 342, "PartialTemplate.__init__"),
+        (393, 415, "Token.__init__"),
+        (424, 437, "Token.split_contents"),
+        (441, 443, "Lexer.__init__"),
+        (452, 464, "Lexer.tokenize"),
+        (466, 498, "Lexer.create_token"),
+        (536, 558, "Parser.__init__"),
+        (563, 625, "Parser.parse"),
+        (627, 632, "Parser.skip_past"),
+        (634, 651, "Parser.extend_nodelist"),
+        (653, 664, "Parser.error"),
+        (666, 682, "Parser.invalid_block_tag"),
+        (693, 694, "Parser.next_token"),
+        (696, 697, "Parser.prepend_token"),
+        (699, 700, "Parser.delete_first_token"),
+        (702, 704, "Parser.add_library"),
+        (706, 710, "Parser.compile_filter"),
+        (712, 716, "Parser.find_filter"),
+        (773, 817, "FilterExpression.__init__"),
+        (938, 955, "FilterExpression.args_check"),
+        (987, 1038, "Variable.__init__"),
+        (1040, 1056, "Variable.resolve"),
+        (1161, 1173, "Node.get_nodes_by_type"),
+        (1181, 1182, "NodeList.render"),
+        (1184, 1189, "NodeList.get_nodes_by_type"),
+        (1195, 1196, "TextNode.__init__"),
+        (1204, 1211, "TextNode.render_annotated"),
+        (1282, 1283, "VariableNode.__init__"),
+        (1303, 1347, "token_kwargs"),
     ],
     # 8 functions, spans 56-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
@@ -767,6 +782,56 @@ DECLARED = {
             # from here down shifts by one — the region count is unchanged at
             # six, which is the number the note says is the review surface.
             ((74, 74), None, "from django_rust_templates import _native"),
+            # **M19 step 2's first region: the plan slot on `Template`.** Eight
+            # lines of ours against none of upstream's — seven of prose and
+            # `_native_plan = None` — so clause (5) wants the note.
+            #
+            # A *class* attribute rather than an instance one, and the reason is
+            # the same one this guard keeps producing: `Template` is built by
+            # `__new__` in more than one place (`engine/parser.py::template_for`,
+            # and every hand-built fixture in the suite), so an `__init__`-set
+            # attribute would be missing on exactly the objects a fallback is
+            # for. `None` is "render the nodelist", which is what this class did
+            # before the walk existed.
+            #
+            # The region is eight lines where M19's other two are eleven and
+            # eight, and the arithmetic in the `COMPARED_PATH` note above quotes
+            # the same three numbers. They are *not* independent: the note adds
+            # them to `+27`, and this list is where the sum is re-derived from
+            # what the regions say. `equal` in
+            # `tests/test_interposition.py` is the third witness and does not
+            # move, because a one-sided insertion cannot take a line out of a
+            # matched block.
+            (
+                (146, 153),
+                None,
+                "_native_plan = None",
+            ),
+            # **M19 step 2's second region: the walk's arm in `_render`.** Eleven
+            # of ours against none of upstream's — eight lines of prose, then
+            # `plan = self._native_plan`, `if plan is not None:` and
+            # `return _native.render_plan(plan, context)` — and the last line of
+            # the method, `return self.nodelist.render(context)`, is *outside* it
+            # because `difflib` matches it against upstream's identically. The arm
+            # sits above the fallback rather than replacing it, which is what
+            # makes a declined plan a lost optimisation and never a different
+            # answer.
+            #
+            # `Template._render` is not in `COMPARED_PATH` and this is the region
+            # that would have been refused if it were: the parity harness parses
+            # and never renders, so no corpus reaches it — measured, not assumed,
+            # by `test_the_compared_path_is_the_measured_one`. The hook is
+            # `_render` rather than `NodeList.render` because the latter *is* on
+            # the compared path (`(1181, 1182)`) and because `_render` is the
+            # single point every `Template.render` funnels through, including the
+            # two branches around `bind_template`.
+            (
+                (178, 188),
+                None,
+                "plan = self._native_plan\n"
+                "if plan is not None:\n"
+                "return _native.render_plan(plan, context)",
+            ),
             # M19's slot, and the only line in this class that is not upstream's.
             # `FilterExpression` declares `__slots__`, so a per-expression cache
             # has to be named here or there is nowhere to put it — a module-level
@@ -777,13 +842,13 @@ DECLARED = {
             #
             # **The region clears clause (4) by two lines, and that margin is the
             # whole reason the cache is filled where it is.** The compared path's
-            # entry for `FilterExpression.__init__` is `(746, 790)`; `__slots__` is
+            # entry for `FilterExpression.__init__` is `(773, 817)`; `__slots__` is
             # above it, so this line is declared and legal, while a line *inside*
             # `__init__` would make the parity comparison Rust against Rust. That
             # is what forced the lazy fill below, and it is why the two entries are
             # in this file together.
             (
-                (744, 744),
+                (771, 771),
                 (737, 737),
                 '__slots__ = ("token", "filters", "var", "is_var", "_rust_names")',
             ),
@@ -795,6 +860,19 @@ DECLARED = {
             # statements against upstream's three, and each pair is a separate
             # opcode; the second region is the delegation proper.
             #
+            # **The second region is four statements against upstream's three
+            # since M19 step 2, and the shape is the note.** `_native_plan` has
+            # to be copied off the `Template` `parse_template` returns, because
+            # upstream's `compile_nodelist` returns only the nodelist and
+            # `Template.__init__` discards the parsed object — so `Template(source)`,
+            # which is every `Engine.from_string` and the suite's most common
+            # construction, would render on the Python path while the identical
+            # `render_string` walked natively. The added line is between upstream's
+            # second and third, which is why the region *grew* rather than gaining
+            # its own opcode: an insertion inside an already-replaced run is not a
+            # new entry in `tests/test_interposition.py`'s list, and that list is
+            # the second witness that it did not become one.
+            #
             # This is the one declared region that *is* the Rust-vs-Rust hazard
             # the guard exists to refuse, and it is intended: M9's whole point is
             # that the suite's parsing runs in Rust. It is safe for the parity
@@ -804,15 +882,16 @@ DECLARED = {
             # `COMPARED_PATH` and why that absence is a measurement rather than
             # an oversight.
             (
-                (189, 203),
+                (208, 222),
                 (185, 196),
                 "from django_rust_templates.render import parse_template",
             ),
             (
-                (206, 208),
+                (225, 235),
                 (199, 201),
                 "parsed = parse_template(self.source, self.engine, self.origin)\n"
                 "self.extra_data = parsed.extra_data\n"
+                "self._native_plan = parsed._native_plan\n"
                 "return parsed.nodelist",
             ),
             # M11 Task 2's filter seam: `FilterExpression.resolve` gains one
@@ -853,7 +932,7 @@ DECLARED = {
             # = 69.8 us of a 620.8 us render, 11.2%), and what the re-reading gives
             # up. The `try`/`except AttributeError` is the unset slot rather than an
             # error: `FilterExpression` has no `__dict__`, and there are two
-            # construction routes — `__init__` (ours 745) and the descriptor
+            # construction routes — `__init__` (ours 772) and the descriptor
             # materialiser (`engine/parser.py`), which builds the object with
             # `__new__` and never calls `__init__`. Filling it in `__init__` is what
             # clause (4) forbids (that span is on the compared path) and filling it
@@ -907,7 +986,7 @@ DECLARED = {
             # path, where the answer is kept, and on expressions carrying more
             # than one filter.
             (
-                (810, 840),
+                (837, 867),
                 None,
                 "if self.filters:\n"
                 "try:\n"
@@ -966,7 +1045,7 @@ DECLARED = {
             # `test_filter_parity.py::test_the_comparison_target_is_not_rust_owned`
             # is what watches *that*.
             (
-                (848, 898),
+                (875, 925),
                 None,
                 "from django_rust_templates.host import (\n"
                 "effective_autoescape,\n"
@@ -1060,7 +1139,7 @@ DECLARED = {
             # not — a non-raising signature carries the bit on an ordinary return
             # value) is what makes the alternative live rather than closed.
             (
-                (1046, 1092),
+                (1073, 1119),
                 (957, 1028),
                 'return _native.resolve_lookups(self.lookups, context)',
             ),
@@ -1103,7 +1182,7 @@ DECLARED = {
             # here; it is not this region's, and widening this branch would not
             # reach it.
             (
-                (1193, 1241),
+                (1220, 1268),
                 None,
                 "if context.autoescape and type(value) is str:\n"
                 "escaped = _native.html_escape(value)\n"

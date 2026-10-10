@@ -136,7 +136,7 @@ a three-variable template rendered `'1|2|3'` with `{'_native.resolve': 3,
 `LookupScope::resolve` is the *floor prototype's* path, and the prototype is not
 what ships.
 
-**Step 1 has since landed**, and the call is now `engine/base.py:1092`,
+**Step 1 has since landed**, and the call is now `engine/base.py:1119`,
 `_native.resolve_lookups(self.lookups, context)`, entering at
 `crates/template-py/src/lib.rs:2773-2778`, with no `parse_variable` between the
 shell and the walk. The row above it is what that bought, measured rather than
@@ -218,11 +218,14 @@ the sentence:
   reaches the escape filter.
 - **(b) is inherited**, and it is the whole of the floor's per-variable cost:
   `render_floor` fetches `render_value_in_context` once per render
-  (`crates/template-py/src/lib.rs:3037-3039`) and calls it per variable in
+  (`crates/template-py/src/lib.rs:3597-3599`) and calls it per variable in
   `append_expression_value`. That the floor and `render_desc` share exactly these
   two helpers — the resolver and the escaper — is the floor's own claim about
-  itself (`crates/template-py/src/lib.rs:2836-2838`), and it is what makes the
-  subtraction isolate dispatch.
+  itself, and it is what makes the subtraction isolate dispatch. *(The floor's
+  prototype functions, `render_floor` and `render_desc`, were deleted in the M19
+  cleanup; the surviving half of the citation is the cached handle on
+  `render_value_in_context`, which is what `render_floor` fetched, and which the
+  walk now fetches from a `PyOnceLock` rather than per render.)*
 
 The correction is therefore **narrower than revision 1 made it and points the
 same way**: the floor's 0.936–0.948 is a measurement of a Rust loop paying one
@@ -319,7 +322,7 @@ and 0.385 is what the whole call costs once the arm answers instead. What §2
 inherits from this is a *third* removable cost, not a bigger version of the
 first.
 
-**The arm is landed, and it is `engine/base.py:1221`** — the predicate is
+**The arm is landed, and it is `engine/base.py:1248`** — the predicate is
 `type(value) is int and (context.use_l10n is False or not
 settings.USE_THOUSAND_SEPARATOR)`, exact type so that `bool` (which `localize`
 sends down its own arm anyway) and an `int` subclass that overrides `__str__`
@@ -440,7 +443,7 @@ Unchanged from M18 §4 and not re-argued here; the boundary is the whole design:
    is why `{{ x }}` renders `'\ud800'` above while `{{ x|upper }}` raises. The
    analogue for filters is cheaper than the pattern it copies, because the
    fall-through already exists:
-   `python/django_rust_templates/engine/base.py:862` routes to `_native.filter`
+   `python/django_rust_templates/engine/base.py:889` routes to `_native.filter`
    only when `names.get(func)` finds the builtin, and the `else` path is
    Django's own callable. So the refusal route is the *same branch*, and the
    repair is to make
@@ -510,7 +513,7 @@ laziness must not reach it.* The test that enforces it is
 ### 3.3 The debug contract: a native node needs a span
 
 **BLOCKING 5 is correct and revision 1 missed it too**, and it is the stronger of
-the two: `Node.render_annotated` (`engine/base.py:1108`) sets
+the two: `Node.render_annotated` (`engine/base.py:1135`) sets
 `e._culprit_node = self` first-writer-wins, then builds `template_debug` from
 `e._culprit_node.token`. A natively-rendered node has no Python `Node` to be the
 culprit and no `.token`, so `e.template_debug` is absent and
@@ -846,13 +849,25 @@ committed), the NIT (`iters` is pinned per row).
 
 **Disputed, with a measurement: B1's premise.** The render path does call
 `_native.resolve` — three calls for a three-variable template, reached from
-`engine/base.py:1092` — so `LookupScope::resolve` is the prototype's path and not the
+`engine/base.py:1119` — so `LookupScope::resolve` is the prototype's path and not the
 shipped one, and revision 1's 2.24× was a true statement about the shipped engine
 with a wrong account of why. The review's decomposition of that 0.522 is exactly
 right and is adopted; its *conclusion* that the engine's resolver is "at parity
 or slightly ahead" is a property of a prototype the package does not install.
 The number that governs the milestone is ~1.37× (§1.2), measured on the shipped
 path, and neither revision 1's 2.24× nor the review's 0.949× is it.
+
+> **Dated correction (M19, slice 2).** The paragraph above is about the
+> pre-walk tree, and one clause of it has since gone false: a *walked* template
+> no longer reaches this seam at all. `{{ a.b }}` — one plain lookup, no filter
+> — resolves inside `render_plan`, so neither `_native.resolve` nor
+> `_native.resolve_lookups` is called from Python, which
+> `tests/test_interposition.py::ResolverDelegationTests.test_variable_resolution_reaches_rust`
+> now asserts directly (the row asserts the crossing on a *declined* template,
+> `{{ a.b|upper }}`, where the route survives). The B1 dispute's conclusion is
+> unaffected — `LookupScope::resolve` is still the prototype's path, not the
+> shipped one — but "the render path does call `_native.resolve`" must be read
+> as scoped to the templates the walk declines.
 
 **One correction of my own, not raised in review:** revision 1's
 `render_value_in_context` table was measured with `USE_I18N=False` and was low by

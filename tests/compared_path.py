@@ -16,7 +16,7 @@ So it is measured. Every function the module defines is wrapped with a counter,
 the corpus is parsed through the harness's own entry point, and the functions
 that ran, with the lines they occupy, *are* the compared path:
 
-    30 of 68 function(s) the module defines were executed, spanning 118-1302
+    30 of 68 function(s) the module defines were executed, spanning 118-1347
 
 which is why the answer matters — the reach covers nearly the whole file, not
 one function in it. (The span is the first start to the last end of the
@@ -32,9 +32,15 @@ this docstring, and the pin below is what the row re-measures. **The 1291 in the
 version of this sentence before this one was right and is now 1302**, because
 the `int` arm's unescaped branch gained eleven lines: the first start is still
 118 and the count is still 30, so *one* of the two figures moved, which is the
-case a reader of a two-number sentence is least likely to check. The 68 is the
-walk's own count of `FunctionDef`s in the file, re-measured rather than
-carried.)
+case a reader of a two-number sentence is least likely to check. **It is 1347
+now, and only the second figure moved**: the walk's three insertions all land
+*inside* functions the table already lists, so the count stays 30 and the tail
+moves `+27`. The 68 is the walk's own count of `FunctionDef`s in the file,
+re-measured rather than carried, and it is the figure that would have changed
+had the walk needed a function of its own here — which it does not, because it
+is Rust. Nothing in the paragraph above distinguishes "moved" from "renamed" and
+the two read the same; the instrument is what tells them apart, and it prints
+the set.)
 
 **What "every function the module defines" means took two passes to get
 right.** The first sweep wrapped what `inspect.isfunction` accepts, which is the

@@ -6,11 +6,11 @@
 use pyo3::create_exception;
 use pyo3::exceptions::{
     PyAttributeError, PyException, PyIndexError, PyKeyError, PyNotImplementedError, PyRuntimeError,
-    PyStopIteration, PyTypeError, PyValueError, PyZeroDivisionError,
+    PyStopIteration, PyTypeError, PyUnicodeDecodeError, PyValueError, PyZeroDivisionError,
 };
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyDict, PyList, PyString, PyTuple};
+use pyo3::types::{PyDict, PyList, PyString, PyTuple, PyType};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -25,7 +25,7 @@ mod filters;
 use template_core::lexer::Lexer as CoreLexer;
 use template_core::parser::desc::{
     AttrValue, FilterExprDesc, FilterVar, IfConditionDesc, NodeDesc, NodeListDesc, TokenDesc,
-    VariableDesc, TEXT_NODE,
+    VariableDesc, HOST_NODE, TEXT_NODE,
 };
 // Aliased because this crate already exports a `NodeRef` — the Python-facing
 // handle a *descriptor* carries. The resolver's handles are `template-core`'s
@@ -2809,72 +2809,210 @@ fn resolve_components(
 }
 
 // ---------------------------------------------------------------------------
-// M18.0 slice 1 — a native render walk over the descriptor tree.
+// M19 step 2 — the native render walk.
 // ---------------------------------------------------------------------------
 //
-// The spike in §7 of the M18 design, and only that: two node classes, `TextNode`
-// and a `VariableNode` with no filters. Everything else is **declined and named**
-// rather than guessed, so a template that falls back shows as a set difference
-// and not as a passing render (§6 item 3).
+// A plan is built once, at compile time, by walking the parser's descriptor
+// tree in parallel with the `NodeList` `materialise` built from it, and it
+// **carries the materialised node at every step**. That pairing is the design's
+// load-bearing invariant, and it is asserted rather than assumed: a
+// `class_name` that does not match the object at that index produces no plan at
+// all, and the template renders on the Python path unchanged. A declined plan
+// is therefore a set difference somebody can see (the census below), never a
+// render that quietly differs.
 //
-// Two walks, and the difference between them *is* the measurement:
+// Four lessons, each with the measurement that justifies it:
 //
-// * [`render_floor`] walks a **flat plan** built once at parse time by
-//   [`plan_nodelist`]. No `class_name` string comparison and no name-keyed
-//   attribute lookup happens in the loop — it matches on an `Op` *variant*,
-//   which is a jump table. This is the dispatch-free floor, and it is the gate:
-//   if the render work itself is not faster than stock, neither route (a) nor
-//   route (b) can win, because (b) cannot beat a floor that already excludes the
-//   dispatch it removes.
-// * [`render_desc`] walks the descriptor tree directly, comparing `class_name`
-//   strings and finding attributes by name — route (a) as it would actually be
-//   written. The gap between the two is the dispatch tax, measured rather than
-//   asserted.
+// * **One sink.** `NodeList.render` builds a list and `"".join`s it, and so does
+//   `ForNode.render` — a list, an append and a join per nodelist per render.
+//   This walk owns one `String` and applies the `SafeString` wrapper **once**,
+//   at the outer boundary, which is where Django applies it too
+//   (`NodeList.render`, `engine/base.py:1181-1182`): the type is the same and the characters
+//   are the same, so nothing between the two can observe the difference.
+// * **A native loop frame.** `ForNode.render` writes a six-key `forloop` dict
+//   and the loop variable into the context on **every** iteration —
+//   `loop_bookkeeping.py` measures ~0.11 and ~0.06 µs per iteration for the two,
+//   against a fitted slope of 0.222 for the row. A body this walk renders end to
+//   end cannot observe either, so both are elided and the loop variable lives in
+//   a frame target instead of in the context.
+// * **Hoisted render-invariant work.** `autoescape` and the escape function are
+//   read once per render rather than once per variable.
+// * **The escape fast path inside the walk** — `render_value_in_context`'s own
+//   first arm (`type(value) is str` under autoescaping) taken here, so an
+//   ordinary `{{ name }}` pays no Python frame at all.
 //
-// Both call the *same* two helpers for the parts that are not dispatch — the
-// variable resolution ([`LookupScope::resolve`]) and the escaping
-// (`django.template.base.render_value_in_context`) — so the only quantity the
-// subtraction isolates is the dispatch.
-//
-// **`TEXT_NODE` is never a class-name literal.** Every other node is built with
-// `NodeDesc::new("X")` or `NodeDesc::with_nodelist("X", …)`, but a text node comes
-// only from the `NodeDesc::text()` builder (`crates/template-core/src/parser/desc.rs`),
-// so a renderer (or a refactor) driven by grepping for string literals would
-// silently miss the node a template is mostly made of. Both walks test
-// `class_name == TEXT_NODE` explicitly.
+// The plan is **not** sold as the win: the M18.0 floor already measured that
+// dispatch is not where the time is, and the minijinja study falsified the
+// jump-table mechanism outright. The plan is what makes the removals above
+// reachable and checkable — minijinja's own `pc`/`Jump` exists for an
+// instruction-swap re-entry this design does not need.
 
-/// One step of a *flat* render plan — the dispatch-free floor.
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+
+/// The two node classes the walk renders itself.
+const VARIABLE_NODE: &str = "VariableNode";
+const FOR_NODE: &str = "ForNode";
+
+/// The nesting depth past which the walk raises, rather than letting the Rust
+/// stack run out.
 ///
-/// Built once by [`plan_nodelist`], at parse time. Every `class_name` comparison
-/// and every name-keyed `attrs` lookup is spent here, so [`render_floor`]'s loop
-/// has neither left to do.
-enum Op {
-    /// A `TextNode`'s `s`, appended literally (Django never escapes a `TextNode`).
-    Text(String),
-    /// A `VariableNode` whose expression is an unfiltered lookup, resolved per
-    /// render against the context.
-    Lookup { lookups: Vec<String> },
-    /// A `VariableNode` whose expression is an unfiltered literal; `literal_to_py`
-    /// turns the wire value into the object Django's `Variable` holds.
-    Literal { value: AttrValue },
-    /// A node this walk will not render. Carries the `class_name`, so the
-    /// delegated set is reportable rather than inferred from an absence.
-    Delegate(String),
+/// Stock Django raises `RecursionError` first, because the tree is built by
+/// Python's recursive parser and CPython's limit is 1000 frames — measured on
+/// the pin: 200 levels of `{% for %}` parse, 500 raise. A recursive Rust walk
+/// would instead run out of *stack*, which is **not** catchable: the process
+/// dies where stock raises a 500. So the cap is explicit rather than inherited,
+/// and the failure *mode* stays what stock's is.
+const MAX_WALK_DEPTH: usize = 500;
+
+/// One `{{ … }}` the walk resolves itself.
+enum Expr {
+    /// An unfiltered lookup: `Variable.lookups`. Resolved against the context,
+    /// or — inside a sealed loop — against the loop's frame.
+    Lookup(Vec<String>),
+    /// An unfiltered literal: `Variable.literal`, as the object Django's
+    /// `Variable` holds. `literal_to_py` is the same conversion the resolver
+    /// uses, so a literal renders through one code path and not two.
+    Literal(AttrValue),
 }
 
-/// The first attribute named `name`, or `None` — the name-keyed lookup route (a)
-/// pays for on every node of every render and the floor precomputes away.
+/// One node's native action.
+///
+/// `Act` and not `Step`, because `Step` is already `template-core`'s answer to
+/// one arm of a lookup and this file implements that trait.
+enum Act {
+    /// A `TextNode`'s `s`, appended verbatim. Django never escapes a text node.
+    Text(String),
+    /// A `{{ … }}` with no filters.
+    Emit(Expr),
+    /// A `{{ … }}` whose head is the enclosing sealed loop's own variable.
+    /// Resolved with the frame as the root target, so the loop variable never
+    /// reaches the context and the loop never pays `context[loopvar] = item`.
+    Local(Vec<String>),
+    /// A `{% for %}` the walk owns end to end.
+    For(Box<ForPlan>),
+    /// A node the walk does not render. `render_annotated` is called on it,
+    /// which is also what keeps Django's culprit protocol in one place.
+    Delegate,
+}
+
+/// One planned node, with the materialised node it was planned from.
+struct Slot {
+    act: Act,
+    /// The materialised Python node — two jobs, and both need the object rather
+    /// than a name: `render_annotated` is the delegate target, and Django's
+    /// exception protocol reads `e._culprit_node.token` and
+    /// `e._culprit_node.origin` off whatever node was rendering.
+    node: Py<PyAny>,
+    /// `type(node).__name__`, read once here so neither the render-time census
+    /// nor the pairing assertion costs a Python attribute read per node.
+    class_name: String,
+}
+
+/// A `{% for %}` body this walk renders without `ForNode.render`.
+///
+/// Built only when the body is *sealed*: every node is one this walk renders,
+/// no node is a `{% for %}` (whose `parentloop` reads the dict being elided),
+/// no node mentions `forloop`, and there is exactly one loop variable (an
+/// unpacking loop writes and pops one context entry per name).
+struct ForPlan {
+    body: Vec<Slot>,
+    /// The `{% empty %}` branch, planned normally. It is rendered **before**
+    /// Django builds the dict (`engine/defaulttags.py:208-216`) and sees the enclosing
+    /// context's `forloop` untouched, so sealing does not constrain it.
+    empty: Vec<Slot>,
+    /// `self.sequence` — a `FilterExpression`, so the filters and the
+    /// `ignore_failures` semantics are the transcribed Python ones.
+    sequence: Py<PyAny>,
+    /// `self.is_reversed`.
+    is_reversed: bool,
+}
+
+/// Which nodes the walk rendered and which it handed back, over every render
+/// since [`census_start`].
+///
+/// A process-global rather than a per-render return value, because the question
+/// it answers is asked of a whole suite run ("how many of the 1547 rendered
+/// without a delegate") and the answer is a set. Off by default, and the walk's
+/// only reference to it is an `Option` it carries, so the happy-path cost is
+/// one branch per node.
+#[derive(Default, Clone)]
+struct Census {
+    handled: Vec<(String, usize)>,
+    delegated: Vec<(String, usize)>,
+}
+
+/// `(class_name, count)`, ascending by first sighting. Named because
+/// `census_take` returns two of them and clippy reads the tuple of tuples as a
+/// type nobody meant to write.
+type CensusRows = Vec<(String, usize)>;
+
+static CENSUS_ON: AtomicBool = AtomicBool::new(false);
+static CENSUS: Mutex<Census> = Mutex::new(Census {
+    handled: Vec::new(),
+    delegated: Vec::new(),
+});
+
+fn census_on() -> bool {
+    CENSUS_ON.load(Ordering::Relaxed)
+}
+
+fn census_add(counts: &mut Vec<(String, usize)>, class_name: &str, count: usize) {
+    match counts.iter_mut().find(|(name, _)| name == class_name) {
+        Some(entry) => entry.1 += count,
+        None => counts.push((class_name.to_string(), count)),
+    }
+}
+
+/// `counts[name] += 1`, keeping first-seen order.
+fn census_bump(census: &mut Option<Census>, class_name: &str, delegated: bool) {
+    let Some(census) = census else { return };
+    let counts = if delegated {
+        &mut census.delegated
+    } else {
+        &mut census.handled
+    };
+    census_add(counts, class_name, 1);
+}
+
+fn census_merge(into: &mut Census, from: Census) {
+    for (class_name, count) in from.handled {
+        census_add(&mut into.handled, &class_name, count);
+    }
+    for (class_name, count) in from.delegated {
+        census_add(&mut into.delegated, &class_name, count);
+    }
+}
+
+/// Start (or clear) the census.
+#[pyfunction]
+fn census_start() {
+    // Cleared before the flag is set, so a render that starts between the two
+    // cannot write into the previous run's counts.
+    *CENSUS.lock().unwrap() = Census::default();
+    CENSUS_ON.store(true, Ordering::Relaxed);
+}
+
+/// Stop the census and return `(handled, delegated)`, each `(class_name, count)`.
+#[pyfunction]
+fn census_take() -> (CensusRows, CensusRows) {
+    CENSUS_ON.store(false, Ordering::Relaxed);
+    let census = CENSUS.lock().unwrap();
+    (census.handled.clone(), census.delegated.clone())
+}
+
+/// The first attribute named `name`, or `None`.
 fn find_attr<'a>(node: &'a NodeDesc, name: &str) -> Option<&'a AttrValue> {
     node.attrs.iter().find(|(n, _)| n == name).map(|(_, v)| v)
 }
 
-/// A `{{ … }}` with no filters, as an `Op`, or `None` if this walk declines it.
+/// A `{{ … }}` with no filters, or `None` if this walk declines it.
 ///
-/// Declines a filtered expression, a translated variable (`_("x")` resolves to a
-/// `gettext_lazy` proxy Python must build), and any expression whose variable
-/// part is neither a lookup nor a literal. Each is a case slice 1 does not cover;
-/// naming the class is the caller's, the *reason* is not on the wire.
-fn plan_expression(expr: &FilterExprDesc) -> Option<Op> {
+/// Declines a filtered expression, a translated variable (`_("x")` resolves to
+/// a `gettext_lazy` proxy Python must build), and any expression whose variable
+/// part is neither a lookup nor a literal. Each is a case this slice does not
+/// cover, and declining is what the census counts.
+fn plan_expr(expr: &FilterExprDesc) -> Option<Expr> {
     if !expr.filters.is_empty() {
         return None;
     }
@@ -2886,108 +3024,681 @@ fn plan_expression(expr: &FilterExprDesc) -> Option<Op> {
         return None;
     }
     if *lookup {
-        variable.lookups.as_ref().map(|lookups| Op::Lookup {
-            lookups: lookups.clone(),
-        })
+        variable
+            .lookups
+            .as_ref()
+            .map(|lookups| Expr::Lookup(lookups.clone()))
     } else {
-        variable.literal.as_ref().map(|value| Op::Literal {
-            value: value.clone(),
-        })
+        variable
+            .literal
+            .as_ref()
+            .map(|value| Expr::Literal(value.clone()))
     }
 }
 
-/// [`plan_expression`] without the clone, for the arm that cannot precompute.
+/// Seal a planned body, and rewrite its loop-variable reads.
 ///
-/// `floor` builds `Op`s once at parse time, so owning the look-ups there costs
-/// nothing per render. `rust` dispatches per node and per render, and if it built
-/// the same owned `Op` it would clone a `Vec<String>` and its `String` on every
-/// variable of every render — an allocation that is a property of *this spike's
-/// code* and not of route (a), which needs the look-ups for one call and may
-/// borrow them. The subtraction `floor − rust` is meant to be the dispatch, so
-/// the dispatch arm borrows.
-fn planned_expression(expr: &FilterExprDesc) -> Option<PlannedExpr<'_>> {
-    if !expr.filters.is_empty() {
-        return None;
+/// `false` means the body keeps Django's dict: it holds a node this walk does
+/// not render (which may reach the dict through `takes_context=True`, an
+/// `{% include %}` of a template this parse never saw, or anything else no
+/// template text can bound), a nested `{% for %}` (which reads `parentloop` out
+/// of the very dict being elided), or a `forloop` reference of its own.
+///
+/// The two questions are one pass because they are one decision: a body that
+/// mentions `forloop` cannot be sealed, and a body that *can* be sealed is
+/// exactly the body whose loop-variable reads become [`Step::Local`].
+fn seal(body: &mut [Slot], loopvar: &str) -> bool {
+    let mut reads_loopvar = false;
+    for slot in body.iter() {
+        match &slot.act {
+            Act::Text(_) => {}
+            Act::Emit(Expr::Literal(_)) => {}
+            Act::Emit(Expr::Lookup(lookups)) => match lookups.first().map(String::as_str) {
+                Some("forloop") => return false,
+                Some(head) if head == loopvar => reads_loopvar = true,
+                _ => {}
+            },
+            Act::For(_) | Act::Delegate | Act::Local(_) => return false,
+        }
     }
-    let (lookup, value) = &expr.var;
-    let AttrValue::Variable(variable) = value else {
-        return None;
-    };
-    if variable.translate {
-        return None;
-    }
-    if *lookup {
-        variable.lookups.as_deref().map(PlannedExpr::Lookup)
-    } else {
-        variable.literal.as_ref().map(PlannedExpr::Literal)
-    }
-}
-
-/// What [`planned_expression`] decides, borrowed from the tree `render_desc` walks.
-enum PlannedExpr<'a> {
-    Lookup(&'a [String]),
-    Literal(&'a AttrValue),
-}
-
-/// One node as an `Op`; a class this walk does not cover becomes a `Delegate`
-/// carrying its own name.
-fn plan_node(node: &NodeDesc) -> Op {
-    if node.class_name == TEXT_NODE {
-        return match find_attr(node, "s") {
-            Some(AttrValue::Str(s)) => Op::Text(s.clone()),
-            _ => Op::Delegate(node.class_name.clone()),
-        };
-    }
-    if node.class_name == "VariableNode" {
-        if let Some(AttrValue::FilterExpr(expr)) = find_attr(node, "filter_expression") {
-            if let Some(op) = plan_expression(expr) {
-                return op;
+    if reads_loopvar {
+        for slot in body.iter_mut() {
+            if let Act::Emit(Expr::Lookup(lookups)) = &slot.act {
+                if lookups.first().map(String::as_str) == Some(loopvar) {
+                    slot.act = Act::Local(lookups.clone());
+                }
             }
         }
     }
-    Op::Delegate(node.class_name.clone())
+    true
 }
 
-/// The whole plan for one nodelist, in document order.
+/// `{% for %}` as a [`ForPlan`], or `None` for a loop `ForNode.render` must run.
+fn plan_for(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResult<Option<ForPlan>> {
+    let Some((_, body_desc)) = desc
+        .nodelists
+        .iter()
+        .find(|(name, _)| name == "nodelist_loop")
+    else {
+        return Ok(None);
+    };
+    // Always present on the descriptor (`tags/for.rs:163-164`), even when the
+    // tag has no `{% empty %}`: Django's `ForNode.__init__` substitutes an empty
+    // `NodeList` and the shell materialises one, so the pairing holds either way.
+    let Some((_, empty_desc)) = desc
+        .nodelists
+        .iter()
+        .find(|(name, _)| name == "nodelist_empty")
+    else {
+        return Ok(None);
+    };
+    let python_body = node.getattr("nodelist_loop")?;
+    let python_empty = node.getattr("nodelist_empty")?;
+    let Some(mut body) = plan_list(py, body_desc, &python_body)? else {
+        return Ok(None);
+    };
+    let Some(empty) = plan_list(py, empty_desc, &python_empty)? else {
+        return Ok(None);
+    };
+    let loopvars: Vec<String> = node.getattr("loopvars")?.extract()?;
+    // An unpacking loop writes one context entry per name and pops them back
+    // per iteration, and each name is a frame of its own. Declined rather than
+    // half-done.
+    if loopvars.len() != 1 || !seal(&mut body, &loopvars[0]) {
+        return Ok(None);
+    }
+    Ok(Some(ForPlan {
+        body,
+        empty,
+        sequence: node.getattr("sequence")?.unbind(),
+        is_reversed: node.getattr("is_reversed")?.extract()?,
+    }))
+}
+
+/// One materialised node, planned against the descriptor it was built from.
 ///
-/// `NodeListDesc`'s nesting is flattened away: slice 1 covers no node that owns a
-/// child nodelist, so a node that does is delegated whole and never descended
-/// into.
-fn plan_nodelist(desc: &NodeListDesc) -> Vec<Op> {
-    desc.nodes.iter().map(plan_node).collect()
+/// `None` means the pairing does not hold, which aborts the whole plan: a plan
+/// that is right about most nodes and wrong about one is a render that differs
+/// from Django's in a way no test would name.
+fn plan_slot(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResult<Option<Slot>> {
+    let class_name: String = node.get_type().name()?.to_string();
+    // `HOST_NODE` is the one descriptor whose class name is not the object's: a
+    // user tag's compile function returned that object, and the descriptor
+    // could only name the slot (see `desc.rs::HOST_NODE`).
+    if desc.class_name != class_name && desc.class_name != HOST_NODE {
+        return Ok(None);
+    }
+    let act = if desc.class_name == TEXT_NODE {
+        match find_attr(desc, "s") {
+            Some(AttrValue::Str(text)) => Act::Text(text.clone()),
+            _ => Act::Delegate,
+        }
+    } else if class_name == VARIABLE_NODE {
+        match find_attr(desc, "filter_expression") {
+            Some(AttrValue::FilterExpr(expr)) => match plan_expr(expr) {
+                Some(expr) => Act::Emit(expr),
+                None => Act::Delegate,
+            },
+            _ => Act::Delegate,
+        }
+    } else if class_name == FOR_NODE {
+        match plan_for(py, desc, node)? {
+            Some(plan) => Act::For(Box::new(plan)),
+            None => Act::Delegate,
+        }
+    } else {
+        Act::Delegate
+    };
+    Ok(Some(Slot {
+        act,
+        node: node.clone().unbind(),
+        class_name,
+    }))
 }
 
-/// `counts[name] += 1`, keeping first-seen order. Drives the handled/delegated
-/// report both walks return.
-fn bump(counts: &mut Vec<(String, usize)>, name: &str) {
-    if let Some(entry) = counts.iter_mut().find(|(n, _)| n == name) {
-        entry.1 += 1;
-    } else {
-        counts.push((name.to_string(), 1));
+/// A whole nodelist in document order, or `None` if any node declines.
+fn plan_list(
+    py: Python<'_>,
+    desc: &NodeListDesc,
+    nodelist: &Bound<'_, PyAny>,
+) -> PyResult<Option<Vec<Slot>>> {
+    if nodelist.len()? != desc.nodes.len() {
+        return Ok(None);
+    }
+    let mut slots = Vec::with_capacity(desc.nodes.len());
+    for (index, node_desc) in desc.nodes.iter().enumerate() {
+        let node = nodelist.get_item(index)?;
+        let Some(slot) = plan_slot(py, node_desc, &node)? else {
+            return Ok(None);
+        };
+        slots.push(slot);
+    }
+    Ok(Some(slots))
+}
+
+/// A parsed template's render plan, held in Rust.
+///
+/// Built by `compile_template` and attached to the `Template` the shell builds;
+/// `Template._render` hands it back to [`render_plan`]. A template with no plan
+/// renders on the Python path exactly as before this slice, so a plan this
+/// builder declines is a lost optimisation and never a behaviour change.
+#[pyclass]
+struct NativePlan {
+    slots: Vec<Slot>,
+}
+
+/// `Node.render_annotated`'s `except` arm (`engine/base.py:1135-1164`), for a node this
+/// walk rendered itself.
+///
+/// Django's two guards are both `hasattr` — first-writer-wins — so the innermost
+/// failing node names the culprit and every enclosing one leaves it alone. The
+/// walk reproduces that by *being* the nesting: each native step's error arm runs
+/// in a Rust frame nested inside its caller's, so the innermost sets the
+/// attribute and the outer frames find it already there. That is the property a
+/// flat plan with jumps would have had to reconstruct.
+///
+/// Everything is read at error time and nothing on the happy path, which is
+/// Django's shape too: `context.template.engine.debug` is read inside the
+/// handler, so a template rendered without debug pays nothing for the protocol.
+fn annotate_culprit(py: Python<'_>, context: &Bound<'_, PyAny>, slot: &Slot, error: &PyErr) {
+    // The walk is only reachable through `Template._render`, which is only
+    // reachable with a bound template, so none of these reads can fail the way
+    // they would for a hand-called `render_annotated`. If one does anyway the
+    // original exception propagates unannotated: losing an annotation is a
+    // smaller failure than replacing the exception with whatever was raised
+    // while describing it.
+    let error_value = error.value(py);
+    let annotate = || -> PyResult<()> {
+        let debug: bool = context
+            .getattr("template")?
+            .getattr("engine")?
+            .getattr("debug")?
+            .extract()?;
+        if !debug {
+            return Ok(());
+        }
+        if !error_value.hasattr("_culprit_node")? {
+            error_value.setattr("_culprit_node", slot.node.bind(py))?;
+        }
+        if error_value.hasattr("template_debug")? {
+            return Ok(());
+        }
+        let template = context.getattr("render_context")?.getattr("template")?;
+        let culprit = error_value.getattr("_culprit_node")?;
+        if !template.getattr("origin")?.eq(culprit.getattr("origin")?)? {
+            return Ok(());
+        }
+        let info = template.call_method1(
+            "get_exception_info",
+            (error_value, culprit.getattr("token")?),
+        )?;
+        error_value.setattr("template_debug", info)?;
+        Ok(())
+    };
+    let _ = annotate();
+}
+
+/// The render-invariant state of one walk.
+struct Walk<'py> {
+    py: Python<'py>,
+    context: Bound<'py, PyAny>,
+    /// `django_rust_templates.engine.base.render_value_in_context`, fetched once.
+    /// Django's function, not a Rust reimplementation of it: it is the
+    /// transcription the transcription guard pins, so the fallback path is
+    /// byte-identical by construction rather than by a test that keeps pace.
+    escape: Bound<'py, PyAny>,
+    scope: LookupScope,
+    /// `context.autoescape`, hoisted — and refreshed after every delegate,
+    /// because `AutoEscapeControlNode` writes that attribute **in place** on the
+    /// context object rather than restoring it later.
+    autoescape: bool,
+    /// The output, as a Rust `String` — which is the whole point of the walk,
+    /// and which Python's `str` is not a superset of. See [`Walk::push_python`].
+    out: String,
+    /// Set once a piece will not fit `out`; `Some` means the accumulator is
+    /// Python's from then on and the pieces are here.
+    spill: Option<Vec<Py<PyAny>>>,
+    /// How many nodes have been pushed. Read by [`Walk::push_python`] as the
+    /// **node index** of the piece it is holding, which is the ordinal
+    /// `NodeList.render`'s `"".join` would name for it.
+    nodes: usize,
+    census: Option<Census>,
+}
+
+impl<'py> Walk<'py> {
+    fn run(
+        &mut self,
+        slots: &[Slot],
+        frame: Option<&Bound<'py, PyAny>>,
+        depth: usize,
+    ) -> PyResult<()> {
+        if depth > MAX_WALK_DEPTH {
+            return Err(pyo3::exceptions::PyRecursionError::new_err(
+                "maximum recursion depth exceeded",
+            ));
+        }
+        for slot in slots {
+            match &slot.act {
+                Act::Text(text) => {
+                    self.push_text(text)?;
+                    census_bump(&mut self.census, &slot.class_name, false);
+                }
+                Act::Delegate => {
+                    let rendered = slot
+                        .node
+                        .bind(self.py)
+                        .call_method1("render_annotated", (&self.context,))?;
+                    self.push_python(rendered.unbind())?;
+                    self.autoescape = self.context.getattr("autoescape")?.extract()?;
+                    census_bump(&mut self.census, &slot.class_name, true);
+                }
+                Act::Emit(expr) => match self.emit_expr(slot, expr) {
+                    Ok(()) => census_bump(&mut self.census, &slot.class_name, false),
+                    Err(error) => return Err(self.culprit(slot, error)),
+                },
+                Act::Local(lookups) => match self.emit_local(slot, lookups, frame) {
+                    Ok(()) => census_bump(&mut self.census, &slot.class_name, false),
+                    Err(error) => return Err(self.culprit(slot, error)),
+                },
+                Act::For(plan) => match self.run_for(plan, depth + 1) {
+                    Ok(()) => census_bump(&mut self.census, &slot.class_name, false),
+                    Err(error) => return Err(self.culprit(slot, error)),
+                },
+            }
+        }
+        Ok(())
+    }
+
+    /// Attach the culprit annotation and hand the original exception back.
+    fn culprit(&self, slot: &Slot, error: PyErr) -> PyErr {
+        annotate_culprit(self.py, &self.context, slot, &error);
+        error
+    }
+
+    fn emit_expr(&mut self, slot: &Slot, expr: &Expr) -> PyResult<()> {
+        let result = match expr {
+            Expr::Lookup(lookups) => self.scope.resolve(self.py, lookups, &self.context),
+            Expr::Literal(value) => return self.emit(literal_to_py(self.py, value)?),
+        };
+        self.emit_resolved(slot, result)
+    }
+
+    fn emit_local(
+        &mut self,
+        slot: &Slot,
+        lookups: &[String],
+        frame: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<()> {
+        // `Act::Local` is only produced by `seal`, which only runs inside a
+        // sealed body, which is only ever walked with a frame.
+        let item = frame.ok_or_else(|| PyRuntimeError::new_err("sealed loop has no frame"))?;
+        let result = self.scope.resolve_local(self.py, lookups, item);
+        self.emit_resolved(slot, result)
+    }
+
+    /// Emit a resolved variable, taking the two arms that absorb a failure.
+    ///
+    /// A `{{ … }}` is a `VariableNode`, and the failure of its lookup is
+    /// absorbed *before* the node ever sees it: `FilterExpression.resolve`
+    /// catches `VariableDoesNotExist` and substitutes (`engine/base.py:819-832`), and
+    /// `VariableNode.render` catches `UnicodeDecodeError` and renders `""`
+    /// (`engine/base.py:1291-1294`). Resolving a variable directly — which is what
+    /// makes this walk cheap — is resolving *past* both, so both are taken here.
+    /// `Act::Local` shares this path rather than having its own: it is the same
+    /// `VariableNode.render` with the loop frame standing in for the context, so
+    /// a miss on the tail of a loop variable is substituted the same way.
+    ///
+    /// `Ok(())` with nothing emitted is the `UnicodeDecodeError` arm: Django
+    /// returns early there and `render_value_in_context` never runs.
+    fn emit_resolved(&mut self, slot: &Slot, result: PyResult<Py<PyAny>>) -> PyResult<()> {
+        match result {
+            Ok(value) => self.emit(value),
+            Err(error) => match self.absorb(slot, error)? {
+                Some(value) => self.emit(value),
+                None => Ok(()),
+            },
+        }
+    }
+
+    /// The substituted value for a lookup failure, or `None` for `""`.
+    ///
+    /// The class test is `except VariableDoesNotExist`, and nothing else is
+    /// caught: `Variable.resolve` has no handler of its own, so a lookup that
+    /// raises anything else reaches the node uncaught, which is where Django's
+    /// outer handler decides whether to log and substitute or to propagate.
+    fn absorb(&self, slot: &Slot, error: PyErr) -> PyResult<Option<Py<PyAny>>> {
+        let py = self.py;
+        if error.is_instance_of::<PyUnicodeDecodeError>(py) {
+            return Ok(None);
+        }
+        let class = VARIABLE_DOES_NOT_EXIST
+            .import(
+                py,
+                "django_rust_templates.engine.base",
+                "VariableDoesNotExist",
+            )?
+            .cast::<PyType>()?;
+        if !error.is_instance(py, class) {
+            return Err(error);
+        }
+        let invalid = string_if_invalid(&self.context)?;
+        let invalid = invalid.bind(py);
+        // `if string_if_invalid:` — and the `else` assigns the falsy value
+        // itself, which is `""` for the default. Both routes end in the same
+        // place, but only one of them is `string_if_invalid`, and `None` is a
+        // value `render_value_in_context` renders as `"None"` rather than as
+        // `""`, so the distinction is not cosmetic.
+        if !invalid.is_truthy()? {
+            return Ok(Some(invalid.clone().unbind()));
+        }
+        if invalid.contains("%s")? {
+            // `string_if_invalid % self.var`, and `self.var` is the `Variable`
+            // object — `%s` on it calls `Variable.__str__`, which is the lookup
+            // text. Read off the node rather than re-derived by joining
+            // `lookups`: it is the operand Django uses, and it is the same
+            // object the expression would have used had it not been planned
+            // natively.
+            let var = slot
+                .node
+                .bind(py)
+                .getattr("filter_expression")?
+                .getattr("var")?;
+            return Ok(Some(invalid.call_method1("__mod__", (var,))?.unbind()));
+        }
+        Ok(Some(invalid.clone().unbind()))
+    }
+
+    /// Append one resolved value, taking `render_value_in_context`'s first arm
+    /// here when it applies.
+    ///
+    /// The arm is **exact `str` under autoescaping**, and the exactness is
+    /// load-bearing rather than tidy: a `str` subclass is where `SafeString`
+    /// lives, it carries `__html__`, and escaping one is the bug the predicate
+    /// declines. `html_escape` returning `None` (a lone surrogate, which the
+    /// binding refuses rather than raises on) falls through to the Python
+    /// function, which takes the slow path with the same answer.
+    fn emit(&mut self, value: Py<PyAny>) -> PyResult<()> {
+        let py = self.py;
+        // Gated on the spill because the fast path writes `out` directly: once
+        // the accumulator is Python's, `out` is an empty remnant and a piece
+        // written to it would be lost.
+        if self.autoescape && self.spill.is_none() {
+            let value = value.bind(py);
+            if value.is_exact_instance_of::<PyString>() {
+                if let Ok(text) = value.cast::<PyString>() {
+                    if let Some(escaped) = html_escape(text)? {
+                        return self.push_text(&escaped);
+                    }
+                }
+            }
+        }
+        let rendered = self.escape.call1((value, &self.context))?;
+        self.push_python(rendered.unbind())
+    }
+
+    /// Append a piece this walk produced itself.
+    fn push_text(&mut self, text: &str) -> PyResult<()> {
+        match &mut self.spill {
+            None => self.out.push_str(text),
+            Some(pieces) => pieces.push(PyString::new(self.py, text).into_any().unbind()),
+        }
+        self.nodes += 1;
+        Ok(())
+    }
+
+    /// Append one piece that came back from Python, which may not be a piece a
+    /// Rust `String` can hold.
+    ///
+    /// **The accumulator is a Rust `String`, and Python's `str` is not a subset
+    /// of it.** A lone surrogate — `'\ud800'`, which
+    /// `FilterSeamRefusalTests.test_a_string_the_seam_cannot_hold_renders_as_django_renders_it`
+    /// renders through `{{ x|upper }}` — is a `str` CPython carries and one no
+    /// `String` can. So the first piece that will not fit **spills** the
+    /// accumulator into Python's: the fast path stays one `push_str` per node,
+    /// and the slow path ends in `"".join`, which is what `NodeList.render`
+    /// does (`engine/base.py:1181-1182`) and therefore what the walk owes it.
+    ///
+    /// Two failures are not the same failure here, and the branch below is the
+    /// difference. A **`str` that will not fit** is a value Django renders, and
+    /// it goes into the spill. A piece that is **not a `str` at all** is a value
+    /// Django dies on: `NodeList.render` is
+    /// `SafeString("".join([node.render_annotated(context) for node in self]))`,
+    /// so a node returning anything else raises `TypeError` from the `join`, and
+    /// this raises from the same call rather than re-writing its message — the
+    /// list is padded so the offending piece sits at its **node** index
+    /// (`self.nodes`), because that ordinal and the type name in the text are
+    /// CPython's to phrase. The padding is empty strings: the `join` raises
+    /// before it concatenates anything, so only the position is observed.
+    fn push_python(&mut self, piece: Py<PyAny>) -> PyResult<()> {
+        let py = self.py;
+        let fits = match piece.bind(py).cast::<PyString>() {
+            Ok(text) => text.to_str().is_ok(),
+            Err(_) => false,
+        };
+        if fits && self.spill.is_none() {
+            let text = piece.bind(py).cast::<PyString>()?.to_str()?;
+            self.out.push_str(text);
+        } else if piece.bind(py).is_instance_of::<PyString>() {
+            if self.spill.is_none() {
+                // The prefix has merged `self.nodes` nodes and becomes one
+                // element. The ordinal above is computed from the *count*, not
+                // from this list, so merging does not lose it.
+                self.spill = Some(vec![PyString::new(py, &self.out).into_any().unbind()]);
+                self.out.clear();
+            }
+            self.spill.as_mut().unwrap().push(piece);
+        } else {
+            let list = PyList::empty(py);
+            for _ in 0..self.nodes {
+                list.append("")?;
+            }
+            list.append(&piece)?;
+            PyString::new(py, "").call_method1("join", (list,))?;
+            unreachable!("`''.join` over a non-str piece did not raise");
+        }
+        self.nodes += 1;
+        Ok(())
+    }
+
+    /// A sealed `{% for %}`, in `ForNode.render`'s order
+    /// (`engine/defaulttags.py:193-258`) with the two per-iteration writes elided.
+    ///
+    /// The order is the whole correctness argument: `values` is resolved and
+    /// normalised to something with a length *before* the empty test, the length
+    /// is read *before* the reversal, and the empty branch is rendered *before*
+    /// any loop state exists. A sealed loop is the only kind that reaches here —
+    /// every other `{% for %}` is a `Act::Delegate` — so `unreachable!` is the
+    /// honest arm for the rest.
+    fn run_for(&mut self, plan: &ForPlan, depth: usize) -> PyResult<()> {
+        let py = self.py;
+        let mut values = plan
+            .sequence
+            .bind(py)
+            .call_method1("resolve", (&self.context, true))?;
+        if values.is_none() {
+            values = PyList::empty(py).into_any();
+        }
+        if !values.hasattr("__len__")? {
+            values = py.import("builtins")?.getattr("list")?.call1((values,))?;
+        }
+        if values.len()? < 1 {
+            return self.run(&plan.empty, None, depth);
+        }
+        if plan.is_reversed {
+            values = py
+                .import("builtins")?
+                .getattr("reversed")?
+                .call1((values,))?;
+        }
+        for item in values.try_iter()? {
+            let item = item?;
+            self.run(&plan.body, Some(&item), depth)?;
+        }
+        Ok(())
+    }
+}
+
+/// Walk a plan and return the rendered `SafeString`.
+#[pyfunction]
+fn render_plan(py: Python<'_>, plan: &NativePlan, context: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    let context = context.bind(py);
+    let mut walk = Walk {
+        py,
+        context: context.clone(),
+        escape: render_value_in_context(py)?.clone(),
+        scope: LookupScope::new(context),
+        autoescape: context.getattr("autoescape")?.extract()?,
+        out: String::new(),
+        spill: None,
+        nodes: 0,
+        census: if census_on() {
+            Some(Census::default())
+        } else {
+            None
+        },
+    };
+    walk.run(&plan.slots, None, 0)?;
+    if let Some(census) = walk.census.take() {
+        census_merge(&mut CENSUS.lock().unwrap(), census);
+    }
+    // `SafeString` of a whole `str`, or of `"".join(pieces)` where the walk had
+    // to spill — `NodeList.render`'s own expression (`engine/base.py:1181-1182`),
+    // which is the thing this returns in place of. `SafeString` and not
+    // `mark_safe`, for the two reasons on [`SAFE_STRING`].
+    let out: Py<PyAny> = match walk.spill.take() {
+        None => PyString::new(py, &walk.out).into_any().unbind(),
+        Some(pieces) => PyString::new(py, "")
+            .call_method1("join", (PyList::new(py, pieces)?,))?
+            .unbind(),
+    };
+    Ok(SAFE_STRING
+        .import(py, "django.utils.safestring", "SafeString")?
+        .call1((out,))?
+        .unbind())
+}
+
+/// `django_rust_templates.engine.base.render_value_in_context`, cached once.
+///
+/// The function itself, not a Rust reimplementation of it: it is Django's —
+/// `template_localtime`, `localize`, `conditional_escape` — transcribed into
+/// this package, and the transcription is byte-identical to stock's by
+/// construction rather than by a test that has to keep pace with it. The walk
+/// takes the same function's first arm inline ([`Walk::emit`]) and calls this
+/// for everything that arm declines.
+///
+/// **Cached, and it is a per-render fetch that made it worth caching.** This was
+/// a function, `escape_fn`, that did the import and the `getattr` on every call;
+/// the walk then called it once per render, so the two together were ~1.2 µs of
+/// fixed cost on every walked template — invisible in the loop rows, where a
+/// per-iteration win dominates, and the whole of the `micro/text` row, which is
+/// the render call. `PyOnceLock::import` resolves both once per process.
+static RENDER_VALUE_IN_CONTEXT: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+fn render_value_in_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
+    RENDER_VALUE_IN_CONTEXT.import(
+        py,
+        "django_rust_templates.engine.base",
+        "render_value_in_context",
+    )
+}
+
+/// `django.utils.safestring.SafeString`, cached once — and it is `SafeString`
+/// rather than `mark_safe` deliberately, for two reasons that agree.
+///
+/// **It is the faithful one.** The expression this replaces is
+/// `NodeList.render`'s, and that expression is `SafeString("".join([...]))` —
+/// `mark_safe` is Django's *public* helper, not the constructor the node list
+/// uses. `mark_safe` wraps `SafeString` in `keep_lazy_text`, and for a `str`
+/// input the two return the same object.
+///
+/// **And it is 0.48 µs against 0.07.** Measured, 7×300 000: `mark_safe("")`
+/// 0.484 µs, `SafeString("")` 0.072 µs. The wrapper is the whole of it, and on
+/// a walked template it is paid once per render — which is why the empty-plan
+/// `render_plan` was 0.656 µs, most of it this call.
+static SAFE_STRING: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+/// A lookup root that answers the enclosing sealed loop's variable from the
+/// walk's frame and every other name from the context.
+///
+/// The frame is a **shadow**, and reproducing the shadow exactly is the whole
+/// point: Django writes `context[loopvar] = item` into the pushed top dict, so
+/// the name resolves to the item ahead of any outer binding while a name the
+/// loop never bound still resolves from the context. Delegating every arm but
+/// `get_item` to a target over the real `Context` reproduces that, including
+/// the `dir()` rule and the attribute-arm suppression — both of which read the
+/// *context* at the first bit, because Django's `current` there is the context
+/// object itself.
+///
+/// The call arm is why the head cannot simply be resolved in Rust and the rest
+/// handed to `resolve_lookup`: Django applies `callable(current)` **after every
+/// bit**, so a callable item is called before `rest` is walked, and `Step::Found`
+/// keeps that in the one place that implements it.
+struct FrameTarget {
+    name: String,
+    item: Py<PyAny>,
+    context: PyTarget,
+}
+
+impl LookupTarget for FrameTarget {
+    fn get_item(&self, bit: &str) -> Step {
+        if bit == self.name {
+            return Python::attach(|py| {
+                Step::Found(self.context.target_for(self.item.clone_ref(py)))
+            });
+        }
+        self.context.get_item(bit)
+    }
+
+    /// Django's root is a `BaseContext`, which has `__getitem__`; a frame stands
+    /// in for one, so the guard is true for the same reason.
+    fn has_getitem(&self) -> bool {
+        true
+    }
+
+    fn get_attr(&self, bit: &str) -> Step {
+        self.context.get_attr(bit)
+    }
+
+    fn get_index(&self, index: &IntValue) -> Step {
+        self.context.get_index(index)
+    }
+
+    fn in_dir(&self, bit: &str) -> bool {
+        self.context.in_dir(bit)
+    }
+
+    fn context_probes_attribute(&self, bit: &str) -> bool {
+        self.context.context_probes_attribute(bit)
+    }
+
+    fn is_context(&self) -> bool {
+        self.context.is_context()
+    }
+
+    fn call_arm(&self) -> Option<CallArm> {
+        self.context.call_arm()
+    }
+
+    fn call(&self) -> Result<Box<dyn LookupTarget>, CallFailure> {
+        self.context.call()
+    }
+
+    fn string_if_invalid(&self) -> Result<Box<dyn LookupTarget>, PendingFailure> {
+        self.context.string_if_invalid()
+    }
+
+    fn node(&self) -> CoreNodeRef {
+        self.context.node()
     }
 }
 
 /// The four `Rc`s `PyTarget` shares, hoisted out of the render loop.
 ///
-/// The same `PyTarget`/`outcome_to_py` pair `_native.resolve` uses, and the same
-/// reasons: §4's boundary rule lets the value cross because it *is* a Python
-/// object, and `PyTarget` is what reaches into the Python `Context` for it. This
-/// is the one place the floor and the dispatched walk both cross for a variable,
-/// so it is the one thing their subtraction holds equal.
-///
-/// [`LookupScope::resolve`] first allocated all of these per variable node — three
-/// `malloc`s (the arena, the `pending` cell, the `Box<dyn LookupTarget>`) plus a
-/// `Box` per container the loop walks into. That is the price of borrowing
-/// `resolve_lookup`'s per-**call** API, and it is not part of any render design: it
-/// is plumbing this spike added. It matters because `floor` is *the gate*, and a
-/// floor that pays an avoidable allocation per variable measures the plumbing
-/// rather than the walk. Hoisting costs nothing and leaves `floor − rust` a
-/// dispatch measurement and `floor` vs stock a design measurement.
-///
-/// The arena and `pending` stay per-*call* in the port's contract (`PyTarget` says
-/// so), so [`LookupScope::resolve`] resets both rather than reusing them. Nothing
-/// observes the reset: `outcome_to_py` returns `clone_ref`'d values, not handles
-/// into the arena, and it reads `pending` only for an outcome that raised.
+/// The arena and `pending` stay per-*call* in the port's contract (`PyTarget`
+/// says so), so [`LookupScope::resolve`] resets both rather than reusing them.
+/// Nothing observes the reset: `outcome_to_py` returns `clone_ref`'d values, not
+/// handles into the arena, and it reads `pending` only for an outcome that
+/// raised.
 struct LookupScope {
     arena: Rc<RefCell<Vec<Py<PyAny>>>>,
     pending: Rc<Cell<Option<PyErr>>>,
@@ -3003,14 +3714,18 @@ impl LookupScope {
         }
     }
 
+    fn reset(&self) {
+        self.arena.borrow_mut().clear();
+        self.pending.set(None);
+    }
+
     fn resolve(
         &self,
         py: Python<'_>,
         lookups: &[String],
         context: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        self.arena.borrow_mut().clear();
-        self.pending.set(None);
+        self.reset();
         let root = PyTarget::new(
             context.clone().unbind(),
             &self.arena,
@@ -3025,215 +3740,37 @@ impl LookupScope {
             context,
         )
     }
-}
 
-/// `django_rust_templates.engine.base.render_value_in_context`, fetched once per
-/// render.
-///
-/// The function itself, not a Rust reimplementation of it: it is Django's —
-/// `template_localtime`, `localize`, `conditional_escape` — transcribed into this
-/// package, and the transcription is byte-identical to stock's by construction
-/// rather than by a test that has to keep pace with it.
-fn escape_fn<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    py.import("django_rust_templates.engine.base")?
-        .getattr("render_value_in_context")
-}
-
-/// Resolve one variable and append its escaped rendering to `out`.
-fn append_expression_value(
-    out: &mut String,
-    escape: &Bound<'_, PyAny>,
-    value: Py<PyAny>,
-    context: &Bound<'_, PyAny>,
-) -> PyResult<()> {
-    let text: String = escape.call1((value, context))?.extract()?;
-    out.push_str(&text);
-    Ok(())
-}
-
-/// The result of one native render: the bytes, and the reachability census §6
-/// item 3 asks for.
-///
-/// `output` is `None` when any node was declined — a partial render is not a
-/// render, and handing one back would let a fallback read as a pass. `handled`
-/// and `delegated` are `(class_name, count)` pairs in first-seen order, over the
-/// whole nodelist (the walk does not stop at the first decline, so `delegated` is
-/// the complete set rather than its first element).
-#[pyclass]
-struct RenderResult {
-    #[pyo3(get)]
-    output: Option<String>,
-    #[pyo3(get)]
-    handled: Vec<(String, usize)>,
-    #[pyo3(get)]
-    delegated: Vec<(String, usize)>,
-}
-
-#[pymethods]
-impl RenderResult {
-    fn __repr__(&self) -> String {
-        match &self.output {
-            Some(output) => format!(
-                "<RenderResult {:?} handled={:?} delegated={:?}>",
-                output, self.handled, self.delegated
-            ),
-            None => format!(
-                "<RenderResult declined handled={:?} delegated={:?}>",
-                self.handled, self.delegated
-            ),
-        }
+    /// [`LookupScope::resolve`] with the sealed loop's item as the root; the
+    /// head of `lookups` is the name it answers to.
+    fn resolve_local(
+        &self,
+        py: Python<'_>,
+        lookups: &[String],
+        item: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        self.reset();
+        let context = self.context.bind(py);
+        let root = PyTarget::new(
+            context.clone().unbind(),
+            &self.arena,
+            &self.pending,
+            &self.context,
+        );
+        let frame = FrameTarget {
+            // `Step::Local` is only built from a non-empty lookup path.
+            name: lookups.first().cloned().unwrap_or_default(),
+            item: item.clone().unbind(),
+            context: root,
+        };
+        outcome_to_py(
+            py,
+            resolve_lookup(lookups, Box::new(frame)),
+            &self.arena,
+            &self.pending,
+            context,
+        )
     }
-}
-
-/// A parsed template held in Rust, with the flat plan [`render_floor`] walks.
-///
-/// The plan is built here, at parse time, and not on first render: it *is* the
-/// hoisted dispatch the floor measures the absence of, and building it inside the
-/// timed loop would fold its cost into the number that is supposed to exclude it.
-#[pyclass]
-struct DescTree {
-    desc: NodeListDesc,
-    plan: Vec<Op>,
-}
-
-/// Parse `source`, keeping the descriptor tree in Rust and returning an opaque
-/// handle to it.
-///
-/// The parse is [`parse_nodelist`] — the same function `_native.parse` and
-/// `_native.compile_template` drive — so the tree this walks is the tree the
-/// engine's own parse produces, not a second one. No materialiser is involved, so
-/// no Python `Node` is built: that is the whole point of the row this feeds (§3.1).
-#[pyfunction]
-#[pyo3(signature = (source, debug = false, origin_template_name = None, check_filter = None, compile_filter = None, host = None))]
-fn parse_desc(
-    py: Python<'_>,
-    source: &str,
-    debug: bool,
-    origin_template_name: Option<String>,
-    check_filter: Option<Bound<'_, PyAny>>,
-    compile_filter: Option<Bound<'_, PyAny>>,
-    host: Option<Bound<'_, PyAny>>,
-) -> PyResult<DescTree> {
-    let host = FilterCheckHost {
-        check_filter,
-        compile_filter,
-        refs: PyList::empty(py).into_any().unbind(),
-        host,
-    };
-    let desc = match parse_nodelist(source, debug, origin_template_name, &host) {
-        Ok(desc) => desc,
-        Err(error) => return Err(parse_error(py, &error)?),
-    };
-    let plan = plan_nodelist(&desc);
-    Ok(DescTree { desc, plan })
-}
-
-/// The floor: walk the precomputed plan, matching on `Op` variants only.
-///
-/// The gate of the spike — see the module comment above for what a failure here
-/// means.
-#[pyfunction]
-fn render_floor(py: Python<'_>, tree: &DescTree, context: Py<PyAny>) -> PyResult<RenderResult> {
-    let context = context.bind(py);
-    let escape = escape_fn(py)?;
-    let scope = LookupScope::new(context);
-    let mut out = String::new();
-    let mut handled: Vec<(String, usize)> = Vec::new();
-    let mut delegated: Vec<(String, usize)> = Vec::new();
-    let mut declined = false;
-
-    for op in &tree.plan {
-        match op {
-            Op::Text(s) => {
-                out.push_str(s);
-                bump(&mut handled, TEXT_NODE);
-            }
-            Op::Lookup { lookups } => {
-                let value = scope.resolve(py, lookups, context)?;
-                append_expression_value(&mut out, &escape, value, context)?;
-                bump(&mut handled, "VariableNode");
-            }
-            Op::Literal { value } => {
-                let value = literal_to_py(py, value)?;
-                append_expression_value(&mut out, &escape, value, context)?;
-                bump(&mut handled, "VariableNode");
-            }
-            Op::Delegate(name) => {
-                bump(&mut delegated, name);
-                declined = true;
-            }
-        }
-    }
-
-    Ok(RenderResult {
-        output: if declined { None } else { Some(out) },
-        handled,
-        delegated,
-    })
-}
-
-/// The dispatched walk: route (a), comparing `class_name` strings and finding
-/// attributes by name on every node of every render.
-///
-/// Its only difference from [`render_floor`] is where the dispatch happens; the
-/// resolution and escaping go through the same helpers, so `floor − rust` is the
-/// dispatch tax and nothing else.
-#[pyfunction]
-fn render_desc(py: Python<'_>, tree: &DescTree, context: Py<PyAny>) -> PyResult<RenderResult> {
-    let context = context.bind(py);
-    let escape = escape_fn(py)?;
-    let scope = LookupScope::new(context);
-    let mut out = String::new();
-    let mut handled: Vec<(String, usize)> = Vec::new();
-    let mut delegated: Vec<(String, usize)> = Vec::new();
-    let mut declined = false;
-
-    for node in &tree.desc.nodes {
-        if node.class_name == TEXT_NODE {
-            match find_attr(node, "s") {
-                Some(AttrValue::Str(s)) => {
-                    out.push_str(s);
-                    bump(&mut handled, TEXT_NODE);
-                }
-                _ => {
-                    bump(&mut delegated, &node.class_name);
-                    declined = true;
-                }
-            }
-        } else if node.class_name == "VariableNode" {
-            let planned = match find_attr(node, "filter_expression") {
-                Some(AttrValue::FilterExpr(expr)) => planned_expression(expr),
-                _ => None,
-            };
-            match planned {
-                Some(PlannedExpr::Lookup(lookups)) => {
-                    let value = scope.resolve(py, lookups, context)?;
-                    append_expression_value(&mut out, &escape, value, context)?;
-                    bump(&mut handled, "VariableNode");
-                }
-                Some(PlannedExpr::Literal(value)) => {
-                    let value = literal_to_py(py, value)?;
-                    append_expression_value(&mut out, &escape, value, context)?;
-                    bump(&mut handled, "VariableNode");
-                }
-                // `planned_expression` yields only `Lookup`/`Literal`, and a
-                // `VariableNode` this walk cannot plan is delegated whole.
-                _ => {
-                    bump(&mut delegated, &node.class_name);
-                    declined = true;
-                }
-            }
-        } else {
-            bump(&mut delegated, &node.class_name);
-            declined = true;
-        }
-    }
-
-    Ok(RenderResult {
-        output: if declined { None } else { Some(out) },
-        handled,
-        delegated,
-    })
 }
 
 /// Parse, materialise, and build the `Template` — M3's end-to-end entry.
@@ -3360,7 +3897,17 @@ fn compile_template(
     // `start, end = token.position`, and dies with
     // `TypeError: cannot unpack non-iterable NoneType object`.
     let debug: bool = engine.bind(py).getattr("debug")?.extract()?;
-    let desc = parse_source(py, source, debug, origin_name, &host)?;
+    // The descriptor tree is **kept**, not consumed: `parse_source` returns the
+    // wire tuple and drops the Rust tree, and the render walk plans against the
+    // Rust tree paired with the `NodeList` materialised from it — which is the
+    // only way to know, for each node, which class the materialiser built and
+    // which attributes the parser gave it. `nodelist_desc_to_py` is the same
+    // producer `parse_source` uses, so the wire shape still has one spelling.
+    let desc_tree = match parse_nodelist(source, debug, origin_name, &host) {
+        Ok(desc_tree) => desc_tree,
+        Err(error) => return Err(parse_error(py, &error)?),
+    };
+    let desc = with_ref_table(py, nodelist_desc_to_py(py, &desc_tree)?, &host)?;
     // The table is the render's own, and it is handed to `materialise` **with**
     // the descriptor rather than being left for the shell to find: this is the
     // hole §Review Focus 3 names. Before this, a `Ref` in the tree reached
@@ -3385,6 +3932,17 @@ fn compile_template(
         register_ref,
         parser.bind(py),
     ))?;
+    // The render plan, built here because `compile_template` is the one place
+    // that holds the descriptor tree *and* the `NodeList` built from it. It is
+    // **optional by construction**: `plan_list` returns `None` the moment the
+    // two disagree about a node's class, and `render_plan` is only reached from
+    // `Template._render` when the template carries a plan — so a declined plan
+    // falls back to the Python path with no branch in the render and no way for
+    // a half-planned tree to render.
+    let plan = match plan_list(py, &desc_tree, &nodelist)? {
+        Some(slots) => Some(NativePlan { slots }.into_pyobject(py)?.into_any().unbind()),
+        None => None,
+    };
     // `parser` is the third argument because `template_for` reads
     // `parser.extra_data` there (`base.py:198-200`). Passing the parser rather
     // than the dict keeps the two in step: there is no way to hand over one
@@ -3400,11 +3958,12 @@ fn compile_template(
     // builds the object that renders and this one is discarded by
     // `compile_nodelist`. Measured, both halves.
     let template = tree.getattr("template_for")?.call1((
-        nodelist,
+        nodelist.clone(),
         engine.bind(py),
         parser.bind(py),
         &origin,
         source,
+        plan,
     ))?;
     Ok(template.unbind())
 }
@@ -3431,9 +3990,9 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(resolve, m)?)?;
     m.add_function(wrap_pyfunction!(resolve_lookups, m)?)?;
     m.add_function(wrap_pyfunction!(compile_template, m)?)?;
-    m.add_function(wrap_pyfunction!(parse_desc, m)?)?;
-    m.add_function(wrap_pyfunction!(render_floor, m)?)?;
-    m.add_function(wrap_pyfunction!(render_desc, m)?)?;
+    m.add_function(wrap_pyfunction!(render_plan, m)?)?;
+    m.add_function(wrap_pyfunction!(census_start, m)?)?;
+    m.add_function(wrap_pyfunction!(census_take, m)?)?;
     m.add_class::<NodeRef>()?;
     m.add_class::<NodeListRef>()?;
     m.add_class::<NodeSlot>()?;
@@ -3442,8 +4001,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SafeStr>()?;
     m.add_class::<Variable>()?;
     m.add_class::<FilterExpr>()?;
-    m.add_class::<DescTree>()?;
-    m.add_class::<RenderResult>()?;
+    m.add_class::<NativePlan>()?;
     m.add("ParseError", m.py().get_type::<ParseError>())?;
     m.add("UnimplementedTag", m.py().get_type::<UnimplementedTag>())?;
     m.add("CANNOT_HOLD", cannot_hold(m.py()))?;
