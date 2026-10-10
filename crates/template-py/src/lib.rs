@@ -161,6 +161,22 @@ fn filter_flags(name: &str) -> PyResult<(bool, bool, bool)> {
 /// `autoescape` and `use_tz` are the context's, and exist because seven filters
 /// branch on the first and two on the second (§D1).
 ///
+/// **`_native.CANNOT_HOLD` is the one return that is not an answer.** A Python
+/// `str` may hold a lone surrogate, which a Rust `&str` cannot, so there are
+/// values this seam cannot hold. Where Django's answer for such a value would be
+/// an exception of our own invention — `{{ x|upper }}` with `x = '\ud800'` is
+/// `'\ud800'` upstream and was `UnicodeEncodeError` here — the seam returns the
+/// [`CannotHold`] singleton instead, and the shell reads that as "run Django's
+/// own callable". It is the same refusal `_native.html_escape` sends with its
+/// `None`, and it is deliberately not an exception: an exception would turn a
+/// value Django renders into a 500. Measured over the seam: all 57 built-in
+/// names refuse on `'\ud800'`, where Django's own body answers 33 of the 37 that
+/// take only a value (`.review/m19-measurements/surrogate_boundary.txt`).
+///
+/// The sentinel is an object rather than `None` because `None` **is** an answer
+/// a filter may give — see [`CannotHold`] — and a caller that read it as the
+/// refusal would run the filter a second time.
+///
 /// **`args` is the filter's argument list and not an `Option`, which is the one
 /// shape this parameter must not have.** Django's loop builds `arg_vals`
 /// (`base.py:804-809`) and calls `func(obj, *arg_vals)` (`base.py:815`), so the
@@ -664,6 +680,71 @@ create_exception!(
      agreeing with Django's \"Did you forget to register or load this tag?\" — the\n\
      opposite of the truth."
 );
+
+create_exception!(
+    _native,
+    CannotHoldValue,
+    PyException,
+    "The seam cannot hold a Python value, so it declines to answer for it.\n\
+     \n\
+     A Python `str` is a sequence of code points and a Rust `&str` is UTF-8, so a\n\
+     lone surrogate cannot be represented; the conversion raises rather than\n\
+     losing the character. **This type is the Rust side's signal and never\n\
+     reaches Python**: `run_filter` spends it and reports `CANNOT_HOLD` instead,\n\
+     the way `?` carries any other internal failure. It is a distinct type rather\n\
+     than a message because the test for it must be structural: `urlencode`\n\
+     raises `UnicodeEncodeError` on this very input in Django too, and that one is\n\
+     a real error the caller must see."
+);
+
+/// The value `_native.filter` returns for a Python value the seam cannot hold.
+///
+/// **A singleton, identity-compared, because `None` cannot carry this message.**
+/// A filter may legitimately *answer* `None` — `default` returns its argument,
+/// and `{{ x|default:None }}` with a falsy `x` is `None` — so a `None` return
+/// would mean both "here is your answer" and "I have none", and the shell would
+/// run Django's own body a second time over the first, on an input nobody would
+/// think to test. Measured at the seam, both spellings of "no value" arrive as
+/// Python `None`: `_native.filter("default", None, (None,), True, True)` is a
+/// *result* and `_native.filter("upper", "\ud800", (), True, True)` was the
+/// refusal, indistinguishable.
+///
+/// **Not an exception, and the first reason written for that was false.** The
+/// draft said a control-flow exception would be eaten by the render path's broad
+/// handlers — `Variable._resolve_lookup`'s `except Exception` is Django's own —
+/// and measured at 6.0.9 that is wrong: `VariableNode.render` catches
+/// `UnicodeDecodeError` and nothing else, and a filter body's exception reaches
+/// the caller from all six render shapes tried, with `debug` on and off
+/// (`.review/m19-measurements/surrogate_boundary.txt` §8). The reasons that hold
+/// are that a refusal is **not an error** — Django renders this value — and that
+/// the sibling refusal one function away, `_native.html_escape`, already
+/// declines by *returning*. Two seams, one protocol; and a returned object
+/// cannot be caught by a handler that has never heard of it.
+#[pyclass(frozen, module = "django_rust_templates._native")]
+pub struct CannotHold;
+
+#[pymethods]
+impl CannotHold {
+    fn __repr__(&self) -> &'static str {
+        "<the filter seam cannot hold this value>"
+    }
+}
+
+/// The one [`CannotHold`] instance, shared by the module attribute and every
+/// refusal `run_filter` reports.
+///
+/// One `PyOnceLock` behind both, because the shell's test is `is not` and two
+/// instances would make it false for the refusal it is there to catch.
+pub(crate) fn cannot_hold(py: Python<'_>) -> Py<PyAny> {
+    static SINGLETON: pyo3::sync::PyOnceLock<Py<PyAny>> = pyo3::sync::PyOnceLock::new();
+    SINGLETON
+        .get_or_init(py, || {
+            Py::new(py, CannotHold)
+                .expect("allocating the CannotHold singleton")
+                .into_any()
+        })
+        .clone_ref(py)
+}
 
 /// A token's wire shape, shared with `_native.lex`.
 type WireToken = (u8, String, usize, Option<(usize, usize)>);
@@ -3365,5 +3446,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<RenderResult>()?;
     m.add("ParseError", m.py().get_type::<ParseError>())?;
     m.add("UnimplementedTag", m.py().get_type::<UnimplementedTag>())?;
+    m.add("CANNOT_HOLD", cannot_hold(m.py()))?;
     Ok(())
 }

@@ -571,8 +571,26 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # searches for; the count is the five `def`s and the sixth is this prose.
 # 479 + 5 = 484.
 #
-# Counts at close: 484 collected, proxy and discovery agreeing.
-PINNED = 484
+# 484 → 487 is **+3**, all in `tests/test_base_parity.py` and all in one new
+# class, `FilterSeamRefusalTests`, which is slice 1b's own subject: a Python
+# `str` holding a lone surrogate, which Rust's `&str` cannot hold at all. The
+# first row is the shell's read — six templates through both engines across
+# four surrogates and both autoescape settings, **48 renders, 0 diverge** — and
+# it is the row that would have caught the sentinel leaking into `obj`, because
+# a leaked sentinel renders as a string rather than raising. The second is the
+# one the reviewer's finding asked for: `_native.filter` returns a singleton for
+# a refusal, and a `None` from `default` on a falsy value is an *answer*, so the
+# row asserts both readings off one call site rather than asserting "not None".
+# The third is the positive control over the same six templates with an ordinary
+# value, because a row asserting equality on a refusal says nothing about the
+# path a caller takes when the seam *does* answer.
+# Measured the other way, as this ledger's rule asks: `git diff -U0 tests/` adds
+# **3** `def test_` lines and removes none, and no module but this one gained a
+# row — the other two test files in the diff changed one line each, a re-keyed
+# citation in `test_filter_inventory.py` and `test_interposition.py`. 484 + 3 = 487.
+#
+# Counts at close: 487 collected, proxy and discovery agreeing.
+PINNED = 487
 
 
 def collected() -> unittest.TestSuite:

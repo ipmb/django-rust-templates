@@ -870,14 +870,32 @@ class FilterExpression:
                 # FFI's order would decide which name `date` blames.
                 use_tz = effective_use_tz(context, func)
                 autoescape = effective_autoescape(context, func)
-                obj = _native.filter(
+                filtered = _native.filter(
                     builtin_name,
                     obj,
                     tuple(arg_vals),
                     autoescape,
                     use_tz,
                 )
-                continue
+                # **`_native.CANNOT_HOLD` is not an answer, it is this seam
+                # declining to give one** — it says it cannot hold the value (a
+                # Python `str` may be a lone surrogate; a Rust `&str` may not),
+                # and the honest thing is to let Django's own callable below
+                # answer instead of inventing an exception for a value Django
+                # renders. An identity test and not `is None`, because `None`
+                # **is** a result a filter may give: `{{ x|default:None }}` with
+                # a falsy `x` answers it, and reading that as the refusal would
+                # run the filter a second time.
+                #
+                # **`obj` is assigned only on an answer, and that is the whole
+                # reason the result is a separate name.** Assigning the sentinel
+                # into `obj` and falling through would hand *it* to Django's
+                # body, and `{{ x|upper }}` with `x = '\ud800'` then renders
+                # `&lt;the filter seam cannot hold this value&gt;` — measured,
+                # and it looks like a successful port rather than a leak.
+                if filtered is not _native.CANNOT_HOLD:
+                    obj = filtered
+                    continue
             if getattr(func, "expects_localtime", False):
                 obj = template_localtime(obj, context.use_tz)
             if getattr(func, "needs_autoescape", False):

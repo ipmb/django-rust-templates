@@ -49,6 +49,24 @@ use template_core::filters::value::{Value, ValueId};
 use template_core::parser::error::{Error, PyErrorKind};
 use template_core::pynum::IntValue;
 
+/// The refusal [`PyFilterHost::classify`] raises for a value Rust cannot hold.
+///
+/// **It is not an error and never escapes [`run_filter`].** The wrapper spends it
+/// and reports [`crate::cannot_hold`] instead, because the shell reads that
+/// singleton as "I cannot answer for this value" and takes the long way — the
+/// same control-flow signal `_native.html_escape`'s `None` is. An exception that
+/// escaped would turn a value Django renders into a 500, which is what the
+/// boundary did before this existed: measured, `{{ x|upper }}` with
+/// `x = '\ud800'` raised in this engine and rendered `'\ud800'` in stock.
+///
+/// A dedicated type rather than a message, because the test for it has to be
+/// structural: a filter body may raise `UnicodeEncodeError` of its own
+/// (`urlencode` does, on exactly this input, in Django too), and that one is a
+/// real error the caller must see.
+fn refuse() -> PyErr {
+    PyErr::new::<crate::CannotHoldValue, _>(())
+}
+
 /// Django's `SafeData`, cached.
 ///
 /// `isinstance(value, SafeData)` is the question `escape`, `force_escape`,
@@ -126,6 +144,16 @@ impl<'py> PyFilterHost<'py> {
     /// `list` or `None` is interned as an `Opaque` *including* tuples and dicts,
     /// because a `Value::List` that a tuple had been flattened into would answer
     /// `as_nested_sequence` and `get_index` with the wrong type's semantics.
+    ///
+    /// **One input cannot be held at all, and it does not raise: it refuses.**
+    /// `PyString::to_str` cannot encode a lone surrogate, because Rust's `&str`
+    /// is UTF-8 and a Python `str` is not — so [`refuse`] is raised and
+    /// [`run_filter`] turns it into the [`crate::CannotHold`] singleton rather
+    /// than an exception. A `str` is the *only* type with this problem: every
+    /// other branch above produces a `Value` from a fixed-width or
+    /// already-canonical form, and a `list` inherits it through its elements,
+    /// which is why the recursion at the `PyList` arm propagates the same
+    /// refusal instead of flattening to what it managed.
     fn classify(&self, obj: &Bound<'py, PyAny>) -> PyResult<Value> {
         let py = self.py;
         if obj.is_none() {
@@ -153,7 +181,13 @@ impl<'py> PyFilterHost<'py> {
             return Ok(Value::List(items));
         }
         if obj.is_instance_of::<PyString>() {
-            let text = obj.cast::<PyString>()?.to_str()?.to_string();
+            // `to_str`, not `to_string_lossy`: a refusal has to be *sayable* to
+            // the shell, and a lossy conversion would answer for a value by
+            // inventing characters it does not have.
+            let text = match obj.cast::<PyString>()?.to_str() {
+                Ok(text) => text.to_string(),
+                Err(_) => return Err(refuse()),
+            };
             if obj.is_exact_instance_of::<PyString>() {
                 return Ok(Value::Str(text.into_boxed_str()));
             }
@@ -1657,6 +1691,40 @@ impl PyFilterHost<'_> {
 /// bodies the raw value would make that filter unimplementable without a second, subtler rule that
 /// 29 separately-written bodies would each have to remember.
 pub fn run_filter(
+    py: Python<'_>,
+    name: &str,
+    value: &Bound<'_, PyAny>,
+    args: &Bound<'_, PyTuple>,
+    autoescape: bool,
+    use_tz: bool,
+) -> PyResult<Py<PyAny>> {
+    match run_filter_inner(py, name, value, args, autoescape, use_tz) {
+        Ok(answered) => Ok(answered),
+        // **A refusal is an answer, and the answer is "not mine".** The caller
+        // runs Django's own body for this filter instead — the `else` branch
+        // `engine/base.py` already had for a name that is not a builtin — so the
+        // value is rendered by the code Django would have used, rather than by an
+        // exception. Matching on the type and not the message is what keeps a
+        // body's own `UnicodeEncodeError` (`urlencode`'s, on this same input)
+        // reported as the error it is; and the return is the shared singleton
+        // rather than `None` because a filter may *answer* `None` (see
+        // [`crate::CannotHold`]).
+        Err(error) if error.is_instance_of::<crate::CannotHoldValue>(py) => {
+            Ok(crate::cannot_hold(py))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// [`run_filter`]'s body, which may *raise* the refusal `run_filter` spends.
+///
+/// Split only so the boundary's sentinel is one arm in one place: everything
+/// below is unchanged, and every `?` here that can carry a refusal
+/// ([`PyFilterHost::classify`], and its recursion through a `list` — or through
+/// the `str()` of a `@stringfilter` input, which is the same crossing) reaches
+/// the wrapper as `Err`, where the type decides whether it is the seam declining
+/// or an error to report.
+fn run_filter_inner(
     py: Python<'_>,
     name: &str,
     value: &Bound<'_, PyAny>,

@@ -13,7 +13,7 @@ teeth has a row with teeth.
 6071 of those calls come from frames named render — VariableNode.render,
 CycleNode.render and TranslateNode.render — and 434 from a nested function
 called render_value inside the blocktranslate tag. The call sites are
-`python/django_rust_templates/engine/base.py:1251`, which is ours, and
+`python/django_rust_templates/engine/base.py:1269`, which is ours, and
 `django/template/defaulttags.py:114`, `django/templatetags/i18n.py:91` and
 `django/templatetags/i18n.py:185`, which are not. The two out-of-module modules
 reach it through a from-import of render_value_in_context at module scope, and
@@ -558,6 +558,131 @@ class NativeEscapeTests(unittest.TestCase):
                         self.ours(text, context),
                         _pinned("render_value_in_context")(text, context),
                     )
+
+
+class FilterSeamRefusalTests(unittest.TestCase):
+    """`_native.filter` on a value Rust cannot hold — the equality row.
+
+    Slice 1b. ``classify`` converts a Python ``str`` to Rust's ``Box<str>``
+    through ``PyString::to_str``, and a lone surrogate has no UTF-8 encoding, so
+    until this the seam raised ``UnicodeEncodeError`` where Django renders the
+    string. Measured before the repair, on the installed extension: **all 57
+    built-in filter names raised** on ``'\\ud800'``, where Django's own body
+    answers 33 of the 37 that take only a value
+    (``.review/m19-measurements/surrogate_boundary.{py,txt}``).
+
+    The repair reuses the branch that already existed for a name that is not a
+    builtin: the seam returns the ``_native.CANNOT_HOLD`` singleton and
+    ``FilterExpression.resolve`` lets Django's own callable answer. That is a
+    *refusal*, not an exception — and the first reason written for that was
+    **false**: "the render path would swallow it". Measured at 6.0.9,
+    ``VariableNode.render`` catches ``UnicodeDecodeError`` and nothing else, and
+    a raising filter reaches the caller from all six render shapes tried, with
+    ``debug`` on and off
+    (``.review/m19-measurements/surrogate_boundary.txt`` §8). The reasons that
+    hold are that a refusal is not an *error*, and that the sibling refusal one
+    function away — ``_native.html_escape``, tested above — already declines by
+    returning.
+
+    Every row below compares against Django's engine rather than a literal, and
+    the inputs are chosen so that the two shapes of "nothing" are
+    distinguishable: a surrogate the seam cannot hold, and a filter whose
+    *answer* is ``None``.
+    """
+
+    SURROGATES = ("\ud800", "a\ud800b", "a & \ud800", "\udfff")
+    TEMPLATES = (
+        "{{ x|upper }}",
+        "{{ x|length }}",
+        "{{ x|force_escape }}",
+        "{{ x|slugify }}",
+        "{{ x|truncatechars:2 }}",
+        "{{ x|default:y }}",
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        from scripts.filter_probe import ensure_settings
+
+        ensure_settings()
+        cls.base = importlib.import_module("django_rust_templates.engine.base")
+        cls.native = cls.base._native
+
+    def test_a_string_the_seam_cannot_hold_renders_as_django_renders_it(self):
+        """The equality row: whole templates, ours against stock Django.
+
+        Through the whole engine and not the seam, because "reachable" is the
+        claim that matters — a seam-level refusal that no template reaches is
+        not a divergence. ``upper`` and ``length`` were the two probes that
+        showed it; the other four are the shapes that could break a fallback
+        quietly: ``force_escape`` is non-idempotent, ``slugify`` rewrites the
+        text around the surrogate, ``truncatechars`` counts it, and
+        ``default`` is the filter whose *answer* may itself be ``None``.
+        """
+        import django.template as stock
+        from django_rust_templates.engine import Context, Engine
+
+        ours = Engine()
+        theirs = stock.Engine()
+        for template in self.TEMPLATES:
+            for text in self.SURROGATES:
+                for autoescape in (True, False):
+                    with self.subTest(
+                        template=template, text=repr(text), autoescape=autoescape
+                    ):
+                        variables = {"x": text, "y": None}
+                        self.assertEqual(
+                            ours.from_string(template).render(
+                                Context(variables, autoescape=autoescape)
+                            ),
+                            theirs.from_string(template).render(
+                                stock.Context(variables, autoescape=autoescape)
+                            ),
+                        )
+
+    def test_the_refusal_is_a_singleton_and_not_nones_answer(self):
+        """The protocol, which is the part a repair could get wrong silently.
+
+        ``None`` cannot carry this message: ``default`` returns its argument, so
+        ``{{ x|default:y }}`` with a falsy ``x`` and ``y = None`` is a filter
+        *answering* ``None``. Both spellings arrive as Python ``None`` from a
+        seam that used ``None`` as its sentinel — measured — and the shell would
+        then run Django's body a second time over the first. So the sentinel is
+        its own object, compared by identity, and this row is what says the two
+        are distinguishable.
+        """
+        refused = self.native.filter("upper", "\ud800", (), True, True)
+        self.assertIs(refused, self.native.CANNOT_HOLD)
+        self.assertIs(self.native.CANNOT_HOLD, self.native.CANNOT_HOLD)
+
+        answered = self.native.filter("default", None, (None,), True, True)
+        self.assertIsNone(answered)
+        self.assertIsNot(answered, self.native.CANNOT_HOLD)
+
+    def test_an_ordinary_value_is_unaffected(self):
+        """The positive control, over the same population.
+
+        Without it every row above passes for an engine that renders *nothing*
+        for these templates — the equality would hold at ``"" == ""``. Same six
+        templates, same context, a value a ``str`` Rust can hold; the surrogate
+        is the only variable between this row and the one above. Each answer is
+        asserted non-empty as well as equal, so "both engines agree" cannot be
+        satisfied by agreeing on nothing.
+        """
+        import django.template as stock
+        from django_rust_templates.engine import Context, Engine
+
+        ours = Engine()
+        theirs = stock.Engine()
+        variables = {"x": "a & B-", "y": "fallback"}
+        for template in self.TEMPLATES:
+            with self.subTest(template=template):
+                mine = ours.from_string(template).render(Context(variables))
+                self.assertTrue(mine, f"{template} rendered nothing at all")
+                self.assertEqual(
+                    mine,
+                    theirs.from_string(template).render(stock.Context(variables)),
+                )
 
 
 class UnconfiguredSettingsTests(unittest.TestCase):

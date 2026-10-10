@@ -35,25 +35,25 @@ crates/template-core/src/parser/tags/mod.rs:219	crates/template-core/src/parser/
 crates/template-core/src/parser/tags/mod.rs:231	crates/template-core/src/parser/tags/mod.rs	231	-	-	-
 crates/template-core/src/parser/tags/url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
 crates/template-core/src/parser/tags/with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
-crates/template-py/src/filters.rs:69-71	crates/template-py/src/filters.rs	69	71	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
-crates/template-py/src/filters.rs:156	crates/template-py/src/filters.rs	156	-	obj.cast::<PyString>()?.to_str()	-
-crates/template-py/src/filters.rs:248-257	crates/template-py/src/filters.rs	248	257	*self.raised.borrow_mut() = Some(err)	-
-crates/template-py/src/filters.rs:871	crates/template-py/src/filters.rs	871	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
-crates/template-py/src/filters.rs:1675-1683	crates/template-py/src/filters.rs	1675	1683	match args.len()	-
-crates/template-py/src/filters.rs:1731-1734	crates/template-py/src/filters.rs	1731	1734	host.take_raised()	-
+crates/template-py/src/filters.rs:87-89	crates/template-py/src/filters.rs	87	89	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
+crates/template-py/src/filters.rs:187	crates/template-py/src/filters.rs	187	-	obj.cast::<PyString>()?.to_str()	-
+crates/template-py/src/filters.rs:282-291	crates/template-py/src/filters.rs	282	291	*self.raised.borrow_mut() = Some(err)	-
+crates/template-py/src/filters.rs:905	crates/template-py/src/filters.rs	905	-	utility_text_checked("strip_tags", "django.utils.html", "strip_tags", text)	-
+crates/template-py/src/filters.rs:1745-1753	crates/template-py/src/filters.rs	1745	1753	match args.len()	-
+crates/template-py/src/filters.rs:1801-1804	crates/template-py/src/filters.rs	1801	1804	host.take_raised()	-
 crates/template-py/src/lib.rs:146	crates/template-py/src/lib.rs	146	-	fn filter_flags	-
-crates/template-py/src/lib.rs:770	crates/template-py/src/lib.rs	770	-	fn if_condition_to_py	-
+crates/template-py/src/lib.rs:851	crates/template-py/src/lib.rs	851	-	fn if_condition_to_py	-
 crates/template-py/src/lib.rs:1104	crates/template-py/src/lib.rs	1104	-	-	-
 crates/template-py/src/lib.rs:1251	crates/template-py/src/lib.rs	1251	-	-	-
-crates/template-py/src/lib.rs:2042	crates/template-py/src/lib.rs	2042	-	Python::attach(|py| {	-
-crates/template-py/src/lib.rs:2052	crates/template-py/src/lib.rs	2052	-	let result = Python::attach(|py| {	-
-crates/template-py/src/lib.rs:2063	crates/template-py/src/lib.rs	2063	-	Python::attach(|py| self.value.bind(py).getattr(bit)	-
-crates/template-py/src/lib.rs:2068	crates/template-py/src/lib.rs	2068	-	let result = Python::attach(|py| -> PyResult<Py<PyAny>> {	-
-crates/template-py/src/lib.rs:2089	crates/template-py/src/lib.rs	2089	-	Python::attach(|py| self.dir(py, bit))	-
-crates/template-py/src/lib.rs:2635-2636	crates/template-py/src/lib.rs	2635	2636	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
-crates/template-py/src/lib.rs:2692-2697	crates/template-py/src/lib.rs	2692	2697	fn resolve_lookups(	resolve_components(py, &lookups, context)
-crates/template-py/src/lib.rs:2755-2757	crates/template-py/src/lib.rs	2755	2757	django.template.base.render_value_in_context	-
-crates/template-py/src/lib.rs:2956-2958	crates/template-py/src/lib.rs	2956	2958	fn escape_fn<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {	getattr("render_value_in_context")
+crates/template-py/src/lib.rs:2123	crates/template-py/src/lib.rs	2123	-	Python::attach(|py| {	-
+crates/template-py/src/lib.rs:2133	crates/template-py/src/lib.rs	2133	-	let result = Python::attach(|py| {	-
+crates/template-py/src/lib.rs:2144	crates/template-py/src/lib.rs	2144	-	Python::attach(|py| self.value.bind(py).getattr(bit)	-
+crates/template-py/src/lib.rs:2149	crates/template-py/src/lib.rs	2149	-	let result = Python::attach(|py| -> PyResult<Py<PyAny>> {	-
+crates/template-py/src/lib.rs:2170	crates/template-py/src/lib.rs	2170	-	Python::attach(|py| self.dir(py, bit))	-
+crates/template-py/src/lib.rs:2716-2717	crates/template-py/src/lib.rs	2716	2717	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
+crates/template-py/src/lib.rs:2773-2778	crates/template-py/src/lib.rs	2773	2778	fn resolve_lookups(	resolve_components(py, &lookups, context)
+crates/template-py/src/lib.rs:2836-2838	crates/template-py/src/lib.rs	2836	2838	django.template.base.render_value_in_context	-
+crates/template-py/src/lib.rs:3037-3039	crates/template-py/src/lib.rs	3037	3039	fn escape_fn<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {	getattr("render_value_in_context")
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-
@@ -835,10 +835,10 @@ django_suite/run.py:85	django_suite/run.py	85	-	-	-
 django_suite/template_tests/syntax_tests/test_for.py:334	django_suite/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 django_suite/template_tests/test_partials.py:14	django_suite/template_tests/test_partials.py	14	-	engines["django"]	-
 python/django_rust_templates/engine/base.py:862	python/django_rust_templates/engine/base.py	862	-	names.get(func)	-
-engine/base.py:1074	python/django_rust_templates/engine/base.py	1074	-	return _native.resolve_lookups(self.lookups, context)	-
-engine/base.py:1090	python/django_rust_templates/engine/base.py	1090	-	def render_annotated(self, context):	-
-engine/base.py:1203	python/django_rust_templates/engine/base.py	1203	-	if type(value) is int and (	-
-python/django_rust_templates/engine/base.py:1251	python/django_rust_templates/engine/base.py	1251	-	render_value_in_context(output, context)	-
+engine/base.py:1092	python/django_rust_templates/engine/base.py	1092	-	return _native.resolve_lookups(self.lookups, context)	-
+engine/base.py:1108	python/django_rust_templates/engine/base.py	1108	-	def render_annotated(self, context):	-
+engine/base.py:1221	python/django_rust_templates/engine/base.py	1221	-	if type(value) is int and (	-
+python/django_rust_templates/engine/base.py:1269	python/django_rust_templates/engine/base.py	1269	-	render_value_in_context(output, context)	-
 engine/defaulttags.py:1253	python/django_rust_templates/engine/defaulttags.py	1253	-	partials = parser.extra_data.setdefault("partials", {})	-
 engine/engine.py:233	python/django_rust_templates/engine/engine.py	233	-	extra_data = getattr(template, "extra_data", {})	-
 python/django_rust_templates/engine/exceptions.py:38	python/django_rust_templates/engine/exceptions.py	38	-	-	-

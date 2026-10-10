@@ -222,16 +222,16 @@ COMPARED_PATH = {
         (679, 683, "Parser.compile_filter"),
         (685, 689, "Parser.find_filter"),
         (746, 790, "FilterExpression.__init__"),
-        (893, 910, "FilterExpression.args_check"),
-        (942, 993, "Variable.__init__"),
-        (995, 1011, "Variable.resolve"),
-        (1116, 1128, "Node.get_nodes_by_type"),
-        (1136, 1137, "NodeList.render"),
-        (1139, 1144, "NodeList.get_nodes_by_type"),
-        (1150, 1151, "TextNode.__init__"),
-        (1159, 1166, "TextNode.render_annotated"),
-        (1237, 1238, "VariableNode.__init__"),
-        (1258, 1302, "token_kwargs"),
+        (911, 928, "FilterExpression.args_check"),
+        (960, 1011, "Variable.__init__"),
+        (1013, 1029, "Variable.resolve"),
+        (1134, 1146, "Node.get_nodes_by_type"),
+        (1154, 1155, "NodeList.render"),
+        (1157, 1162, "NodeList.get_nodes_by_type"),
+        (1168, 1169, "TextNode.__init__"),
+        (1177, 1184, "TextNode.render_annotated"),
+        (1255, 1256, "VariableNode.__init__"),
+        (1276, 1320, "token_kwargs"),
     ],
     # 8 functions, spans 56-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
@@ -927,6 +927,18 @@ DECLARED = {
             # on `SafeString`, so the doubled coercion is what a reader would
             # have to be watching for.
             #
+            # **The `continue` is guarded since slice 1b, and the guard is the
+            # only way back to those four steps.** `_native.filter` returns
+            # `_native.CANNOT_HOLD` for a value it cannot hold — a Python `str`
+            # may be a lone surrogate and a Rust `&str` may not — and that
+            # sentinel is an instruction to run Django's own callable, which is
+            # exactly the fall-through the second `mark_safe` would have come
+            # from. So the doubling hazard above is unchanged: it is reachable
+            # only when the seam *answered*, and a seam that answered returned a
+            # result the four steps must not be applied to a second time. The
+            # test is identity against a singleton rather than `is None`, because
+            # `None` is itself an answer a filter may give.
+            #
             # **This region is outside clause (4)'s reach, and that is a
             # measurement rather than an assumption.** `COMPARED_PATH["base.py"]`
             # holds the 30 names this guard actually compares against the pin;
@@ -954,7 +966,7 @@ DECLARED = {
             # `test_filter_parity.py::test_the_comparison_target_is_not_rust_owned`
             # is what watches *that*.
             (
-                (848, 880),
+                (848, 898),
                 None,
                 "from django_rust_templates.host import (\n"
                 "effective_autoescape,\n"
@@ -963,13 +975,15 @@ DECLARED = {
                 "if (builtin_name := names.get(func)) is not None:\n"
                 "use_tz = effective_use_tz(context, func)\n"
                 "autoescape = effective_autoescape(context, func)\n"
-                "obj = _native.filter(\n"
+                "filtered = _native.filter(\n"
                 "builtin_name,\n"
                 "obj,\n"
                 "tuple(arg_vals),\n"
                 "autoescape,\n"
                 "use_tz,\n"
                 ")\n"
+                "if filtered is not _native.CANNOT_HOLD:\n"
+                "obj = filtered\n"
                 "continue",
             ),
             # M9's resolver seam: `Variable._resolve_lookup` delegates to Rust,
@@ -986,7 +1000,7 @@ DECLARED = {
             # blank line between them keeping the two hunks apart. M16 removed
             # the in-function `from django_rust_templates import _native` and
             # the blank line that followed it, so the two hunks now abut and
-            # `difflib` reports them as one — our 1027-1073 against upstream's
+            # `difflib` reports them as one — our 1045-1091 against upstream's
             # 957-1028, the whole body replaced by a comment block and a call.
             # (The span read 995-1033 until M19 lengthened the comment block to
             # record the `2.` divergence, and 995-1047 while the shell still
@@ -995,8 +1009,9 @@ DECLARED = {
             # paragraph explaining the join's inexactness is gone with it, and
             # M19's routing cache added 24 lines *above* this region without
             # touching it, which is why the span read 1019-1065, and the
-            # `if self.filters:` guard added eight more at the same place, which
-            # is why it reads 1027-1073.) The
+            # `if self.filters:` guard added eight more at the same place, and
+            # slice 1b's refusal guard eighteen more at the same place again,
+            # which is why it reads 1045-1091.) The
             # upstream side has not moved in any of it, because the *pairing* is
             # unaffected by how much prose our side carries. Re-derived with the
             # checker's own `differing_lines`, not by adding a delta to the old
@@ -1045,7 +1060,7 @@ DECLARED = {
             # not — a non-raising signature carries the bit on an ordinary return
             # value) is what makes the alternative live rather than closed.
             (
-                (1028, 1074),
+                (1046, 1092),
                 (957, 1028),
                 'return _native.resolve_lookups(self.lookups, context)',
             ),
@@ -1088,7 +1103,7 @@ DECLARED = {
             # here; it is not this region's, and widening this branch would not
             # reach it.
             (
-                (1175, 1223),
+                (1193, 1241),
                 None,
                 "if context.autoescape and type(value) is str:\n"
                 "escaped = _native.html_escape(value)\n"

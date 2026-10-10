@@ -207,7 +207,7 @@ DELEGATING_BY_STRING_METHOD = {"lower", "title"}
 #   `cut`, `safe`, `escape` (whose table *is* Rust's, five replacements) and the
 #   six others that reach a lazy-decorated helper. That cut leaves **5**.
 # * of those 5, four call `mark_safe`, which is a **host method** calling Django's
-#   own `mark_safe` (`crates/template-py/src/filters.rs:69-71`) — so `keep_lazy` rides along and the
+#   own `mark_safe` (`crates/template-py/src/filters.rs:87-89`) — so `keep_lazy` rides along and the
 #   argument's laziness is answered by Python. That cut leaves **1**.
 DELEGATING_BY_LAZY_DECORATOR = {"phone2numeric"}
 

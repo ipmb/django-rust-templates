@@ -19,7 +19,19 @@ population a caller actually reaches:
      matters and a seam-level raise is only a divergence if a template gets there;
   4. the contrast — `{{ x }}`, where this milestone's escape arm *does* refuse,
      falls through to `conditional_escape`, and renders Django's answer. The
-     pattern the repair wants already exists one function away.
+     pattern the repair copies already existed one function away;
+  5. the census over every built-in name, **three outcomes per row** — answered,
+     refused, raised — because the repair made "returned" ambiguous and a
+     two-way tally would count a refusal as an answer;
+  6. the argument-taking half with one argument, so the count is not an arity
+     artefact.
+
+**Run twice: once before the repair, once after.** Before, section 5 read "57 of
+57 raise, ours returns a value for 0"; section 3 raised `UnicodeEncodeError`
+where stock rendered `'\\ud800'`. After, ours refuses — `_native.CANNOT_HOLD` —
+and Django's own body answers through the branch that already existed for a name
+that is not a builtin. The `refused` column is the seam's part and the
+`answered` column is Django's; neither is a raise.
 
 Every value printed goes through `{v!r}`: a lone surrogate is unprintable, and a
 transcript that rendered it would name an input it did not evaluate.
@@ -46,22 +58,35 @@ from django_rust_templates.engine import base as ours  # noqa: E402
 SURROGATES = ["\ud800", "a\ud800b", "\udfff"]
 PLAIN = ["plain", "MiXeD"]
 
+#: The three outcomes, as `(kind, detail)`. `refused` is the seam's own
+#: singleton and is neither an answer nor an error — the distinction this whole
+#: document exists for, so it gets a name rather than a truth test.
+ANSWERED, REFUSED, RAISED = "answered", "refused", "raised"
+
+
+def outcome(native, name, value, args) -> tuple:
+    try:
+        got = native.filter(name, value, args, True, True)
+    except BaseException as error:  # noqa: BLE001  (the point is which one)
+        return RAISED, f"{type(error).__name__}: {error}"
+    if got is native.CANNOT_HOLD:
+        return REFUSED, repr(got)
+    return ANSWERED, repr(got)
+
 
 def main() -> None:
     native = ours._native
     print(f"stock django.template.base: {stock_base.__file__}")
     print(f"native extension:           {native.__file__}")
     print(f"filter_names():             {len(native.filter_names())}")
+    print(f"the refusal singleton:      {native.CANNOT_HOLD!r}")
     print()
 
     print("1. the seam, `_native.filter(name, value, (), True, True)`")
     for name in ("upper", "length", "escape"):
         for value in PLAIN + SURROGATES:
-            try:
-                got = native.filter(name, value, (), True, True)
-                print(f"   {name:7} {value!r:12} -> {got!r}")
-            except BaseException as error:  # noqa: BLE001  (the point is which one)
-                print(f"   {name:7} {value!r:12} -> RAISE {type(error).__name__}: {error}")
+            kind, detail = outcome(native, name, value, ())
+            print(f"   {name:7} {value!r:12} -> {kind:8} {detail}")
     print()
 
     print("2. Django's own body on the same inputs")
@@ -117,24 +142,25 @@ def main() -> None:
     print(f"   need an argument:    {len(needs_arg)}")
     print()
 
-    raises = []
-    answers = []
+    answered, refused, raised = [], [], []
     stock_raises = []
     for name in one_value:
-        try:
-            native.filter(name, "\ud800", (), True, True)
-            answers.append(name)
-        except BaseException as error:  # noqa: BLE001
-            raises.append((name, type(error).__name__))
+        kind, detail = outcome(native, name, "\ud800", ())
+        (answered if kind == ANSWERED else refused if kind == REFUSED else raised).append(
+            (name, detail)
+        )
         try:
             register.filters[name]("\ud800")
         except BaseException as error:  # noqa: BLE001
             stock_raises.append((name, type(error).__name__))
 
-    print(f"   with no argument given, {len(raises)} of {len(one_value)} raise:")
-    for name, kind in raises:
-        print(f"     {name:24} {kind}")
-    print(f"   and ours returns a value for {len(answers)}: {answers}")
+    # The character itself is named rather than embedded: an f-string carrying a
+    # raw surrogate cannot be *printed* — the encode fails where the compile
+    # would have, which is the same trap this document is about, one layer out.
+    print(f"   on a lone surrogate, over the {len(one_value)} value-only filters:")
+    print(f"     refused (the seam's singleton): {len(refused)}")
+    print(f"     answered                      : {len(answered)}")
+    print(f"     raised                        : {len(raised)}")
     print()
     print(f"   Django's own bodies raise for {len(stock_raises)}: {stock_raises}")
     print()
@@ -143,29 +169,110 @@ def main() -> None:
     # artefact. A lone surrogate as the *argument* is a different question and
     # is printed beside it.
     print("6. the argument-taking filters, with one argument supplied")
-    argument_raises = []
+    argument_refused, argument_raised = [], []
     for name in needs_arg:
         body = register.filters[name]
         try:
             parameters = list(inspect.signature(body).parameters.values())[1:]
         except (TypeError, ValueError):  # pragma: no cover
             parameters = []
-        try:
-            value = "" if parameters and parameters[0].default is inspect.Parameter.empty else None
-            native.filter(name, "\ud800", (value,), True, True)
-        except BaseException as error:  # noqa: BLE001
-            argument_raises.append((name, type(error).__name__))
-    print(f"   {len(argument_raises)} of {len(needs_arg)} raise: {argument_raises[:8]} …")
+        value = "" if parameters and parameters[0].default is inspect.Parameter.empty else None
+        kind, detail = outcome(native, name, "\ud800", (value,))
+        if kind == REFUSED:
+            argument_refused.append((name, detail))
+        elif kind == RAISED:
+            argument_raised.append((name, detail))
+    print(f"   refused: {len(argument_refused)} of {len(needs_arg)}")
+    print(f"   raised : {len(argument_raised)} of {len(needs_arg)}: {argument_raised[:8]}")
+    print()
+
+    # **The two halves above are the seam's; this is the caller's.** A refusal
+    # is only a repair if the shell reads it, and the shell's read is the
+    # equality row against Django through the whole engine. Printed as a count
+    # so the transcript carries the claim, not just the seam.
+    print("7. the shell's read: whole templates, ours against stock Django")
+    import django.template as stock
+
+    ours_engine, stock_engine = Engine(), stock.Engine()
+    templates = ("{{ x|upper }}", "{{ x|length }}", "{{ x|default:y }}")
+    divergences = []
+    for template in templates:
+        for text in SURROGATES:
+            for autoescape in (True, False):
+                variables = {"x": text, "y": None}
+                mine = ours_engine.from_string(template).render(
+                    Context(variables, autoescape=autoescape)
+                )
+                theirs = stock_engine.from_string(template).render(
+                    stock.Context(variables, autoescape=autoescape)
+                )
+                if mine != theirs:
+                    divergences.append((template, text, autoescape, mine, theirs))
+    checked = len(templates) * len(SURROGATES) * 2
+    print(f"   {checked} renders compared, {len(divergences)} diverge")
+    for row in divergences[:8]:
+        print(f"     {row}")
     print()
     # The denominator is the **built-ins** — the 9 library filters this
     # `filter_names()` also lists (`localize`, `localtime`, `timezone`,
     # `unlocalize`, `utc`, the four `language_*`) have no body in
     # `defaultfilters`, so the loop above never reached them and this line does
     # not claim them. They are reached through `{% load %}`, not here.
-    builtin = len(raises) + len(argument_raises)
+    builtin = len(one_value) + len(needs_arg)
     print(f"   Django has a body for {builtin} of the {len(names)} names, and")
-    print(f"   **all {builtin} raise on a lone surrogate** — ours returns a value")
-    print("   for none of them, where Django's own body answers for 33 of the 37")
+    print(f"   **all {builtin} refuse at the seam** — {len(refused)} with no argument")
+    print(f"   and {len(argument_refused)} with one — where Django's own body raises")
+    print(f"   for only {len(stock_raises)} of the {len(one_value)} value-only names.")
+    print("   The refused count is the seam's, not the caller's: section 7 is what")
+    print("   says the shell turns each refusal back into Django's own answer.")
+    print()
+
+    # **Would an exception have been swallowed instead?** The first draft of the
+    # repair's docstring said the refusal had to be a *returned* value because
+    # the render path is full of `except Exception` handlers that would eat a
+    # control-flow exception — `Variable._resolve_lookup`'s is Django's own. That
+    # sentence is a reason, so it gets measured, and it came out **false**:
+    # Django 6.0.9's `VariableNode.render` catches `UnicodeDecodeError` and
+    # nothing else, and a filter body's exception reaches the caller from every
+    # context below, debug on and off. The reason the sentinel is a returned
+    # object is therefore not this; it is that the refusal is not an error, and
+    # that `_native.html_escape` — the sibling refusal, one function away —
+    # already declines by returning. Left here because the claim was made and
+    # would otherwise have shipped unchecked.
+    print("8. the reason that was NOT the reason: does a raise get swallowed?")
+    from django.template import Library
+
+    class _Refusal(Exception):
+        pass
+
+    library = Library()
+
+    @library.filter(name="refuse")
+    def _refuse(value):
+        raise _Refusal("the seam refused")
+
+    shapes = (
+        "{{ x|refuse }}",
+        "{{ x|refuse|upper }}",
+        "{% if x|refuse %}y{% endif %}",
+        "{% for i in x|refuse %}y{% endfor %}",
+        "{% filter refuse %}{{ x }}{% endfilter %}",
+        "{{ x|refuse }}{{ y|upper }}",
+    )
+    swallowed = []
+    for debug in (False, True):
+        engine = stock.Engine(debug=debug)
+        engine.template_libraries["t"] = library
+        for shape in shapes:
+            template = engine.from_string("{% load t %}" + "[" + shape + "]")
+            try:
+                template.render(stock.Context({"x": "a", "y": "b"}))
+                swallowed.append((debug, shape))
+            except _Refusal:
+                pass
+    print(f"   {len(shapes) * 2} contexts (6 shapes x debug on/off), {len(swallowed)} swallowed")
+    for row in swallowed:
+        print(f"     {row}")
 
 
 if __name__ == "__main__":

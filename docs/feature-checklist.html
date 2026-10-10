@@ -765,7 +765,7 @@
       port is 1.73 µs against Jinja2's 3.45 µs, yet Jinja2 renders every whole page
       <b>2.4×–3.4× faster</b> — so the remaining gap is per-node work in the Python walk,
       which is what the native render walk is for. <b>One compatibility gap was found on the
-      way and is not fixed here</b>: of the <b>57</b> builtin filters, <b>47 render a
+      way and was left to its own commit</b>: of the <b>57</b> builtin filters, <b>47 render a
       <code>str</code> holding a lone surrogate (<code>'\ud800'</code>) in stock Django
       6.0.9 and raise <code>UnicodeEncodeError</code> in the port</b> — <code>upper</code>,
       <code>length</code>, <code>escape</code>, <code>striptags</code> and the rest — and
@@ -774,7 +774,8 @@
       two as well. The cause is the FFI boundary: a Rust <code>&amp;str</code> is UTF-8, and a
       lone surrogate has no UTF-8 encoding. The fast path below declines that input rather
       than joining the set, so this change does not widen the gap — but the gap is real, it is
-      wider than one filter, and it is recorded rather than repaired inside a speed commit.
+      wider than one filter, and it is repaired in its own commit below rather than inside a
+      speed commit.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>The next leaf down was the <code>int</code>, and it was the largest per-value cost
@@ -825,24 +826,43 @@
     <p class="sub" style="margin-top:16px">
       <b>A value Django renders, this engine refuses — and the crossing is one line.</b>
       Rust's <code>&amp;str</code> is UTF-8 and a Python <code>str</code> is not, so
-      <code>crates/template-py/src/filters.rs:156</code>'s
+      <code>crates/template-py/src/filters.rs:187</code>'s
       <code>obj.cast::&lt;PyString&gt;()?.to_str()</code> cannot hold a lone surrogate. Measured
-      (census in <code>surrogate_boundary.py</code>): <b>all 57 built-in filter names raise
+      (census in <code>surrogate_boundary.py</code>): <b>all 57 built-in filter names raised
       <code>UnicodeEncodeError</code> on <code>'\ud800'</code></b> — 37 of them take only the
       value and raise, the 20 that take an argument raise with one supplied — where Django's own
       body answers <b>33 of those 37</b>. So <code>{{ x|upper }}</code> with
-      <code>x = '\ud800'</code> raises here and renders <code>'\ud800'</code> in stock; that is
-      a drop-in divergence reachable from a public template today, not a step-2 risk.
-      <b>The refusal pattern is one function away and this milestone already uses it</b>:
-      <code>{{ x }}</code> renders that same value, because <code>_native.html_escape</code>
-      returns <code>None</code>, the arm reads it as "go the long way", and Django's
-      <code>conditional_escape</code> answers. For filters the fall-through already exists —
-      <code>engine/base.py:862</code> routes to <code>_native.filter</code> only when the name
-      is a builtin, and the <code>else</code> path is Django's own callable — so the repair is
-      to make the seam say "I cannot hold this value" instead of raising from inside
-      <code>to_str()</code>. <b>Ordered before the walk and as its own commit</b>: the walk
-      crosses this boundary per node and must know whether it crosses with a refusal path, and
-      a correctness fix folded into a speed change makes the speed number unreviewable.
+      <code>x = '\ud800'</code> raised here and rendered <code>'\ud800'</code> in stock; that
+      was a drop-in divergence reachable from a public template today, not a step-2 risk.
+      <b>Repaired, and the repair pattern was already one function away.</b> The seam now
+      <i>declines</i> instead of raising: <code>run_filter</code> answers
+      <code>_native.CANNOT_HOLD</code>, a singleton, and the builtin arm at
+      <code>engine/base.py:862</code> reads it by identity and falls through to the
+      <code>else</code> branch that already existed for a name that is not a builtin — Django's
+      own callable. <b>Not <code>None</code></b>, because <code>None</code> <i>is</i> a filter's
+      answer (<code>default</code> returns its argument; <code>first</code>/<code>last</code>
+      return <code>None</code> for <code>[None, 1]</code>), so a <code>None</code> refusal would
+      be indistinguishable from an answer — a row now asserts both readings off one call.
+      <b>And not a control-flow exception</b>, though the reason first written for that was
+      <b>measured false</b>: the draft said the render path's broad <code>except Exception</code>
+      handlers would swallow it, and Django 6.0.9's <code>VariableNode.render</code> catches
+      <code>UnicodeDecodeError</code> and nothing else (<b>12 contexts — 6 template shapes ×
+      debug on/off — 0 swallowed</b>). The reasons that hold are that a refusal is not an error,
+      and that the sibling <code>_native.html_escape</code> already declines by returning.
+      <b>Measured after the repair</b>: <b>37 of 37</b> value-only filters refuse at the seam
+      (0 answered, 0 raised) and <b>20 of 20</b> argument-taking ones refuse with an argument
+      supplied; <b>48 whole-template renders</b> — 6 templates × 4 surrogate spellings ×
+      autoescape on/off — compare equal to stock, <b>0 diverge</b>. Both halves are load-bearing:
+      deleting the Python guard reddens <b>48</b> rows, reverting the Rust refusal <b>49</b>.
+      <b>One leak was found in the first version of the repair and is worth the line</b>: the
+      sentinel was assigned into <code>obj</code> before falling through, so Django's own
+      <code>upper</code> ran on <i>it</i> and <code>{{ x|upper }}</code> rendered
+      <code>&amp;lt;the filter seam cannot hold this value&amp;gt;</code> — a leak that reads
+      like a successful port. The result is a separate name, <code>filtered</code>, and
+      <code>obj</code> is assigned only on an answer. <b>Ordered before the walk and as its own
+      commit</b>, because the walk crosses this boundary per node and must know it crosses with
+      a refusal path, and a correctness fix folded into a speed change makes the speed number
+      unreviewable.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>That figure holds only for an optimised build, and saying which build is now part

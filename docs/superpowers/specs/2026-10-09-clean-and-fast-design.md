@@ -132,13 +132,13 @@ a three-variable template rendered `'1|2|3'` with `{'_native.resolve': 3,
 'Variable._resolve_lookup': 3}`. The chain was `VariableNode.render` →
 `FilterExpression.resolve` → `Variable._resolve_lookup` →
 `_native.resolve(".".join(self.lookups), context)` →
-`crates/template-py/src/lib.rs:2635-2636`, `parse_variable(path)`.
+`crates/template-py/src/lib.rs:2716-2717`, `parse_variable(path)`.
 `LookupScope::resolve` is the *floor prototype's* path, and the prototype is not
 what ships.
 
-**Step 1 has since landed**, and the call is now `engine/base.py:1074`,
+**Step 1 has since landed**, and the call is now `engine/base.py:1092`,
 `_native.resolve_lookups(self.lookups, context)`, entering at
-`crates/template-py/src/lib.rs:2692-2697`, with no `parse_variable` between the
+`crates/template-py/src/lib.rs:2773-2778`, with no `parse_variable` between the
 shell and the walk. The row above it is what that bought, measured rather than
 predicted.
 
@@ -218,10 +218,10 @@ the sentence:
   reaches the escape filter.
 - **(b) is inherited**, and it is the whole of the floor's per-variable cost:
   `render_floor` fetches `render_value_in_context` once per render
-  (`crates/template-py/src/lib.rs:2956-2958`) and calls it per variable in
+  (`crates/template-py/src/lib.rs:3037-3039`) and calls it per variable in
   `append_expression_value`. That the floor and `render_desc` share exactly these
   two helpers — the resolver and the escaper — is the floor's own claim about
-  itself (`crates/template-py/src/lib.rs:2755-2757`), and it is what makes the
+  itself (`crates/template-py/src/lib.rs:2836-2838`), and it is what makes the
   subtraction isolate dispatch.
 
 The correction is therefore **narrower than revision 1 made it and points the
@@ -319,7 +319,7 @@ and 0.385 is what the whole call costs once the arm answers instead. What §2
 inherits from this is a *third* removable cost, not a bigger version of the
 first.
 
-**The arm is landed, and it is `engine/base.py:1203`** — the predicate is
+**The arm is landed, and it is `engine/base.py:1221`** — the predicate is
 `type(value) is int and (context.use_l10n is False or not
 settings.USE_THOUSAND_SEPARATOR)`, exact type so that `bool` (which `localize`
 sends down its own arm anyway) and an `int` subclass that overrides `__str__`
@@ -401,11 +401,11 @@ Unchanged from M18 §4 and not re-argued here; the boundary is the whole design:
 2. **The walk resolves with the GIL already held.** The review measured this
    rather than leaving it open, and the answer is that every `LookupTarget`
    method on `PyTarget` re-enters `Python::attach` — `has_getitem`
-   (`crates/template-py/src/lib.rs:2042`), `get_item`
-   (`crates/template-py/src/lib.rs:2052`), `get_attr`
-   (`crates/template-py/src/lib.rs:2063`), `get_index`
-   (`crates/template-py/src/lib.rs:2068`) and `in_dir`
-   (`crates/template-py/src/lib.rs:2089`) — because the trait in `template-core`
+   (`crates/template-py/src/lib.rs:2123`), `get_item`
+   (`crates/template-py/src/lib.rs:2133`), `get_attr`
+   (`crates/template-py/src/lib.rs:2144`), `get_index`
+   (`crates/template-py/src/lib.rs:2149`) and `in_dir`
+   (`crates/template-py/src/lib.rs:2170`) — because the trait in `template-core`
    carries no `py`. A depth-1 lookup is
    ≥2 attaches plus a real `hasattr(type(v), "__getitem__")`. It is not fatal
    today and it is why depth 3 inverts. **Removing it is a `LookupTarget`
@@ -418,7 +418,7 @@ Unchanged from M18 §4 and not re-argued here; the boundary is the whole design:
 4. **What the boundary does with a `str` Rust cannot hold is decided here, not
    after the walk — and today the answer is a live divergence.** Rust's `&str`
    is UTF-8; a Python `str` is not, and the crossing is **one conversion**:
-   `crates/template-py/src/filters.rs:156` is
+   `crates/template-py/src/filters.rs:187` is
    `obj.cast::<PyString>()?.to_str()`, which cannot encode a lone surrogate. So
    this is a property of the seam and not of any filter's signature, and the
    measured consequence is that **all 57 built-in filter names raise
@@ -445,8 +445,31 @@ Unchanged from M18 §4 and not re-argued here; the boundary is the whole design:
    Django's own callable. So the refusal route is the *same branch*, and the
    repair is to make
    `classify` say "I cannot hold this value" rather than raise from inside
-   `to_str()` — `Result<Value>` becoming `Result<Option<Value>>`, or the
-   equivalent at the seam.
+   `to_str()`, and to let the shell run Django's own callable on that signal.
+
+   **The signal is a returned sentinel and not `None`, and that is a
+   correction.** The first draft spent the refusal as `Ok(None)` from the seam,
+   reading it as `if obj is None`. Measured, `None` **is** in the range of
+   `_native.filter`: `default` returns its argument, so
+   `{{ x|default:None }}` with a falsy `x` is a filter *answering* `None`, and
+   `first`/`last` do the same for `[None, 1]`. Two spellings of "no value" then
+   arrive as one Python `None`, so the shell would re-run Django's body over a
+   legitimate answer — silently *correct* for those two and needlessly slow, but
+   worse for the instrument: a census that cannot tell a refusal from a result
+   cannot show the boundary is sound. The signal is therefore the
+   `_native.CANNOT_HOLD` singleton, compared by identity: same protocol as
+   `html_escape`, one object over, with no value to collide with.
+
+   The alternative — letting `refuse()`'s exception reach the shell and spelling
+   the fall-through as `except _native.CannotHoldValue` — was measured rather
+   than argued. The reason first written against it ("the render path's broad
+   handlers would swallow it") is **false**: at 6.0.9 `VariableNode.render`
+   catches `UnicodeDecodeError` and nothing else, and a raising filter reaches
+   the caller from all six render shapes tried, `debug` on and off
+   (`.review/m19-measurements/surrogate_boundary.txt` §8). Both work; the
+   returned object wins on the grounds that a refusal is not an error, that the
+   sibling refusal already works this way, and that nothing can catch it by
+   accident.
 
    Two things follow for sequencing (§5). The **decision** is an input to the
    walk, because a walk that crosses the boundary per node must know whether it
@@ -487,7 +510,7 @@ laziness must not reach it.* The test that enforces it is
 ### 3.3 The debug contract: a native node needs a span
 
 **BLOCKING 5 is correct and revision 1 missed it too**, and it is the stronger of
-the two: `Node.render_annotated` (`engine/base.py:1090`) sets
+the two: `Node.render_annotated` (`engine/base.py:1108`) sets
 `e._culprit_node = self` first-writer-wins, then builds `template_debug` from
 `e._culprit_node.token`. A natively-rendered node has no Python `Node` to be the
 culprit and no `.token`, so `e.template_debug` is absent and
@@ -688,16 +711,28 @@ the identity check are **not** re-specified here — §0's correction.
    inverse of the filter-routing row above — the one that was per-compile and so
    showed only in parse.
 
-   **Slice 1b — the boundary's refusal — is decided (§3.1 item 4) and is its own
-   commit, and it lands *before* the walk.** The decision is already made: the
-   boundary carries a refusal the way `html_escape` does, and the walk
-   generalises that pattern rather than adding a fallback per node type
-   afterwards. What is scheduled here is the *repair*, and it is scheduled first
-   because it is not an optimisation — `{{ x|upper }}` with `x = '\ud800'`
-   raises where Django renders, so the row that closes it is an equality row
-   against Django for a value this tree currently refuses. Its own commit, per
-   §3.1's second consequence: folding a correctness fix into a speed change makes
-   the speed number unreviewable.
+   **Slice 1b — the boundary's refusal — landed, and it landed *before* the
+   walk.** The decision is §3.1 item 4: the boundary carries a refusal the way
+   `html_escape` does, as the returned `_native.CANNOT_HOLD` singleton rather
+   than `None` (which is in the seam's range) or an exception (which is not what
+   a non-error should be), and the shell's read is `if filtered is not
+   _native.CANNOT_HOLD: continue`, so a refusal falls into the branch that
+   already existed for a non-builtin name. It went first because it is not an
+   optimisation — `{{ x|upper }}` with `x = '\ud800'` raised where Django
+   renders. Its own commit, per §3.1's second consequence: folding a correctness
+   fix into a speed change makes the speed number unreviewable.
+
+   Evidence, all of it in the commit:
+   `tests/test_base_parity.py::FilterSeamRefusalTests` — 48 renders of six
+   templates × four surrogate spellings × both autoescape settings compared
+   against stock Django, the singleton/`None` distinction as its own row, and a
+   positive control over the same six templates so the equality cannot be
+   satisfied by rendering nothing; the census
+   (`.review/m19-measurements/surrogate_boundary.{py,txt}`) now scores three
+   outcomes — answered / refused / raised — because the two-way tally the
+   original probe used counts a refusal as an answer; and both halves of the
+   repair were A/B'd, the Python guard removed (48 failures) and the Rust
+   `to_str()` refusal reverted to a raise (49 errors).
 3. **`LookupTarget` takes `py`.** The signature change across `template-core`
    that removes the per-method `Python::attach` (§3.1 item 2). Its own step
    because it touches a trait the whole walk is written against, and because
@@ -785,7 +820,7 @@ committed), the NIT (`iters` is pinned per row).
 
 **Disputed, with a measurement: B1's premise.** The render path does call
 `_native.resolve` — three calls for a three-variable template, reached from
-`engine/base.py:1074` — so `LookupScope::resolve` is the prototype's path and not the
+`engine/base.py:1092` — so `LookupScope::resolve` is the prototype's path and not the
 shipped one, and revision 1's 2.24× was a true statement about the shipped engine
 with a wrong account of why. The review's decomposition of that 0.522 is exactly
 right and is adopted; its *conclusion* that the engine's resolver is "at parity
