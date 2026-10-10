@@ -1,0 +1,18 @@
+# commit 49e87c6 (main), artifact bc4c750a6940 (release .so), 2026-10-10
+# .venv/bin/python -I .review/m19-measurements/inheritance_share.py
+
+iters=200, rust engine, render mode
+`delegated` is the top-level delegated call's own frame; calls in parens
+is every call of that class, nested ones included
+
+row                      render us  delegated us    share  composition
+------------------------------------------------------------------------------------------------
+real-world/normal            386.1         382.4   99.0%  Extends=382.4us(1) Block=0.0us(2) Include=0.0us(1)
+real-world/complex           557.6         553.6   99.3%  Extends=553.6us(2) Block=0.0us(4) Include=0.0us(73)
+django-only/realistic       1081.1        1076.6   99.6%  Extends=1076.6us(1) Block=0.0us(3)
+
+`delegated us` is what the walk paid to hand the node back; a row whose
+share is near 1.00 is a row where the walk is a wrapper around Python.
+A row near 0.00 is one where the walk owns the page and the census's
+`out deleg` percentage is about where the bytes came from, not the cost.
+A nested delegate is inside the timed frame, so it is not added again.

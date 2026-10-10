@@ -1,0 +1,20 @@
+# commit 49e87c6 (main), artifact bc4c750a6940 (release .so), 2026-10-10
+# .venv/bin/python -I .review/m19-measurements/step5_ceiling.py
+
+repeats=7, target=0.05s, artifact sha256:bc4c750a6940
+render mode: one handle, compiled outside the loop
+
+row                                   best us   worst us    iters   vs stock
+----------------------------------------------------------------------------
+real-world/normal  stock               410.03     420.72      116     1.000x
+real-world/normal  ours (shipped)      374.03     381.37      121     0.912x
+flat/normal        ours (ceiling)      118.81     120.62      393     0.290x
+
+micro/extends django                     9.63       9.87     4562     1.000x
+micro/extends rust                      10.18      10.61     4363     1.057x
+
+The ceiling row renders the same bytes with no `{% extends %}` and no
+`{% block %}` in the source at all, so it is the floor of what the
+inheritance delegation costs on this page — a slice that owned the block
+bodies but not `ExtendsNode` would still pay one Python frame and the
+block-context push, and would land above it.
