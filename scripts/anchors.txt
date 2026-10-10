@@ -865,6 +865,8 @@ engine/defaulttags.py:204	python/django_rust_templates/engine/defaulttags.py	204
 engine/defaulttags.py:205-214	python/django_rust_templates/engine/defaulttags.py	205	214	-	-
 engine/defaulttags.py:214-229	python/django_rust_templates/engine/defaulttags.py	214	229	-	-
 engine/defaulttags.py:220-227	python/django_rust_templates/engine/defaulttags.py	220	227	-	-
+engine/defaulttags.py:223-224	python/django_rust_templates/engine/defaulttags.py	223	224	loop_dict["revcounter"] = len_values - i	loop_dict["revcounter0"] = len_values - i - 1
+engine/defaulttags.py:226-227	python/django_rust_templates/engine/defaulttags.py	226	227	loop_dict["first"] = i == 0	loop_dict["last"] = i == len_values - 1
 engine/defaulttags.py:248	python/django_rust_templates/engine/defaulttags.py	248	-	self.loopvars[0]	-
 engine/defaulttags.py:324-337	python/django_rust_templates/engine/defaulttags.py	324	337	-	-
 engine/defaulttags.py:329-330	python/django_rust_templates/engine/defaulttags.py	329	330	except VariableDoesNotExist:	-

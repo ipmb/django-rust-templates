@@ -5,7 +5,7 @@ BLOCKING findings against the `may_write_context` fix at `35ff15c`, and both nam
 a route the predicate's docstring had argued away:
 
 * the **sequence** of a nested `{% for %}` — a `FilterExpression` resolved in
-  Python (`lib.rs:4799`, `.call_method1("resolve", (&self.context, true))`) — can
+  Python (`lib.rs:4371`, `.call_method1("resolve", (&self.context, true))`) — can
   write the enclosing loop's variable, and `may_write_context` descends into a
   nested `Act::For`'s body and `empty` but never looks at its sequence;
 * a **filter** can receive the context object as an explicit argument, which

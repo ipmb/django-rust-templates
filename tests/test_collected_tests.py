@@ -732,7 +732,23 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # 512 + 2 = 514.
 #
 # Counts at close: 514 collected, proxy and discovery agreeing.
-PINNED = 514
+#
+# 514 → 516 is **+2**, and it is the *fourth* adversarial round's one BLOCKING
+# finding — this time against the deletion itself, and a defect the deletion
+# **created**. `Walk::run_loop_body` computed `forloop.revcounter` as
+# `length - index` and `revcounter0` as `length - index - 1` in `usize`, while
+# Django's are Python integers (`engine/defaulttags.py:223-224`) that go
+# negative the moment a sequence yields past the length it reported. A body that
+# reads `forloop.revcounter` is not sealable, so before the deletion such a loop
+# was handed to Python and Django's own arithmetic ran; deleting the frame route
+# is what brought it into code whose subtraction had been wrong all along.
+# The fix is `let signed_length = length as i64;` beside the loop. The two rows
+# below the rename (`test_the_reverse_counters_…`) pin the growing list and the
+# disagreeing `__len__`, the second going negative **twice** and so ruling out a
+# saturating repair as well.
+#
+# Counts at close: 516 collected, proxy and discovery agreeing.
+PINNED = 516
 
 
 def collected() -> unittest.TestSuite:

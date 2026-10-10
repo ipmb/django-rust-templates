@@ -1,0 +1,438 @@
+{
+ "native": "sha256:32ee8d6cb88bcd8644646bf5b0a6fd7b597ad0b05836277e1738128a68c9cc8a (2701680 bytes)",
+ "repeats": 7,
+ "records": [
+  {
+   "key": "family/A1",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 168.42391296933238,
+   "worst_us": 175.0261641494426,
+   "iters": 207,
+   "bytes": 290
+  },
+  {
+   "key": "family/A1",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 189.0444879224389,
+   "worst_us": 192.74818838083584,
+   "iters": 207,
+   "bytes": 290
+  },
+  {
+   "key": "family/A1",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 199.42142850985485,
+   "worst_us": 208.75928574241698,
+   "iters": 175,
+   "bytes": 290
+  },
+  {
+   "key": "family/A1",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 219.79047999983385,
+   "worst_us": 240.10881149609173,
+   "iters": 175,
+   "bytes": 290
+  },
+  {
+   "key": "family/A1",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 24.550379982537933,
+   "worst_us": 26.175176575696558,
+   "iters": 1229,
+   "bytes": 290
+  },
+  {
+   "key": "family/A1",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 21.00728965607647,
+   "worst_us": 21.820144840168325,
+   "iters": 1229,
+   "bytes": 290
+  },
+  {
+   "key": "family/A2",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 194.95346705159787,
+   "worst_us": 199.6353655394053,
+   "iters": 197,
+   "bytes": 530
+  },
+  {
+   "key": "family/A2",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 252.8578681199986,
+   "worst_us": 259.0448376639902,
+   "iters": 197,
+   "bytes": 530
+  },
+  {
+   "key": "family/A2",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 227.56161810265797,
+   "worst_us": 239.6994908904713,
+   "iters": 165,
+   "bytes": 530
+  },
+  {
+   "key": "family/A2",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 285.8345940088233,
+   "worst_us": 296.2323272544326,
+   "iters": 165,
+   "bytes": 530
+  },
+  {
+   "key": "family/A2",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 27.9231113741824,
+   "worst_us": 29.235079661062116,
+   "iters": 1293,
+   "bytes": 530
+  },
+  {
+   "key": "family/A2",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 24.68625909277171,
+   "worst_us": 26.240687564696774,
+   "iters": 1293,
+   "bytes": 530
+  },
+  {
+   "key": "family/A4",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 242.22389240808127,
+   "worst_us": 246.15927846937242,
+   "iters": 158,
+   "bytes": 1010
+  },
+  {
+   "key": "family/A4",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 372.63818357811795,
+   "worst_us": 380.77927207798234,
+   "iters": 158,
+   "bytes": 1010
+  },
+  {
+   "key": "family/A4",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 285.0620371410278,
+   "worst_us": 299.9268519623136,
+   "iters": 135,
+   "bytes": 1010
+  },
+  {
+   "key": "family/A4",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 416.6666666235499,
+   "worst_us": 431.8401185123043,
+   "iters": 135,
+   "bytes": 1010
+  },
+  {
+   "key": "family/A4",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 36.417502227482,
+   "worst_us": 37.74888641206145,
+   "iters": 898,
+   "bytes": 1010
+  },
+  {
+   "key": "family/A4",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 31.94367148906183,
+   "worst_us": 33.19381071044078,
+   "iters": 898,
+   "bytes": 1010
+  },
+  {
+   "key": "family/B1",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 43.610637098713966,
+   "worst_us": 44.32802387212315,
+   "iters": 879,
+   "bytes": 240
+  },
+  {
+   "key": "family/B1",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 73.24710808031101,
+   "worst_us": 75.67036405854157,
+   "iters": 879,
+   "bytes": 240
+  },
+  {
+   "key": "family/B1",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 64.04573060302756,
+   "worst_us": 67.23829087116255,
+   "iters": 605,
+   "bytes": 240
+  },
+  {
+   "key": "family/B1",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 89.00433885557038,
+   "worst_us": 91.01398014040156,
+   "iters": 605,
+   "bytes": 240
+  },
+  {
+   "key": "family/B1",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 17.36420561858979,
+   "worst_us": 17.89271230940469,
+   "iters": 2096,
+   "bytes": 240
+  },
+  {
+   "key": "family/B1",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 13.787790077413213,
+   "worst_us": 14.34943558928603,
+   "iters": 2096,
+   "bytes": 240
+  },
+  {
+   "key": "family/B2",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 68.15052820200718,
+   "worst_us": 71.1671795805057,
+   "iters": 568,
+   "bytes": 480
+  },
+  {
+   "key": "family/B2",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 132.68082570710914,
+   "worst_us": 134.22711268042767,
+   "iters": 568,
+   "bytes": 480
+  },
+  {
+   "key": "family/B2",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 92.98241488988415,
+   "worst_us": 96.7761798710417,
+   "iters": 417,
+   "bytes": 480
+  },
+  {
+   "key": "family/B2",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 153.10771462934122,
+   "worst_us": 160.16106953737224,
+   "iters": 417,
+   "bytes": 480
+  },
+  {
+   "key": "family/B2",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 21.521500565534673,
+   "worst_us": 22.531464537158097,
+   "iters": 1748,
+   "bytes": 480
+  },
+  {
+   "key": "family/B2",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 17.404009145711182,
+   "worst_us": 18.063215101302923,
+   "iters": 1748,
+   "bytes": 480
+  },
+  {
+   "key": "family/B4",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 114.7097191003818,
+   "worst_us": 118.72759214081883,
+   "iters": 331,
+   "bytes": 960
+  },
+  {
+   "key": "family/B4",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 253.24043499522497,
+   "worst_us": 258.7002778905542,
+   "iters": 331,
+   "bytes": 960
+  },
+  {
+   "key": "family/B4",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 147.1121672641826,
+   "worst_us": 153.22053231769894,
+   "iters": 263,
+   "bytes": 960
+  },
+  {
+   "key": "family/B4",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 280.84077940503056,
+   "worst_us": 292.4721178327804,
+   "iters": 263,
+   "bytes": 960
+  },
+  {
+   "key": "family/B4",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 28.652745992738062,
+   "worst_us": 29.329900842225342,
+   "iters": 1311,
+   "bytes": 960
+  },
+  {
+   "key": "family/B4",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 24.308384453677476,
+   "worst_us": 24.91390158977817,
+   "iters": 1311,
+   "bytes": 960
+  },
+  {
+   "key": "family/C",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 140.53375270771778,
+   "worst_us": 144.14560931440988,
+   "iters": 279,
+   "bytes": 50
+  },
+  {
+   "key": "family/C",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 122.80600361182191,
+   "worst_us": 124.30570615742583,
+   "iters": 279,
+   "bytes": 50
+  },
+  {
+   "key": "family/C",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 164.82305193664627,
+   "worst_us": 173.38772073793285,
+   "iters": 154,
+   "bytes": 50
+  },
+  {
+   "key": "family/C",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 144.14772725446366,
+   "worst_us": 183.841175408792,
+   "iters": 154,
+   "bytes": 50
+  },
+  {
+   "key": "family/C",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 20.294962810054777,
+   "worst_us": 20.899294294038185,
+   "iters": 1264,
+   "bytes": 50
+  },
+  {
+   "key": "family/C",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 17.85169463144922,
+   "worst_us": 18.081750786683486,
+   "iters": 1264,
+   "bytes": 50
+  },
+  {
+   "key": "family/D",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 18.571073429437767,
+   "worst_us": 19.558362239703698,
+   "iters": 2029,
+   "bytes": 0
+  },
+  {
+   "key": "family/D",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 12.789654024284996,
+   "worst_us": 13.05977919700332,
+   "iters": 2029,
+   "bytes": 0
+  },
+  {
+   "key": "family/D",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 33.60512118541302,
+   "worst_us": 34.65636928707098,
+   "iters": 1048,
+   "bytes": 0
+  },
+  {
+   "key": "family/D",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 23.74121372633301,
+   "worst_us": 24.294847339695632,
+   "iters": 1048,
+   "bytes": 0
+  },
+  {
+   "key": "family/D",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 13.444976608415374,
+   "worst_us": 14.107593949208217,
+   "iters": 2480,
+   "bytes": 0
+  },
+  {
+   "key": "family/D",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 10.026360882141988,
+   "worst_us": 10.639953231270004,
+   "iters": 2480,
+   "bytes": 0
+  }
+ ]
+}

@@ -4427,13 +4427,26 @@ impl<'py> Walk<'py> {
         // The order is observable — a loop named `forloop` has the item written
         // *over* the dict at `engine/defaulttags.py:248` — so it is transcribed
         // rather than reordered.
+        // **The reverse counters are signed, and it is not a style choice.**
+        // Django's are Python integers and go *negative* when the sequence yields
+        // more items than `len()` reported — which is ordinary behaviour for a list
+        // that grows while it is rendered, and for any object whose `__iter__` and
+        // `__len__` disagree (`engine/defaulttags.py:223-224`; `engine/defaulttags.py:226-227` does not police it). Computing them in
+        // `usize` wraps instead: the adversarial reviewer's fourth round rendered
+        // `{% for s in xs %}{{ s }}:{{ forloop.revcounter }}/{{ forloop.revcounter0
+        // }};{% endfor %}` over a one-element list whose element appends to it, and
+        // got `b:0/18446744073709551615` where Django gives `b:0/-1`. `length` comes
+        // from Python's `len()`, so it fits `i64` by construction; `index` passing
+        // `i64::MAX` would take 9.2e18 iterations.
+        let signed_length = length as i64;
         for (index, item) in values.try_iter()?.enumerate() {
             let item = item?;
             let counter = index + 1;
+            let revcounter = signed_length - index as i64;
             forloop.set_item("counter0", index)?;
             forloop.set_item("counter", counter)?;
-            forloop.set_item("revcounter", length - index)?;
-            forloop.set_item("revcounter0", length - index - 1)?;
+            forloop.set_item("revcounter", revcounter)?;
+            forloop.set_item("revcounter0", revcounter - 1)?;
             forloop.set_item("first", index == 0)?;
             forloop.set_item("last", index == length - 1)?;
             self.context.set_item(&plan.loopvar, &item)?;

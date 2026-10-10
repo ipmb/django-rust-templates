@@ -1344,7 +1344,9 @@
       <code>title</code> is the row's own control, drawn from the same render: it is read by
       the emit and by nothing else, so its count is <b>1</b> on every build and a 0 would mean
       the instrument never saw the render. The python unit-test pin moved <b>510 → 512</b>
-      with the second round, and <b>512 → 514</b> with the third.
+      with the second round, <b>512 → 514</b> with the third, and <b>514 → 516</b> with the
+      fourth, whose two rows pin the signed reverse counters (see the paragraph under the
+      headline tiles).
     </p>
     <p class="sub" style="margin-top:16px">
       <b>What the fix costs, in the unit the fix is about.</b> A body that keeps the context
@@ -1401,20 +1403,39 @@
       complex 341.34 / 524.97), where on the tree before this change we won
       <code>normal</code> at 132.81 against 169.84. <b>That is the project's stated goal — faster
       than Jinja2 — moving away on this change</b>, and it is stated here rather than left for a
-      reader of the page to notice. The corpus counts behind those deltas were
-      <i>counted</i>, not inferred: every loop of every measured row is run by the walk with
-      <b>0 delegated</b> — <code>complex</code>'s thirteen included — and our context reads equal
-      stock's <b>exactly</b> (257/276/370/101/151/251), so the two rows that did not move did so
-      because the ordered pass was already writing their state, not because the walk skips them.
-      Acceptance on this tree: <b>1547 tests OK (skipped=6)</b>, the six skips by identity,
-      <b>514</b> python unit tests, <b>787</b> Rust tests, differential harness
-      <b>59</b> cases identical, and the benchmark's 54 cells with no cell in which any two
-      engines that ran disagree. The page's own provenance line names the build the numbers
-      were taken on (<code>f921c593cf7338ab</code>) and the tree builds to
-      <code>32ee8d6cb88bcd86</code>; the 86 bytes between them are a UUID, six embedded
-      source-line fields and the two code-signature pages over them, with <b>zero</b> bytes
-      differing in the binary's text and segment — measured by diffing the two images, and
-      written up in the record's §7.1.
+      reader of the page to notice. The counts behind those deltas were taken on <b>both</b>
+      builds, once per artifact with the live build's sha asserted, and they separate the two
+      things a loop can cost. Every loop of every measured row is run by the walk with <b>0
+      delegated</b> — <code>complex</code>'s thirteen included — and the reads that are <i>not</i>
+      the loop variable are identical in the two builds: <b>7 / 16 / 250 / 1 / 101 / 101</b> for
+      <code>normal</code> / <code>complex</code> / <code>large</code> / <code>filter-arg</code> /
+      <code>i18n</code> / <code>realistic</code>. What moves is the loop-variable read, and it
+      moves by exactly the reads the frame route used to serve — <b>250 / 12 / 120 / 100 / 0 /
+      100</b> in that same row order — with the per-iteration writes moving <b>50 / 0 / 60 / 50 /
+      0 / 0</b> beside them. Those last zeros are why <code>i18n</code>'s delta is an exact zero,
+      gaining neither a write nor a read, while <code>complex</code> gains no write and twelve
+      reads and <code>realistic</code> no write and a hundred: the ordered pass was already
+      writing their per-iteration state, which is now a measurement rather than the assumption it
+      was recorded as.
+      <b>A fourth adversarial round then found one defect in the code, and it is one the deletion
+      created:</b> <code>forloop.revcounter</code> and <code>revcounter0</code> were computed in
+      <code>usize</code>, where Django's are whole numbers that go <i>negative</i> as soon as a
+      sequence yields past the length it reported — ordinary for a list that grows while it is
+      rendered — and the ordered pass escaped it only because a body reading
+      <code>forloop.revcounter</code> was unsealable, so Django's own arithmetic ran. It is fixed
+      and pinned by two rows in <code>tests/test_interposition.py</code>; the second goes negative
+      <i>twice</i>, which a saturating repair would also have got wrong. Acceptance on this tree:
+      <b>1547 tests OK (skipped=6)</b>, the six skips by identity, <b>516</b> python unit tests,
+      <b>787</b> Rust tests, differential harness <b>59</b> cases identical, and the benchmark's
+      54 cells with no cell in which any two engines that ran disagree. The page's own provenance
+      line names the build the numbers were taken on (<code>f921c593cf7338ab</code>); the
+      committed deletion builds to <code>32ee8d6cb88bcd86</code> and this tree to
+      <code>dc174855d926defc</code>. The 86 bytes between the first two are 16 load-command bytes,
+      six embedded source-line fields each exactly 1 lower and the two code-signature pages over
+      them, with <b>zero</b> differing in <code>__TEXT.__text</code> — the instruction
+      <i>section</i>; the <code>__TEXT</code> <i>segment</i> around it holds the load commands too,
+      so some of the 86 are inside that — and zero in <code>__DATA</code>. Measured by diffing the
+      two images, and written up in the record's §7.1.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>Until M18 it was a substitution, and that machinery is gone.</b> Earlier revisions of

@@ -1,0 +1,294 @@
+{
+ "native": "sha256:32ee8d6cb88bcd8644646bf5b0a6fd7b597ad0b05836277e1738128a68c9cc8a (2701680 bytes) /Users/pete/projects/lincolnloop/django-rust-templates/python/django_rust_templates/_native.cpython-314-darwin.so",
+ "repeats": 9,
+ "records": [
+  {
+   "key": "real-world/normal",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 409.5968751547237,
+   "worst_us": 411.8454834194078,
+   "iters": 120
+  },
+  {
+   "key": "real-world/normal",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 569.5637012430435,
+   "worst_us": 583.4588045709306,
+   "iters": 87
+  },
+  {
+   "key": "real-world/normal",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 123.2832898635067,
+   "worst_us": 128.56190341801988,
+   "iters": 383
+  },
+  {
+   "key": "real-world/normal",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 204.6743082852724,
+   "worst_us": 212.0496501447633,
+   "iters": 120
+  },
+  {
+   "key": "real-world/normal",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 391.19636787144447,
+   "worst_us": 436.7859195784034,
+   "iters": 87
+  },
+  {
+   "key": "real-world/normal",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 167.1825482858972,
+   "worst_us": 171.4085065364575,
+   "iters": 383
+  },
+  {
+   "key": "real-world/complex",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 846.5073157199903,
+   "worst_us": 857.6549824506959,
+   "iters": 57
+  },
+  {
+   "key": "real-world/complex",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 978.0649997992441,
+   "worst_us": 1012.3591800220312,
+   "iters": 50
+  },
+  {
+   "key": "real-world/complex",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 91.78979059867196,
+   "worst_us": 93.71836207499052,
+   "iters": 511
+  },
+  {
+   "key": "real-world/complex",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 530.5146138804654,
+   "worst_us": 554.7916664733764,
+   "iters": 57
+  },
+  {
+   "key": "real-world/complex",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 678.1283399323002,
+   "worst_us": 685.0091798696667,
+   "iters": 50
+  },
+  {
+   "key": "real-world/complex",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 115.05699611028362,
+   "worst_us": 122.84426029758808,
+   "iters": 511
+  },
+  {
+   "key": "real-world/large",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 686.6695204660398,
+   "worst_us": 703.6358492021537,
+   "iters": 73
+  },
+  {
+   "key": "real-world/large",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 2139.244565193582,
+   "worst_us": 2376.541650965405,
+   "iters": 23
+  },
+  {
+   "key": "real-world/large",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 1438.210848859991,
+   "worst_us": 1595.4709696498785,
+   "iters": 33
+  },
+  {
+   "key": "real-world/large",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 285.4235202380239,
+   "worst_us": 293.44178061638894,
+   "iters": 73
+  },
+  {
+   "key": "real-world/large",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 2399.2463475619647,
+   "worst_us": 2599.072478124467,
+   "iters": 23
+  },
+  {
+   "key": "real-world/large",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 2080.924242777242,
+   "worst_us": 2234.4015147113664,
+   "iters": 33
+  },
+  {
+   "key": "django-only/filter-arg",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 443.98750019767743,
+   "worst_us": 456.92840913860977,
+   "iters": 110
+  },
+  {
+   "key": "django-only/filter-arg",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 499.6633030135523,
+   "worst_us": 521.9019393817606,
+   "iters": 99
+  },
+  {
+   "key": "django-only/filter-arg",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 29.022791270547916,
+   "worst_us": 29.897594636137402,
+   "iters": 1490
+  },
+  {
+   "key": "django-only/filter-arg",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 541.670081755993,
+   "worst_us": 553.3632544525475,
+   "iters": 110
+  },
+  {
+   "key": "django-only/filter-arg",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 613.5778688011935,
+   "worst_us": 640.2146463362369,
+   "iters": 99
+  },
+  {
+   "key": "django-only/filter-arg",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 53.80131408569072,
+   "worst_us": 55.30942414634105,
+   "iters": 1490
+  },
+  {
+   "key": "django-only/i18n",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 666.3085541977371,
+   "worst_us": 688.6120540297565,
+   "iters": 74
+  },
+  {
+   "key": "django-only/i18n",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 722.0625000841477,
+   "worst_us": 751.5686323612873,
+   "iters": 68
+  },
+  {
+   "key": "django-only/i18n",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 35.627726078047154,
+   "worst_us": 36.23347668999917,
+   "iters": 1223
+  },
+  {
+   "key": "django-only/i18n",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 384.1936893484279,
+   "worst_us": 405.4453783209209,
+   "iters": 74
+  },
+  {
+   "key": "django-only/i18n",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 462.88357364520544,
+   "worst_us": 474.0349267034189,
+   "iters": 68
+  },
+  {
+   "key": "django-only/i18n",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 57.25095420637955,
+   "worst_us": 58.6075224856163,
+   "iters": 1223
+  },
+  {
+   "key": "django-only/realistic",
+   "mode": "render",
+   "engine": "django",
+   "best_us": 1226.2635493243579,
+   "worst_us": 1251.2271001469344,
+   "iters": 40
+  },
+  {
+   "key": "django-only/realistic",
+   "mode": "parse",
+   "engine": "django",
+   "best_us": 1297.0292969053057,
+   "worst_us": 1316.082216264378,
+   "iters": 37
+  },
+  {
+   "key": "django-only/realistic",
+   "mode": "compile",
+   "engine": "django",
+   "best_us": 82.34666361195977,
+   "worst_us": 87.90798352689056,
+   "iters": 547
+  },
+  {
+   "key": "django-only/realistic",
+   "mode": "render",
+   "engine": "rust",
+   "best_us": 1039.239575038664,
+   "worst_us": 1096.8458249408286,
+   "iters": 40
+  },
+  {
+   "key": "django-only/realistic",
+   "mode": "parse",
+   "engine": "rust",
+   "best_us": 1198.2263515804063,
+   "worst_us": 1252.2556487080717,
+   "iters": 37
+  },
+  {
+   "key": "django-only/realistic",
+   "mode": "compile",
+   "engine": "rust",
+   "best_us": 116.75007674516173,
+   "worst_us": 123.39815720651892,
+   "iters": 547
+  }
+ ]
+}

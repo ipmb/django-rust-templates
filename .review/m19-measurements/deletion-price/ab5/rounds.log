@@ -1,0 +1,29 @@
+prefix artifact sha256:32ee8d6cb88bcd86
+fixed artifact sha256:dc174855d926defc
+calibrated (on the artifact in place); pins in /Users/pete/.claude/jobs/627577b5/tmp/ab5/family.pins.json
+round  1  prefix sha 32ee8d6cb88bcd86
+round  1  fixed  sha dc174855d926defc
+round  2  fixed  sha dc174855d926defc
+round  2  prefix sha 32ee8d6cb88bcd86
+round  3  prefix sha 32ee8d6cb88bcd86
+round  3  fixed  sha dc174855d926defc
+round  4  fixed  sha dc174855d926defc
+round  4  prefix sha 32ee8d6cb88bcd86
+round  5  prefix sha 32ee8d6cb88bcd86
+round  5  fixed  sha dc174855d926defc
+round  6  fixed  sha dc174855d926defc
+round  6  prefix sha 32ee8d6cb88bcd86
+round  7  prefix sha 32ee8d6cb88bcd86
+round  7  fixed  sha dc174855d926defc
+round  8  fixed  sha dc174855d926defc
+round  8  prefix sha 32ee8d6cb88bcd86
+round  9  prefix sha 32ee8d6cb88bcd86
+round  9  fixed  sha dc174855d926defc
+round 10  fixed  sha dc174855d926defc
+round 10  prefix sha 32ee8d6cb88bcd86
+round 11  prefix sha 32ee8d6cb88bcd86
+round 11  fixed  sha dc174855d926defc
+round 12  fixed  sha dc174855d926defc
+round 12  prefix sha 32ee8d6cb88bcd86
+done: 24 runs per set
+restored dc174855d926defc

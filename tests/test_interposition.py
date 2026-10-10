@@ -2094,6 +2094,112 @@ class FilterRoutingTests(unittest.TestCase):
             "from a frame the condition's write could not reach",
         )
 
+    def test_the_reverse_counters_go_negative_when_the_sequence_outgrows_it_len(self):
+        """The fourth round's BLOCKING finding, at the render.
+
+        `{% for %}` writes `revcounter = len_values - i` and
+        `revcounter0 = len_values - i - 1` (`engine/defaulttags.py:223-224`) in
+        **Python integers**, and `len_values` is read once, before the first
+        iteration. Nothing makes the sequence stop at that length, so both
+        counters go negative as soon as it yields past it — the reviewers' route
+        is an ordinary list whose element appends to it while `{{ s }}` renders
+        its `__str__`, and the sibling below is an object whose `__len__` simply
+        disagrees with its `__iter__`. The walk computed both in `usize`, so it
+        wrapped to `18446744073709551615` instead, and the deletion of the frame
+        route is what exposed it: a body that reads `forloop.revcounter` was not
+        sealable, so before this change such a loop was handed to Python and
+        Django's own arithmetic ran.
+
+        The row asserts stock's answer **and** the literal, because a row that
+        only compares the two engines passes when both are wrong, and this is a
+        case where "both are wrong" is what a reader would have to rule out.
+        """
+        from django.template.engine import Engine as StockEngine
+        from django.template.context import Context as StockContext
+
+        from django_rust_templates.engine import Context, Engine
+
+        class Grow:
+            """Renders to `a`, and appends `b` to the list it is being read from."""
+
+            def __init__(self, xs):
+                self.xs = xs
+
+            def __str__(self):
+                self.xs.append("b")
+                return "a"
+
+        source = (
+            "{% for s in xs %}{{ s }}:{{ forloop.revcounter }}/"
+            "{{ forloop.revcounter0 }};{% endfor %}"
+        )
+
+        def grew(engine, context):
+            xs = []
+            xs.append(Grow(xs))
+            return engine().from_string(source).render(context({"xs": xs}))
+
+        stock = grew(StockEngine, StockContext)
+        our = grew(Engine, Context)
+
+        self.assertEqual(
+            stock,
+            "a:1/0;b:0/-1;",
+            "the expectation itself: `len_values` is 1 and the list yields 2, so "
+            "the second iteration's `revcounter` is 0 and its `revcounter0` is "
+            "-1. A stock answer that is not this means the fixture no longer "
+            "grows the list, and the comparison below would be vacuous",
+        )
+        self.assertEqual(
+            our,
+            stock,
+            "the walk wrapped the unsigned subtraction instead of going negative: "
+            "`18446744073709551615` is `0usize - 1`, and Django gives `-1`",
+        )
+
+    def test_the_reverse_counters_match_a_sequence_whose_len_disagrees_with_its_iter(
+        self,
+    ):
+        """The sibling: no `__str__` side effect, just a lying `__len__`.
+
+        The row above needs a body that mutates the sequence, which is a lot of
+        machinery for an arithmetic bug — and the reviewer asked for this shape
+        separately. Here nothing is mutated at all: the object advertises one
+        item and yields three, so the counters are `1/0`, `0/-1`, `-1/-2` and the
+        walk must print the same. Under the unsigned arithmetic the third
+        iteration alone differs in both counters.
+        """
+        from django.template.engine import Engine as StockEngine
+        from django.template.context import Context as StockContext
+
+        from django_rust_templates.engine import Context, Engine
+
+        class Over:
+            def __len__(self):
+                return 1
+
+            def __iter__(self):
+                return iter(["x", "y", "z"])
+
+        source = (
+            "{% for s in xs %}{{ s }}:{{ forloop.revcounter }}/"
+            "{{ forloop.revcounter0 }};{% endfor %}"
+        )
+        stock = StockEngine().from_string(source).render(StockContext({"xs": Over()}))
+        our = Engine().from_string(source).render(Context({"xs": Over()}))
+
+        self.assertEqual(
+            stock,
+            "x:1/0;y:0/-1;z:-1/-2;",
+            "the expectation itself: three iterations against a length of one",
+        )
+        self.assertEqual(
+            our,
+            stock,
+            "the third iteration's counters wrapped: the walk printed "
+            "`18446744073709551615/18446744073709551614` for `-1/-2`",
+        )
+
     def test_the_parser_finds_our_defaultfilters(self):
         """The premise, on its own, so a green counter cannot be the whole story.
 
