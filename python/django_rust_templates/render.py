@@ -146,18 +146,29 @@ def django_exception(error, host=None):
     than lucky** — the reviewer asked, so the reasoning is written down instead
     of being re-derived. Three facts, each checked in the tree:
 
-    * `ErrorKind::Host` is constructed at exactly one place,
-      `python_host_error` (`crates/template-py/src/lib.rs:1104`), called only
-      from the `call_tag` boundary (`crates/template-py/src/lib.rs:1251`), and
-      ``class_name`` is read straight off that error — so a name in the wire
-      error always came from a `call_tag` failure;
-    * ``last_error`` is assigned in one place, `ShellHost.call_tag`
-      (`python/django_rust_templates/host.py:555`), on the way out — so it
-      always names a `call_tag` failure too;
+    * `ErrorKind::Host` **carrying a class** is constructed at exactly one
+      place, `python_host_error` (`crates/template-py/src/lib.rs:1289`), and
+      every host boundary that can raise a Python exception calls it — `call_tag`
+      (`crates/template-py/src/lib.rs:1490`), `partial_node`
+      (`crates/template-py/src/lib.rs:1612`) and `register_partial_def`
+      (`crates/template-py/src/lib.rs:1687`). ``class_name`` is read straight
+      off that error, so a class in the wire error always came from a host
+      failure;
+    * ``last_error`` is assigned on the way out of each host method that raises,
+      `ShellHost.call_tag` (`python/django_rust_templates/host.py:746`) and
+      `ShellHost.register_partial_def`
+      (`python/django_rust_templates/host.py:849`) — so it names that failure
+      too;
     * a host error is **terminal**: the parse loop's arm is
       `Err(error) => Err(error)` (`crates/template-core/src/parser/mod.rs:434-443`) and its caller is
-      `?`, so no `call_tag` failure is caught and survived, and the failing call
+      `?`, so no host failure is caught and survived, and the failing call
       is necessarily the last one to have touched either field.
+
+    Fact 3 is what makes the pair safe: the parse being terminal means there has
+    been at most one host failure when this function runs, so a non-``None``
+    ``last_error`` is that failure's own object — and a failure at
+    `partial_node`, which assigns nothing, leaves it ``None`` and falls through
+    to the class-only conversion below.
 
     **The fourth fact is measured, not structural, and saying so is the
     correction** — the reviewer asked, and they were right to. The first three

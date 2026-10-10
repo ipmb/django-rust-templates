@@ -150,9 +150,17 @@ rows are not a second one.
   That is exactly why the seventh key is `PyString::new` and not `PyString::intern`:
   the loop variable's name comes from *the template*, and interning a
   template-controlled name would let any template grow that table without bound.
-- **The dict and the values are unchanged.** A fresh `PyDict` per loop execution and
-  a fresh Python int or bool per counter per iteration are still built; only the keys
-  moved.
+- **The dict and the values are unchanged — only the keys moved.** The `PyDict` is
+  still built once per loop execution and the seven state *values* are still written on
+  every iteration. What is **not** true, and an earlier version of this bullet said it
+  was, is that those writes *build* a fresh int or bool per counter per iteration.
+  Measured on the shipped artifact (`.review/m19-measurements/counter_id.py`): three
+  renders of one four-item loop hand back the **identical** four `counter` objects,
+  and the first iteration's `counter` **is** the interpreter's `1` — because CPython
+  caches small ints (`int("256")` is cached, `int("257")` is not, measured) and
+  `first`/`last` are the `True`/`False` singletons. Every row in §3/§4 is ≤ 200 items,
+  so no counter there allocates an object at all. The lever's saving is the key
+  identity of §1 and nothing else.
 
 ## 6. The headline benchmark
 
@@ -246,4 +254,75 @@ time as a multiple of Jinja2's, per after-run, is **1.09× / 1.07×** (`normal`)
 figure lies below both of its page's before figures, so the lever narrows the gap on all
 three and closes it on none.
 
+## 7. Where the two rows live
+
+The review's NIT 3 asked whether
+`test_a_non_ascii_loop_variable_name_reaches_the_context` and
+`test_a_loop_named_forloop_writes_the_item_over_the_dict` belong in
+`DefaultTagsInterpositionTests` rather than `FilterRoutingTests`, on the reasoning
+that `{% for %}` is `defaulttags`' construct and the rows' subject is a loop.
+
+**Declined, and the reason is what the two classes hold rather than what they are
+named.** `FilterRoutingTests` is 27 rows and **10 of them are `{% for %}` rows** —
+the sealing rows, the context-write rows, the reverse-counter rows and these two,
+spanning `tests/test_interposition.py:1780-2287` — because it is where the loop
+walk's behavioural rows have landed since slice 3.
+`DefaultTagsInterpositionTests` is 4 rows over 133 lines and its whole premise is
+**identity** — whose file, whose `Node` class — and its one loop row,
+`test_a_rendered_for_holds_our_for_node`, asserts an `isinstance` and not a render.
+Moving these two there would put them beside a class that never renders a loop and
+away from the eight rows that exercise the same `Walk::run_loop_body` they do.
+
+The real defect the NIT points at is the **class name**: a reader looking for loop
+rows does not look under `FilterRoutingTests`. That is true, and it is equally true
+of the eight rows that predate this slice, so renaming the class is a change to
+other commits' rows and not to this one. Recorded here so the next reader finds the
+rows by the count rather than by the name.
+
+## 8. The citation audit, and the one this commit missed
+
+`0018591b`'s message says *"the one line the lever adds to `lib.rs` is above nine
+`crates/template-py/src/lib.rs:N` citations held in other files, so those and their
+`scripts/anchors.txt` keys are re-keyed here."* The count is right — **nine** — and
+the mechanism is right. The sentence's *"one line"* is not: diffed against
+`c631d5b`, `lib.rs` gains **three** insertions and +27 net lines, and they sit at
+three different heights:
+
+| insertion | at | shifts everything below by |
+|---|---|---|
+| `use pyo3::intern;` | line 11 | **+1** |
+| ten lines of `ForPlan.loopvar` doc | 3049 | **+11** |
+| sixteen lines into `run_loop_body` | 4453 | **+27** |
+
+The nine the commit re-keyed are all in the +1 zone and each moved by exactly one
+line — verified here by content, not arithmetic: `filter_flags` 146 -> 147,
+`if_condition_to_py` 851 -> 852, `resolve`/`parse_variable` 2716-2717 ->
+2717-2718, `resolve_lookups` 2773-2778 -> 2774-2779, and the five `PyTarget`
+`Python::attach` lines 2123/2133/2144/2149/2170 -> +1 each. All nine carry a real
+snippet in the manifest, so the gate checked them and the gate was green.
+
+**The commit missed the one citation its third insertion moved.**
+`2026-10-09-clean-and-fast-design.md:238` cites the `render_value_in_context` doc
+line at `lib.rs:4573`; that line sits at 4570 in `c631d5b` and at **4597** here
+(+27), so the citation was 3 high before this commit and 24 low after it. The gate
+could not say so, and the reason is the row rather than the number:
+
+```
+crates/template-py/src/lib.rs:4573  crates/template-py/src/lib.rs  4573  -  -  -
+```
+
+A `-` in the snippet column means *no claim about the source text*; the checker
+requires only that such a row exists. **A `-` row cannot fail on a line number that
+has moved**, which is how a +27 drift survived a gate that was asked about exactly
+that. It is re-keyed to 4597 here and **given a snippet**, so it is now a claim the
+gate can fail on.
+
+Two more rows were in the same condition and are repaired for the same reason,
+though not by this commit's shift: `render.py`'s `python_host_error` citations at
+`lib.rs:1104` and `:1251` were stale by **185** and **239** lines — drift
+accumulated since M12 (`8c59934`) — and both rows carried `-`. They are re-keyed to
+1289 and 1490 with snippets. So the honest statement of what this commit's own
+insertions cost is: **one citation moved by +27 and was missed; nine moved by +1 and
+were not.** The two in `render.py` are a different commit's debt, found while
+looking.
 

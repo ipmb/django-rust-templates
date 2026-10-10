@@ -44,8 +44,10 @@ crates/template-py/src/filters.rs:1833-1841	crates/template-py/src/filters.rs	18
 crates/template-py/src/filters.rs:1903-1906	crates/template-py/src/filters.rs	1903	1906	host.take_raised()	-
 crates/template-py/src/lib.rs:147	crates/template-py/src/lib.rs	147	147	fn filter_flags	-
 crates/template-py/src/lib.rs:852	crates/template-py/src/lib.rs	852	852	fn if_condition_to_py	-
-crates/template-py/src/lib.rs:1104	crates/template-py/src/lib.rs	1104	-	-	-
-crates/template-py/src/lib.rs:1251	crates/template-py/src/lib.rs	1251	-	-	-
+crates/template-py/src/lib.rs:1289	crates/template-py/src/lib.rs	1289	-	fn python_host_error(py: Python<'_>, error: &PyErr) -> Error {	-
+crates/template-py/src/lib.rs:1490	crates/template-py/src/lib.rs	1490	-	.map_err(|error| python_host_error(py, &error))?;	-
+crates/template-py/src/lib.rs:1612	crates/template-py/src/lib.rs	1612	-	.map_err(|error| python_host_error(host.py(), &error))?;	-
+crates/template-py/src/lib.rs:1687	crates/template-py/src/lib.rs	1687	-	.map_err(|error| python_host_error(host.py(), &error))?;	-
 crates/template-py/src/lib.rs:2124	crates/template-py/src/lib.rs	2124	2124	Python::attach(|py| {	-
 crates/template-py/src/lib.rs:2134	crates/template-py/src/lib.rs	2134	2134	let result = Python::attach(|py| {	-
 crates/template-py/src/lib.rs:2145	crates/template-py/src/lib.rs	2145	2145	Python::attach(|py| self.value.bind(py).getattr(bit)	-
@@ -53,7 +55,7 @@ crates/template-py/src/lib.rs:2150	crates/template-py/src/lib.rs	2150	2150	let r
 crates/template-py/src/lib.rs:2171	crates/template-py/src/lib.rs	2171	2171	Python::attach(|py| self.dir(py, bit))	-
 crates/template-py/src/lib.rs:2717-2718	crates/template-py/src/lib.rs	2717	2718	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
 crates/template-py/src/lib.rs:2774-2779	crates/template-py/src/lib.rs	2774	2779	fn resolve_lookups(	resolve_components(py, &lookups, context)
-crates/template-py/src/lib.rs:4573	crates/template-py/src/lib.rs	4573	-	-	-
+crates/template-py/src/lib.rs:4597	crates/template-py/src/lib.rs	4597	-	/// `django_rust_templates.engine.base.render_value_in_context`, cached once.	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-
@@ -854,6 +856,7 @@ engine/base.py:1288-1296	python/django_rust_templates/engine/base.py	1288	1296	-
 engine/base.py:1308	python/django_rust_templates/engine/base.py	1308	-	if type(value) is int and (	-
 engine/base.py:1351-1354	python/django_rust_templates/engine/base.py	1351	1354	except UnicodeDecodeError:	-
 python/django_rust_templates/engine/base.py:1356	python/django_rust_templates/engine/base.py	1356	-	render_value_in_context(output, context)	-
+python/django_rust_templates/engine/context.py:69	python/django_rust_templates/engine/context.py	69	-	def __setitem__(self, key, value):	-
 engine/defaulttags.py:193-258	python/django_rust_templates/engine/defaulttags.py	193	258	-	-
 engine/defaulttags.py:194-198	python/django_rust_templates/engine/defaulttags.py	194	198	with context.push():	-
 engine/defaulttags.py:194-197	python/django_rust_templates/engine/defaulttags.py	194	197	parentloop = context["forloop"]	-
@@ -884,10 +887,11 @@ python/django_rust_templates/engine/parser.py:568	python/django_rust_templates/e
 python/django_rust_templates/engine/parser.py:669	python/django_rust_templates/engine/parser.py	669	-	-	-
 python/django_rust_templates/host.py:35	python/django_rust_templates/host.py	35	-	-	-
 python/django_rust_templates/host.py:422	python/django_rust_templates/host.py	422	-	-	-
-python/django_rust_templates/host.py:555	python/django_rust_templates/host.py	555	-	-	-
 python/django_rust_templates/host.py:607	python/django_rust_templates/host.py	607	-	self._django_tags = django_own_tags()	-
 python/django_rust_templates/host.py:737	python/django_rust_templates/host.py	737	-	and its `_culprit_node` attached. Rust can only carry the class's	-
-python/django_rust_templates/render.py:264	python/django_rust_templates/render.py	264	-	(measured — a `{% for %}` node at ``(9, 25)``), so this parser's tokens are	-
+python/django_rust_templates/host.py:746	python/django_rust_templates/host.py	746	-	self.last_error = error	-
+python/django_rust_templates/host.py:849	python/django_rust_templates/host.py	849	-	self.last_error = error	-
+python/django_rust_templates/render.py:275	python/django_rust_templates/render.py	275	-	(measured — a `{% for %}` node at ``(9, 25)``), so this parser's tokens are	-
 tests/milestone_ownership.py:440	tests/milestone_ownership.py	440	-	def unshimmed(scope: str = TARGET) -> list:	-
 tests/parity_target.py:63	tests/parity_target.py	63	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
 tests/parity_target.py:177	tests/parity_target.py	177	-	So this is the replacement Python side	-

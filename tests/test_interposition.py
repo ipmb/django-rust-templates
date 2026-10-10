@@ -2201,19 +2201,24 @@ class FilterRoutingTests(unittest.TestCase):
         )
 
     def test_a_non_ascii_loop_variable_name_reaches_the_context(self):
-        """The loop's seventh key is a `PyString` built once, not a `&str` passed
-        per iteration — and the name it carries is the template's.
+        """The loop's seventh key is a `PyString` built once, and the name it
+        carries is the template's — `Ω` survives the pre-build.
 
         `Walk::run_loop_body` used to hand `plan.loopvar` to
         `Context.__setitem__` as a `&str`, so PyO3 built a `PyString` from it on
         every iteration; the lever pre-builds one at plan time and reuses it. The
-        saving is the build, and the risk is that the pre-built string is not the
-        name the template wrote — a conversion that is lossy for anything outside
-        ASCII would be invisible in every row whose loop variable is `item`.
+        saving is the build, and the risk the pre-build introduces is that the
+        string it carries is not the name the template wrote — a conversion made
+        lossy for anything outside ASCII would be invisible in every row whose
+        loop variable is `item`.
 
+        **A guard, not a discriminator.** Measured on both artifacts — the
+        pre-lever `dc174855d926defc` and the shipped `3d3e99e63eddc036` — this row
+        passes on each, because both routes build the key from a real `str`. What
+        it pins is that the pre-built one still carries the template's name.
         Django's own `Variable` accepts `Ω` as a name (`\\w` is Unicode-aware for
-        a `str` pattern), so the row asserts stock's answer first and only then
-        that ours equals it.
+        a `str` pattern), so the row asserts stock's answer as a literal first and
+        only then that ours equals it.
         """
         from django.template.engine import Engine as StockEngine
         from django.template.context import Context as StockContext
@@ -2248,11 +2253,16 @@ class FilterRoutingTests(unittest.TestCase):
         body reads an `int` where it might expect the state. That order is only
         observable when the two writes collide, which is this row.
 
-        It is also the one place the lever's identity claim is testable: the dict
-        is written with the interned `"forloop"` and the item with a `PyString`
-        built at plan time, so the second write replaces the first *by equality*
-        and not by identity. A dict that keyed on identity would grow a second
-        entry here and `{{ forloop }}` would keep printing the dict.
+        **It pins the write order, not the lever's key identity**, and an earlier
+        version of this docstring said otherwise. The store is a plain `dict`
+        (`BaseContext.__setitem__` is `self.dicts[-1][key] = value`,
+        `python/django_rust_templates/engine/context.py:69`) and a dict compares
+        keys by equality and hash and never by identity, so the item lands in the
+        same slot whichever `PyString` carries the name. Measured: this row passes
+        on the pre-lever build `dc174855d926defc` as well as the shipped
+        `3d3e99e63eddc036`. What it guards is that the item is still written
+        *after* the dict — the lever kept that order, and a reordering would break
+        it.
         """
         from django.template.engine import Engine as StockEngine
         from django.template.context import Context as StockContext

@@ -235,7 +235,7 @@ the sentence:
   reaches the escape filter.
 - **(b) is inherited**, and it is the whole of the floor's per-variable cost:
   `render_floor` fetches `render_value_in_context` once per render
-  (`crates/template-py/src/lib.rs:4573`) and calls it per variable in
+  (`crates/template-py/src/lib.rs:4597`) and calls it per variable in
   `append_expression_value`. That the floor and `render_desc` share exactly these
   two helpers — the resolver and the escaper — is the floor's own claim about
   itself, and it is what makes the subtraction isolate dispatch. *(The floor's
@@ -544,7 +544,7 @@ protocol, so it is on the walk's path by construction.
 **§3 therefore needs: every natively-rendered node participates in the
 `_culprit_node` first-writer protocol, carrying its own `(start, end)` span.** The
 data exists — the Rust parser's tokens carry correct positions, and
-`python/django_rust_templates/render.py:264` cites a `{% for %}` at (9, 25) — but
+`python/django_rust_templates/render.py:275` cites a `{% for %}` at (9, 25) — but
 there is no protocol for handing one back, and
 `python/django_rust_templates/host.py:737` already notes that Rust can carry the
 class's token but not the object.

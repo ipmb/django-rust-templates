@@ -10,8 +10,8 @@ W50          50      43.034     33.522     -9.512      -9.517     -10.447      -
 W200        200     158.099    121.171    -36.928     -37.013     -41.554     -31.636    6.99%    7.39%   MOVE
 P             0      34.294     34.535     +0.240      +0.220      -1.309      +1.284    5.34%    4.08%   
 
-  L (empty body): per-iteration prefix +0.2770 us -> fixed +0.0993 us  delta -0.1777 us/iteration  (intercept +3.884 us)
-  W (one `{{ r.name }}` a row): per-iteration prefix +0.7698 us -> fixed +0.5856 us  delta -0.1842 us/iteration  (intercept +4.218 us)
+  L (empty body): per-iteration prefix +0.2770 us -> fixed +0.0993 us  delta -0.1777 us/iteration  (intercepts prefix +3.884 us -> fixed +3.768 us)
+  W (one `{{ r.name }}` a row): per-iteration prefix +0.7698 us -> fixed +0.5856 us  delta -0.1842 us/iteration  (intercepts prefix +4.218 us -> fixed +4.090 us)
   P (no `{% for %}` anywhere — the control this change cannot touch): paired +0.220 us, 0.64% of its row
 
 --- ours, parse
@@ -26,8 +26,8 @@ W50          50      62.238     52.389     -9.849      -9.764     -10.997      -
 W200        200     178.795    139.951    -38.845     -38.607     -42.606     -31.573    3.94%    6.00%   MOVE
 P             0     199.248    199.756     +0.508      +0.329      -1.265      +3.063    1.42%    1.31%   
 
-  L (empty body): per-iteration prefix +0.2779 us -> fixed +0.0998 us  delta -0.1781 us/iteration  (intercept +18.867 us)
-  W (one `{{ r.name }}` a row): per-iteration prefix +0.7785 us -> fixed +0.5854 us  delta -0.1931 us/iteration  (intercept +23.148 us)
+  L (empty body): per-iteration prefix +0.2779 us -> fixed +0.0998 us  delta -0.1781 us/iteration  (intercepts prefix +18.867 us -> fixed +18.510 us)
+  W (one `{{ r.name }}` a row): per-iteration prefix +0.7785 us -> fixed +0.5854 us  delta -0.1931 us/iteration  (intercepts prefix +23.148 us -> fixed +22.922 us)
   P (no `{% for %}` anywhere — the control this change cannot touch): paired +0.329 us, 0.17% of its row
 
 --- ours, compile
@@ -42,7 +42,7 @@ W50          50      17.475     17.386     -0.089      -0.090      -0.282      +
 W200        200      17.557     17.532     -0.025      +0.011      -0.395      +0.550    2.07%    4.96%   
 P             0     163.569    163.468     -0.101      -0.034      -1.189      +1.916    1.57%    1.36%   
 
-  L (empty body): per-iteration prefix +0.0002 us -> fixed +0.0002 us  delta -0.0000 us/iteration  (intercept +13.523 us)
-  W (one `{{ r.name }}` a row): per-iteration prefix +0.0006 us -> fixed +0.0006 us  delta +0.0000 us/iteration  (intercept +17.441 us)
+  L (empty body): per-iteration prefix +0.0002 us -> fixed +0.0002 us  delta -0.0000 us/iteration  (intercepts prefix +13.523 us -> fixed +13.454 us)
+  W (one `{{ r.name }}` a row): per-iteration prefix +0.0006 us -> fixed +0.0006 us  delta +0.0000 us/iteration  (intercepts prefix +17.441 us -> fixed +17.401 us)
   P (no `{% for %}` anywhere — the control this change cannot touch): paired -0.034 us, 0.02% of its row
 
