@@ -985,9 +985,10 @@
       <b>What is left, stated against the same table.</b> The single-node <i>parse</i> rows are
       still ~1.4×–2.3× stock — that is the compile path, not the render path, and it is the
       next leaf (materialising Python node objects eagerly). <code>micro/include</code>
-      (0.74× stock, 7.2 µs against Jinja2's 6.1) and <code>micro/extends</code> (1.05×, 10.0
-      against 5.1) are the two rows Jinja2 still wins outright, because it precompiles
-      inheritance and this engine still crosses into Python for <code>{% include %}</code>.
+      (0.70× stock, 7.0 µs against Jinja2's 6.0) and <code>micro/extends</code> (0.98×, 9.7
+      against 5.2) are the two rows Jinja2 still wins outright: it precompiles
+      <code>{% include %}</code> into the parent, and this engine still opens a Python frame
+      per include and per inheritance level, which is what step 5's second slice is for.
       <code>django-only/filter-arg</code> remains the one row both slower than stock (1.10×)
       and outside the three-engine intersection — Jinja2 spells a filter argument
       <code>floatformat(2)</code>, not <code>floatformat:2</code>, so the row runs on two engines.
@@ -1012,6 +1013,56 @@
       <code>django-only/realistic</code> — does not move, because the block above it is
       delegated whole; that is reachability rather than argument shape, and it is the next
       slice.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>The walk now owns a <code>{% block %}</code> body, and on the page that is all body
+      that is the whole render.</b> A descent pass in Rust plans the body nodelist of every
+      <code>{% block %}</code> it can and attaches that plan to the <code>NodeList</code>
+      itself, and <code>BlockNode.render</code> renders that body through the plan instead of
+      through Python. <code>ExtendsNode</code> and <code>BlockNode</code> stay Python
+      delegates — this slice takes the body, not the inheritance machinery — and the numbers
+      say the body was the thing: <code>real-world/normal</code>'s render ratio goes
+      <b>0.89× → 0.31×</b> of stock (373 µs → 129 µs against stock's 417), its parse
+      <b>0.99× → 0.55×</b>, measured on two runs of one artifact. The gate is the census, and
+      it is the same page measured two ways: <code>real-world/normal</code> now reads
+      <b><code>applied: length=2 upper=1 title=50</code> and <code>body xings: 50</code></b> —
+      <i>identical</i> to the spliced fixture <code>flat/normal</code> that step 3a used as
+      its ceiling, down to the filter counts. The <code>50</code> matters more than the
+      <code>applied:</code> line: routed-but-not-computed is exactly what a share meter cannot
+      see, so the third meter from step 3a is what certifies this one.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>And it is honest about where it does not pay, which is the other half of the
+      prediction.</b> <code>micro/extends</code> moves only <b>1.04× → 0.98×</b>, because its
+      bodies are three and four nodes and the render is two Python frames and a
+      <code>get_nodes_by_type</code> walk over the whole parent — a body plan does not touch
+      any of that. <code>real-world/complex</code> (0.62×) and
+      <code>django-only/realistic</code> (0.93×) do not move at all, and the census says why
+      before the timings do: their loops hold an <code>{% include %}</code> and a
+      <code>{% blocktranslate %}</code>, a body holding a delegate cannot seal, so the whole
+      loop is delegated and the walk never reaches inside it. Their output-returned-from-Python
+      share <i>rises</i> — 298.8% → <b>494.5%</b> and 197.8% → <b>295.0%</b> — which is the
+      correct reading of moving work out of a frame a share meter cannot see inside. Both were
+      predicted to move and both predictions are recorded as misses rather than reworded.
+      <code>real-world/large</code>, the control with no inheritance at all, is identical in
+      every census column and every timing, as predicted.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>One design change against its own prediction, made because the guard refused the
+      first one.</b> The prediction put the arm inside <code>NodeList.render</code>. It cannot
+      go there: that function is on the transcription guard's compared path — the set
+      <code>tests/parity_target.py</code> reads to decide whether a declared transcription
+      region sits on code the parity harness executes — and a region there would make the
+      harness compare Rust against Rust. So the arm became a new method
+      (<code>_render_with_plan</code>) and the hook moved to its <i>caller</i>,
+      <code>BlockNode.render</code>, with that file's two lines rewritten by the generator's
+      <code>TRANSFORMS</code> table so it stays generated and its seven compared-path spans
+      stay bit-identical. The scatter band is stated before the deltas it bounds, as every
+      slice since step 3a has: two runs of the one artifact give a median 1.08% and a max
+      8.43% over all 36 ratios, so nothing under ~2% is called a move here — and the
+      <code>real-world/normal</code> row is 60× the band. Acceptance is unmoved and verified
+      on this artifact: <b>1547 tests, OK (skipped=6)</b>, plus the 494 unit tests.
+    </p>
     <p class="sub" style="margin-top:16px">
       <b>Until M18 it was a substitution, and that machinery is gone.</b> Earlier revisions of
       this page described a meta-path finder that served a transcription of

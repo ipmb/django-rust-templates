@@ -1178,6 +1178,24 @@ class NodeList(list):
     # extend_nodelist().
     contains_nontext = False
 
+    # The native render plan for this nodelist, or `None` (M19 step 5). Set by
+    # `_native.compile_template` on the **body nodelist of every `{% block %}` it
+    # could plan**, and `None` everywhere else — read by `_render_with_plan` just
+    # below, which is what `BlockNode.render` calls in place of `render`.
+    #
+    # A class attribute rather than an instance one, for the reason
+    # `Template._native_plan` gives: `NodeList` is built by several paths — the
+    # materialiser, and every hand-built fixture in the suite — and a missing
+    # attribute would be an `AttributeError` at the read rather than a fallback.
+    #
+    # It goes on the *body* and not on the `BlockNode` because the node that
+    # renders a body is frequently not the node the plan was built for:
+    # `BlockNode.render` pops an override out of the block context and renders
+    # `type(self)(block.name, block.nodelist).nodelist` — the same `NodeList`
+    # object — and `{{ block.super }}` re-enters through the base template's own
+    # block. The body nodelist is the one object all of those paths share.
+    _native_plan = None
+
     def render(self, context):
         return SafeString("".join([node.render_annotated(context) for node in self]))
 
@@ -1187,6 +1205,48 @@ class NodeList(list):
         for node in self:
             nodes.extend(node.get_nodes_by_type(nodetype))
         return nodes
+
+    def _render_with_plan(self, context):
+        """Render this nodelist, in Rust when it carries a plan (M19 step 5).
+
+        `Template._render`'s two lines, one level down, and the whole of this
+        slice: the walk delegates a `BlockNode`, Python pops the override out of
+        the block context and renders its body here, and on a page with
+        inheritance that body is the whole render — measured, **99.0%** of
+        `real-world/normal`'s wall time is inside the one delegated `ExtendsNode`
+        frame (`.review/m19-measurements/inheritance_share.py`).
+
+        **The caller is `loader_tags.py::BlockNode.render`, and this method is
+        *not* named `_render` after `Template`'s.**  `Template._render` is
+        Django's name, and Django's reason for it is the bound-context contract
+        — `render` binds, `_render` assumes a bound context — which `NodeList`
+        has no counterpart for.  What differs here is the *plan*, so the name
+        says the plan.  (The call site is upstream's own line rewritten in
+        `scripts/gen_impl_transcription.py`'s `TRANSFORMS`: this file is
+        hand-written, `loader_tags.py` is generated, and a generated file may
+        differ from the pin only by whole-line substitutions the generator
+        makes.)
+
+        **Why the arm is not in `render` above.**  `NodeList.render` is on the
+        transcription guard's compared path (`(1199, 1200)`), so an arm inside it
+        would make the parity harness compare Rust against Rust — the same
+        reason `Template._render` took the walk's arm rather than `Template.render`
+        taking it, and the same clause of `scripts/check_transcriptions.py`.  The
+        *caller* is the other half of the choice: `BlockNode.render` is where a
+        block body funnels, and it is not on that path.
+
+        **The fallback is total, so this cannot change an answer.**  Every
+        nodelist the descent did not plan reads `None` — the class default, so
+        every hand-built `NodeList` in the suite included — and takes `render`,
+        which is what the call did before the walk existed.  A body whose nodes
+        and descriptors disagree gets no plan at all (`plan_list` returns `None`
+        on the first class mismatch), so a block this pass misreads is a lost
+        optimisation, never a different string.
+        """
+        plan = self._native_plan
+        if plan is not None:
+            return _native.render_plan(plan, context)
+        return self.render(context)
 
 
 class TextNode(Node):

@@ -2827,7 +2827,7 @@ fn resolve_components(
 //   `ForNode.render` — a list, an append and a join per nodelist per render.
 //   This walk owns one `String` and applies the `SafeString` wrapper **once**,
 //   at the outer boundary, which is where Django applies it too
-//   (`NodeList.render`, `engine/base.py:1181-1182`): the type is the same and the characters
+//   (`NodeList.render`, `engine/base.py:1199-1200`): the type is the same and the characters
 //   are the same, so nothing between the two can observe the difference.
 // * **A native loop frame.** `ForNode.render` writes a six-key `forloop` dict
 //   and the loop variable into the context on **every** iteration —
@@ -2856,6 +2856,11 @@ use std::sync::Mutex;
 const VARIABLE_NODE: &str = "VariableNode";
 const FOR_NODE: &str = "ForNode";
 const IF_NODE: &str = "IfNode";
+/// The one class whose body the walk reaches on its own hook rather than as a
+/// planned slot (M19 step 5): `BlockNode.render` renders the body nodelist
+/// through `NodeList._render_with_plan`, so the plan goes on the nodelist — see
+/// [`plan_block_bodies`].
+const BLOCK_NODE: &str = "BlockNode";
 
 /// The nesting depth past which the walk raises, rather than letting the Rust
 /// stack run out.
@@ -3764,6 +3769,128 @@ struct NativePlan {
     slots: Vec<Slot>,
 }
 
+/// A plan for one nodelist, already boxed as the Python object the body's
+/// render reads, or `None` if the pairing does not hold.
+fn make_plan(
+    py: Python<'_>,
+    desc: &NodeListDesc,
+    nodelist: &Bound<'_, PyAny>,
+) -> PyResult<Option<Py<PyAny>>> {
+    match plan_list(py, desc, nodelist)? {
+        Some(slots) => Ok(Some(
+            NativePlan { slots }.into_pyobject(py)?.into_any().unbind(),
+        )),
+        None => Ok(None),
+    }
+}
+
+/// Attach a plan to every `{% block %}` body in the tree (M19 step 5).
+///
+/// **Why this pass exists at all.**  A `{% block %}`'s body is reached through
+/// `BlockNode.render`, which calls `block.nodelist.render(context)` — a plain
+/// Python `NodeList.render`.  The walk therefore never enters a block body, and
+/// on a page with inheritance that is where the whole render lives: measured,
+/// `real-world/normal` returns **198.8%** of its output from delegates and
+/// **99.0%** of its wall time is inside the one delegated `ExtendsNode` frame
+/// (`.review/m19-measurements/inheritance_share.py`).  `Template._render` is the
+/// same hook one level up; this is it one level down.
+///
+/// **This pass attaches; `NodeList._render_with_plan` reads.**  That method, not
+/// `NodeList.render`, and the pair is a pair because of the transcription guard:
+/// `NodeList.render` is on the parity harness's compared path, so an arm inside
+/// it would make the comparison Rust against Rust.  Nothing else about the design
+/// changes — the attach is on the body `NodeList` either way, and clause (4) of
+/// `scripts/check_transcriptions.py` is the reason.  The caller is
+/// `loader_tags.py::BlockNode.render`, whose two body renders are upstream's own
+/// lines rewritten by the generator's `TRANSFORMS` table: this pass and base.py
+/// are hand-written, `loader_tags.py` is generated, and a generated transcription
+/// may differ from the pin only by whole-line substitutions.
+///
+/// **The tree it descends is the descriptor tree, paired with the `NodeList`
+/// materialised from it**, because `compile_template` is the only place that
+/// holds both — the same reason the root plan is built there.  Descent is by the
+/// attribute name each descriptor's nodelist was declared with, which is the
+/// constructor parameter name and therefore the attribute name the materialiser
+/// set; `NodeListDesc::get_nodes_by_type` descends by position instead, and the
+/// two agree for every node Rust builds except `IfNode` (see `desc.rs`).
+///
+/// **`IfNode` is the one class whose branches cannot be reached by name**: its
+/// `__init__` takes `conditions_nodelists` and holds its child nodelists inside
+/// that list, so Rust emits them as *empty-named* descriptors — "positional
+/// only", the marker `materialise_node` documents — and the materialised node
+/// stores them at `conditions_nodelists[i][1]`.  A `{% block %}` inside an
+/// `{% if %}` branch is reachable exactly that way and nowhere else: `plan_if`
+/// cannot seal a branch containing a `BlockNode` (`seal` refuses a delegate), so
+/// the `IfNode` is delegated and Python reaches the block body — which is the
+/// case this arm is for.  The pairing is by position, which is the order
+/// `tags/if.rs` emitted them, so a wrong pair is not possible; a missing
+/// attribute or a short list is skipped rather than raised, because an
+/// optimisation must not turn a shape it does not understand into a compile
+/// error.
+///
+/// **Nothing here can change an answer.**  A body whose nodes and descriptors
+/// disagree gets no plan (`plan_list` returns `None` on the first class
+/// mismatch), and the body's render runs exactly as it did before when the plan
+/// is absent.  So a `{% block %}` this pass misreads is a lost
+/// optimisation, which is the contract `plan_list` already has.
+///
+/// `HOST_NODE` descriptors carry no nodelists at all (`NodeDesc::host`), so a
+/// host tag's body is not descended into — the shape `desc.rs` records as the
+/// one place a host-owned body could differ, and the divergence is bounded there
+/// to a tag that returns a real `ExtendsNode`/`BlockNode` from Python.
+fn plan_block_bodies(
+    py: Python<'_>,
+    desc: &NodeListDesc,
+    nodelist: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    if nodelist.len()? != desc.nodes.len() {
+        return Ok(());
+    }
+    for (index, node_desc) in desc.nodes.iter().enumerate() {
+        let node = nodelist.get_item(index)?;
+        let class_name: String = node.get_type().name()?.to_string();
+        // The same pairing rule `plan_slot` applies, and the same reason: a
+        // descriptor and a node that disagree are not about each other, so
+        // neither this node's body nor its children may be planned from it.
+        if node_desc.class_name != class_name && node_desc.class_name != HOST_NODE {
+            continue;
+        }
+        let mut positional = 0usize;
+        for (name, child_desc) in &node_desc.nodelists {
+            let child = if name.is_empty() {
+                let branch = match if_branch(&node, positional) {
+                    Some(branch) => branch,
+                    None => {
+                        positional += 1;
+                        continue;
+                    }
+                };
+                positional += 1;
+                branch
+            } else if node.hasattr(name.as_str())? {
+                node.getattr(name.as_str())?
+            } else {
+                continue;
+            };
+            if class_name == BLOCK_NODE {
+                if let Some(plan) = make_plan(py, child_desc, &child)? {
+                    child.setattr("_native_plan", plan)?;
+                }
+            }
+            plan_block_bodies(py, child_desc, &child)?;
+        }
+    }
+    Ok(())
+}
+
+/// One `IfNode` branch nodelist, by position, or `None` for a node that is not
+/// an `IfNode` — or one whose shape is not what `tags/if.rs` builds.
+fn if_branch<'py>(node: &Bound<'py, PyAny>, index: usize) -> Option<Bound<'py, PyAny>> {
+    let branches = node.getattr("conditions_nodelists").ok()?;
+    let branch = branches.get_item(index).ok()?;
+    branch.get_item(1).ok()
+}
+
 /// `Node.render_annotated`'s `except` arm (`engine/base.py:1135-1164`), for a node this
 /// walk rendered itself.
 ///
@@ -3851,7 +3978,7 @@ enum Absorbed {
     /// (`base.py:800`).
     Continue(Py<PyAny>),
     /// `VariableNode.render`'s `UnicodeDecodeError` arm: the node renders `""`
-    /// and `render_value_in_context` never runs (`engine/base.py:1291-1294`).
+    /// and `render_value_in_context` never runs (`engine/base.py:1351-1354`).
     Nothing,
 }
 
@@ -4333,7 +4460,7 @@ impl<'py> Walk<'py> {
     /// `String` can. So the first piece that will not fit **spills** the
     /// accumulator into Python's: the fast path stays one `push_str` per node,
     /// and the slow path ends in `"".join`, which is what `NodeList.render`
-    /// does (`engine/base.py:1181-1182`) and therefore what the walk owes it.
+    /// does (`engine/base.py:1199-1200`) and therefore what the walk owes it.
     ///
     /// Two failures are not the same failure here, and the branch below is the
     /// difference. A **`str` that will not fit** is a value Django renders, and
@@ -4462,7 +4589,7 @@ fn is_variable_does_not_exist(py: Python<'_>, error: &PyErr) -> PyResult<bool> {
 /// exists to not have.
 ///
 /// The `UnicodeDecodeError` arm is not `resolve`'s at all but
-/// `VariableNode.render`'s (`engine/base.py:1291-1294`): resolving a variable
+/// `VariableNode.render`'s (`engine/base.py:1351-1354`): resolving a variable
 /// directly is resolving *past* both handlers, so both are taken here.
 fn absorb_emit(
     py: Python<'_>,
@@ -4524,7 +4651,7 @@ fn render_plan(py: Python<'_>, plan: &NativePlan, context: Py<PyAny>) -> PyResul
         census_merge(&mut CENSUS.lock().unwrap(), census);
     }
     // `SafeString` of a whole `str`, or of `"".join(pieces)` where the walk had
-    // to spill — `NodeList.render`'s own expression (`engine/base.py:1181-1182`),
+    // to spill — `NodeList.render`'s own expression (`engine/base.py:1199-1200`),
     // which is the thing this returns in place of. `SafeString` and not
     // `mark_safe`, for the two reasons on [`SAFE_STRING`].
     let out: Py<PyAny> = match walk.spill.take() {
@@ -4905,6 +5032,14 @@ fn compile_template(
         Some(slots) => Some(NativePlan { slots }.into_pyobject(py)?.into_any().unbind()),
         None => None,
     };
+    // And the same hook one level down, for the bodies the walk cannot reach as
+    // slots (see `plan_block_bodies`). Independent of the plan above: a template
+    // whose *root* declines can still have a plannable block body, and one whose
+    // root is planned usually has several. It is attached to the `NodeList`
+    // objects themselves rather than returned, because that is the object
+    // `BlockNode.render` calls and the object `{{ block.super }}` re-enters
+    // through.
+    plan_block_bodies(py, &desc_tree, &nodelist)?;
     // `parser` is the third argument because `template_for` reads
     // `parser.extra_data` there (`base.py:198-200`). Passing the parser rather
     // than the dict keeps the two in step: there is no way to hand over one

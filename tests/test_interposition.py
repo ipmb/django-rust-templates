@@ -460,6 +460,37 @@ class InterpositionTests(unittest.TestCase):
         # did so without changing either file's length. Re-measured rather than
         # derived: ours is 1347 lines, 229 of them differ, upstream's 1207 with 89
         # differing, and 1347-229 = 1207-89 = 1118.
+        #
+        # **M19 step 5 adds two more, both `delete`s, and they are the first pair
+        # this list has carried that a run of *matched* lines sits between.** The
+        # slice attaches a plan to every `{% block %}` body and gives `NodeList`
+        # the arm that reads it: an eighteen-line region at ours 1181-1198 (the
+        # plan attribute, whose comment grew) and a forty-two-line one at ours
+        # 1208-1249 (`_render_with_plan`, inserted after `get_nodes_by_type`).
+        # Both are ours alone, so both are `delete`s and `equal` moves by nothing
+        # — 1118 again — while our *differing* count goes 229 → 289 and upstream's
+        # stays 89. Re-measured: ours is 1407 lines, 289 differ, upstream's 1207
+        # with 89, and 1407-289 = 1207-89 = 1118, the same number a third time.
+        #
+        # **They arrive as ops twelve and thirteen, and the nine matched lines at
+        # ours 1199-1207 are why the pair reads as adjacent here.** `difflib`
+        # matched that run because `NodeList.render` and
+        # `NodeList.get_nodes_by_type` are upstream's to the character — the two
+        # functions the slice deliberately did *not* touch, an arm inside `render`
+        # being the shape the guard's compared path refuses. So the newest two
+        # `delete`s sit next to each other in this list with no other op between
+        # them, while in the file a *matched* block separates them: **adjacency in
+        # this list is `difflib`'s statement about the ops and not about the
+        # file**, the same way the M18 paragraph above distinguishes order from
+        # position. The pair is also what splits the guard's `COMPARED_PATH` into
+        # two bands rather than shifting it as one — +18 for the two functions
+        # above the second region, +60 below it.
+        #
+        # The render leaf's `delete`, last in this list until now, is pushed from
+        # position twelve to fourteen. It is *still* last, so the claim the
+        # paragraph above makes about the last position holds, and it is the
+        # pushed-back entry rather than either of the newest two that shows the
+        # pair landed **above** it in the file rather than beside it.
         self.assertEqual(
             [op[0] for op in differing],
             [
@@ -474,6 +505,8 @@ class InterpositionTests(unittest.TestCase):
                 "delete",
                 "delete",
                 "replace",
+                "delete",
+                "delete",
                 "delete",
             ],
         )

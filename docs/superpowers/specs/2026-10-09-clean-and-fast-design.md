@@ -218,7 +218,7 @@ the sentence:
   reaches the escape filter.
 - **(b) is inherited**, and it is the whole of the floor's per-variable cost:
   `render_floor` fetches `render_value_in_context` once per render
-  (`crates/template-py/src/lib.rs:4559-4561`) and calls it per variable in
+  (`crates/template-py/src/lib.rs:4686-4688`) and calls it per variable in
   `append_expression_value`. That the floor and `render_desc` share exactly these
   two helpers — the resolver and the escaper — is the floor's own claim about
   itself, and it is what makes the subtraction isolate dispatch. *(The floor's
@@ -322,7 +322,7 @@ and 0.385 is what the whole call costs once the arm answers instead. What §2
 inherits from this is a *third* removable cost, not a bigger version of the
 first.
 
-**The arm is landed, and it is `engine/base.py:1248`** — the predicate is
+**The arm is landed, and it is `engine/base.py:1308`** — the predicate is
 `type(value) is int and (context.use_l10n is False or not
 settings.USE_THOUSAND_SEPARATOR)`, exact type so that `bool` (which `localize`
 sends down its own arm anyway) and an `int` subclass that overrides `__str__`

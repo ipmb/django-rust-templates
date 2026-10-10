@@ -307,7 +307,44 @@ TRANSFORMS = {
         "from django.template import Library, Node, TemplateSyntaxError":
             "from django_rust_templates.engine import Library, Node, TemplateSyntaxError",
     },
-    # The one row that is not a rewrite of a *name*. `static.py` reaches the
+    # M19 step 5's, and the first rows in this table that rewrite a **statement**
+    # rather than a name. `loader_tags.py` is generated, and it stays generated:
+    # the code the substitution calls (`NodeList._render_with_plan`) lives in
+    # `base.py`, which is hand-written already, so nothing here needs a region
+    # upstream has no counterpart for and `HAND_WRITTEN` is not the answer.
+    #
+    # **What the two rows buy is that this file's shape does not change.** They
+    # are one line to one line, so the file stays 372 lines (370 of the pin plus
+    # the marker), the `COMPARED_PATH` spans in `check_transcriptions.py` are
+    # valid before and after, and the parity harness's view of the module the
+    # suite's block semantics live in is bit-identical across the slice. That
+    # property is why a module-level `_render_block_body` helper here was
+    # withdrawn: a new function moves a line count, and a line count inside the
+    # one module `test_extends.py` and `recursive_templates/` exercise is a
+    # change to the instrument that reads it.
+    #
+    # **Which lines, and why those are the funnel.** `BlockNode.render` reaches a
+    # block body exactly twice — the no-block-context arm (`self.nodelist`) and
+    # the override arm (`block.nodelist`, which is `type(self)(block.name,
+    # block.nodelist)`'s reference to the same object) — and `super()` is covered
+    # by the second, because it re-enters through `self.render`. Both keys are
+    # upstream's own text, which is what makes the rows checkable: a Django pin
+    # bump that rewords either line fails this generator loudly instead of
+    # leaving a body render that silently stops taking the plan.
+    #
+    # **Why the arm is a call and not a branch in `NodeList.render`, which would
+    # have left this file alone.** That method is on the guard's compared path
+    # (`(1181, 1182)`), and `check_transcriptions.py`'s clause (4) refuses a
+    # declared region there for the reason it exists: the parity harness executes
+    # it, so the comparison would be Rust against Rust. The arm's home and the
+    # arm's caller are therefore two different files, and this is the caller's.
+    "loader_tags.py": {
+        "                result = self.nodelist.render(context)":
+            "                result = self.nodelist._render_with_plan(context)",
+        "                result = block.nodelist.render(context)":
+            "                result = block.nodelist._render_with_plan(context)",
+    },
+    # The one *import* row that is not a rewrite of a *name*. `static.py` reaches the
     # package's own attributes — `template.Library()`, `template.Node`,
     # `template.TemplateSyntaxError` — at seven sites, so rewriting the import
     # would mean rewriting the body and the transcription would stop being

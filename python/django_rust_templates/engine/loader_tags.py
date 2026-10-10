@@ -55,7 +55,7 @@ class BlockNode(Node):
         with context.push():
             if block_context is None:
                 context["block"] = self
-                result = self.nodelist.render(context)
+                result = self.nodelist._render_with_plan(context)
             else:
                 push = block = block_context.pop(self.name)
                 if block is None:
@@ -65,7 +65,7 @@ class BlockNode(Node):
                 block = type(self)(block.name, block.nodelist)
                 block.context = context
                 context["block"] = block
-                result = block.nodelist.render(context)
+                result = block.nodelist._render_with_plan(context)
                 if push is not None:
                     block_context.push(self.name, push)
         return result

@@ -90,7 +90,7 @@ UPSTREAM_NAMESPACE = "django.template."
 # re-runs the instrument and fails if the two disagree. A pinned table with a
 # live re-measurement behind it is the same shape as the module meter.
 #
-# 30 functions, spanning 118-1347 in a file of 1347 lines — nearly the whole
+# 30 functions, spanning 118-1407 in a file of 1407 lines — nearly the whole
 # file, which is the finding.
 # A guard that checked only the named target's own lines would miss a region
 # declared in any of the other 29.
@@ -179,6 +179,26 @@ UPSTREAM_NAMESPACE = "django.template."
 # real reason. `resolve` is not in this table — the parse harness never renders —
 # which is why a change inside it shifts the table without appearing in it.
 #
+# **A sixth move, +60, is M19 step 5, and it is the first one that splits the
+# table into three bands rather than two.** The slice adds two regions inside
+# `class NodeList`: the plan attribute's comment at 1181 (**+18** — the comment
+# grew from nine lines to sixteen and the attribute stayed one) and
+# `NodeList._render_with_plan` after `get_nodes_by_type` at 1208 (**+42**). Both
+# are one-sided insertions, so neither resizes anything; what they do is put a
+# boundary *inside* the table, between the two functions of `NodeList` and the
+# rest of the file. `NodeList.render` 1181-1182 → 1199-1200 and
+# `NodeList.get_nodes_by_type` 1184-1189 → 1202-1207 move by **+18**, the part
+# above the method; `TextNode.__init__` 1195-1196 → 1255-1256 through
+# `token_kwargs` 1303-1347 → 1363-1407 move by **+60**, and the file is
+# **1407** lines. `Node.get_nodes_by_type` 1161-1173 is above the first region
+# and keeps its M16 number, and `FilterExpression.args_check` 938-955 is above
+# both, which is the same check as before on a table that now has two more places
+# to fail to shift. The three bands are the shape to carry forward: **a region
+# added inside a compared function moves the entries *below that function* less
+# than the entries below a region that sits between two of them**, which is
+# exactly the distinction the render leaf's move could not show, because it
+# landed inside a function that is not a table member at all.
+#
 # The arithmetic was wrong here once before, in the direction this block exists
 # to warn about: it counted the region someone had named (M11's arm, nineteen
 # lines) rather than what that commit did (thirty-three), and the pin was right
@@ -241,12 +261,12 @@ COMPARED_PATH = {
         (987, 1038, "Variable.__init__"),
         (1040, 1056, "Variable.resolve"),
         (1161, 1173, "Node.get_nodes_by_type"),
-        (1181, 1182, "NodeList.render"),
-        (1184, 1189, "NodeList.get_nodes_by_type"),
-        (1195, 1196, "TextNode.__init__"),
-        (1204, 1211, "TextNode.render_annotated"),
-        (1282, 1283, "VariableNode.__init__"),
-        (1303, 1347, "token_kwargs"),
+        (1199, 1200, "NodeList.render"),
+        (1202, 1207, "NodeList.get_nodes_by_type"),
+        (1255, 1256, "TextNode.__init__"),
+        (1264, 1271, "TextNode.render_annotated"),
+        (1342, 1343, "VariableNode.__init__"),
+        (1363, 1407, "token_kwargs"),
     ],
     # 8 functions, spans 56-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
@@ -822,15 +842,96 @@ DECLARED = {
             # and never renders, so no corpus reaches it — measured, not assumed,
             # by `test_the_compared_path_is_the_measured_one`. The hook is
             # `_render` rather than `NodeList.render` because the latter *is* on
-            # the compared path (`(1181, 1182)`) and because `_render` is the
+            # the compared path (`(1199, 1200)`) and because `_render` is the
             # single point every `Template.render` funnels through, including the
-            # two branches around `bind_template`.
+            # two branches around `bind_template`. **M19 step 5 is the same
+            # decision made a second time in a second class** — see the
+            # `_render_with_plan` region below, whose arm is the same three lines
+            # and whose call site is `loader_tags.py`'s — and it is why
+            # `NodeList.render` is still upstream's two lines at a span this
+            # region's note has had to re-key once already.
             (
                 (178, 188),
                 None,
                 "plan = self._native_plan\n"
                 "if plan is not None:\n"
                 "return _native.render_plan(plan, context)",
+            ),
+            # **M19 step 5's first region: the plan slot on `NodeList`.** Eighteen
+            # lines of ours against none of upstream's — sixteen of prose and
+            # `_native_plan = None` — so clause (5) wants the note, and this is
+            # the same one-line-code-with-a-long-comment shape as the `Template`
+            # region above, at the same one-line cost.
+            #
+            # **Why the plan is on the body `NodeList` and not on the
+            # `BlockNode`.** The node that renders a body is frequently not the
+            # node the plan was built for: `BlockNode.render` pops an override out
+            # of the block context and renders `type(self)(block.name,
+            # block.nodelist).nodelist` — the *same* `NodeList` object — and
+            # `{{ block.super }}` re-enters through the base template's own block,
+            # a second body carrying a plan of its own. The body nodelist is the
+            # one object every one of those paths shares, which is also why the
+            # read had to be at a call site rather than on the node.
+            #
+            # A class attribute rather than an instance one, for the reason
+            # `Template`'s is: `NodeList` is built by the materialiser *and* by
+            # every hand-built fixture in the suite, so an attribute set in
+            # `__init__` would be missing on exactly the objects a fallback is
+            # for. `None` is "render the nodelist", which is what this class did
+            # before the walk existed.
+            #
+            # **This region and the next are a boundary inside `COMPARED_PATH`,
+            # and the note above the table is where that is worked out**: the two
+            # `NodeList` functions move by **+18** and everything from `TextNode`
+            # down by **+60**, because a region between two table members is a
+            # different shape from a region inside one that is not a member. Both
+            # numbers are in the table's own entries, re-measured with
+            # `inspect.getsourcelines` rather than added.
+            (
+                (1181, 1198),
+                None,
+                "_native_plan = None",
+            ),
+            # **M19 step 5's second region: `NodeList._render_with_plan`** — the
+            # arm, the fallback, and the prose for both. Forty-two lines of ours
+            # against none of upstream's, so clause (5) wants the note, and the
+            # snippet names all five of the region's executable lines.
+            #
+            # **This is where the block body's render crosses into Rust, and the
+            # reason it is here rather than in `render` eight lines above is the
+            # clause that this whole table exists for.** `NodeList.render` is in
+            # `COMPARED_PATH` (`(1199, 1200)`), so an arm inside it would make the
+            # parity harness compare Rust against Rust; `_render_with_plan` is a
+            # name upstream does not have, so no table member can cover it. The
+            # *caller* is the other half and it is not in this file: the two lines
+            # of `loader_tags.py::BlockNode.render` that render a block body are
+            # rewritten by `gen_impl_transcription.py`'s `TRANSFORMS`, one line
+            # for one line, which leaves that module's `COMPARED_PATH` — the seven
+            # functions of the one file the suite's block semantics live in —
+            # valid to the line. Both halves are needed: this region alone would
+            # be dead code, and a rewrite there alone would have nothing to call.
+            #
+            # **Not named `_render`, though `Template`'s arm is.** `Template._render`
+            # is Django's name and Django's reason for it is the bound-context
+            # contract — `render` binds and `_render` assumes a bound context —
+            # which `NodeList` has no counterpart for. What differs here is the
+            # plan, so the name says the plan; borrowing `_render` would import a
+            # correspondence that does not hold.
+            #
+            # The fallback is `self.render(context)`, the line immediately above
+            # the region and upstream's own, so a body the descent declined — or
+            # every nodelist the descent never looked at — is a *lost
+            # optimisation* and never a different string. That is the same
+            # contract the `Template` region above states, and the second of the
+            # two places it has to hold.
+            (
+                (1208, 1249),
+                None,
+                "def _render_with_plan(self, context):\n"
+                "plan = self._native_plan\n"
+                "if plan is not None:\n"
+                "return _native.render_plan(plan, context)\n"
+                "return self.render(context)",
             ),
             # M19's slot, and the only line in this class that is not upstream's.
             # `FilterExpression` declares `__slots__`, so a per-expression cache
@@ -1182,7 +1283,7 @@ DECLARED = {
             # here; it is not this region's, and widening this branch would not
             # reach it.
             (
-                (1220, 1268),
+                (1280, 1328),
                 None,
                 "if context.autoescape and type(value) is str:\n"
                 "escaped = _native.html_escape(value)\n"
@@ -1531,6 +1632,42 @@ DECLARED = {
                 (1, 2),
                 None,
                 "# TRANSCRIBED: django/template/loader_tags.py (Django 6.0.9)",
+            ),
+            # M19 step 5's, and the first rows in this file — which until now was
+            # pin-plus-marker, like `defaulttags.py` and for its reason: the
+            # module's tag bodies stay verbatim because Rust compiles the names
+            # out of it.
+            #
+            # **Two lines of upstream's, rewritten, and none of the file's shape
+            # moves.** That is the whole of the difference, and it is stated as
+            # one because this module is where the suite's block semantics live
+            # (`test_extends.py`, `test_partials.py`, `recursive_templates/`), so
+            # a change to its *shape* would be a change to the instrument that
+            # reads it: the seven spans in `COMPARED_PATH` are byte-identical
+            # before and after this slice, and the file is 372 lines on both
+            # sides. The rows came from `gen_impl_transcription.py`'s `TRANSFORMS`
+            # table, which is what keeps that true — the file is still generated,
+            # not hand-written, and the two keys are upstream's exact text, so a
+            # pin bump that rewords either one fails that generator loudly rather
+            # than silently un-patching the seam.
+            #
+            # **What they call, and why the call is here while the code is not.**
+            # `_render_with_plan` is `base.py`'s (declared there, with the arm's
+            # own region), because `NodeList.render` — the method this replaces —
+            # is on the compared path and the guard's clause (4) refuses a region
+            # inside it. `BlockNode.render` is not, and it is the frame a block
+            # body funnels through: these are its only two renders of a body, the
+            # no-block-context arm and the override arm. `super()` rides the
+            # second, because it re-enters through `self.render`.
+            (
+                (58, 58),
+                (56, 56),
+                "result = self.nodelist._render_with_plan(context)",
+            ),
+            (
+                (68, 68),
+                (66, 66),
+                "result = block.nodelist._render_with_plan(context)",
             ),
         ],
     ),
