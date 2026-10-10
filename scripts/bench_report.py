@@ -6,39 +6,40 @@ run — every (workload, mode, engine) measurement, its output hash, its iterati
 count and its spread.
 
 **Charts, not decoration.** The corpus spans two and a half orders of magnitude
-(0.4 us to 17 ms) within a single family, so a linear axis would draw three of the
-four engines as invisible slivers and the fourth as a wall — a chart that lies by
+(0.4 us to 17 ms) within a single family, so a linear axis would draw two of the
+three engines as invisible slivers and the third as a wall — a chart that lies by
 omission. The x-axis is therefore logarithmic and *says so on the axis*, every bar
 carries its value as a direct label, and the full table is on the same page. A log
 axis without those three is an argument rather than a measurement, and dropping
 any one of them would make this worse than the table alone.
 
-**Four engines is four categorical hues, in a fixed order, never cycled.** The
+**Three engines is three categorical hues, in a fixed order, never cycled.** The
 order is the same in every chart and in every legend, so `rust` is the same colour
 wherever the reader looks; a panel that repainted its series would make the reader
-re-learn it per panel. The palette is the dataviz reference instance's first four
-categorical slots, validated in both modes (adjacent-pair CVD deltaE 9.1 light /
-8.4 dark, normal-vision deltaE 22.9 / 19.8). Two light steps sit below 3:1 against
+re-learn it per panel. The palette is the dataviz reference instance's first three
+categorical slots — minijinja's slot is retired, not reassigned, so no surviving
+series changed colour — validated in both modes (adjacent-pair CVD deltaE 9.2 light
+/ 9.4 dark, normal-vision deltaE 27.6 / 26.5). One light step sits below 3:1 against
 the surface, which obliges *relief* — visible labels or a table view — and this
 report ships both rather than picking.
 
 **Every caveat is printed where its number is.** A row that excludes engines names
 them and says why, on the row; a row whose engines disagree says so, on the row; the
-Context and minijinja caveats sit under the table they qualify, not in a footnote.
-A reader who scrolls to the middle of this page and reads one row has everything
-that row needs.
+Context caveat sits under the table it qualifies, not in a footnote. A reader who
+scrolls to the middle of this page and reads one row has everything that row needs.
 """
 
 from __future__ import annotations
 
 import html
 import math
+import re
 
-# The reference palette's first four categorical slots. Dark is the same four hues
+# The reference palette's first three categorical slots. Dark is the same three hues
 # re-stepped for the dark surface, not a flip of the light ones — which is why both
 # columns were validated separately rather than derived from each other.
-SERIES_LIGHT = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100")
-SERIES_DARK = ("#3987e5", "#d95926", "#199e70", "#c98500")
+SERIES_LIGHT = ("#2a78d6", "#eb6834", "#1baf7a")
+SERIES_DARK = ("#3987e5", "#d95926", "#199e70")
 
 BAR = 13.0  # bar height
 BAR_GAP = 3.0  # surface gap between the bars of one group
@@ -111,8 +112,13 @@ def _group(records: list[dict]) -> dict:
 
 
 def _ran_shared(group: dict) -> bool:
-    """Whether every workload in this group was run by all four engines."""
-    return all(len(per) == 4 for per in group.values())
+    """Whether every workload in this group was run by the whole engine set.
+
+    The engine count is read off the palette, which has exactly one hue per engine
+    and is not allowed to cycle: a fourth engine arriving without a fourth hue is a
+    chart that repaints a series, so the two must move together.
+    """
+    return all(len(per) == len(SERIES_LIGHT) for per in group.values())
 
 
 def _ticks(lo: float, hi: float) -> list[float]:
@@ -285,7 +291,7 @@ def _heroes(grouped: dict, modes: list[str], shared: set) -> str:
     out.append(
         _tile(
             f"{agree}/{total}",
-            "four-engine rows that byte-agree",
+            "three-engine rows that byte-agree",
             "the shared corpus is the measured syntax intersection, not a preference",
         )
     )
@@ -330,7 +336,7 @@ def _table(grouped: dict, engines: list[str], families: dict) -> str:
             # non-empty one found is the row's note.
             note = next((r["note"] for r in per_engine.values() if r["note"]), "")
             if not note:
-                note = '<span class="na">in the four-engine intersection</span>'
+                note = '<span class="na">in the three-engine intersection</span>'
             rows.append(
                 f'<tr><td class="wk">{html.escape(workload)}</td>'
                 f'<td class="r">{note}</td>{"".join(cells)}</tr>'
@@ -427,11 +433,13 @@ def render(payload: dict) -> str:
         f'<span class="swkey s{i}"></span><span class="skl">{html.escape(e)}</span>'
         for i, e in enumerate(engines)
     )
-    page = _PAGE
-    for slot, values in (("light", SERIES_LIGHT), ("dark", SERIES_DARK)):
-        for i, value in enumerate(values):
-            page = page.replace(f"@{slot}{i}@", value)
     replacements = {
+        "@LIGHT_VARS@": _series_vars(SERIES_LIGHT),
+        "@DARK_VARS@": _series_vars(SERIES_DARK),
+        "@SERIES_RULES@": "\n".join(
+            f".s{i} {{ fill: var(--s{i}); background: var(--s{i}); }}"
+            for i in range(len(SERIES_LIGHT))
+        ),
         "@@LEGEND@@": legend,
         "@@HEROES@@": _heroes(grouped, modes, shared),
         "@@PANELS@@": "".join(panels),
@@ -441,9 +449,28 @@ def render(payload: dict) -> str:
         "@@ENGINES@@": html.escape(", ".join(engines)),
         "@@COMMAND@@": html.escape(payload.get("command", "")),
     }
+    page = _PAGE
     for marker, value in replacements.items():
         page = page.replace(marker, value)
+    # **A placeholder with no replacement is invisible in a browser and is not
+    # invisible here.** The palette and the `--sN` declarations used to be spelled
+    # out by hand in the template, so shrinking the palette from four hues to three
+    # left a literal `@light3@` in the CSS — a value no browser reports and no diff
+    # of the *generated* file makes obvious, since the generated file is not the one
+    # anyone reads. Both are generated from the palette now, and this refuses
+    # anything left over rather than shipping it.
+    leftover = sorted(set(re.findall(r"@[@A-Za-z0-9_]*@", page)))
+    if leftover:
+        raise AssertionError(
+            f"the report template still contains {leftover} — a placeholder whose "
+            f"replacement list shrank renders as literal text on the page"
+        )
     return page
+
+
+def _series_vars(values: tuple) -> str:
+    """The `--sN` custom-property declarations for one mode's palette."""
+    return " ".join(f"--s{i}: {v};" for i, v in enumerate(values))
 
 
 _PAGE = """<!doctype html>
@@ -457,7 +484,7 @@ _PAGE = """<!doctype html>
   --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #82807a;
   --border: #dedcd5; --grid: #e7e5de;
   --status-good: #1a7f4b; --status-bad: #b3261e;
-  --s0: @light0@; --s1: @light1@; --s2: @light2@; --s3: @light3@;
+  @LIGHT_VARS@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -466,7 +493,7 @@ _PAGE = """<!doctype html>
     --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8f8e85;
     --border: #34342f; --grid: #2d2d2a;
     --status-good: #4fbf82; --status-bad: #f2857c;
-    --s0: @dark0@; --s1: @dark1@; --s2: @dark2@; --s3: @dark3@;
+    @DARK_VARS@
   }
 }
 :root[data-theme="dark"] {
@@ -475,7 +502,7 @@ _PAGE = """<!doctype html>
   --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8f8e85;
   --border: #34342f; --grid: #2d2d2a;
   --status-good: #4fbf82; --status-bad: #f2857c;
-  --s0: @dark0@; --s1: @dark1@; --s2: @dark2@; --s3: @dark3@;
+  @DARK_VARS@
 }
 * { box-sizing: border-box; }
 body { margin: 0; padding: 26px 18px 72px; background: var(--surface-0);
@@ -508,10 +535,7 @@ button.mode { font: inherit; font-size: 13px; padding: 5px 14px; border-radius: 
   color: var(--text-primary); cursor: pointer; }
 button.mode[aria-pressed="true"] { background: var(--text-primary);
   color: var(--surface-1); border-color: var(--text-primary); }
-.s0 { fill: var(--s0); background: var(--s0); }
-.s1 { fill: var(--s1); background: var(--s1); }
-.s2 { fill: var(--s2); background: var(--s2); }
-.s3 { fill: var(--s3); background: var(--s3); }
+@SERIES_RULES@
 .panel { background: var(--surface-1); border: 1px solid var(--border);
   border-radius: 10px; padding: 15px 18px 6px; margin: 14px 0; overflow-x: auto; }
 svg.chart { width: 100%; min-width: 1160px; height: auto; display: block; }
@@ -562,8 +586,8 @@ pre.cmd { background: var(--surface-2); border: 1px solid var(--border);
 </style></head><body><main>
 <header>
   <h1>Template engine benchmark</h1>
-  <p>The same templates rendered by four engines: stock Django&rsquo;s DTL, this
-  package&rsquo;s Rust engine, Jinja2, and minijinja. Engines in this run:
+  <p>The same templates rendered by three engines: stock Django&rsquo;s DTL, this
+  package&rsquo;s Rust engine, and Jinja2. Engines in this run:
   <b>@@ENGINES@@</b>. Rows marked <span class="ok">&equiv;</span> produced
   byte-identical output; every row hashes what it rendered, and a disagreement is
   printed rather than averaged into a timing.</p>
@@ -593,14 +617,13 @@ means the bytes matched the <code>django</code> control, &ne; that they did not,
 <h2>How this was measured</h2>
 <dl class="env">@@ENVIRONMENT@@</dl>
 <p class="cap">Modes: <b>render</b> times a template that is already compiled;
-<b>parse</b> includes the compile, through <code>from_string</code> on all four
-engines so that none of them is served from a cache the others do not have. Two
-asymmetries are inside these numbers and are named here rather than left for a
-reader to find: minijinja&rsquo;s binding exposes no compiled-template handle, so a
-minijinja render carries one name-table lookup that the other three do not; and the
-Django-side engines are handed a <code>Context</code> built once per row rather than
-once per call, which is what the milestone table this supersedes measured &mdash; a
-view that builds one per request pays about the same again on both of them.</p>
+<b>parse</b> includes the compile, through <code>from_string</code> on all three
+engines so that none of them is served from a cache the others do not have. One
+asymmetry is inside these numbers and is named here rather than left for a
+reader to find: the Django-side engines are handed a <code>Context</code> built
+once per row rather than once per call, which is what the milestone table this
+supersedes measured &mdash; a view that builds one per request pays about the same
+again on both of them.</p>
 <pre class="cmd">@@COMMAND@@</pre>
 <div id="tip" role="tooltip"></div>
 <script>

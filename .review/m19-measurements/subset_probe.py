@@ -1,16 +1,31 @@
 #!/usr/bin/env python
-"""Which constructs all four engines render byte for byte.
+"""Which constructs every engine in the benchmark renders byte for byte.
 
-`bench_corpus.py` says the four-engine corpus is an *intersection*, and that the
+`bench_corpus.py` says the shared corpus is an *intersection*, and that the
 intersection was measured one construct at a time rather than assumed. This is
 that measurement, and it is the licence for every exclusion the corpus makes: a
-row that is not shared is not shared because of one of the five findings below,
-each of which is printed with the bytes that produce it.
+row that is not shared is not shared because of one of the findings below, each of
+which is printed with the bytes that produce it.
+
+**It runs `bench_engines.ENGINES` and not a list of its own**, so removing an
+engine from the benchmark removes it here and the findings are re-measured over
+the set that remains rather than inherited from a run over a set that no longer
+exists. The four-engine run is what the corpus's docstring first recorded;
+minijinja's removal (Pete, 2026-10-09) changed every row that had named it — seven
+of the twenty-one. Five of those still differ and now name Jinja2 alone; two
+(`less-than`, `solidus`) became shared, taking the corpus from 10 of 21 to 12 of 21
+and the exclusions from 11 to 9.
 
 The method is deliberately the dumbest one that answers the question: render the
-same source string through all four engines and compare the bytes. No
+same source string through every engine and compare the bytes. No
 normalisation, no "semantically equal" — the corpus's claim is byte equality, so
 byte equality is what is tested.
+
+Two rows of the transcript are **not byte-reproducible**, and a re-run that diffs
+against it should expect them: jinja2 renders a bound method for
+`{{ data.items }}`, whose repr carries a heap address (`0x10bd2e340` in the
+recorded run). Everything else matches, so the recorded file is the output of
+this script and a two-line diff is a pass.
 
 Run:  .venv/bin/python -I .review/m19-measurements/subset_probe.py
 """
@@ -67,10 +82,12 @@ shared, excluded = [], []
 for label, source, data in CASES:
     out = {}
     for name in bench_engines.ENGINES:
-        # The build is inside the `try` on purpose: minijinja refuses a source it
-        # cannot parse at `add_template` time, which is *construction*, not
-        # render — so a probe that only guards the render reports a crash for a
-        # construct that is simply outside that engine's grammar.
+        # The build is inside the `try` on purpose: an engine may refuse a source
+        # it cannot parse at build/construction time rather than at render, and a
+        # probe that only guards the render reports a crash for a construct that is
+        # simply outside that engine's grammar. (minijinja, which the benchmark used
+        # to carry, was the clearest case: it raised `TemplateError` from
+        # `add_template` and never saw the render at all.)
         try:
             engine = bench_engines.build(name, {"page.html": source}, {})
         except Exception as exc:
@@ -88,12 +105,13 @@ for label, source, data in CASES:
     control = out["django"]
     agree = [n for n in bench_engines.ENGINES if out[n] == control]
     differs = [n for n in bench_engines.ENGINES if n != "django" and out[n] != control]
-    verdict = "all four agree" if not differs else "differs: " + ", ".join(differs)
+    verdict = "all agree" if not differs else "differs: " + ", ".join(differs)
     print("%-28s %-34s %s" % (label, repr(control)[:34], verdict))
     for name in differs:
         print("%-28s   %-32s %s" % ("", name, repr(out[name])[:70]))
     (shared if not differs else excluded).append((label, differs, out))
 
 print()
-print("shared with all four: %d of %d" % (len(shared), len(CASES)))
-print("excluded            : %d" % len(excluded))
+print("engines: %d  (%s)" % (len(bench_engines.ENGINES), ", ".join(bench_engines.ENGINES)))
+print("shared with all of them: %d of %d" % (len(shared), len(CASES)))
+print("excluded               : %d" % len(excluded))

@@ -1,21 +1,21 @@
 #!/usr/bin/env python
-"""The project's public evidence: four engines, one corpus, one table, one report.
+"""The project's public evidence: three engines, one corpus, one table, one report.
 
     source scripts/env.sh
     maturin develop --release                       # or every number is about the wrong file
     .venv/bin/python -I scripts/bench.py            # table
     .venv/bin/python -I scripts/bench.py --html docs/bench.html
 
-**Four engines, and the control is one of them.** `django` is stock Django's DTL
+**Three engines, and the control is one of them.** `django` is stock Django's DTL
 and every ratio in the report is taken against it; `rust` is this package;
-`jinja2` and `minijinja` are the two comparisons Pete asked for, wired as Django
-backends so all four answer one call shape. `scripts/bench_engines.py` owns that
-wiring and the reason it lives in an out-of-venv directory.
+`jinja2` is the comparison Pete asked for, wired as a Django backend so all three
+answer one call shape. `scripts/bench_engines.py` owns that wiring and the reason
+it lives in an out-of-venv directory.
 
 **The corpus is two families, and the split is measured, not chosen.**
 `scripts/bench_corpus.py` carries the argument in full; in one line, the
-`micro` and `real-world` rows are the four-engine *syntax intersection* and are
-asserted to hash identically on all four, while `django-only` holds the
+`micro` and `real-world` rows are the three-engine *syntax intersection* and are
+asserted to hash identically on all three, while `django-only` holds the
 constructs the intersection excludes — filter arguments, the i18n library,
 `forloop.*`, `{% empty %}` — and runs the two engines that have them. Every row
 prints which engines ran it and why the others did not, because a row that
@@ -23,7 +23,7 @@ silently drops an engine is a row whose column a reader will fill in from the
 row above it.
 
 **Two modes per row.** `parse` compiles the template and renders it, through
-`from_string` on all four engines — the compile a cold request pays. `render` is
+`from_string` on all three engines — the compile a cold request pays. `render` is
 the same template compiled once and rendered repeatedly, which is the hot path
 with the parse removed. Both are reported for every row rather than one being
 chosen for the reader, since which one matters depends on whether the reader is
@@ -35,15 +35,15 @@ the first version of this column not a comparison at all.
 compared against the control's. `rust` differing from `django` anywhere is a hard
 failure and exits non-zero: byte-identical output is the drop-in criterion this
 package exists to meet, and a timing table whose two sides render different bytes
-is not a comparison. `jinja2` and `minijinja` differing is not a failure — they
-are different template languages — but it is printed, per row, and the report
-lists the rows where the corpus is *not* a byte-for-byte intersection.
+is not a comparison. `jinja2` differing is not a failure — it is a different
+template language — but it is printed, per row, and the report lists the rows
+where the corpus is *not* a byte-for-byte intersection.
 
 **What is measured.** `perf_counter` around a tight inner loop; the reported
 figure is the **best** per-call time in microseconds, with the worst beside it so
 a noisy run is visible rather than hidden. The iteration count is calibrated once
 per (row, mode) on the **control** and used for every engine on that row, so all
-four are timed over the same number of calls: calibrating per engine hands a
+three are timed over the same number of calls: calibrating per engine hands a
 faster engine a larger N and therefore a tighter best-of-N, which is a bias no
 column would have shown. The count is printed, because 4 iterations and 40000
 iterations are different measurements of the same thing.
@@ -196,21 +196,22 @@ def measure(
     calls ``from_string(source)`` every iteration — and *not*
     ``get_template(name)``, which was the first version and was not a comparison at
     all: Django's ``Engine.get_template`` returns a lazily-compiled ``Template``
-    that re-parses on each render, while Jinja2's ``Environment.get_template`` and
-    my minijinja construction both serve an **already-compiled** template out of a
-    cache. Measured on `micro/text`, that made Jinja2's parse cost 0.7 us more than
+    that re-parses on each render, while Jinja2's ``Environment.get_template``
+    serves an **already-compiled** template out of a cache (as did minijinja's
+    environment, the fourth engine this benchmark used to carry). Measured on
+    `micro/text`, that made Jinja2's parse cost 0.7 us more than
     its render where Django's cost 2.4 us more — the column was reading *cache
     lookup* against *re-parse*, and printing it beside "ours/stock" invited exactly
     the wrong conclusion.
 
-    ``from_string`` is unambiguous on all four: it compiles a fresh template on
-    every engine, it is what the historical `large/parse` row measured, and Jinja2's
-    and minijinja's caches are not consulted by it. ``{% extends %}`` and
+    ``from_string`` is unambiguous on all three: it compiles a fresh template on
+    every engine, it is what the historical `large/parse` row measured, and
+    Jinja2's cache is not consulted by it. ``{% extends %}`` and
     ``{% include %}`` still resolve, because the engine's loader is what serves
-    them and all four engines are constructed with the row's whole template set.
+    them and all three engines are constructed with the row's whole template set.
 
     **`pin_iters` is how a row stays a comparison.** `run` calibrates on the
-    control and passes the count here for every engine on the row, so all four are
+    control and passes the count here for every engine on the row, so all three are
     timed over the same number of calls and a faster engine's best-of-N is not
     quietly taken over a larger sample. It is `None` only when the control is not in
     this run, which `run` refuses to let happen silently.
@@ -490,8 +491,8 @@ def print_table(records: list[dict], verdicts: dict, engines: list[str]) -> None
     print("out: '=' output identical to the django control, 'x' not, '-' engine absent,")
     print("     ' ' engine did not run this row. ours/stock = rust best / django best.")
     print("iters: calls per timed sample, calibrated once per row on the *control*")
-    print("     and used for every engine on that row, so all four are timed over")
-    print("     the same number of calls to about --target seconds each.")
+    print("     and used for every engine on that row, so all engines are timed")
+    print("     over the same number of calls to about --target seconds each.")
 
 
 def refusals(records: list[dict], verdicts: dict) -> list[str]:
@@ -523,7 +524,7 @@ def disagreement_detail(records: list[dict], verdicts: dict) -> list[str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Four engines, one corpus: stock Django, this package, Jinja2, minijinja.",
+        description="Three engines, one corpus: stock Django, this package, Jinja2.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--engines", default=",".join(bench_engines.ENGINES))
@@ -578,7 +579,7 @@ def main() -> int:
     verdicts = equality(records)
 
     # The engine each column claims to be, checked against the class that built it:
-    # a table is a claim about four engines, so which engine produced a column is the
+    # a table is a claim about three engines, so which engine produced a column is the
     # one thing that must never be inferred from the numbers.
     for rec in records:
         if rec["identity"] != bench_engines.IDENTITY[rec["engine"]]:
@@ -593,7 +594,7 @@ def main() -> int:
     detail = disagreement_detail(records, verdicts)
     if detail:
         print("\nwhere the corpus is not a byte-for-byte intersection (informational —")
-        print("Jinja2 and minijinja are different template languages, not other builds):")
+        print("Jinja2 is a different template language, not another build):")
         print("\n".join(detail))
 
     if args.count:

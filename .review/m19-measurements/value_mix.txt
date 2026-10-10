@@ -1,0 +1,29 @@
+workload               family      vars  by exact type (count)
+------------------------------------------------------------------------------------------------
+micro/text             micro          0  
+micro/variable         micro          1  str 1   [str escaping changed bytes 0/1]
+micro/lookup           micro          1  str 1   [str escaping changed bytes 0/1]
+micro/loop-text        micro          0  
+micro/loop-var         micro         50  str 50   [str escaping changed bytes 0/50]
+micro/if               micro          0  
+micro/filter           micro          1  str 1   [str escaping changed bytes 0/1]
+micro/escape           micro          1  str 1   [str escaping changed bytes 1/1]
+micro/include          micro          2  int 1, str 1   [str escaping changed bytes 0/1]
+micro/extends          micro          1  str 1   [str escaping changed bytes 0/1]
+real-world/normal      real-world    205  int 2, str 203   [str escaping changed bytes 50/203]
+real-world/complex     real-world    239  int 73, str 166   [str escaping changed bytes 72/166]
+real-world/large       real-world    330  int 60, str 270   [str escaping changed bytes 0/270]
+django-only/filter-arg django-only    100  SafeString 50, str 50   [str escaping changed bytes 0/50]
+django-only/i18n       django-only    101  int 100, lazy.<locals>.__proxy__ 1
+django-only/for-tags   django-only    150  SafeString 50, int 50, str 50   [str escaping changed bytes 0/50]
+django-only/escape-table django-only      3  str 3   [str escaping changed bytes 3/3]
+django-only/realistic  django-only    202  SafeString 50, int 100, lazy.<locals>.__proxy__ 2, str 50   [str escaping changed bytes 0/50]
+
+family    by exact type, summed over its rows
+------------------------------------------------------------------------------------------------
+micro     total   57   non-str    1 (2%)   str   56   escaping changed 1/56
+          int 1, str 56
+real-world total  774   non-str  135 (17%)   str  639   escaping changed 122/639
+          int 135, str 639
+django-only total  556   non-str  403 (72%)   str  153   escaping changed 3/153
+          SafeString 150, int 250, lazy.<locals>.__proxy__ 3, str 153

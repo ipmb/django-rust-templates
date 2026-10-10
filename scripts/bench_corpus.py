@@ -2,79 +2,92 @@
 """The templates the benchmark renders, and why each row is in the corpus it is in.
 
 Two syntax families, and **the split is a measurement**. Before any of this was
-written, one construct at a time was rendered through all four engines to ask
-which of them agree byte for byte (`.review/m19-measurements/subset_probe.py`,
-whose transcript is beside it). Five things came back, and every one of them
-prices a row out of the four-engine corpus or reshapes it:
+written, one construct at a time was rendered through every engine in the
+benchmark to ask which of them agree byte for byte
+(`.review/m19-measurements/subset_probe.py`, whose transcript is beside it). Five
+things came back, and every one of them prices a row out of the shared corpus or
+reshapes it:
 
-1. **Escaping differs three ways.** Django writes `&#x27;` for an apostrophe and
-   `&quot;` for a quote; Jinja2 (through markupsafe) writes `&#39;` and `&#34;`;
-   and minijinja escapes the solidus as well (`</b>` -> `&lt;&#x2f;b&gt;`). So a
-   shared row may not put `/`, `'` or `"` in an *escaped* value. `escape` is still
-   exercised — `&`, `<` and `>` agree, and the corpus data carries those — but a
-   row built to show the *table* is a Django-only row, and it is not hidden: the
-   report prints the three tables side by side.
+1. **Escaping differs two ways.** Django writes `&#x27;` for an apostrophe and
+   `&quot;` for a quote; Jinja2 (through markupsafe) writes `&#39;` and `&#34;`.
+   So a shared row may not put `'` or `"` in an *escaped* value. `escape` is still
+   exercised — `&`, `<`, `>` and `/` agree — but a row built to show the *table* is
+   a Django-only row. This was three ways while minijinja was in the benchmark: it
+   was the only one of the four that escaped the solidus, so `a</b>` was a
+   divergence too. It is now an agreement, and the shared corpus takes advantage of
+   that — `micro/escape` renders a closing tag, which asserts on every run that
+   Django and Jinja2 both leave the solidus alone.
 2. **A dict key named `items` resolves to the method in Jinja2.** Jinja2 tries
    attribute before item, so `{{ row.items }}` calls `dict.items` and raises.
    Django tries item before attribute and returns the value. `keys`, `values`,
    `get`, `copy`, `count` and `update` are the same trap, so the corpus data
    avoids all of them — the nested-loop key is `parts`, not `items`.
-3. **`{% empty %}` and `{% else %}` are two spellings of one idea, and the split
-   is one-against-two rather than one-against-one.** Django refuses
-   `{% for … %}{% else %}` and accepts `{% empty %}`; Jinja2 and minijinja both do
-   the opposite. The first version of this list said "each one engine's spelling
-   … neither engine knows the other's", which reads as one engine each and is
-   wrong by a count.
+3. **`{% empty %}` and `{% else %}` are two spellings of one idea.** Django
+   refuses `{% for … %}{% else %}` and accepts `{% empty %}`; Jinja2 does the
+   opposite. The first version of this list said "each one engine's spelling …
+   neither engine knows the other's", which read as a draw and was wrong by a
+   count; it was then corrected to "one against two", which was right while
+   minijinja — the second `{% else %}` engine — was in the benchmark. With
+   minijinja gone it is one against one, and the exclusion is Jinja2's alone.
 4. **Filter arguments have different syntax** — `floatformat:2` against
-   `floatformat(2)` — so *any* filter with an argument is a one-family row. This
-   is why `django-only` is a family and not an afterthought. It is weaker than it
-   looks in one direction: `floatformat(2)` is not merely unsupported in Jinja2,
-   it is a *parse* error (`expected token 'end of print statement'`), so the row
-   is not "the same construct spelled differently" but "a construct two engines
-   have no grammar for".
-5. **A chained lookup through an undefined name raises in Jinja2 *and*
-   minijinja** (`{{ nope.deeper }}` → `UndefinedError`, `TemplateError`), and
-   Django returns `''`. This list first said "fine in Django and Jinja2 and an
-   error in minijinja", which is wrong about Jinja2 — its default `Undefined`
-   raises on an attribute of an undefined, so the exclusion is two engines wide.
-   Every shared row therefore supplies its data; the parse-bound row that renders
-   `{{ section0.field0 }}` against an empty context is a *Django-only* row, which
-   is where it belongs anyway.
+   `floatformat(2)` — so *any* filter with an argument is a Jinja2-excluded row.
+   This is why `django-only` is a family and not an afterthought. It is weaker
+   than it looks in one direction: `floatformat(2)` is not merely unsupported in
+   Jinja2, it is a *parse* error (`expected token 'end of print statement'`), so
+   the row is not "the same construct spelled differently" but "a construct one
+   engine has no grammar for".
+5. **A chained lookup through an undefined name raises in Jinja2** —
+   `{{ nope.deeper }}` → `UndefinedError` — where Django returns `''`. This list
+   has been wrong about the width of this exclusion twice: it first said "fine in
+   Django and Jinja2 and an error in minijinja", which was wrong about Jinja2
+   (its default `Undefined` raises on an attribute of an undefined), and was then
+   corrected to "two engines wide", which was right about the four-engine set and
+   is now one engine wide. Every shared row therefore supplies its data; the
+   parse-bound row that renders `{{ section0.field0 }}` against an empty context
+   is a *Django-only* row, which is where it belongs anyway.
 
-The probe's own output is `.review/m19-measurements/subset_probe.txt`: 20 cases,
-10 shared, 10 excluded, and each exclusion printing the bytes that produce it.
+The probe's own output is `.review/m19-measurements/subset_probe.txt`, and it is
+re-run whenever the engine set changes — the findings above are a measurement of
+the engine set in the benchmark now, not a memory of the first one. It prints each
+case's bytes on every engine, and it is where the two escape spellings are readable
+side by side: the corpus's escape-table row is Django-only and never had a Jinja2
+column, so the Jinja2 spelling of `'` and `"` lives in the transcript and in that
+row's note rather than in a column of it.
+
 Its first run was wrong in a way worth recording, because the failure mode is
 this file's whole subject: it called `handle.render(context)` directly instead of
 `engine.render(handle, context)`, and every minijinja row came back
-`AttributeError: '_Inline' object has no attribute 'render'` — which reads as
-"minijinja differs on everything" rather than as a probe that cannot drive one of
-its four engines. A probe whose four arms are not all known to work is a probe
-that will report an exclusion for the wrong reason.
+`AttributeError: '_Inline' object has no attribute 'render'` — which read as
+"minijinja differs on everything" rather than as a probe that could not drive one
+of its engines. A probe whose arms are not all known to work is a probe that
+will report an exclusion for the wrong reason.
 
 The shared family is therefore the intersection, and every one of its rows is
-expected to hash identically on all four engines — which `bench.py` asserts
+expected to hash identically on all three engines — which `bench.py` asserts
 rather than assumes. The `django-only` family is where the constructs that make
 Django templates Django templates live, and it runs two engines because two is
 the number that can render it.
 
 **The data is part of the claim.** Every escaped value in the shared corpus was
-chosen to avoid the three divergent characters, so "the four agree" is a fact
-about the corpus and not a fact about the engines. `django-only/escape-table`
-exists to show the difference rather than to hide it.
+chosen to avoid the characters Django and Jinja2 spell differently, so "the three
+agree" is a fact about the corpus and not a fact about the engines.
+`django-only/escape-table` exists to show the difference rather than to hide it.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-SHARED = ("django", "rust", "jinja2", "minijinja")
+SHARED = ("django", "rust", "jinja2")
 DJANGO_ONLY = ("django", "rust")
 
 # --- data --------------------------------------------------------------------------
 # Ints and strings only. No floats: ``1.5`` renders as ``1.5`` on the Python side
 # and minijinja's ``f64`` Display is not the same algorithm, so a float is a
 # formatting difference dressed as a timing difference. Money arrives as a string
-# for the same reason, which is also how a real template gets it.
+# for the same reason, which is also how a real template gets it. (The float ban
+# outlived its reason: minijinja is gone, and the corpus keeps the rule rather than
+# churn every row's bytes for a float nobody asked for.)
 
 _TITLES = ("Monthly report", "Quarterly review", "Annual summary", "Incident log")
 _OWNERS = ("Ada", "Grace", "Linus", "Barbara", "Ken", "Margaret")
@@ -106,10 +119,14 @@ def _rows(count: int) -> list[dict]:
 ROWS = _rows(50)
 
 _TITLE = "Monthly report"
-# No `</b>`: the solidus is the one character minijinja escapes and the other three
-# do not, so a closing tag would put this row outside the intersection it belongs
-# to. `django-only/escape-table` is where that difference is shown.
-_HTML = "Acme & Sons <b>bold"
+# The closing tag is deliberate and it is new. While minijinja was in the
+# benchmark the solidus was the one character *it* escaped and the others did not,
+# so a `</b>` here would have put the row outside the intersection it belongs to.
+# With minijinja gone the constraint inverted: Django and Jinja2 both leave the
+# solidus alone, and rendering one asserts that agreement on every run instead of
+# leaving it to a note. `django-only/escape-table` still shows the two spellings
+# for `'` and `"`, which is the divergence that survives.
+_HTML = "Acme & Sons <b>bold</b>"
 
 ROW = {"name": "Widget press", "value": 12}
 NESTED = {"meta": {"label": "deep"}}
@@ -193,16 +210,17 @@ COMPLEX = (
 LINE = "<tr><td>{{ line.sku|upper }}</td><td>{{ line.note }}</td><td>{{ line.qty }}</td></tr>"
 
 
-def large_template(load_i18n: bool) -> str:
+def large_template() -> str:
     """A ~9 KB page with no loop: the parse-bound row.
 
     Alternating `{{ section.N }}` and `{% if %}`/`{% for %}` so the node count is
-    dominated by variables and control tags rather than text. Both families share
-    the shape; the Django-only copy keeps the unused `{% load i18n %}` it has
-    always had, since that tag is the reason it cannot run on the other two.
+    dominated by variables and control tags rather than text. There is no
+    `{% load i18n %}`: this row is in the shared family and Jinja2 has no such
+    library. The `load_i18n` parameter this used to take had one call site, and it
+    passed `False` — a dead branch in a corpus whose whole argument is that a row
+    is where it is for a reason, so it is gone.
     """
-    parts = ["{% load i18n %}"] if load_i18n else []
-    parts.append("<article>")
+    parts = ["<article>"]
     for i in range(20):
         parts.append(f'<section id="s{i}">')
         for j in range(10):
@@ -421,7 +439,7 @@ def workloads() -> list[Workload]:
             "real-world/large",
             "real-world",
             "a 9 KB page with no loop: the parse-bound row",
-            _one(large_template(load_i18n=False)),
+            _one(large_template()),
             "page.html",
             LARGE_DATA,
         ),
@@ -435,7 +453,7 @@ def workloads() -> list[Workload]:
             {"rows": ROWS},
             engines=DJANGO_ONLY,
             needs_i18n=True,
-            note="Jinja2 and minijinja spell a filter argument floatformat(2), not floatformat:2",
+            note="Jinja2 spells a filter argument floatformat(2), not floatformat:2",
         ),
         W(
             "django-only/i18n",
@@ -446,7 +464,7 @@ def workloads() -> list[Workload]:
             {"rows": ROWS},
             engines=DJANGO_ONLY,
             needs_i18n=True,
-            note="neither other engine has the i18n tag library",
+            note="Jinja2 has no i18n tag library at all",
         ),
         W(
             "django-only/for-tags",
@@ -456,17 +474,17 @@ def workloads() -> list[Workload]:
             "page.html",
             {"rows": ROWS},
             engines=DJANGO_ONLY,
-            note="loop metadata is forloop.* in DTL and loop.* in the other two; {% empty %} has no counterpart",
+            note="loop metadata is forloop.* in DTL and loop.* in Jinja2; {% empty %} has no counterpart there",
         ),
         W(
             "django-only/escape-table",
             "django-only",
-            "the three escape tables, side by side",
+            "the escape tables, side by side",
             _one(D_ESCAPE_TABLE),
             "page.html",
             {"apos": "it's", "quot": 'say "hi"', "solidus": "a</b>"},
             engines=DJANGO_ONLY,
-            note="Django &#x27; &quot; and no solidus rule; Jinja2 &#39; &#34;; minijinja escapes the solidus too",
+            note="Django writes &#x27; and &quot;; Jinja2 writes &#39; and &#34;; both leave the solidus alone",
         ),
         W(
             "django-only/realistic",
@@ -486,8 +504,8 @@ FAMILIES = ("micro", "real-world", "django-only")
 
 FAMILY_SUMMARY = {
     "micro": "one construct per row, so a regression names itself",
-    "real-world": "whole pages, rendered by all four engines",
-    "django-only": "the constructs outside the four-engine intersection, rendered by the two engines that have them",
+    "real-world": "whole pages, rendered by all three engines",
+    "django-only": "the constructs outside the three-engine intersection, rendered by the two engines that have them",
 }
 
 

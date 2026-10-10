@@ -1,10 +1,9 @@
 #!/usr/bin/env python
-"""The four engines this benchmark compares, behind one three-method interface.
+"""The three engines this benchmark compares, behind one three-method interface.
 
     django      stock Django's DTL, the control every ratio is taken against
     rust        this package's engine
     jinja2      Jinja2, through Django's *own* ``Jinja2`` backend class
-    minijinja   minijinja, through an equivalent backend written here
 
 The interface is deliberately tiny — ``get``/``from_string``/``render`` — so that
 the harness in ``bench.py`` never learns which engine it is driving and cannot
@@ -18,24 +17,28 @@ is how a benchmark ends up measuring a stricter environment than a user would
 ever run. It is driven from a ``DictLoader`` through ``OPTIONS['loader']``, which
 is the documented hook for a non-filesystem loader.
 
-**minijinja has no such class, so one is written here** and it is written to
-mirror ``Jinja2``'s shape rather than to be convenient: ``BaseEngine`` subclass,
-a ``Template`` wrapper, ``auto_escape_callback`` for the autoescape that the
-binding leaves off by default. It lives in ``scripts/`` and not in the package
-on purpose — it is benchmark scaffolding, and ``python/django_rust_templates/``
-is the thing being shipped.
+**minijinja was the fourth engine and is gone.** It was wired through a backend
+written here to mirror ``Jinja2``'s shape. The benchmark is now the two
+comparisons that matter for this package — the engine it replaces, and the one
+it is most often weighed against — and the removal is recorded rather than
+silent, because a reader comparing against an earlier report will see a column
+disappear. Two things it cost, both now carried in the corpus instead of hidden:
+minijinja was the only one of the four that escaped the solidus, and its
+``{% else %}`` was a second arm on the `for`-loop split. Every exclusion the
+corpus still makes is re-measured over the three that remain
+(`.review/m19-measurements/subset_probe.py`).
 
-**Why these two are installed outside the venv.** ``scripts/env.sh`` and
+**Why Jinja2 is installed outside the venv.** ``scripts/env.sh`` and
 ``requirements-dev.txt`` both record the reason: ``requirements-dev.txt``
 deliberately omits jinja2 because five ``template_tests`` rows skip when it is
 absent, and ``scripts/assert_suite_outcome.py`` pins *exactly* those six skips by
 identity. Three of the six are ``Jinja2TemplateReloadTests``, which skip because
 ``import jinja2`` fails. Install jinja2 into ``.venv`` and the acceptance run
 ends ``OK (skipped=3)`` and the project's own gate goes red — the benchmark would
-have broken the criterion it exists to measure against. So they go in
-``.bench-deps`` (gitignored) and are put on ``sys.path`` by this module, and
-``missing_engines`` below reports which ones are absent instead of quietly
-running three engines.
+have broken the criterion it exists to measure against. So it goes in
+``.bench-deps`` (gitignored) and is put on ``sys.path`` by this module, and
+``missing_engines`` below reports what is absent instead of quietly printing a
+two-engine table.
 """
 
 from __future__ import annotations
@@ -50,26 +53,25 @@ BENCH_DEPS = PROJECT_ROOT / ".bench-deps"
 # who has to reconstruct it from the traceback is a reader who will instead run
 # the three-engine table and believe it.
 INSTALL_HINT = (
-    f"python -m pip install --target {BENCH_DEPS.name} jinja2 minijinja   "
+    f"python -m pip install --target {BENCH_DEPS.name} jinja2   "
     f"(from {PROJECT_ROOT})"
 )
 
-ENGINES = ("django", "rust", "jinja2", "minijinja")
+ENGINES = ("django", "rust", "jinja2")
 CONTROL = "django"
 
 # The class that must have built each engine, checked before a table is printed.
-# A table is a claim about four engines, so which engine produced a column is the
+# A table is a claim about three engines, so which engine produced a column is the
 # one thing that must never be inferred from the numbers.
 IDENTITY = {
     "django": "django.template.engine.Engine",
     "rust": "django_rust_templates.engine.engine.Engine",
     "jinja2": "django.template.backends.jinja2.Jinja2",
-    "minijinja": "django_rust_templates_bench.MiniJinja",
 }
 
 
 def _bench_deps_available() -> bool:
-    return (BENCH_DEPS / "jinja2").is_dir() and (BENCH_DEPS / "minijinja").is_dir()
+    return (BENCH_DEPS / "jinja2").is_dir()
 
 
 if _bench_deps_available():
@@ -81,19 +83,15 @@ if _bench_deps_available():
 
 
 def missing_engines() -> list[str]:
-    """Which of the four cannot be built here, so the caller can say so."""
+    """Which of the three cannot be built here, so the caller can say so."""
     out = []
     if not _bench_deps_available():
-        out.extend(["jinja2", "minijinja"])
+        out.append("jinja2")
         return out
     try:
         import jinja2  # noqa: F401
     except ImportError:
         out.append("jinja2")
-    try:
-        import minijinja  # noqa: F401
-    except ImportError:
-        out.append("minijinja")
     return out
 
 
@@ -194,72 +192,6 @@ class Jinja2Engine:
         pass
 
 
-# --- minijinja, through the equivalent backend written here ---------------------
-
-
-class _Inline:
-    """A `from_string` handle for minijinja, which has no template object."""
-
-    __slots__ = ("source",)
-
-    def __init__(self, source):
-        self.source = source
-
-
-class MiniJinjaEngine:
-    """minijinja behind the same interface as Django's ``Jinja2`` backend.
-
-    **The binding exposes no template handle.** ``minijinja.Environment`` has
-    ``add_template`` / ``render_template(name, **ctx)`` / ``render_str``, and no
-    ``get_template``; the compiled template is not reachable from Python. So
-    ``get`` returns the *name* and ``render`` looks it up again — and a
-    *pre-compiled* render on this engine therefore carries one name-table lookup
-    that the other three do not. It is small and it is not zero, so ``bench.py``
-    prints it in the row's note rather than leaving a reader to discover it. The
-    parse is not repeated: minijinja caches the compiled template in the
-    environment, which is what ``add_template`` populated.
-    """
-
-    def __init__(self, templates):
-        import minijinja
-
-        self.name = "minijinja"
-        self.control = False
-        self._env = minijinja.Environment(
-            loader=lambda name: self._sources[name],
-            # The binding leaves autoescape off; Django's Jinja2 backend turns it
-            # on. Matching the backend this is compared against is the point.
-            auto_escape_callback=lambda _name: True,
-        )
-        self._sources = dict(templates)
-        for name, source in self._sources.items():
-            self._env.add_template(name, source)
-
-    @property
-    def identity(self):
-        return "django_rust_templates_bench.MiniJinja"
-
-    def get(self, name):
-        return name
-
-    def from_string(self, source):
-        # Not `add_template`: it would key every inline source on one name and
-        # raise on the second call. `render_str` compiles and renders in one
-        # crossing, which is what a `from_string` caller gets on this engine.
-        return _Inline(source)
-
-    def context(self, data):
-        return data
-
-    def render(self, handle, context):
-        if isinstance(handle, _Inline):
-            return self._env.render_str(handle.source, **context)
-        return self._env.render_template(handle, **context)
-
-    def close(self):
-        pass
-
-
 # --- construction ----------------------------------------------------------------
 
 
@@ -291,6 +223,4 @@ def build(name: str, templates: dict, libraries: dict) -> object:
         )
     if name == "jinja2":
         return Jinja2Engine(templates)
-    if name == "minijinja":
-        return MiniJinjaEngine(templates)
     raise ValueError(f"unknown engine {name!r}")

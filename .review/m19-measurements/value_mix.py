@@ -5,7 +5,8 @@ The M19 review's BLOCKING 3: §2 prices the str fast path on the cheapest value
 type, and "the fraction of unfiltered non-str variables in your corpus is
 unmeasured and it swings the per-variable estimate by 17x". BLOCKING 2's sibling
 worry is the same shape — a shared row hashes identically with autoescape off if
-nothing in it escapes, so "the four engines agree" would say nothing.
+nothing in it escapes, so "the four engines agree" (the review's words, written
+while the benchmark carried four; it carries three now) would say nothing.
 
 Both are answered by one instrument: wrap `render_value_in_context` while each
 corpus workload renders, and tally (exact type of the value, whether escaping
