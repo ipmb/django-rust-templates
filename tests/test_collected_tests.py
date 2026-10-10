@@ -620,8 +620,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # rows are: the argument reaching the walk (`applied == [("floatformat", 1)]`,
 # `crossed == []`); the *number* reaching the body as a number, asserted on
 # `floatformat:2.5` versus `floatformat:"2.5"` because `mark_safe(2)` would
-# stringify and the two must not agree; and a loop row, because the same fix is
-# what lets `{% for %}` seal.
+# stringify and the two must not agree, and on `add:2` versus `add:"2"` with
+# `x="a"` (`"a" + 2` is a `TypeError`, `"a" + "2"` is a string) because that one
+# separates int from str inside the *body* rather than by a cast, so a later
+# coercion of the argument would leave it discriminating; and a loop row, because
+# the same fix is what lets `{% for %}` seal.
 # Measured the other way, as this ledger's rule asks: `git diff -U0 tests/` adds
 # **3** `def test_` lines and removes none, no module gains a row but this one
 # (`test_collected_tests.py`'s own pin moves with it, which is this paragraph),

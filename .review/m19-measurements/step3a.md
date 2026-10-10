@@ -476,14 +476,35 @@ agreeing with it.
 fix moved it from 1.39× to 1.10×; it did not make it a win, and the commit message
 says so.  Its remaining 44.7 µs at render (485.8 ours against 441.1 stock, on the
 four-run means) is ~0.9 µs per loop iteration, where each iteration applies one
-filtered expression, and the census reads 4 interior
-host crossings per application because `floatformat`'s body is Python.  **That the
-residual is those crossings is a plausible reading and not a measurement** — the
-decomposition of it is not taken here, and the next decision that would rest on it
-owes its own instrument.
+filtered expression, and the census reads 4 interior host crossings per
+application because `floatformat`'s body is Python.
+
+**That residual is now measured, and it is the third meter's first finding on its
+own.**  `.review/m19-measurements/floatformat_crossings.py` reads the meter per
+application over a matrix of inputs, and `floatformat` crosses **4** times
+whatever it is handed — float, int, str, `Decimal`, zero — and **4 with the
+argument absent**, so the four are the body's own round-trips and neither the
+input nor the argument path.  They are the four host calls the body makes, and
+the count reconciles with the source rather than being read off it:
+`decimal_parse` (`crates/template-core/src/filters/floatformat.rs:460`),
+`decimal_quantize` (`:498`), `number_format` (`:435`) and `mark_safe` (`:441`).
+For contrast `upper` reads **0** (a Rust table over a `Value::Str`) and
+`lower`/`escape`/`add` read **1** — the meter doing exactly what §0 built it for,
+on a real row, one commit after it landed.
+
+**And the count is not flat across argument *shapes*, which is the new arm's own
+reading.**  `floatformat:"2"` reads **5**: the extra crossing is `to_int`, because
+a quoted argument is `mark_safe`d into a `SafeString` and `int_of` cannot answer a
+`Value::Safe` in Rust where it answers a `Value::Int` for free
+(`crates/template-py/src/filters.rs:367-374`).  So the bare-number arm is
+**cheaper than the quoted spelling of the same argument** — the literal keeps the
+`int`, and `int()` stays in Rust.  The next question for this row is therefore the
+four crossings themselves, not the routing, which is now correct.
 
 The gate that keeps the fix fixed, in two places: the route table above (a
 regression flips those rows back to `delegated`, which is how the hole was found)
 and three unit rows in `tests/test_interposition.py` — the argument reaching the
 walk, the number reaching the body *as a number* (`floatformat:2.5` vs
-`floatformat:"2.5"`, which must not agree), and the loop sealing.
+`floatformat:"2.5"` and `add:2` vs `add:"2"` with `x="a"`, the second separating
+int from str inside the *body* rather than by a cast so that a later coercion of
+the argument would leave it discriminating), and the loop sealing.

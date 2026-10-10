@@ -1701,25 +1701,40 @@ class FilterRoutingTests(unittest.TestCase):
 
         The plausible wrong fix is to take the constant arm's `mark_safe`, and
         that arm is not merely redundant here: `mark_safe(2)` does not wrap a
-        non-string, it *stringifies* — `SafeString(2)` is `"2"`. `floatformat`
-        tells the two apart (`int(2.5)` is `2`, `int("2.5")` raises `ValueError`
-        and returns the input unchanged), so the row is the same template with
-        the argument written three ways and Django's own three answers.
+        non-string, it *stringifies* — `SafeString(2)` is `"2"`. Two filters
+        tell the two apart, and they fail differently on purpose:
+
+          * `floatformat` **casts**: `int(2.5)` is 2 and `int("2.5")` raises
+            `ValueError`, so the argument written three ways gives Django's three
+            answers;
+          * `add` raises a **`TypeError` inside the body**: with `x="a"`,
+            `int("a")` fails either way and the two disagree only because
+            `"a" + 2` is a `TypeError` and `"a" + "2"` is a string.
+
+        The second is the sharper of the two — a later "helpful" coercion of the
+        argument on the way in would silence the first and leave this one still
+        discriminating.
         """
         from django_rust_templates.engine import Engine
 
         cases = [
-            ("2.5", "1.23", "a number: `int(2.5)` is 2"),
-            ('"2.5"', "1.2345", "a quoted constant: `floatformat` takes its "
-                                "`int()` failure path"),
+            ("{{ x|floatformat:2.5 }}", {"x": 1.2345}, "1.23",
+             "a number: `int(2.5)` is 2"),
+            ('{{ x|floatformat:"2.5" }}', {"x": 1.2345}, "1.2345",
+             "a quoted constant: `floatformat` takes its `int()` failure path"),
+            ("{{ x|add:2 }}", {"x": "a"}, "",
+             'a number: `"a" + 2` is a `TypeError`, which `add` answers `""`'),
+            ('{{ x|add:"2" }}', {"x": "a"}, "a2",
+             'a quoted constant: `"a" + "2"` is a string'),
         ]
-        for argument, expected, why in cases:
-            with self.subTest(argument=argument):
+        for template, context, expected, why in cases:
+            with self.subTest(template=template):
+                name = template.split("|")[1].split(":")[0]
                 rendered, crossed, applied, _ = self._render_with_both_meters(
-                    Engine(), "{{ x|floatformat:" + argument + " }}", {"x": 1.2345}
+                    Engine(), template, context
                 )
                 self.assertEqual(rendered, expected, why)
-                self.assertEqual(applied, [("floatformat", 1)])
+                self.assertEqual(applied, [(name, 1)])
                 self.assertEqual(crossed, [])
 
     def test_a_number_argument_lets_the_loop_seal(self):

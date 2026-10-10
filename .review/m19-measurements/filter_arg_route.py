@@ -8,7 +8,7 @@ the context per render.  **A third shape exists and it is not carried**: a bare
 number in the argument position matches `var_arg` — `var_chars` is `\\w\\.\\+-`
 (`base.py:714`), digits included — so Django stores `(True, Variable("2"))`, and
 `Variable.__init__` makes that a *literal*: `self.literal = int("2")` with
-`lookups` left `None` (`base.py:880-895`), which `resolve` returns directly
+`lookups` left `None` (`base.py:887-895`), which `resolve` returns directly
 (`value = self.literal`, `base.py:929-931`).  The comment that says why is
 `base.py:686-687`: *"Numbers are treated as variables for implementation reasons
 (so that they retain their type when passed to filters)"*.
