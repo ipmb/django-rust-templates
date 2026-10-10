@@ -160,7 +160,15 @@ def main() -> None:
                 engine.close()
             counts.append((sum(n for _, n in filters) or 0, xings))
         (bare_applied, bare_x), (quoted_applied, quoted_x) = counts
+        # Two asserts, two different jobs.  The first pins the *routing* — both
+        # spellings reached the walk, so the rows are comparable at all.  The
+        # second pins the *account*: that the surcharge is exactly one crossing,
+        # which is what the `to_int` explanation predicts.  Without it the delta
+        # would be printed and unchecked, and a body change that made it +2 or 0
+        # would print a different table and still exit 0 — a probe that records
+        # the account rather than one that defends it.
         assert bare_applied == quoted_applied == 1, (name, counts)
+        assert quoted_x - bare_x == 1, (name, counts)
         print(f"{name:16}  {bare_x:>6g}  {quoted_x:>8g}  {quoted_x - bare_x:>+7g}")
     print(
         "\nThe delta is +1 on every one: the quoted spelling pays a `to_int` the\n"

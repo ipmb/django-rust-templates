@@ -1,0 +1,48 @@
+# positive control for the delta assert, 2026-10-10
+# the same probe with `assert quoted_x - bare_x == 1` broken to `== 2`:
+# the assert fires with the real counts, so it is live and not vacuous.
+
+# positive control: the delta assert with the expectation broken to == 2
+
+iters=20, rust engine, render mode
+body xings: host crossings inside the body the walk applied
+
+case                                walked?   applied                  xings   per app
+----------------------------------------------------------------------------------------
+floatformat      (no argument)      walked    floatformat=1                4      4.00
+floatformat:2    (float)            walked    floatformat=1                4      4.00
+floatformat:2    (int)              walked    floatformat=1                4      4.00
+floatformat:2    (str)              walked    floatformat=1                4      4.00
+floatformat:2    (Decimal)          walked    floatformat=1                4      4.00
+floatformat:2    (zero)             walked    floatformat=1                4      4.00
+floatformat:-2   (negative arg)     walked    floatformat=1                4      4.00
+floatformat:n    (variable arg)     walked    floatformat=1                4      4.00
+floatformat:"2"  (quoted arg)       walked    floatformat=1                5      5.00
+floatformat:"2g" (suffix arg)       walked    floatformat=1                5      5.00
+upper           (Rust table)        walked    upper=1                      0      0.00
+lower           (Python body)       walked    lower=1                      1      1.00
+escape          (Python body)       walked    escape=1                     1      1.00
+add:2           (Python body)       walked    add=1                        1      1.00
+
+`floatformat` is 4 crossings whatever *value* it is handed and 4 with
+the argument absent, so the four are the body's own round-trips and not
+the input path.  They are the four host calls the body makes
+(`decimal_parse`, `decimal_quantize`, `number_format`, `mark_safe`).
+A *quoted* argument makes it 5: the extra one is `to_int`, which Rust
+answers for a bare number (`Value::Int`) and not for a `SafeString`.
+`upper` is 0 because Rust computes it; `lower`/`escape`/`add` are 1.
+
+
+=== the shape surcharge: a quoted argument against a bare number ===
+
+filter              bare    quoted    delta
+--------------------------------------------
+Traceback (most recent call last):
+  File "/Users/pete/projects/lincolnloop/django-rust-templates/.review/m19-measurements/_control_bad_delta.py", line 182, in <module>
+    main()
+    ~~~~^^
+  File "/Users/pete/projects/lincolnloop/django-rust-templates/.review/m19-measurements/_control_bad_delta.py", line 171, in main
+    assert quoted_x - bare_x == 2, (name, counts)
+           ^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ('floatformat', [(1.0, 4.0), (1.0, 5.0)])
+EXIT=1

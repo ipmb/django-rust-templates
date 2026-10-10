@@ -1,4 +1,4 @@
-# commit 384dde8 (main), artifact bc4c750a (release .so), 2026-10-10
+# commit 32a6c67 (main), artifact bc4c750a (release .so), 2026-10-10
 
 iters=20, rust engine, render mode
 body xings: host crossings inside the body the walk applied
@@ -45,3 +45,4 @@ The delta is +1 on every one: the quoted spelling pays a `to_int` the
 bare number does not.  Where `bare` is 0 the literal arm is the whole
 crossing — the body stays in Rust — and the quoted spelling is the only
 reason it does not.
+EXIT=0
