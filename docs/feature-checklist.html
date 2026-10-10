@@ -837,7 +837,7 @@
       <b>Repaired, and the repair pattern was already one function away.</b> The seam now
       <i>declines</i> instead of raising: <code>run_filter</code> answers
       <code>_native.CANNOT_HOLD</code>, a singleton, and the builtin arm at
-      <code>engine/base.py:862</code> reads it by identity and falls through to the
+      <code>engine/base.py:923</code> reads it by identity and falls through to the
       <code>else</code> branch that already existed for a name that is not a builtin — Django's
       own callable. <b>Not <code>None</code></b>, because <code>None</code> <i>is</i> a filter's
       answer (<code>default</code> returns its argument; <code>first</code>/<code>last</code>
