@@ -279,7 +279,7 @@
       Done means Rust performs the work; in progress and to do mean Django's own Python
       still does, and the suite passes either way.
     </p>
-    <p class="stamp">Measured <b>2026-10-09</b> from the tree, at Django <b>6.0.9</b>.</p>
+    <p class="stamp">Measured <b>2026-10-10</b> from the tree, at Django <b>6.0.9</b>.</p>
   </header>
 
   <div class="stats">
@@ -613,7 +613,7 @@
     </p>
     <p class="sub" style="margin-top:16px">
       <b>Speed is measured, and is not yet a win.</b> The port is checked against stock
-      Django 6.0.9 and Jinja2 on 18 workload/mode rows in three families — micro templates
+      Django 6.0.9 and Jinja2 on 18 workloads × 2 modes = 36 rows in three families — micro templates
       that isolate one construct each, three "real-world" whole pages of increasing
       complexity, and the constructs that fall outside the three engines' shared syntax.
       <code>scripts/bench.py --html</code> writes <code>docs/bench.html</code>: charts, a
@@ -622,12 +622,19 @@
       like rather than three different templates — and the harness prints the engine it
       built, the extension it loaded and which profile built it, refusing to print a table
       for any other engine. Measured 2026-10-09 local, the day the report stamps its run in
-      UTC (2026-10-10 02:47): the port is <b>1.45× slower at render and
-      1.43× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
-      run 1.35×–1.57×), and the worst row in the corpus is compile of a template with no
-      nodes in it at all — <b>3.80×</b>, 14.9 µs against stock's 3.9 µs. Compatibility has
+      UTC (2026-10-10 03:23): the port is <b>1.36× slower at render and
+      1.39× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
+      run 1.25×–1.47×), and the worst row in the corpus is compile of a template with no
+      nodes in it at all — <b>3.85×</b>, 14.9 µs against stock's 3.9 µs. Compatibility has
       been the priority throughout, and the measurement is published here rather than only
-      the number that would flatter it.
+      the number that would flatter it. <b>Every chart, tile and table block states which
+      way "better" runs</b>, and the word is read from the payload (<code>bench.py</code>'s
+      <code>MODE_METRIC</code>) rather than written into a caption, so a new chart cannot
+      inherit the wrong direction silently. The fastest-engine tile is scoped for the same
+      reason: counted over every row it used to read "django 19, jinja2 7", which reads as
+      <i>Django is faster</i>, while <b>Jinja2 wins every whole-page render</b> at
+      0.30×–0.41× stock's time. Both are true; <code>parse</code> is where they invert,
+      because Jinja2 compiles to Python source and Django does not.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>That figure holds only for an optimised build, and saying which build is now part
