@@ -1,0 +1,40 @@
+python:  3.14.4 on macOS-27.0.1-arm64-arm-64bit-Mach-O
+row:     {% for r in rows %}<tr><td>x</td></tr>{% endfor %}  (N=50, body is text only)
+best of 7 per point, calibrated to 0.05s
+
+== 0. the stripped loop renders the same bytes, before anything is timed ==
+   real '<tr><td>x</td></tr><tr><'
+   stripped '<tr><td>x</td></tr><tr><'
+   identical, and equal to ROW_TEXT * N
+
+== 1. the per-iteration primitives, us per iteration ==
+
+primitive                             us/iter
+----------------------------------------------
+6 loop_dict writes                     0.1115
+context[loopvar] = item                0.0607
+TextNode.render_annotated              0.0254
+list.append(render result)             0.0129
+''.join([...]) over 50                 0.0105
+
+== 2. the parts against the fitted slope ==
+
+quantity                               us/row
+----------------------------------------------
+sum of the five parts above            0.2190
+django: fitted b                       0.2210   (loop_decomposition.txt)
+rust: fitted b                         0.2220   (loop_decomposition.txt)
+
+   a sum above the row means a part is measured out of situ; a sum
+   below it means something in the iteration is not in the list
+
+== 3. the bound: ForNode.render vs the same loop with the writes hoisted ==
+
+ForNode.render, N=50 (us/render)       14.749
+stripped, N=50 (us/render)              9.519
+delta (us/render)                       5.230
+delta per iteration                    0.1046
+speedup on this row                     1.55x
+
+   this is a lower bound on the walk's loop win: it removes the dict
+   writes only, not the per-node Python frame the walk also removes

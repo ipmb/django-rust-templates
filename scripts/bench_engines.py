@@ -28,6 +28,21 @@ minijinja was the only one of the four that escaped the solidus, and its
 corpus still makes is re-measured over the three that remain
 (`.review/m19-measurements/subset_probe.py`).
 
+**Both Django-side engines get a *cached* loader, and that is the default's own
+shape.** ``Engine(loaders=None)`` — what every real project gets for not setting
+the key — builds the filesystem and app-directories loaders and wraps them in
+``cached.Loader``, so a partial is parsed once and afterwards only rendered. This
+module used to hand the two engines a bare ``locmem.Loader`` instead, which
+re-parses ``{% extends %}``'s parent and every ``{% include %}`` on **every
+render**; Jinja2 caches compiled templates by construction (its ``DictLoader``
+goes through the environment's template cache), so the corpus was making one
+side's work larger than the other's — the per-engine asymmetry the paragraph
+above says the harness cannot allow itself. Measured, it is not small: the
+``extends`` row goes 18.4 -> 9.7 us for stock and 30.5 -> 9.5 us for this package
+(``.review/m19-measurements/loader_cache_probe.py``). The nesting below is
+Django's own — ``[(cached.Loader, [(locmem.Loader, templates)])]`` — spelled with
+each engine's *own* loader classes, for the same reason the ``Context`` is.
+
 **Why Jinja2 is installed outside the venv.** ``scripts/env.sh`` and
 ``requirements-dev.txt`` both record the reason: ``requirements-dev.txt``
 deliberately omits jinja2 because five ``template_tests`` rows skip when it is
@@ -119,12 +134,21 @@ class DjangoEngine:
     render rather than a comparable run.
     """
 
-    def __init__(self, name, engine_cls, context_cls, loader_path, templates, libraries):
+    def __init__(
+        self,
+        name,
+        engine_cls,
+        context_cls,
+        loader_path,
+        cached_path,
+        templates,
+        libraries,
+    ):
         self.name = name
         self.control = name == CONTROL
         self._context_cls = context_cls
         self._engine = engine_cls(
-            loaders=[(loader_path, dict(templates))],
+            loaders=[(cached_path, [(loader_path, dict(templates))])],
             libraries=dict(libraries),
         )
 
@@ -206,6 +230,7 @@ def build(name: str, templates: dict, libraries: dict) -> object:
             Engine,
             Context,
             "django.template.loaders.locmem.Loader",
+            "django.template.loaders.cached.Loader",
             templates,
             libraries,
         )
@@ -218,6 +243,7 @@ def build(name: str, templates: dict, libraries: dict) -> object:
             Engine,
             Context,
             "django_rust_templates.engine.loaders.locmem.Loader",
+            "django_rust_templates.engine.loaders.cached.Loader",
             templates,
             libraries,
         )
