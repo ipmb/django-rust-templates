@@ -503,7 +503,7 @@ def workloads() -> list[Workload]:
 FAMILIES = ("micro", "real-world", "django-only")
 
 FAMILY_SUMMARY = {
-    "micro": "one construct per row, so a regression names itself",
+    "micro": "one construct per row, so a regression names itself. These are the smallest templates the engines can render, so their ratios are dominated by per-call overhead rather than by template work — read them as a regression detector, not as an engine verdict",
     "real-world": "whole pages, rendered by all three engines",
     "django-only": "the constructs outside the three-engine intersection, rendered by the two engines that have them",
 }

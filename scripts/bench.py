@@ -93,6 +93,28 @@ RENDER = "render"
 PARSE = "parse"
 MODES = (RENDER, PARSE)
 
+# What the number under each mode *is*, and which way is better. It lives in the
+# payload rather than in the report's prose because a chart that states its
+# direction in a hand-written caption is a chart whose direction can go stale
+# silently — and every chart in this report is currently "lower", so the failure
+# mode is not "a wrong direction" but "a new chart inherits the old one". A mode
+# added here without an entry is a `KeyError` at report time rather than a chart
+# with no direction on it.
+MODE_METRIC = {
+    RENDER: {
+        "unit": "microseconds per call",
+        "what": "render a template that is already compiled",
+        "better": "lower",
+        "why": "the same work costs fewer microseconds",
+    },
+    PARSE: {
+        "unit": "microseconds per call",
+        "what": "compile a template and render it, in one call",
+        "better": "lower",
+        "why": "the same work costs fewer microseconds",
+    },
+}
+
 
 # --- the extension identity --------------------------------------------------------
 
@@ -640,6 +662,10 @@ def build_payload(records, verdicts, engines, args) -> dict:
         ],
         "ran": engines,
         "modes": list(MODES),
+        # Per mode, what the number is and which way is better — read by the
+        # report's charts and table so each one states its direction, rather than
+        # carrying a caption someone wrote once (see `MODE_METRIC`).
+        "metrics": {mode: MODE_METRIC[mode] for mode in MODES},
         "families": {
             f: bench_corpus.FAMILY_SUMMARY[f] for f in bench_corpus.FAMILIES
         },

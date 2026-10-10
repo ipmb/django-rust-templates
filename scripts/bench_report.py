@@ -49,6 +49,15 @@ VALUE_COL = 124.0  # right margin for the direct labels
 TOP = 34.0  # legend band
 WIDTH = 1200.0
 
+# The byte-agreement tile's direction, and it is the one direction on this page that
+# is not a timing. `bench.py`'s `MODE_METRIC` cannot supply it: that table is keyed by
+# mode, and agreement is not measured in a mode — a row agrees or it does not, under
+# either. It is a named constant rather than a literal in the tile's f-string for the
+# same reason `MODE_METRIC` lives in the payload: a direction spelled out inside the
+# sentence it applies to is a direction that can be edited away from the number it
+# describes without anything failing.
+AGREEMENT_BETTER = "higher"
+
 
 # --- number formatting -------------------------------------------------------------
 
@@ -135,7 +144,9 @@ def _ticks(lo: float, hi: float) -> list[float]:
 # --- one chart ----------------------------------------------------------------------
 
 
-def _svg(path: str, group: dict, engines: list[str], present: list[str]) -> str:
+def _svg(
+    path: str, group: dict, engines: list[str], present: list[str], metric: dict
+) -> str:
     """A grouped horizontal bar chart: one bar per engine, one group per workload.
 
     `engines` is every engine in the run, in the run's order; `present` is the
@@ -148,7 +159,17 @@ def _svg(path: str, group: dict, engines: list[str], present: list[str]) -> str:
     being drawn as a row of italic "cannot render" text under every workload — ten
     identical placeholder lines draw the eye to the absence rather than to the
     measurements, and the absence is one fact about the panel, not one per row.
+
+    `metric` is the mode's entry from `bench.MODE_METRIC`, and it is what makes the
+    chart say **which direction is better** on its own face — in the axis label
+    inside the SVG and in the `aria-label`, not only in a caption beside it. That
+    matters here more than it looks: every chart in this report is currently
+    "lower is better", so a chart that states nothing reads as correct, and the way
+    a wrong one arrives is a future mode whose number is throughput. Reading it
+    from the payload rather than spelling it in this function means a new mode
+    cannot inherit the old direction without saying so.
     """
+    direction = f'{metric["better"]} is better'
     keys = list(group)
     height = TOP + len(keys) * (len(present) * (BAR + BAR_GAP) + GROUP_GAP) + 36
     values = [r["best_us"] for per in group.values() for r in per.values()]
@@ -163,7 +184,8 @@ def _svg(path: str, group: dict, engines: list[str], present: list[str]) -> str:
 
     out = [
         f'<svg class="chart" viewBox="0 0 {WIDTH:.0f} {height:.0f}" role="img" '
-        f'aria-label="microseconds per call, log scale, for {html.escape(path)}">',
+        f'aria-label="{html.escape(metric["unit"])}, log scale, for {html.escape(path)}; '
+        f'{html.escape(direction)}">',
         '<g class="legend">',
     ]
     lx = GUTTER
@@ -176,7 +198,8 @@ def _svg(path: str, group: dict, engines: list[str], present: list[str]) -> str:
         lx += 28 + len(engine) * 8.0
     out.append(
         f'<text x="{WIDTH - VALUE_COL + 8:.0f}" y="18" class="lg muted" '
-        f'text-anchor="end">x axis: microseconds per call, log scale</text></g>'
+        f'text-anchor="end">x axis: {html.escape(metric["unit"])}, log scale '
+        f"&middot; <tspan class=\"dir\">{html.escape(direction)}</tspan></text></g>"
     )
     for tick in _ticks(lo, hi):
         tx = x_of(tick)
@@ -237,16 +260,36 @@ def _svg(path: str, group: dict, engines: list[str], present: list[str]) -> str:
 # --- the parts of the page -----------------------------------------------------------
 
 
-def _tile(value: str, label: str, note: str) -> str:
+def _tile(value: str, label: str, note: str, direction: str = "") -> str:
+    """One hero tile.
+
+    `direction` is the payload's `better` for whatever this tile counts, and it is
+    an argument rather than a phrase written into `note` so that the badge is built
+    in exactly one place and the note stays plain escaped prose. The tiles need it
+    individually because they do not agree: the two ratio tiles and the
+    byte-agreement tile point opposite ways.
+    """
+    badge = (
+        f'<span class="dir">{html.escape(direction)} is better</span> '
+        if direction
+        else ""
+    )
     return (
         f'<div class="tile"><div class="tv">{html.escape(value)}</div>'
         f'<div class="tl">{html.escape(label)}</div>'
-        f'<div class="tn">{html.escape(note)}</div></div>'
+        f'<div class="tn">{badge}{html.escape(note)}</div></div>'
     )
 
 
-def _heroes(grouped: dict, modes: list[str], shared: set) -> str:
-    """The numbers that answer "how does ours compare", before any chart."""
+def _heroes(grouped: dict, modes: list[str], shared: set, metrics: dict) -> str:
+    """The numbers that answer "how does ours compare", before any chart.
+
+    Every tile says which way is better, in its own `note` and not only in the one
+    above it, because the tiles do not agree with each other: the ratio tiles and
+    the byte-agreement tile point opposite ways, and the fastest-engine tile is not
+    a ratio at all but a win count with a scope written into its own note. A reader
+    who reads one tile has no way to infer the next one's direction.
+    """
     out = []
     for mode in modes:
         ratios = [
@@ -261,26 +304,12 @@ def _heroes(grouped: dict, modes: list[str], shared: set) -> str:
                 _tile(
                     f"{_geomean(ratios):.2f}x",
                     f"ours vs stock Django — real-world / {mode}",
-                    f"geometric mean over {len(ratios)} pages; 1.00x is parity, "
+                    f"geometric mean over {len(ratios)} pages; 1.00x is parity and "
                     f"below it we win",
+                    metrics[mode]["better"],
                 )
             )
-    wins: dict[str, int] = {}
-    for path, by_workload in grouped.items():
-        if path[0] == "django-only":
-            continue
-        for per in by_workload.values():
-            best = min(per.values(), key=lambda r: r["best_us"])
-            wins[best["engine"]] = wins.get(best["engine"], 0) + 1
-    leader = min(wins, key=lambda e: (-wins[e], e)) if wins else "-"
-    out.append(
-        _tile(
-            leader,
-            "fastest engine most often",
-            "; ".join(f"{e} {wins[e]}" for e in sorted(wins, key=lambda e: -wins[e]))
-            + " rows",
-        )
-    )
+    out.append(_fastest_tile(grouped, metrics))
     agree = 0
     total = 0
     for path in shared:
@@ -292,24 +321,126 @@ def _heroes(grouped: dict, modes: list[str], shared: set) -> str:
         _tile(
             f"{agree}/{total}",
             "three-engine rows that byte-agree",
-            "the shared corpus is the measured syntax intersection, not a preference",
+            "every one of these rows is a row where three independent engines "
+            "produced the same bytes. The shared corpus is the measured syntax "
+            "intersection, not a preference",
+            AGREEMENT_BETTER,
         )
     )
     return "".join(out)
 
 
-def _table(grouped: dict, engines: list[str], families: dict) -> str:
-    head = "".join(
-        f"<th>{html.escape(e)}<br><span class=\"sub\">&micro;s per call</span></th>"
-        for e in engines
+def _winners(grouped: dict, family: str, mode: str) -> list:
+    """The per-engine records of every row in one (family, mode) that >=2 engines ran."""
+    out = []
+    for (fam, m), by_workload in grouped.items():
+        if fam != family or m != mode:
+            continue
+        for per in by_workload.values():
+            if len(per) >= 2:
+                out.append(per)
+    return out
+
+
+def _fastest_tile(grouped: dict, metrics: dict) -> str:
+    """Who is fastest — stated at the scope where the question has an answer.
+
+    **This tile used to count winners over every row, and that count was the
+    defect.** The rows are not exchangeable: `real-world` is 3 whole pages while
+    `micro` is 10 one-construct templates, and `parse` answers the opposite way to
+    `render`, because Jinja2 compiles to Python source and Django does not. Pooled,
+    the count reads "django 19, jinja2 7" — a headline that a reader takes as
+    "Django is faster", while Jinja2 wins **every whole-page render**, by 2.5x-3.3x.
+
+    Both sentences are true and only one of them is what a reader wants, so the
+    tile states the one that answers "which engine should I use to render a page",
+    and the note says what the pooled count is and why it says `django`. A number
+    that misleads is worse than a number that is absent, and the honest version of
+    this one is a *scope*, not a bigger sample.
+    """
+    page = _winners(grouped, "real-world", "render")
+    if not page:
+        return ""
+    wins: dict[str, int] = {}
+    for per in page:
+        best = min(per.values(), key=lambda r: r["best_us"])
+        wins[best["engine"]] = wins.get(best["engine"], 0) + 1
+    leader = min(wins, key=lambda e: (-wins[e], e))
+
+    # The ratio the leader actually wins by, against the control, when the leader is
+    # jinja2 and the control ran. Computed rather than asserted, and skipped rather
+    # than guessed if either is absent.
+    ratios = sorted(
+        per["jinja2"]["best_us"] / per["django"]["best_us"]
+        for per in page
+        if leader == "jinja2" and "jinja2" in per and "django" in per
     )
+    spread = (
+        f", at {ratios[0]:.2f}x-{ratios[-1]:.2f}x stock Django's own time"
+        if ratios
+        else ""
+    )
+
+    pooled: dict[str, int] = {}
+    pooled_rows = 0
+    for per in _winners(grouped, "micro", "render") + _winners(grouped, "micro", "parse") + page + _winners(grouped, "real-world", "parse"):
+        pooled_rows += 1
+        best = min(per.values(), key=lambda r: r["best_us"])
+        pooled[best["engine"]] = pooled.get(best["engine"], 0) + 1
+    pooled_leader = min(pooled, key=lambda e: (-pooled[e], e))
+
+    note = (
+        f"{leader} wins every one of these {len(page)} pages{spread}. Counting "
+        f"winners over the whole corpus instead reads “{pooled_leader} "
+        f"{pooled[pooled_leader]} of {pooled_rows}”: that pools in the `parse` "
+        f"rows, where the answer is the other way round, and the `micro` rows, which "
+        f"the family's own note explains."
+    )
+    return _tile(
+        f"{leader} {wins[leader]}/{len(page)}",
+        "fastest on whole-page renders — real-world / render",
+        note,
+        metrics["render"]["better"],
+    )
+
+
+def _table(grouped: dict, engines: list[str], families: dict, metrics: dict) -> str:
+    """Every measurement, one row per workload.
+
+    The direction goes in **two** places, because the table holds both modes at
+    once and they are not interchangeable. The engine column says the unit and the
+    direction, which is what a reader needs to read a single cell; the family banner
+    row says it again beside the mode name, because the mode is what picks the
+    metric and the banner is the only place the mode is written.
+
+    The column header is one per engine, not one per (engine, mode) — a row is one
+    workload under one mode, so the mode is already fixed by the banner, and a
+    per-mode column header would promise a layout the body does not have.
+    """
+    units = {metrics[m]["unit"] for m in metrics}
+    betters = {metrics[m]["better"] for m in metrics}
+    # Both modes are microseconds-per-call and both are lower-is-better today, so
+    # this collapses to one sentence. If a mode ever inverts, the header can no
+    # longer speak for the table and the banner does the work alone — saying so is
+    # cheaper than a header that is true of half the rows under it.
+    shared_sub = ""
+    if len(units) == 1 and len(betters) == 1:
+        unit = next(iter(units))
+        better = next(iter(betters))
+        shared_sub = (
+            f'<br><span class="sub">{html.escape(unit)}<br>'
+            f'<span class="dir">{html.escape(better)} is better</span></span>'
+        )
+    head = "".join(f"<th>{html.escape(e)}{shared_sub}</th>" for e in engines)
     order = {family: i for i, family in enumerate(families)}
     rows = []
     for family, mode in sorted(grouped, key=lambda k: (order.get(k[0], 99), k[1])):
         group = grouped[(family, mode)]
         rows.append(
             f'<tr class="fam"><td colspan="{3 + len(engines)}">{html.escape(family)}'
-            f" / {html.escape(mode)}</td></tr>"
+            f" / {html.escape(mode)}"
+            f'<span class="dirhead">'
+            f'{html.escape(metrics[mode]["better"])} is better</span></td></tr>'
         )
         for workload, per_engine in group.items():
             control = per_engine.get("django")
@@ -404,6 +535,7 @@ def render(payload: dict) -> str:
 
     panels = []
     for mode in modes:
+        metric = payload["metrics"][mode]
         for family in payload["families"]:
             path = (family, mode)
             if path not in grouped:
@@ -411,12 +543,32 @@ def render(payload: dict) -> str:
             group = grouped[path]
             here = [e for e in engines if any(e in per for per in group.values())]
             gone = [e for e in engines if e not in here]
-            caption = payload["families"][family].rstrip(".")
+            # The direction leads, and the axis inside the SVG repeats it, because
+            # the caption is what a reader skims and the axis is what they look at
+            # once they are reading the marks. `_svg`'s docstring has why the
+            # direction is in the payload instead of written here.
+            #
+            # The caption carries markup of its own now (`<span class="dir">`), so
+            # the interpolated parts are escaped one at a time rather than the whole
+            # string being passed through `html.escape` — which would emit the spans
+            # as text and is not a thing a reader would report as a bug.
+            # The direction is on the `<h3>` badge directly above this line, so the
+            # caption does not repeat the badge — it starts on what the number *is*.
+            # Said once beside the panel name, it is read while scanning; said twice
+            # in a row it reads as a stutter and stops being read at all.
+            caption = (
+                f'{html.escape(metric["what"])}'
+                f' &middot; {html.escape(payload["families"][family].rstrip("."))}'
+            )
             if gone:
                 caption += (
-                    f". {' and '.join(gone)} cannot render any row of this family; "
-                    f"the table says why, row by row"
+                    f". {html.escape(' and '.join(gone))} cannot render any row of "
+                    f"this family; the table says why, row by row"
                 )
+            caption += (
+                '. The <span class="tok">N.NN&times;</span> beside a bar is that row '
+                "against django, so below 1.00 is faster"
+            )
             # Every panel but the first mode's is hidden in the markup rather than
             # by script on load, so the page is correct with JavaScript off and the
             # button's pressed state and the visible panels always agree.
@@ -424,9 +576,11 @@ def render(payload: dict) -> str:
             panels.append(
                 f'<section class="panel{hidden}" data-mode="{html.escape(mode)}">'
                 f'<h3>{html.escape(family)}'
-                f'<span class="modehead">/ {html.escape(mode)}</span></h3>'
-                f'<p class="cap">{html.escape(caption)}</p>'
-                f"{_svg('/'.join(path), group, engines, here)}</section>"
+                f'<span class="modehead">/ {html.escape(mode)}</span>'
+                f'<span class="dirhead">'
+                f'{html.escape(metric["better"])} is better</span></h3>'
+                f'<p class="cap">{caption}</p>'
+                f"{_svg('/'.join(path), group, engines, here, metric)}</section>"
             )
 
     legend = "".join(
@@ -441,9 +595,9 @@ def render(payload: dict) -> str:
             for i in range(len(SERIES_LIGHT))
         ),
         "@@LEGEND@@": legend,
-        "@@HEROES@@": _heroes(grouped, modes, shared),
+        "@@HEROES@@": _heroes(grouped, modes, shared, payload["metrics"]),
         "@@PANELS@@": "".join(panels),
-        "@@TABLE@@": _table(grouped, engines, payload["families"]),
+        "@@TABLE@@": _table(grouped, engines, payload["families"], payload["metrics"]),
         "@@DISAGREEMENTS@@": _disagreements(payload),
         "@@ENVIRONMENT@@": _environment(payload),
         "@@ENGINES@@": html.escape(", ".join(engines)),
@@ -516,6 +670,22 @@ h3 { font-size: 14px; margin: 0 0 3px; font-weight: 650; }
 header p { color: var(--text-secondary); margin: 0; max-width: 78ch; }
 .sub, .cap, .tn { color: var(--text-secondary); font-size: 12.5px; }
 .cap { margin: 0 0 12px; }
+/* Direction badges: every chart, tile and table block names which way "better"
+   runs. They are a word rather than a colour or an arrow, so they survive a
+   colourblind reader, a printout and forced colors — and they have to be on each
+   one, because the three hero tiles do not agree with each other: the ratio tiles
+   and the byte-agreement tile point opposite ways.
+   `.tok` is the same pill for a token being named inside a sentence (the `N.NN×`
+   ratio notation) — it is *not* a direction, so it does not wear `.dir`. */
+.dir, .dirhead, .tok { display: inline-block; color: var(--text-secondary);
+  font-size: 11px; font-weight: 500; font-variant-numeric: normal;
+  white-space: nowrap; border: 1px solid var(--border);
+  background: var(--surface-2); border-radius: 999px; padding: 0 8px; }
+.modehead + .dirhead { margin-left: 8px; }
+.tbl th .dir { margin-top: 2px; }
+/* On the table's family banner the badge sits on `--surface-2` already, so it
+   takes the panel colour instead and stays visible as a pill. */
+.tbl tr.fam .dirhead { background: var(--surface-1); }
 .legend-inline { margin-left: auto; color: var(--text-secondary); font-size: 12.5px; }
 .swkey { display: inline-block; width: 10px; height: 10px; border-radius: 2.5px;
   margin: 0 5px 0 10px; }
