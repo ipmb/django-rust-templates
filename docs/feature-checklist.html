@@ -613,18 +613,21 @@
     </p>
     <p class="sub" style="margin-top:16px">
       <b>Speed is measured, and is not yet a win.</b> The port is checked against stock
-      Django 6.0.9 on four workloads — a pre-compiled 50-row i18n page, the same page parsed
-      and rendered, a generated ~200-node template, and a one-variable template — by running
-      <code>scripts/bench.py</code> under both engines and diffing the two transcripts. Each
-      side is named on the command line (<code>--side rust</code>, <code>--side stock</code>)
-      and the harness prints the engine it built — and the extension it loaded, and which
-      profile built it — and refuses to print a table for any other engine;
-      both sides then load the same two template sources and print a hash of every rendered
-      page, and those four hashes agree, so the comparison is like for like rather than two
-      different templates. Measured 2026-10-09, the port is <b>1.3× to 1.8× slower</b>
-      (1.34× pre-compiled render, 1.35× parse-and-render, 1.41× the node-heavy template,
-      1.82× the one-variable one) — the compatibility work has been the priority throughout,
-      and the measurement is published here rather than only the number that would flatter it.
+      Django 6.0.9 and Jinja2 on 18 workload/mode rows in three families — micro templates
+      that isolate one construct each, three "real-world" whole pages of increasing
+      complexity, and the constructs that fall outside the three engines' shared syntax.
+      <code>scripts/bench.py --html</code> writes <code>docs/bench.html</code>: charts, a
+      table, and the provenance for every row. Each row hashes the bytes each engine
+      rendered — <b>26 of 26 three-engine rows byte-agree</b>, so the comparison is like for
+      like rather than three different templates — and the harness prints the engine it
+      built, the extension it loaded and which profile built it, refusing to print a table
+      for any other engine. Measured 2026-10-09 local, the day the report stamps its run in
+      UTC (2026-10-10 02:47): the port is <b>1.45× slower at render and
+      1.43× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
+      run 1.35×–1.57×), and the worst row in the corpus is compile of a template with no
+      nodes in it at all — <b>3.80×</b>, 14.9 µs against stock's 3.9 µs. Compatibility has
+      been the priority throughout, and the measurement is published here rather than only
+      the number that would flatter it.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>That figure holds only for an optimised build, and saying which build is now part
@@ -637,7 +640,7 @@
       a while: the extension sitting in a working tree is whatever was last installed, so a
       stale or unoptimised one is invisible from the outside. <code>bench.py</code> now
       prints the extension it loaded and which build it is, beside the engine, and the
-      1.35×–1.85× above is the figure for the <code>--release</code> build.
+      real-world 1.35×–1.57× above is the figure for the <code>--release</code> build.
       <b>The gate now builds it rather than trusting it:</b> <code>scripts/check.sh</code> runs
       <code>maturin develop --release</code> before the Python suites, so the unit rows and the
       1547 exercise the source instead of whatever happened to be installed. A row pins that
