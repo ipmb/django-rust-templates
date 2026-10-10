@@ -1,87 +1,126 @@
-"""Django's template engine, reimplemented in Rust.
+"""Django's template engine, reimplemented in Rust, as an ordinary backend.
 
-Importing this package does not change anything. The engine is substituted for
-``django.template`` only when :func:`install` is called.
+**There is exactly one way to use this package, and it is a setting.** A project
+names the backend in its template configuration::
 
-**Calling :func:`install` is the whole of the activation story for an installed
-package, and this docstring used to say otherwise.** It read "…or when the
-``DJANGO_RUST_TEMPLATES`` environment variable is set", which is true of this
-repository and false of the wheel: the only reader of that variable is
-``scripts/shimpath/sitecustomize.py``, which lives in the source tree, is not
-shipped, and needs ``scripts/shimpath`` on ``PYTHONPATH``. A claim in a shipped
-docstring that the shipped artifact does not honour is worse than no claim — it
-is the reader's first instruction, and it fails silently. So, from an installed
-wheel, the single way in is to call :func:`install` from your *entry point* —
-``manage.py``, ``wsgi.py``, ``asgi.py`` — before Django is imported.
+    TEMPLATES = [
+        {
+            "BACKEND": "django_rust_templates.backends.RustTemplates",
+            "DIRS": [BASE_DIR / "templates"],
+            "APP_DIRS": True,
+            "OPTIONS": {"context_processors": [...]},
+        }
+    ]
 
-**Not from your settings module, and not from an ``AppConfig.ready()``.** Both
-were recommended here until they were measured against a real project, and both
-are too late by construction: ``django.setup()`` runs
-``from django.urls import set_script_prefix`` before it reads the settings
-module (the settings module is read on the ``configure_logging`` line that
-follows) and before it calls ``apps.populate`` (which is what invokes
-``ready()``), and ``django.urls`` imports every module under ``django.template``
-on the way in. :func:`install` refuses rather than silently accepting a
-half-substituted interpreter, so the failure is loud — but the instruction that
-produced it should not have been there.
+and nothing else. There is no import to perform, no finder to install, no
+``AppConfig.ready()`` hook and no environment variable: ``EngineHandler``
+resolves the string above with ``import_string``, which is the same route every
+other Django template backend takes. Importing this package by hand does
+nothing at all, which is why this module is four functions wide.
 
-Substitution is deliberately incremental: any module under
-``django.template`` that this package does not yet provide falls back to
-Django's own implementation, so the test suite can be run at every milestone and
-report real progress rather than an all-or-nothing result. :func:`unshimmed`
-reports what is still falling back; it is empty as of milestone M14.
+**This package has its own namespace and does not impersonate Django's.** It
+used to substitute itself for ``django.template`` on ``sys.meta_path``, and that
+machinery is gone: the engine lives at ``django_rust_templates.engine``, the
+backend at ``django_rust_templates.backends``, and no module of Django's is
+replaced, patched or shadowed at any point. The consequence worth stating is
+that a name reached across the boundary — ``engines``, ``TemplateDoesNotExist``,
+``django.template.loader`` — is *Django's* object and behaves exactly as it does
+for any other backend, because there is no second copy anywhere for it to be
+confused with.
 """
 
 from __future__ import annotations
 
-from . import _shim
+from . import _native
 
-__all__ = ("install", "installed", "uninstall", "unshimmed", "engine_version")
+__all__ = ("engine_version",)
+
+# The Django this engine is a *transcription* of — the version §4 pins and
+# ``django.lock`` records the SHA of, and the only one every gate in this project
+# has ever been run against.
+#
+# It is a tuple beside the code rather than a lookup into ``django.lock`` because
+# the two answer different questions: the lock pins the *checkout the suite runs*,
+# and this names the *behaviour the Rust engine reproduces*. An installed wheel has
+# no ``.django/`` and no lock file to read, so the claim has to travel with the
+# artifact or it does not exist. :func:`_require_django` is the reader;
+# ``tests/test_packaging_guard.py`` is the guard that the two cannot drift, and
+# ``scripts/check_packaging.sh`` checks it against a real venv.
+TRANSCRIBED_DJANGO = (6, 0, 9)
 
 
 def engine_version() -> str:
     """Version of the compiled Rust engine behind this package."""
-    from . import _native
-
     return _native.engine_version()
 
 
-def install(strict: bool = False, allow_django_mismatch: bool = False) -> None:
-    """Substitute this package's implementation for ``django.template``.
+def _require_django(allow_mismatch: bool = False) -> None:
+    """Refuse a Django this engine was not transcribed from.
 
-    Must be called once Django is importable and before ``django.template`` is
-    imported — in a Django project, from the entry point and ahead of
-    ``django.setup()``. See the module docstring for why the settings module is
-    too late. Raising a :class:`ShimError` is the intended outcome when called
-    after the fact; see ``_shim._stale_captures`` for what it detects.
+    Called from ``RustTemplates.__init__``, which is the one door into this
+    package, so every project that names the backend passes through here exactly
+    once — before its first template is loaded.
 
-    ``strict`` makes a subsequent :func:`unshimmed` non-empty result an error.
+    **Why a version check earns its keep, measured rather than argued.** The
+    engine reproduces one Django's template machinery, and every gate this
+    project owns — the acceptance suite, the differential harness, the meter —
+    runs against that one checkout, so none of them can speak about any other
+    Django. Before this function existed, two outcomes fell out of that gap and
+    both were measured on wheels installed into a clean venv:
 
-    ``allow_django_mismatch`` skips the check that the installed Django is the
-    one this engine was transcribed from. That check is on by default and
-    refuses anything outside ``6.0.x``; it exists because a mismatched Django can
-    otherwise install cleanly and pass every gate this project has, which is
-    exactly the failure the guard is for. Pass it only to *test* a transcription
-    against a Django it was not taken from.
+    * **Django 6.1.2** — the engine loaded, rendered a template, and said nothing
+      about the transcription and the running Django being different versions.
+      This is the direction that matters, because it is silent: it is the shape
+      this project keeps finding, a green result that means nothing.
+    * **Django 5.2.7** — import died with ``ImportError: cannot import name
+      'django_file_prefixes' from 'django.utils.deprecation'``, an error that
+      names Django for a problem that is ours.
+
+    **It raises ``ImproperlyConfigured``**, because that is the exception a
+    project already catches around a bad ``TEMPLATES`` entry, and the thing that
+    is wrong *is* the configuration: this backend and the installed Django do not
+    belong together. Every other misconfiguration in this file's neighbourhood —
+    an unknown ``OPTIONS`` key, ``APP_DIRS`` beside an explicit ``loaders`` —
+    arrives the same way, so a project needs no second handler.
+
+    **A missing Django is the third case and gets our own message**, because
+    ``pip install django-rust-templates`` with no Django beside it must not read
+    as a broken Django. It is exercised in ``scripts/check_packaging.sh``, where
+    the population is a real venv.
+
+    **The bound is major.minor, not the patch.** Any 6.0.x passes, which matches
+    the declared dependency ``Django>=6.0,<6.1``; treating a patch release as a
+    new engine would make the guard fire on routine security updates and train
+    the reader to reach for ``allow_mismatch``. The message still names 6.0.9,
+    because that is the version the behaviour was actually pinned against and
+    the one worth reporting.
     """
-    _shim.install(strict=strict, allow_django_mismatch=allow_django_mismatch)
+    from django.core.exceptions import ImproperlyConfigured
 
+    try:
+        import django
+    except ImportError as exc:  # pragma: no cover - covered end-to-end, see above
+        raise ImproperlyConfigured(
+            "django-rust-templates is a template backend for Django and needs "
+            "Django, which is not importable in this interpreter. Install it "
+            "(`pip install 'Django>=6.0,<6.1'`) before naming this backend in "
+            "TEMPLATES."
+        ) from exc
 
-def uninstall() -> None:
-    """Undo :func:`install`, restoring Django's own implementation."""
-    _shim.uninstall()
+    if allow_mismatch:
+        return
 
+    if django.VERSION[:2] == TRANSCRIBED_DJANGO[:2]:
+        return
 
-def installed() -> bool:
-    """Whether this package is currently substituted for ``django.template``."""
-    return _shim.installed()
-
-
-def unshimmed() -> list[str]:
-    """Modules of *the engine* under ``django.template`` still Django's own code.
-
-    Not every module under ``django.template``: the ones §3 declares are not the
-    engine — the backend contract, the loading facade, responses and the two
-    pieces of glue — are subtracted, because they will never be ours.
-    """
-    return _shim.unshimmed()
+    pin = ".".join(str(part) for part in TRANSCRIBED_DJANGO)
+    raise ImproperlyConfigured(
+        f"this engine is a transcription of Django {pin}, but Django "
+        f"{django.get_version()} is installed. The Rust engine reimplements "
+        f"Django's template machinery by reproducing one version's behaviour, "
+        f"and it is proven against that version only — run it against another "
+        f"and every check this project has would still report success. Install "
+        f"Django {TRANSCRIBED_DJANGO[0]}.{TRANSCRIBED_DJANGO[1]}.x, or set "
+        f"``allow_django_mismatch`` in this backend's OPTIONS if you mean to "
+        f"test a transcription against a Django it was not taken from."
+    )

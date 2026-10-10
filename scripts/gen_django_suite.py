@@ -95,6 +95,12 @@ TAGS = "django.templatetags"
 DJANGO_BACKEND = "django.template.backends.django.DjangoTemplates"
 OUR_BACKEND = "django_rust_templates.backends.RustTemplates"
 
+# The same two classes split into the module they live in and the name they are
+# bound to, for the one row that reaches the backend by *import* instead of by the
+# string a project writes in settings.
+BACKEND_MODULE, BACKEND_CLASS = DJANGO_BACKEND.rsplit(".", 1)
+OUR_BACKEND_MODULE, OUR_BACKEND_CLASS = OUR_BACKEND.rsplit(".", 1)
+
 # Where the engine's modules are on disk. This is the whole partition: a name is
 # ours exactly when there is a file here for it.
 ENGINE_DIR = ROOT / "python" / "django_rust_templates" / "engine"
@@ -172,7 +178,11 @@ def _alias(alias: ast.alias) -> str:
 
 
 def _spans(source: str):
-    """``(start, end, replacement)`` in absolute offsets, for every rewrite.
+    """``(edits, retarget)``: the rewrites in absolute offsets, and whether the
+    backend class was reached by import so that the caller can say so to
+    :func:`_verify`.
+
+    ``edits`` are ``(start, end, replacement)``.
 
     **A mixed statement is split, not skipped.** `syntax_tests/test_include.py:1`
     is `from django.template import Context, Engine, TemplateDoesNotExist,
@@ -191,8 +201,43 @@ def _spans(source: str):
     def at(lineno, column):
         return starts[lineno - 1] + column
 
+    # **The backend class is reachable by two spellings and only one of them is a
+    # string.** Everything above rewrites the ``BACKEND`` *literal* a
+    # ``TEMPLATES`` entry carries; ``test_partials.py`` instead does ``from
+    # django.template.backends.django import DjangoTemplates`` and calls it, and
+    # the string rule never sees that. Measured, before this branch existed:
+    # ``test_partials_use_cached_loader_when_configured`` built **Django's**
+    # backend — Django's ``Engine`` — because that is what the name it imported
+    # was bound to, while the ``loaders`` in the same ``OPTIONS`` dict *were*
+    # rewritten, because those are dotted strings. The row rendered through a
+    # hybrid that exists in no configuration at all and passed.
+    #
+    # **This rule cannot be derived from `ours()`, and that is the part worth
+    # recording.** `ours()` is `engine/<rest>.py exists`, and the backend is
+    # `django_rust_templates/backends.py` — outside `engine/`. The one component
+    # of this package that is not under `engine/` is invisible to a partition
+    # keyed on `engine/`, so it is spelled out here instead. A second such
+    # component would inherit the same blindness.
+    #
+    # Renaming the bound name is what the whole-statement rewrite buys: the call
+    # site is a bare `DjangoTemplates`, so it follows the import. It is safe here
+    # because the file that imports it is the only place in the suite the name
+    # occurs as code — asserted in `_verify`, which refuses the forms this rule
+    # does not know (the attribute spelling, and the name in a file that never
+    # imported it).
+    retarget = any(
+        isinstance(node, ast.ImportFrom)
+        and not node.level
+        and node.module == BACKEND_MODULE
+        and any(a.name == BACKEND_CLASS for a in node.names)
+        for node in ast.walk(tree)
+    )
+
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
+        if retarget and isinstance(node, ast.Name) and node.id == BACKEND_CLASS:
+            end = at(node.lineno, node.col_offset) + len(BACKEND_CLASS)
+            out.append((at(node.lineno, node.col_offset), end, OUR_BACKEND_CLASS))
+        elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             if node.level:
                 # A relative import. `from ..utils import setup` is relative to
@@ -211,6 +256,25 @@ def _spans(source: str):
                 if others:
                     lines.append("from django import " + ", ".join(map(_alias, others)))
                 out.append((at(node.lineno, node.col_offset), at(node.end_lineno, node.end_col_offset), "\n".join(lines)))
+                continue
+            if module == BACKEND_MODULE:
+                # The statement is *replaced*, not repointed: this package's
+                # backend is not Django's module under another name, it is a
+                # different module entirely, so there is no prefix to splice.
+                if [a.name for a in node.names] != [BACKEND_CLASS]:
+                    raise SystemExit(
+                        f"line {node.lineno} imports {module!r} expecting "
+                        f"{BACKEND_CLASS!r} alone; the whole statement is "
+                        f"replaced by this rule, so any other name would be "
+                        f"dropped: {[_alias(a) for a in node.names]}"
+                    )
+                out.append(
+                    (
+                        at(node.lineno, node.col_offset),
+                        at(node.end_lineno, node.end_col_offset),
+                        f"from {OUR_BACKEND_MODULE} import {OUR_BACKEND_CLASS}",
+                    )
+                )
                 continue
             if module == DJANGO:
                 own = [n for n in node.names if not _djangos(n.name)]
@@ -263,7 +327,7 @@ def _spans(source: str):
                 # puts the second name somewhere else on the line.
                 start = at(alias.lineno, alias.col_offset)
                 out.append((start, start + len("import ") + len(module), "import " + new))
-    return out
+    return out, retarget
 
 
 # A string literal naming a module this package owns. The dotted tail is
@@ -447,7 +511,7 @@ def rewrite(source: str, relative: pathlib.Path) -> str:
     derived from that string, so rewriting the string without writing the alias
     down would rename the engine out from under its own tests.
     """
-    edits = list(_spans(source))
+    edits, retarget = _spans(source)
     before = _import_targets(source)
     for match in STRING.finditer(source):
         path = match.group("path")
@@ -473,11 +537,11 @@ def rewrite(source: str, relative: pathlib.Path) -> str:
     for start, end, replacement in sorted(edits, reverse=True):
         source = source[:start] + replacement + source[end:]
 
-    _verify(source, before)
+    _verify(source, before, retarget)
     return source
 
 
-def _verify(result: str, before) -> None:
+def _verify(result: str, before, retarget: bool) -> None:
     """Assert the two halves described in `rewrite`, or raise."""
     try:
         tree = ast.parse(result)
@@ -497,10 +561,41 @@ def _verify(result: str, before) -> None:
         for module, _ in before
         if not _owned(module) and module != "django" and module.split(".")[0] != ENGINE
     }
+    # The backend module joins that short list for one file, because the rule
+    # above *replaces* its import rather than repointing it — the class this
+    # package ships is in a different module, so the name cannot follow the
+    # prefix the way `django.template.base` can. Subtracted only where the rule
+    # actually fired, so a file that reaches the class by a spelling the rule
+    # does not know still raises here instead of losing its import quietly.
+    if retarget:
+        kept.discard(BACKEND_MODULE)
+    elif BACKEND_MODULE in {module for module, _ in before}:
+        raise SystemExit(
+            f"a file imports {BACKEND_MODULE!r} by a spelling the rewrite does "
+            f"not know, so its backend is still Django's"
+        )
     now = {module for module, _ in after}
     missing = sorted(kept - now)
     if missing:
         raise SystemExit(f"the rewrite renamed something Django's: {missing}")
+
+    # And the closure on the rename above: the two spellings it does not handle.
+    # An attribute access would be `import django.template.backends.django as b;
+    # b.DjangoTemplates`, and a bare name in a file with no such import can only
+    # be a local binding this rule has no business touching. Neither occurs in
+    # the suite today; both are one plausible edit away, and both would leave the
+    # row green against Django's engine.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == BACKEND_CLASS:
+            raise SystemExit(
+                f"the rewrite produced an attribute access to {BACKEND_CLASS!r}, "
+                f"which the import rule cannot see"
+            )
+        if isinstance(node, ast.Name) and node.id == BACKEND_CLASS:
+            raise SystemExit(
+                f"the rewrite produced a bare {BACKEND_CLASS!r} in a file it did "
+                f"not retarget, so that name does not bind what it looks like"
+            )
 
 
 def sources():

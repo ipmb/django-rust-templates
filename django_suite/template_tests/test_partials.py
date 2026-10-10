@@ -4,7 +4,7 @@ from unittest import mock
 from django.http import HttpResponse
 from django_rust_templates.engine import Context, NodeList, Origin, PartialTemplate, Template, TemplateDoesNotExist, TemplateSyntaxError
 from django.template import engines
-from django.template.backends.django import DjangoTemplates
+from django_rust_templates.backends import RustTemplates
 from django.template.loader import render_to_string
 from django.test import TestCase, override_settings
 from django.urls import path, reverse
@@ -43,7 +43,7 @@ class PartialTagsTests(TestCase):
 
     def test_partials_use_cached_loader_when_configured(self):
         template_dir = os.path.join(os.path.dirname(__file__), "templates")
-        backend = DjangoTemplates(
+        backend = RustTemplates(
             {
                 "NAME": "django",
                 "DIRS": [template_dir],

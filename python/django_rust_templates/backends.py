@@ -61,6 +61,7 @@ from django.core.checks import Error, Warning
 from django.template.backends.base import BaseEngine
 from django.template.backends.django import DjangoTemplates
 
+from django_rust_templates import _require_django
 from django_rust_templates.engine.context import make_context
 from django_rust_templates.engine.engine import Engine
 from django_rust_templates.engine.exceptions import TemplateDoesNotExist
@@ -92,6 +93,19 @@ class RustTemplates(DjangoTemplates):
     def __init__(self, params):
         params = params.copy()
         options = params.pop("OPTIONS").copy()
+
+        # **First, before the engine is built and before anything is validated.**
+        # This is the one door into the package — `EngineHandler` constructs the
+        # backend when the engine is first asked for — so one call here covers
+        # every route in, and it is the earliest point at which the check can be
+        # made from inside the package. `_require_django` carries the measurements
+        # and the reason it is a version check at all.
+        #
+        # `allow_django_mismatch` is popped rather than passed on: `Engine` takes
+        # an explicit keyword list and would raise `TypeError` on it, which is the
+        # right failure for an unknown option and the wrong one for this.
+        _require_django(options.pop("allow_django_mismatch", False))
+
         options.setdefault("autoescape", True)
         options.setdefault("debug", settings.DEBUG)
         options.setdefault("file_charset", "utf-8")

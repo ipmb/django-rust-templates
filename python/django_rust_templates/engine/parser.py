@@ -5,14 +5,12 @@ module is the only place the two meet, and it is deliberately mechanical: it
 looks up a class by name, calls it with keyword arguments, and attaches
 ``token``/``origin`` afterwards.
 
-The path is ``engine/parser.py`` as the milestone plan specifies. Note the
-consequence: ``engine`` is on the shim's search path for ``django.template``, so
-this file also makes ``django.template.parser`` importable — a name Django does
-not have. Nothing imports it (the shell reaches it as
-``django_rust_templates.engine.parser``), and ``_shim.unshimmed()`` compares
-source trees, so it neither shadows anything nor perturbs the progress meter.
-Flagged rather than silently relocated, because if Django ever grows a
-``template/parser.py`` this name would shadow it.
+The path is ``engine/parser.py``. It sits inside ``engine`` because it is the
+engine's own materialisation step and reaches every node class the engine
+registers; under this package's own namespace the name is unambiguous, and the
+one thing worth recording is that Django 6.0.9 has no ``django/template/parser.py``
+at all, so there is no upstream module this name could be confused with — the
+parser is ``base.py``'s ``Parser``, and this file only names classes for it.
 """
 
 from __future__ import annotations

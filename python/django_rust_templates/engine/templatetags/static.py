@@ -2,7 +2,14 @@
 
 from urllib.parse import quote, urljoin
 
-from django_rust_templates.engine import template
+# Upstream's line here is `from django import template`, which binds the name
+# `template` to the DTL package. Ours binds the same name to the same package
+# under the name this package ships it as; the seven uses below are
+# `template.Library`, `template.Node` and `template.TemplateSyntaxError`, all
+# re-exported from `django_rust_templates.engine`'s root, so the body is
+# unchanged. The name stays `template` because the body is what is being
+# transcribed — a rename would make every later diff against upstream noisy.
+from django_rust_templates import engine as template
 from django.apps import apps
 from django.utils.encoding import iri_to_uri
 from django.utils.html import conditional_escape

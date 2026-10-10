@@ -7,43 +7,32 @@ Rust parses; Python owns the node tree (§6, §5.5). Materialising a
 for ``Engine().template_builtins``, which is a *host callback* and therefore M6's.
 So the caller supplies it.
 
-**This module is not under ``engine``, and that is a correction to the plan.**
-The plan put it at ``python/django_rust_templates/engine/engine.py``. That path is
-a defect, and it was measured rather than reasoned about: ``_shim``'s finder
-serves *any* ``engine/<name>.py`` as ``django.template.<name>``, so a file named
-``engine.py`` there is what ``engine/__init__.py``'s ``from .engine import
-Engine`` resolves to once the shim is installed, and installing it then fails
-with::
+**This module is not under ``engine``, and there is no longer a rule forcing
+that — it is a fact about what the file is.** It is the Python half of the FFI
+seam, beside ``host.py``, which is the other half; ``engine/`` is the
+transcription of Django's template machinery, and this is the adapter that lets
+Rust drive it. The reason it was *once* outside was different and is gone: the
+substitution finder served any ``engine/<name>.py`` as ``django.template.<name>``,
+so a file named ``engine/engine.py`` there was what ``from .engine import
+Engine`` resolved to, and installing the shim then failed with
+``ImportError: cannot import name 'Engine' from 'django.template.engine'``.
+Under this package's own namespace that name is unambiguous and nothing shadows
+anything.
 
-    ImportError: cannot import name 'Engine' from 'django.template.engine'
-    (/Users/…/python/django_rust_templates/engine/engine.py)
-
-``engine/parser.py`` gets away with the same trick only because Django has no
-``template/parser.py`` to shadow — which is why the rule is "no ``engine`` file
-may take the name of a real ``django.template`` module", not "``engine`` is
-closed". ``django_rust_templates.render`` breaks nothing: it is outside the
-shimmed package entirely.
-
-**``materialiser()`` loads its module from a file, and that is not laziness
-either.** ``engine/__init__.py`` is the shim's ``django.template`` and imports its
-own siblings (``from .engine import Engine``), so ``import
-django_rust_templates.engine.parser`` executes that file and fails for want of
-``engine``::
-
-    ModuleNotFoundError: No module named 'django_rust_templates.engine.engine'
-
-Under the shim the name ``django.template.parser`` *would* resolve, so the lookup
-is tried first and the file is the fallback. That ordering makes M9 a no-op here:
-once the shim is installed for real, the first branch is taken and nothing else
-changes.
+**``materialiser()`` is an ordinary import now, and the dance it replaced is
+worth a sentence.** It used to locate ``engine/parser.py`` by *file path* and
+execute it by hand, because ``import django_rust_templates.engine.parser`` ran
+``engine/__init__.py`` — which the finder served as ``django.template`` — and that
+module's own ``from .engine import Engine`` then failed for want of a name the
+file-path route was there to provide. In an ordinary package the import is
+ordinary.
 """
 
 from __future__ import annotations
 
 import importlib
-import importlib.util
-import sys
-from pathlib import Path
+
+from django_rust_templates import _native
 
 from django_rust_templates import _native
 from django_rust_templates.engine.base import (
@@ -83,11 +72,6 @@ __all__ = (
 # crosses the seam.
 UNKNOWN_ORIGIN = Origin(UNKNOWN_SOURCE)
 
-# `django_rust_templates.engine.parser`, as a file. Resolved from this module's
-# own location rather than from the working directory, so importing this from
-# anywhere finds the same file.
-_MATERIALISER_PATH = Path(__file__).resolve().parent / "engine" / "parser.py"
-
 _CACHED = None
 
 
@@ -101,31 +85,13 @@ def materialiser():
     ``materialise(desc, None, None, parser)`` for the tree — and handing over one
     object keeps the seam to a single argument.
 
-    Idempotent: both branches go through ``sys.modules``, so the file is executed
-    once however many times this is called.
+    Idempotent, and now trivially so: ``sys.modules`` is the cache the import
+    system already keeps, so the module is executed once however many times this
+    is called.
     """
     global _CACHED
-    if _CACHED is not None:
-        return _CACHED
-
-    if importlib.util.find_spec("django.template.parser") is not None:
-        # Only once the shim is installed: Django 6.0.9 has no
-        # `django/template/parser.py`, so this is `None` on the pinned tree
-        # without it. A probe on the spec rather than a `try: import` around the
-        # module body, which would also swallow an ImportError raised *inside*
-        # the materialiser.
-        _CACHED = importlib.import_module("django.template.parser")
-        return _CACHED
-
-    # The name is the one the tests already use for it. It is deliberately not
-    # registered as a submodule of a package that would be imported: the loader
-    # does not touch `django_rust_templates.engine`, which is the whole point.
-    name = "django_rust_templates.engine.parser"
-    spec = importlib.util.spec_from_file_location(name, _MATERIALISER_PATH)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    _CACHED = module
+    if _CACHED is None:
+        _CACHED = importlib.import_module("django_rust_templates.engine.parser")
     return _CACHED
 
 

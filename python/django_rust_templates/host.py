@@ -59,23 +59,23 @@ _LIBRARY_TAG_MODULES = (
 def _library_tag_tables():
     """The five libraries' `register.tags`, imported **lazily**.
 
-    Lazy rather than at module level, because importing a library *executes* it,
-    and these files capture names out of the modules M9 interposed. Measured in
-    the pinned tree: ``django/templatetags/i18n.py:5`` is ``from
-    django.template.base import TokenType, render_value_in_context``, and its
-    line 4 takes ``Node`` from ``django.template`` — the two shapes
-    ``_shim._stale_captures`` exists to refuse, a captured class making every
-    ``isinstance`` false and a captured enum making every comparison false.
+    **The deferral used to be load-bearing and is now order, not identity.** Until
+    the engine stopped substituting itself for ``django.template``, executing one
+    of these modules early captured Django's ``TokenType`` and Django's ``Node`` —
+    a stale-universe copy that made every comparison and every ``isinstance``
+    across the seam false, and that the substitution refused outright. There is one
+    universe now: ``django/templatetags/i18n.py:5`` is ``from
+    django.template.base import TokenType, render_value_in_context``, and in this
+    package the name it reaches is ``django_rust_templates.engine.base``'s — the
+    same object the parser compares against, at every point in the process.
 
-    **Deferred, the capture is of the served modules; deferred to import, it is
-    of Django's.** ``_shim._CAPTURE_NAMESPACES`` already lists
-    ``django.templatetags`` for exactly this reason, and ``install()`` raises
-    when it finds a copy from the other universe — so executing one of these at
-    ``host`` import time, whenever that import lands before ``install()``, is a
-    loud failure rather than a silent one. Deferring the import to the first
-    ``ShellHost`` — constructed by the parser, so after ``install()`` on every
-    path the package supports — keeps the two universes apart instead of relying
-    on the guard.
+    What is left is that ``host`` is imported from inside ``engine/base.py``, so
+    executing five library modules while ``base`` is on the stack is a cycle this
+    file does not have to take. Measured: it does not cycle today, in the order
+    these imports are written. Kept as a deferral because it costs one already-paid
+    ``sys.modules`` lookup per table per call (see [`_library_module`]), and because
+    the alternative is a property of `base.py`'s import graph that someone editing
+    `base.py` would have to re-derive.
 
     **The read is still fresh per call; only ``importlib``'s machinery is
     skipped.** Both tables are read on the hot path — `django_own_tags` once per
@@ -102,6 +102,7 @@ def _library_module(name):
     first. The lazy-import property is kept by the ``None`` branch, so the
     deferral [`_library_tag_tables`] documents still holds.
     """
+
     module = sys.modules.get(name)
     if module is None:
         module = importlib.import_module(name)
@@ -111,15 +112,12 @@ def _library_module(name):
 def _library_filter_tables():
     """The same five libraries' `register.filters`, imported the same lazy way.
 
-    The filter half of [`_library_tag_tables`], with the same deferral and for the
-    same measured reason: the modules capture `TokenType` and `render_value_in_context`
-    out of `django.template.base`, so executing one before `install()` would leave a
-    stale-universe copy — loud under `_shim._stale_captures`, but the deferral keeps
-    the two universes apart instead of relying on the guard. `cache` and `static`
-    register no filters (measured, `register.filters` is empty in both), so this
-    tuple contributes nine callables; they are listed anyway because the *module set*
-    is the five libraries M12 interposes and a sixth library's filters should not
-    have to remember to be added in two places.
+    The filter half of [`_library_tag_tables`], with the same deferral and the same
+    reason it survives — order, not identity. `cache` and `static` register no
+    filters (measured, `register.filters` is empty in both), so this tuple
+    contributes nine callables; they are listed anyway because the *module set* is
+    the five libraries whose tags the Rust registry ports, and a sixth library's
+    filters should not have to remember to be added in two places.
     """
     return tuple(
         _library_module(name).register.filters for name in _LIBRARY_TAG_MODULES
@@ -726,12 +724,12 @@ class ShellHost:
         reads exactly that attribute.
 
         `materialiser` is imported here rather than at module level because
-        `render` imports `ShellHost` from this module (`python/django_rust_templates/render.py:62`), so a
-        module-level import would be a cycle: `import django_rust_templates.host`
-        would reach `render`, which would find `ShellHost` not yet defined. The
-        other names are module-level, as everywhere else in this file —
-        `PartialTemplate` is `django.template.base`'s and `PartialDefNode` is
-        `_defaulttags`'s, both already bound there.
+        `render` imports `ShellHost` from this module, so a module-level import
+        would be a cycle: `import django_rust_templates.host` would reach
+        `render`, which would find `ShellHost` not yet defined. The other names
+        are module-level, as everywhere else in this file — `PartialTemplate` is
+        `engine.base`'s and `PartialDefNode` is `_defaulttags`'s, both already
+        bound there.
         """
         from django_rust_templates.render import materialiser
 
