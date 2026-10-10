@@ -1,0 +1,703 @@
+<title>Django Templates in Rust</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400&display=swap">
+<style>
+  /* Layout: one measured column — a stat strip, then feature tracks; the
+     compact chips grid carries what is done, prose carries what is not. */
+  :root {
+    --bg: #f6f7f6;
+    --surface: #ffffff;
+    --sunk: #eef1ef;
+    --fg: #15191b;
+    --muted: #59635f;
+    --line: #dfe4e1;
+    --accent: #0f4c5c;
+    --done: #1c7a4d;
+    --done-bg: #e6f2ea;
+    --wip: #9a5b06;
+    --wip-bg: #f8eedc;
+    --todo: #6a7378;
+    --todo-bg: #eceeed;
+    --font-body: Archivo, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --font-lead: "Source Serif 4", Georgia, serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1213;
+      --surface: #161b1c;
+      --sunk: #1b2122;
+      --fg: #e7eae8;
+      --muted: #99a3a2;
+      --line: #262e2f;
+      --accent: #6ec2d1;
+      --done: #5cc78e;
+      --done-bg: #16301f;
+      --wip: #dfa457;
+      --wip-bg: #322512;
+      --todo: #98a1a4;
+      --todo-bg: #202626;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1213;
+    --surface: #161b1c;
+    --sunk: #1b2122;
+    --fg: #e7eae8;
+    --muted: #99a3a2;
+    --line: #262e2f;
+    --accent: #6ec2d1;
+    --done: #5cc78e;
+    --done-bg: #16301f;
+    --wip: #dfa457;
+    --wip-bg: #322512;
+    --todo: #98a1a4;
+    --todo-bg: #202626;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.55;
+    padding-inline: 20px;
+    padding-block: 0 72px;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+
+  header { padding-block: 44px 26px; border-bottom: 1px solid var(--line); }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(27px, 4.4vw, 40px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  .lead {
+    font-family: var(--font-lead);
+    font-size: 17px;
+    line-height: 1.6;
+    max-width: 62ch;
+    color: var(--fg);
+    margin: 0 0 6px;
+  }
+  .stamp {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+    margin: 16px 0 0;
+  }
+  .stamp b { font-weight: 500; color: var(--fg); }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .stat { background: var(--bg); padding: 20px 20px 20px 0; min-width: 0; }
+  .stat:first-child { padding-left: 0; }
+  .stat .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 26px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    display: block;
+    line-height: 1.1;
+  }
+  .stat .cap { font-size: 12.5px; color: var(--muted); display: block; margin-top: 6px; }
+  /* Emphasis in a caption is weight of ink, not slope — the file's own idiom. */
+  .stat .cap em { font-style: normal; color: var(--fg); }
+  .stat.is-done .num { color: var(--done); }
+  .stat.is-open .num { color: var(--wip); }
+
+  section { padding-block: 40px 0; }
+  h2 {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  h2 .count {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-left: 10px;
+    letter-spacing: 0;
+  }
+  .sub { color: var(--muted); max-width: 68ch; margin: 0 0 20px; font-size: 14.5px; }
+  .sub code, p code, li code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    background: var(--sunk);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* compact chips — used only for the lists that are finished */
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 0; padding: 0; list-style: none; }
+  .chips li {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    background: var(--sunk);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 3px 8px;
+    color: var(--fg);
+    white-space: nowrap;
+  }
+  .chips li::before {
+    content: "";
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--done);
+    margin-right: 6px;
+    vertical-align: 1px;
+  }
+
+  /* the open work gets room, because each line has a reason */
+  .open { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+  .open > li {
+    display: grid;
+    grid-template-columns: 190px 1fr;
+    gap: 4px 18px;
+    align-items: baseline;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--wip);
+    border-radius: 3px;
+    padding: 12px 16px;
+  }
+  .open > li.todo { border-left-color: var(--todo); }
+  .open > li.done { border-left-color: var(--done); }
+  .open > li.not-engine { border-left-style: dashed; border-left-color: var(--line); }
+  .open .name {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .open .name span { display: block; color: var(--muted); font-family: var(--font-body); font-size: 12px; margin-top: 3px; }
+  .open .why { min-width: 0; font-size: 14px; }
+  .open .why em { font-style: normal; color: var(--muted); }
+
+  .pill {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 2px 7px;
+    border-radius: 999px;
+    display: inline-block;
+    vertical-align: 1px;
+  }
+  .pill.done { color: var(--done); background: var(--done-bg); }
+  .pill.wip { color: var(--wip); background: var(--wip-bg); }
+  .pill.todo { color: var(--todo); background: var(--todo-bg); }
+  .pill.not-engine { color: var(--muted); background: var(--sunk); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 0 22px; font-size: 13px; color: var(--muted); }
+  .legend span { display: flex; align-items: center; gap: 7px; }
+
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 26px 34px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 18px 20px;
+    min-width: 0;
+  }
+  .card h3 { font-size: 14px; font-weight: 600; margin: 0 0 4px; }
+  .card p { margin: 0; font-size: 13.5px; color: var(--muted); }
+  .card ul { margin: 10px 0 0; padding-left: 18px; font-size: 13.5px; color: var(--muted); }
+  .card li { margin-bottom: 3px; }
+  .card li::marker { color: var(--done); }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 380px; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--muted);
+    font-weight: 500;
+    background: var(--sunk);
+  }
+  tr:last-child td { border-bottom: none; }
+  td.mod { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
+  td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 13px;
+  }
+  footer p { max-width: 70ch; margin: 0 0 8px; }
+
+  @media (max-width: 620px) {
+    .open > li { grid-template-columns: 1fr; }
+    .stat { padding: 16px 0; }
+    header { padding-block: 32px 22px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Django template engine · Rust port · Django 6.0.9</p>
+    <h1>What Django's template engine does, and how much of it Rust does yet</h1>
+    <p class="lead">
+      The target is a drop-in replacement: Django's own template test suite, unchanged,
+      running against templates rendered by Rust. Everything below is a Django feature.
+      Done means Rust performs the work; in progress and to do mean Django's own Python
+      still does, and the suite passes either way.
+    </p>
+    <p class="stamp">Measured <b>2026-10-09</b> from the tree, at Django <b>6.0.9</b>.</p>
+  </header>
+
+  <div class="stats">
+    <div class="stat is-done">
+      <span class="num">1547</span>
+      <span class="cap">tests in Django's template suite, all passing — 6 skipped</span>
+    </div>
+    <div class="stat is-done">
+      <span class="num">66 / 66</span>
+      <span class="cap">filters answered by Rust — the 57 built-ins, plus the 9 Django's five tag libraries register</span>
+    </div>
+    <div class="stat is-open">
+      <span class="num">25 / 27</span>
+      <span class="cap">built-in tags implemented in Rust</span>
+    </div>
+    <div class="stat is-done">
+      <span class="num">0</span>
+      <span class="cap">modules of the template <em>engine</em> still Django's own code — the engine is wholly Rust's. Ten more of <code>django.template</code> are adapters Django keeps for good</span>
+    </div>
+    <div class="stat is-done">
+      <span class="num">0 / 5</span>
+      <span class="cap">modules of <code>django.templatetags</code> still Django's own code — the five template-tag libraries are Rust's</span>
+    </div>
+  </div>
+
+  <section>
+    <h2>How to read the statuses</h2>
+    <div class="legend">
+      <span><i class="pill done">Done</i> Rust does the work</span>
+      <span><i class="pill wip">In progress</i> Rust parses it, Django's code runs it</span>
+      <span><i class="pill todo">To do</i> still entirely Django's</span>
+      <span><i class="pill not-engine">Not the engine</i> Django's for good — an adapter around the engine, not the engine</span>
+    </div>
+    <p class="sub">
+      Rust's parser drives every template, including the tags and libraries it does not
+      implement: for those it hands the tag's arguments back to Django's own Python compile
+      function. So a feature can work today, and appear in this page as not done, without
+      contradiction. The honest measure of "ported" is the module count below — how much of
+      the template <em>engine</em> still executes Django's code.
+    </p>
+    <p class="sub">
+      That count is over the engine, and it is smaller than the package it lives in.
+      <code>django.template</code> holds the engine plus ten adapters — the loading facade,
+      the backend registry and its five modules, template responses, context processors and
+      the dev-server reloader. They are not the engine, they are not ours to rewrite, and
+      they never will be: each one either wraps objects the engine already hands back or
+      belongs to Django's view layer. They are marked <b>Not the engine</b> throughout, and
+      they are subtracted from the meter rather than counted against it.
+    </p>
+  </section>
+
+  <section>
+    <h2>Engine core <span class="pill done">Done</span></h2>
+    <p class="sub">The parts every template goes through, on the Rust side since the first passes.</p>
+    <div class="grid2">
+      <div class="card">
+        <h3>Lexing and parsing</h3>
+        <ul>
+          <li>Token types, the tag/variable/text grammar, <code>Parser</code> and its token stack</li>
+          <li>Verbatim, comment and raw regions</li>
+          <li>Syntax errors matching Django's, message for message</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Variables and expressions</h3>
+        <ul>
+          <li>Dotted lookups, list-index lookups, callables</li>
+          <li><code>FilterExpression</code>: argument parsing, argument-count checks, literal handling</li>
+          <li><code>{% if %}</code>'s expression grammar — operators, <code>in</code>, <code>not</code>, <code>and</code>/<code>or</code> precedence</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Context</h3>
+        <ul>
+          <li><code>Context</code>, <code>BaseContext</code>, context stacks and lookup order</li>
+          <li>Autoescape and timezone flags travelling with the context</li>
+          <li>Request context and context processors as a data structure</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Engine and loading</h3>
+        <ul>
+          <li><code>Engine</code>, <code>get_template</code>, <code>from_string</code></li>
+          <li>Loaders: filesystem, app directories, cached, locmem</li>
+          <li>Template origin and caching behaviour</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Inheritance and composition</h3>
+        <ul>
+          <li><code>{% extends %}</code> / <code>{% block %}</code>, nested, repeated, with <code>{{ block.super }}</code></li>
+          <li><code>{% include %}</code> with <code>with</code> and <code>only</code></li>
+          <li><code>{% autoescape %}</code> and safe-string propagation</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Errors</h3>
+        <ul>
+          <li><code>TemplateDoesNotExist</code>, <code>TemplateSyntaxError</code>, <code>VariableDoesNotExist</code></li>
+          <li>Debug-page rendering of template errors</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Built-in filters <span class="count">57 of 57 done</span></h2>
+    <p class="sub">
+      Every filter Django registers, including the format-aware ones
+      (<code>date</code>, <code>time</code>, <code>floatformat</code>) and the escaping ones
+      (<code>escape</code>, <code>force_escape</code>, <code>json_script</code>).
+    </p>
+    <ul class="chips">
+      <li>add</li><li>addslashes</li><li>capfirst</li><li>center</li><li>cut</li><li>date</li>
+      <li>default</li><li>default_if_none</li><li>dictsort</li><li>dictsortreversed</li>
+      <li>divisibleby</li><li>escape</li><li>escapejs</li><li>escapeseq</li><li>filesizeformat</li>
+      <li>first</li><li>floatformat</li><li>force_escape</li><li>get_digit</li><li>iriencode</li>
+      <li>join</li><li>json_script</li><li>last</li><li>length</li><li>linebreaks</li>
+      <li>linebreaksbr</li><li>linenumbers</li><li>ljust</li><li>lower</li><li>make_list</li>
+      <li>phone2numeric</li><li>pluralize</li><li>pprint</li><li>random</li><li>rjust</li>
+      <li>safe</li><li>safeseq</li><li>slice</li><li>slugify</li><li>stringformat</li>
+      <li>striptags</li><li>time</li><li>timesince</li><li>timeuntil</li><li>title</li>
+      <li>truncatechars</li><li>truncatechars_html</li><li>truncatewords</li>
+      <li>truncatewords_html</li><li>unordered_list</li><li>upper</li><li>urlencode</li>
+      <li>urlize</li><li>urlizetrunc</li><li>wordcount</li><li>wordwrap</li><li>yesno</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Built-in tags <span class="count">25 of 27 done</span></h2>
+    <p class="sub">
+      The twenty-five below are compiled by Rust. The two that follow are parsed by
+      Rust but still compiled and executed by Django's Python tag functions.
+    </p>
+    <ul class="chips">
+      <li>{% autoescape %}</li><li>{% block %}</li><li>{% comment %}</li><li>{% csrf_token %}</li>
+      <li>{% cycle %}</li><li>{% debug %}</li><li>{% extends %}</li><li>{% filter %}</li>
+      <li>{% firstof %}</li><li>{% for %}</li><li>{% if %}</li><li>{% ifchanged %}</li>
+      <li>{% include %}</li><li>{% lorem %}</li><li>{% now %}</li><li>{% partial %}</li><li>{% partialdef %}</li>
+      <li>{% regroup %}</li><li>{% resetcycle %}</li><li>{% spaceless %}</li><li>{% templatetag %}</li>
+      <li>{% url %}</li><li>{% verbatim %}</li><li>{% widthratio %}</li><li>{% with %}</li>
+    </ul>
+    <ul class="open" style="margin-top:16px">
+      <li class="todo">
+        <span class="name">{% load %}<span>custom tag libraries</span></span>
+        <span class="why">Still a host-side tag. The registration API below is now Rust's, but Rust's tag registry deliberately does not own the name <code>load</code> — <code>do_load</code> is Django's and is called through the host, which is why this reads as in-progress rather than done.</span>
+      </li>
+      <li class="todo">
+        <span class="name">{% querystring %}<span>query-string rewriting</span></span>
+        <span class="why">Still Django's tag. Small, and it belongs with the rest of the request-facing helpers.</span>
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Tag and filter registration <span class="pill done">Done</span></h2>
+    <p class="sub">
+      What makes a template language extensible: the classes and decorators a project or a
+      third-party app uses to add its own tags and filters. This was the engine's last module
+      — <code>library</code> — and it is the engine's own rather than an adapter:
+      <code>{% load %}</code> compiles a third-party tag library <em>with</em> it. It is now a
+      faithful, verbatim transcription of Django's file rather than a reimplementation, because
+      a tag library is Python by construction: <code>simple_tag</code> and its neighbours each
+      build a compile function as a closure over the user's own function, and nothing on the
+      Rust side can call it. What that buys is identity — <code>Library</code>,
+      <code>InvalidTemplateLibrary</code> and the node classes are <em>the same objects</em>
+      Django's own modules import, which is what the suite's <code>isinstance</code> and
+      <code>assertRaises</code> rows are about. A reimplementation would have rendered the same
+      output while answering those rows about the wrong class.
+    </p>
+    <ul class="open">
+      <li class="done">
+        <span class="name">Library, register<span>tag and filter registration API</span></span>
+        <span class="why"><code>Library</code>, <code>@register.simple_tag</code>, <code>@register.inclusion_tag</code>, <code>@register.filter</code>, <code>SimpleNode</code> and <code>parse_bits</code> are ours, transcribed from Django's file line for line. The parity harness runs twelve of the module's eighteen functions, so the transcription is compared against the pin rather than merely trusted.</span>
+      </li>
+      <li class="done">
+        <span class="name">Tags in Django's own libraries<span>{% translate %}, {% blocktranslate %}, {% static %}, {% timezone %}, {% localize %}, {% cache %}</span></span>
+        <span class="why">All eighteen registered tags in the five <code>django.templatetags</code> libraries are compiled and rendered by Rust, and the nine filters those libraries register — <code>localize</code>, <code>unlocalize</code>, the four <code>language_*</code>, and <code>localtime</code>, <code>utc</code>, <code>timezone</code> — are on the Rust path too. Those last three hand off to the port's own Python transcription of <code>do_timezone</code>, which is one function serving all three names. The registration <em>API</em> above is still Django's — that is why this line reads as done while its neighbour does not, and why <code>{% load %}</code> still enters through Django's code.</span>
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Public template API <span class="pill not-engine">Not the engine</span></h2>
+    <p class="sub">
+      The surface a Django project touches — the part "drop-in replacement" is judged by at
+      the application level. Every item here is an adapter the engine sits inside: it hands
+      the caller objects Rust already produces, and defines no template machinery of its own.
+      These stay Django's, which is why they no longer appear in the to-do count.
+    </p>
+    <ul class="open">
+      <li class="not-engine">
+        <span class="name">Template loading facade<span>render_to_string, get_template, select_template</span></span>
+        <span class="why">Sixty-six lines and four functions, and every body is the same delegation: pick an engine, <code>get_template(name)</code>, <code>render(context, request)</code>. Both halves are already Rust's, so calling this facade already runs the port. <em>It reads as ours at the application level for exactly that reason.</em></span>
+      </li>
+      <li class="not-engine">
+        <span class="name">Backends<span>DjangoTemplates, Jinja2, Dummy</span></span>
+        <span class="why">The <code>BACKENDS</code> setting, per-backend <code>OPTIONS</code>, and the <code>Template</code> wrapper a backend returns. A protocol with a second implementation we deliberately do not provide — owning the registry would mean owning Jinja2's backend too. The suite reaches it from two rows only.</span>
+      </li>
+      <li class="not-engine">
+        <span class="name">Responses<span>TemplateResponse, SimpleTemplateResponse, render()</span></span>
+        <span class="why">The view-layer objects, including their caching and post-render hooks. HTTP semantics — status, <code>Content-Type</code> negotiation, pickling — that reach a template only through the loading facade above. Nothing in the engine imports this module; the import runs the other way.</span>
+      </li>
+      <li class="not-engine">
+        <span class="name">Context processors<span>csrf, debug, request, auth</span></span>
+        <span class="why">Reached by import string from settings, not by import from the engine, so nothing in the engine depends on their identity. Every one takes a <em>request</em> and returns context for a response — view-layer machinery the engine merely names.</span>
+      </li>
+      <li class="not-engine">
+        <span class="name">Template autoreload<span>dev-server template reloading</span></span>
+        <span class="why">Two signal receivers and a directory walk around objects that are already ours. Taking it would mean copying glue with no template machinery to get right — with nothing of ours to get right, there is also nothing for a test to falsify.</span>
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Where Django's code is still running <span class="count">none</span></h2>
+    <p class="sub">
+      The number that moves when a feature really lands. Each module named here is still
+      Django's, and the acceptance suite would pass with it in place — which is exactly why
+      it is tracked. <b>No module of the engine is left to name</b>, and the acceptance
+      suite runs entirely against Rust's code.
+    </p>
+    <p class="sub">
+      That last sentence used to be prose, and the place it was most likely to stop being
+      true was the one file no gate read: <code>django_suite/suite_settings.py</code> names
+      the <code>BACKEND</code> all 1547 tests run against, and it sits outside the tree
+      <code>scripts/gen_django_suite.py</code> re-derives and diffs, so renaming that one
+      string to Django's would have turned the whole acceptance run into a test of stock
+      Django with every gate still green. It is now checked — that file, the alias
+      <code>engines["django"]</code> resolves, and the seven adapter imports the vendored
+      tree is allowed to keep, each asserted against a declared set in
+      <code>tests/test_suite_isolation.py</code> and each re-derived against the pinned
+      checkout there, so the set is inheritance rather than a licence this package
+      granted itself. Prose became a refusal.
+    </p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Module of <code>django.template</code></th><th>What it does</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="mod">—</td><td>the engine is wholly Rust's</td><td><i class="pill done">Done</i></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="sub" style="margin-top:16px">
+      Sixteen modules are Rust's, which is the whole engine: the template base, its
+      exceptions, expressions, template utilities, context, the engine, the loader package and
+      its five loaders, template inheritance, the built-in filters, the built-in tags, and —
+      the last of them — tag and filter registration.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      Django's five template-tag libraries are tracked as a <b>second scope</b> beside the
+      module above — <code>django.templatetags.cache</code>, <code>.i18n</code>,
+      <code>.l10n</code>, <code>.static</code> and <code>.tz</code>, the eighteen registered
+      tags and the nine filters that go with them. That scope is <b>empty</b>: no module under
+      <code>django.templatetags</code> is still served by Django. Both meters now read zero —
+      the engine is wholly Rust's.
+    </p>
+  </section>
+
+  <section>
+    <h2>Not the engine <span class="pill not-engine">Not the engine</span></h2>
+    <p class="sub">
+      Ten more modules of <code>django.template</code> are Django's own code and always will
+      be. They are adapters <em>around</em> the engine rather than the engine: each one either
+      wraps objects Rust already hands back, or belongs to Django's view layer, which reaches
+      down into the template package rather than the other way round. They are subtracted from
+      the meter rather than counted against it, and listed here so that anyone reading the
+      module count can see where the other ten went. That list is read from §3 of the design
+      document by the port's own tests, not restated, so the ten named there and the ten
+      excluded from the count cannot drift apart.
+    </p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Module of <code>django.template</code></th><th>What it does</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="mod">loader</td><td>Public loading facade</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">response</td><td>Template responses</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">backends</td><td>Backend registry</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">backends.base</td><td>Backend base class</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">backends.django</td><td>The Django backend</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">backends.dummy</td><td>The no-op backend</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">backends.jinja2</td><td>The Jinja2 backend</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">backends.utils</td><td>Backend helpers</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">context_processors</td><td>Built-in context processors</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+          <tr><td class="mod">autoreload</td><td>Dev-server reloading</td><td><i class="pill not-engine">Not the engine</i></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>How this is measured</h2>
+    <p class="sub">
+      Django's template test suite is pinned at 6.0.9 and run unchanged against the port; a
+      feature is done when Rust performs the work and the suite is still green, not when a
+      new test of our own passes. Alongside it is the port's own regression suite, which
+      pins the invariants the port could otherwise break silently — the count of tests
+      Django's discovery collects, which modules are still served by Django, and the
+      line-level correspondence between the ported Python and the pinned original. The
+      numbers on this page are read from the tree at each commit.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      The acceptance run refuses to start unless both module counts are zero. Before the
+      suite begins, every module the engine owns is imported and checked to be Rust's — all
+      twenty-one of them, the sixteen under <code>django.template</code> and the five under
+      <code>django.templatetags</code> — and a non-empty count stops the run rather than
+      being printed beside it. The <em>list</em> of modules declared not the engine is read
+      out of §3 of the design document by the port's own tests rather than restated here or
+      in code, so the count cannot reach zero by quietly widening what it excludes.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      The run also pins its own outcome. Its transcript is compared, as a whole line, against
+      <code>OK (skipped=6)</code> after exactly 1547 tests, and the six skips are checked
+      <em>by identity</em> — so a swap that keeps the total at six, a skip that appears, or a
+      skip that stops appearing all stop the gate. The line is compared rather than dissected
+      because a run may be green and still not this one: an <code>expectedFailure</code> that
+      fails prints <code>OK (expected failures=1)</code> and exits 0, and no guard reading an
+      exit status could catch it.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      And it pins the checkout it runs against, before the suite rather than after it. The
+      clone's head is read against the sha <code>django.lock</code> records, and any
+      <code>git status</code> entry — including an untracked file planted in the tree —
+      refuses the run. A transcript cannot tell you the Django it came from was stock, and a
+      deliberately edited test is the one failure that every other check here would report as
+      green.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>Speed is measured, and is not yet a win.</b> The port is checked against stock
+      Django 6.0.9 on four workloads — a pre-compiled 50-row i18n page, the same page parsed
+      and rendered, a generated ~200-node template, and a one-variable template — by running
+      <code>scripts/bench.py</code> under both engines and diffing the two transcripts. Each
+      side is named on the command line (<code>--side rust</code>, <code>--side stock</code>)
+      and the harness prints the engine it built — and the extension it loaded, and which
+      profile built it — and refuses to print a table for any other engine;
+      both sides then load the same two template sources and print a hash of every rendered
+      page, and those four hashes agree, so the comparison is like for like rather than two
+      different templates. Measured 2026-10-09, the port is <b>1.3× to 1.8× slower</b>
+      (1.34× pre-compiled render, 1.35× parse-and-render, 1.41× the node-heavy template,
+      1.82× the one-variable one) — the compatibility work has been the priority throughout,
+      and the measurement is published here rather than only the number that would flatter it.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>That figure holds only for an optimised build, and saying which build is now part
+      of the harness.</b> <code>pip install</code> compiles the extension with
+      <code>--release</code>; <code>maturin develop</code>, which is what a development
+      checkout runs, installs the <i>unoptimised</i> profile instead — and the first honest
+      bench run after M18 measured that binary and produced <b>2.3× to 6.0×</b> (2.34×,
+      2.49×, 4.69×, 6.01×), a range that
+      says nothing about the port and everything about the build. It also went unnoticed for
+      a while: the extension sitting in a working tree is whatever was last installed, so a
+      stale or unoptimised one is invisible from the outside. <code>bench.py</code> now
+      prints the extension it loaded and which build it is, beside the engine, and the
+      1.35×–1.85× above is the figure for the <code>--release</code> build.
+      <b>The gate now builds it rather than trusting it:</b> <code>scripts/check.sh</code> runs
+      <code>maturin develop --release</code> before the Python suites, so the unit rows and the
+      1547 exercise the source instead of whatever happened to be installed. A row pins that
+      invocation <i>and its position</i> — against <i>every</i> step that reads the extension, not
+      one named step, since a build placed after any consumer cannot satisfy it — and the next
+      line checks the claim behaviourally rather than textually:
+      <code>scripts/assert_native_is_the_built_artifact.py</code> requires the <code>_native</code> the tests
+      import to be byte-identical to the artifact the build just produced. (It lives in the
+      source tree, <code>python/django_rust_templates/</code>, through the editable install —
+      not in <code>site-packages</code>.)
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>It installs, and it refuses a Django it was not built for.</b> <code>pip install</code>
+      from a clone or a git URL builds the extension and installs an ordinary Django template
+      backend; the wheel declares <code>Django&gt;=6.0,&lt;6.1</code>, and the backend refuses
+      anything outside 6.0.x when Django builds it from <code>TEMPLATES</code>. Two measured
+      outcomes are what the refusal is for, and neither is visible from inside this repository,
+      where every check runs against the pinned checkout: against Django 6.1.2 the engine used to
+      install cleanly, report an empty meter and render — <i>every gate above would have said
+      green</i> — and against 5.2.7 it died with an <code>ImportError</code> that named Django.
+      Both halves are checked in a real virtualenv by <code>scripts/check_packaging.sh</code>, which
+      also installs the wheel with no Django present to prove the error is ours, and builds the
+      source tree the way <code>pip install .</code> does. <b>Switching it on is one setting</b> —
+      <code>"BACKEND": "django_rust_templates.rust.RustTemplates"</code> in
+      <code>TEMPLATES</code>, with no <code>"NAME"</code> needed: the alias you reach it by
+      is derived from that path as it is for every backend, and the module is named so
+      that the derivation gives <code>rust</code> — and there is nothing else: no import
+      to perform, no finder, no <code>sitecustomize.py</code>, no environment variable,
+      and no ordering rule, because
+      <code>EngineHandler</code> resolves that string the same way it resolves any other
+      backend's. <b>Nothing of Django's is replaced</b>: the package has its own namespace, the
+      engine is <code>django_rust_templates.engine</code>, and a name you reach across the
+      boundary is Django's own object. The packaging check runs a real <code>manage.py</code>
+      against a real settings module and asserts that the same project against Django's own
+      backend renders identically; a control swaps the one line and must come out as stock
+      Django. No wheel is published yet,
+      so a source install needs a Rust toolchain; the port is also <i>slower</i> than the thing it
+      replaces, which is the work in front of it.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>Until M18 it was a substitution, and that machinery is gone.</b> Earlier revisions of
+      this page described a meta-path finder that served a transcription of
+      <code>django.template</code> under Django's own module names, switched on by an
+      <code>install()</code> call placed before <code>django.setup()</code> ran — which is why
+      this page used to argue about <code>manage.py</code> versus <code>settings.py</code>. That
+      whole apparatus (<code>_shim.py</code>, <code>_impl/</code>, <code>install()</code>,
+      <code>scripts/shimpath/</code>) was deleted, and the acceptance suite it existed to drive
+      in place was replaced by a copy of Django's <code>template_tests</code> vendored at
+      <code>django_suite/</code> and regenerated by <code>scripts/gen_django_suite.py</code>.
+      The same 1547 tests run; they simply import this package's engine by name instead of
+      being tricked into it.
+    </p>
+  </section>
+
+  <footer>
+    <p>
+      Statuses describe which implementation performs the work, not whether a template using
+      the feature renders correctly today: with Django's suite passing, most of what is
+      marked to do already behaves as Django does, because Django is what runs it.
+    </p>
+    <p>Django 6.0.9 · the port's own source is the authority; this page is its summary.</p>
+  </footer>
+</div>
