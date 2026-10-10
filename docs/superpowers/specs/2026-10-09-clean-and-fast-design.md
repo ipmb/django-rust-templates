@@ -102,56 +102,81 @@ revision 1's number at all.
 
 ### 1.3 The per-operation costs
 
-Every figure in this section is this probe's, hoisted `Variable` objects, best of
+Every timing in this section is this probe's, hoisted `Variable` objects, best of
 7, recorded in `.review/m19-measurements/production_render_path.txt`. The third
-column is the corpus's own depth distribution, which is the row of this table
-that matters and was added after the review:
+column is the corpus's own depth distribution, which is the row of this table that
+matters and was added after the review. **The four `parse_variable` rows are a
+different function from the one they sit under** — see below — and are marked so
+rather than aligned as if they decomposed their neighbours:
 
 | operation | µs | share of the corpus |
 |---|---|---|
-| `_native.resolve("a", ctx)` — depth 1 | 0.51 | 2% |
-| ‣ of which `parse_variable("a")` | 0.22 | |
-| stock `Variable("a").resolve(ctx)` | 0.23 | |
-| **`_native.resolve("row.name", ctx)` — depth 2** | **0.74** | **98%** |
-| **‣ of which `parse_variable("row.name")`** | **0.25** | |
-| **stock `Variable("row.name").resolve(ctx)`** | **0.30** | |
-| `_native.resolve("b.c.d", ctx)` — depth 3 | 0.81 | one variable |
-| ‣ of which `parse_variable("b.c.d")` | 0.27 | |
+| `_native.resolve("a", ctx)` — depth 1 | 0.52 | 2% |
+| `_native.resolve("row.name", ctx)` — depth 2 | 0.73 | **98%** |
+| stock `Variable("row.name").resolve(ctx)` | 0.30 | |
+| **`_native.resolve_lookups(['row', 'name'], ctx)` — depth 2, after step 1** | **0.65** | **98%** |
+| `_native.resolve("b.c.d", ctx)` — depth 3 | 0.82 | one variable |
 | stock `Variable("b.c.d").resolve(ctx)` | 0.34 | |
 | `stock_ctx["a"]` — bare dict read | 0.12 | |
+| *not a decomposition, a different pyfunction:* | | |
+| `_native.parse_variable("a")` | 0.22 | |
+| `_native.parse_variable("row.name")` | 0.26 | |
+| `_native.parse_variable("b.c.d")` | 0.28 | |
 
-**(a) The render path does call `_native.resolve`, and the re-parse it pays for
-grows with depth.** The review's BLOCKING 1 said the render path "never does" and
-calls `LookupScope::resolve` with strings pre-parsed at plan time; it was measured
-on `render_floor`, a prototype the package does not install. Measured, it calls
-`_native.resolve` once per variable: a three-variable template renders `'1|2|3'`
-with `{'_native.resolve': 3, 'Variable._resolve_lookup': 3}`. The chain is
-`VariableNode.render` → `FilterExpression.resolve` →
-`Variable._resolve_lookup` → **`engine/base.py:1047`, `_native.resolve(".".join(self.lookups), context)`**
-→ `crates/template-py/src/lib.rs:2602-2603`, `parse_variable(path)`. `LookupScope::resolve` is the *floor
-prototype's* path, and the prototype is not what ships.
+**(a) The render path does call into Rust per variable, and the re-parse it paid
+for was the smaller half of the gap.** The review's BLOCKING 1 said the render
+path "never does" and calls `LookupScope::resolve` with strings pre-parsed at plan
+time; it was measured on `render_floor`, a prototype the package does not install.
+Measured at the time of the review, it called `_native.resolve` once per variable:
+a three-variable template rendered `'1|2|3'` with `{'_native.resolve': 3,
+'Variable._resolve_lookup': 3}`. The chain was `VariableNode.render` →
+`FilterExpression.resolve` → `Variable._resolve_lookup` →
+`_native.resolve(".".join(self.lookups), context)` →
+`crates/template-py/src/lib.rs:2605-2606`, `parse_variable(path)`.
+`LookupScope::resolve` is the *floor prototype's* path, and the prototype is not
+what ships.
+
+**Step 1 has since landed**, and the call is now `engine/base.py:1041`,
+`_native.resolve_lookups(self.lookups, context)`, entering at
+`crates/template-py/src/lib.rs:2662-2667`, with no `parse_variable` between the
+shell and the walk. The row above it is what that bought, measured rather than
+predicted.
 
 So revision 1's 2.24× was a true statement about the shipped engine and a wrong
-account of why: 0.22 µs of every variable is spent re-deriving a lookup that
-`Variable.__init__` split and this module then re-joined. The review's
-decomposition (`parse_variable` 0.219 of 0.522) is exactly right, and its
-conclusion — that a pre-parsed resolve is at parity with stock's — is right about
-the prototype.
+account of why. **And so was revision 2's: "0.22 µs of every variable is spent
+re-deriving a lookup".** The review's decomposition (`parse_variable` 0.219 of
+0.522) is a correct measurement of *two calls*, but `_native.parse_variable` is a
+pyfunction returning a `#[pyclass] Variable` with `lookups`, `literal` and
+`translate` on it, while `_native.resolve` calls the internal Rust
+`parse_variable`, which builds a struct and no Python object. The 0.22 was never a
+share of the 0.52 and cannot be subtracted from it. **The measurement that can be
+subtracted is step 1's own: 0.081 µs at depth 2 (median of five rounds, range
+0.074–0.084), which takes the ratio against stock from 2.42× to 2.15× and closes
+19% of the resolver gap — not 35%, and not 52%.**
 
-**But 0.22 is the depth-1 operand and depth 1 is 2% of the corpus.** The review's
-second pass censused every variable resolved during a render of all 18 rust rows:
-1408 variables, 27 at depth 1, **1380 at depth 2**, one at depth 3. At that depth
-the re-parse is 0.25 µs, not 0.22, and the ratio the corpus actually pays is
-**2.46×** rather than 2.23× — our resolver gets *relatively* worse as the path gets
-longer, which is M18 §7.1's inversion arriving on the shipped path. The review's
-own instrument (which resolves through `_resolve_lookup`, one frame in from mine)
-puts the same three gaps at +0.351 / +0.535 / +0.580 µs.
+**The saving is depth-independent, and that is worth a line because the rest of
+this section is about depth.** Measured at 0.080 / 0.081 / 0.079 µs for depths 1,
+2 and 3: the classification grows with the path and so does the `Vec<String>` the
+components cost to hand over, and the two nearly cancel. So this is a *flat* win
+on a corpus that is 98% one depth, which is the one case where a depth-blind
+number is the right number.
+
+**0.22 was also the depth-1 operand, and depth 1 is 2% of the corpus.** The
+review's second pass censused every variable resolved during a render of all 18
+rust rows: 1408 variables, 27 at depth 1, **1380 at depth 2**, one at depth 3. At
+that depth the ratio the corpus actually pays is **2.42×** rather than 2.23× — our
+resolver gets *relatively* worse as the path gets longer, which is M18 §7.1's
+inversion arriving on the shipped path. The review's own instrument (which
+resolves through `_resolve_lookup`, one frame in from mine) puts the same three
+gaps at +0.351 / +0.535 / +0.580 µs, and its residual after step 1 at depth 2 is
++0.255 against my +0.347. **The two instruments are not reconciled and should not
+be**: different probes, different frames, and neither is wrong.
 
 **Two reasons to stop re-joining, and the second is the load-bearing one.**
 
-*It is 0.25 µs a variable at the depth the corpus uses — 35% of the resolver.*
-Cheap: pass `&[String]` across the FFI, which `LookupScope::resolve` already
-accepts.
+*It is 0.08 µs a variable at the depth the corpus uses, and it was cheap.* Pass
+`&[String]` across the FFI, which `LookupScope::resolve` already accepts — and it
+is a **flat** win, so it does not need re-pricing as the corpus changes depth.
 
 *And the join is not a faithful inverse of the parse, which is a correctness bug
 today, not a cost.* `parse_variable` classifies as well as splits, and
@@ -163,9 +188,12 @@ Django renders `''`, and `{{ 0. }}` and `{{ 123. }}` did the same. That was
 measured at M19 and **fixed in this milestone** by putting the Rust dispatch back
 into `Variable.resolve`'s order; the shortcut removes the input class rather than
 patching it, which is the better of the two and the reason step 1 is not optional.
-The population, the render comparison that found it, and the search showing the
-1547 never writes a trailing-dot numeral are in
-`.review/m19-measurements/lookup_roundtrip.txt`.
+**This is the reason that decided the step**, and it is worth more than the 0.08:
+the class is not "trailing-dot decimals" but "`float()` succeeds *and* the token
+ends in `.`", which includes `1_0.` — CPython's `float` takes underscore
+separators — so a fix enumerated from the instances I had found would have missed
+it. The class, the render comparison that found it, and the search showing the
+1547 never writes one are in `.review/m19-measurements/lookup_roundtrip.txt`.
 
 **(b) `render_value_in_context` is where a rendered variable's money goes** —
 0.79 of the 1.47 µs, and for an `int`, 3.49. See §1.5, which is where BLOCKING 3
@@ -190,10 +218,10 @@ the sentence:
   reaches the escape filter.
 - **(b) is inherited**, and it is the whole of the floor's per-variable cost:
   `render_floor` fetches `render_value_in_context` once per render
-  (`crates/template-py/src/lib.rs:2871-2873`) and calls it per variable in
+  (`crates/template-py/src/lib.rs:2926-2928`) and calls it per variable in
   `append_expression_value`. That the floor and `render_desc` share exactly these
   two helpers — the resolver and the escaper — is the floor's own claim about
-  itself (`crates/template-py/src/lib.rs:2670-2672`), and it is what makes the
+  itself (`crates/template-py/src/lib.rs:2725-2727`), and it is what makes the
   subtraction isolate dispatch.
 
 The correction is therefore **narrower than revision 1 made it and points the
@@ -355,7 +383,7 @@ laziness must not reach it.* The test that enforces it is
 ### 3.3 The debug contract: a native node needs a span
 
 **BLOCKING 5 is correct and revision 1 missed it too**, and it is the stronger of
-the two: `Node.render_annotated` (`engine/base.py:1063`) sets
+the two: `Node.render_annotated` (`engine/base.py:1057`) sets
 `e._culprit_node = self` first-writer-wins, then builds `template_debug` from
 `e._culprit_node.token`. A natively-rendered node has no Python `Node` to be the
 culprit and no `.token`, so `e.template_debug` is absent and
@@ -493,14 +521,16 @@ the identity check are **not** re-specified here — §0's correction.
 ## 5. Sequencing
 
 1. **The cheap wins, on the shipped path.** `FilterExpression.resolve` passes
-   `&[String]` instead of re-joining (§1.3a, ~0.25 µs/variable **at the corpus's
-   depth 2** — the 0.22 figure in revision 2 was the depth-1 operand, measured on
-   2% of the corpus); the corpus and the census from §4. **And it is not only a
-   cost:** the join is not a faithful inverse of `parse_variable`, and `{{ 2. }}`
-   rendered `2.0` where stock Django renders `''` until this milestone put the
-   Rust dispatch back into `Variable.resolve`'s order (§1.3a). Passing the
-   components removes the input class rather than patching it, which is why this
-   step is not optional. Nothing here needs the walk.
+   `&[String]` instead of re-joining (§1.3a). **Landed**, and re-priced from the
+   measurement rather than the prediction: **0.081 µs/variable at the corpus's
+   depth 2**, flat across depths 1–3, taking our resolver from 2.42× stock to
+   2.15×. Revision 3's first pass said 0.25 µs and 35% of the resolver, which came
+   from a column that measures a *different pyfunction* and cannot be subtracted
+   (§1.3a). **The step is still not optional, and the size is not why**: the join
+   is not a faithful inverse of `parse_variable`, and `{{ 2. }}` rendered `2.0`
+   where stock Django renders `''` until this milestone put the Rust dispatch back
+   into `Variable.resolve`'s order. Passing the components removes the input class
+   rather than patching it. Nothing here needs the walk.
 2. **The render walk.** Text, variable, escape (exact-type predicate, §3.1), the
    66 builtin filters, `{% if %}`, `{% for %}` — each gated by the 1547.
    **The first slice reports its own per-variable cost against §2's 0.34 µs
@@ -514,11 +544,17 @@ the identity check are **not** re-specified here — §0's correction.
    that removes the per-method `Python::attach` (§3.1 item 2). Its own step
    because it touches a trait the whole walk is written against, and because
    **it is the step that has to be sized at depth 2, not at the depth where the
-   gap is smallest.** At depth 1, step 1 leaves a residual of +0.06 µs and the
-   ordering looks like a detail; at depth 2 — where 98% of the corpus's 1408
-   variables live — step 1 leaves **+0.18 µs on my instrument and +0.26 on the
-   review's**, larger than the entire depth-1 gap it was measured against. A
-   step-3 sized from the depth-1 row would be scheduled as optional.
+   gap is smallest.** At depth 1 the whole gap is 0.29 µs and the ordering looks
+   like a detail; at depth 2 — where 98% of the corpus's 1408 variables live —
+   step 1 leaves **+0.347 µs on my instrument and +0.255 on the review's**, larger
+   than the entire depth-1 gap. A step-3 sized from the depth-1 row would be
+   scheduled as optional.
+   **The 0.09 µs between the two instruments is stated and not reconciled**, and
+   it should not be: they are different probes on different frames — this one
+   times `_native.resolve` at its entry point, the review's times
+   `Variable._resolve_lookup` one Python frame in — and neither is wrong, so
+   averaging them would manufacture a precision neither has. Both are larger than
+   the quantity they are being compared to, which is all the ordering needs.
 4. **Lazy materialisation, with `extra_data` eager** (§3.2), and the culprit-span
    protocol (§3.3) in the *same* commit — they are both "what laziness breaks",
    and either alone is a green suite that lies.
@@ -591,7 +627,7 @@ committed), the NIT (`iters` is pinned per row).
 
 **Disputed, with a measurement: B1's premise.** The render path does call
 `_native.resolve` — three calls for a three-variable template, reached from
-`engine/base.py:1047` — so `LookupScope::resolve` is the prototype's path and not the
+`engine/base.py:1041` — so `LookupScope::resolve` is the prototype's path and not the
 shipped one, and revision 1's 2.24× was a true statement about the shipped engine
 with a wrong account of why. The review's decomposition of that 0.522 is exactly
 right and is adopted; its *conclusion* that the engine's resolver is "at parity

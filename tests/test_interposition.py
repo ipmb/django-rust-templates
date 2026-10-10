@@ -1249,30 +1249,53 @@ class ResolverDelegationTests(unittest.TestCase):
         return logger, handler, records
 
     def test_variable_resolution_reaches_rust(self):
-        """A render that resolves a variable calls `_native.resolve`.
+        """A render that resolves a variable calls `_native.resolve_lookups`.
 
         The meter and the file check above say `base` is ours; neither says the
         *lookup* is. A transcription that kept upstream's loop would pass both,
         which is finding 3's shape applied to this method.
+
+        **And it must be the components, not a re-joined path.** Until M19 the
+        shell called `_native.resolve(".".join(self.lookups), context)`, which is
+        one `parse_variable` per variable — 0.25 µs of a 0.74 µs resolve at the
+        depth this corpus uses — and, worse, a re-*classification*: `"2."` parses
+        back as a number, which is how `{{ 2. }}` rendered `2.0`. So the row asserts
+        both halves. Without the second, a revert to the join passes the first:
+        `resolve` still reaches Rust, still returns the right value for `a.b`, and
+        the cost and the divergence come back silently.
         """
         from django_rust_templates.engine import Context, Engine
 
         from django_rust_templates import _native
 
-        calls = []
-        original = _native.resolve
+        components = []
+        paths = []
+        original_lookups = _native.resolve_lookups
+        original_resolve = _native.resolve
 
-        def counting(*args, **kwargs):
-            calls.append(args[0])
-            return original(*args, **kwargs)
+        def counting_lookups(lookups, context):
+            components.append(list(lookups))
+            return original_lookups(lookups, context)
 
-        _native.resolve = counting
+        def counting_resolve(path, context):
+            paths.append(path)
+            return original_resolve(path, context)
+
+        _native.resolve_lookups = counting_lookups
+        _native.resolve = counting_resolve
         try:
             Engine().from_string("{{ a.b }}").render(Context({"a": {"b": 1}}))
         finally:
-            _native.resolve = original
+            _native.resolve_lookups = original_lookups
+            _native.resolve = original_resolve
 
-        self.assertEqual(calls, ["a.b"], calls)
+        self.assertEqual(components, [["a", "b"]], components)
+        self.assertEqual(
+            paths,
+            [],
+            "the render path re-joined the lookup into a path and re-parsed it: "
+            f"{paths}",
+        )
 
     def test_the_failing_bit_is_passed_to_the_logger(self):
         """The bit `{{ author.name }}` fails on, not the bit it ends on.

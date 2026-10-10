@@ -315,6 +315,19 @@ class RenderParityTests(_ParityTest):
         """
         self.assert_renders_like_django("{{ 2. }}", {})
         self.assert_renders_like_django("{{ 2. }}", {"2": "two"})
+        # **The class representative, not a second instance.** The dual state is
+        # "`float(var)` succeeds *and* `var[-1] == '.'`", and CPython's `float`
+        # takes underscore separators — so `1_0.` is in the class by a different
+        # literal syntax, and it is the row with teeth against a Rust number
+        # parser that learned `_` *without* also emitting the lookups (the one
+        # door the rows above do not watch). A reviewer found this by deriving the
+        # class rather than enumerating instances. `Variable("1_0.")` is
+        # `literal=10.0, lookups=('1_0', '')` on both engines; stock renders `''`
+        # whether or not the context holds a `1_0` key, because the empty second
+        # component misses either way, so the row does not expire when a key
+        # appears.
+        self.assert_renders_like_django("{{ 1_0. }}", {})
+        self.assert_renders_like_django("{{ 1_0. }}", {"1_0": "ten"})
         # The neighbours, so that "the literal branch was read first" cannot be
         # repaired by reading it never: these were correct before the fix and
         # are the control for it. `lookups` is `None` for each, which is what
@@ -323,6 +336,13 @@ class RenderParityTests(_ParityTest):
         self.assert_renders_like_django("{{ 5 }}", {})
         self.assert_renders_like_django("{{ 2.e3 }}", {})
         self.assert_renders_like_django("{{ 'quoted' }}", {})
+        # Named as outside the class rather than left unmentioned, because each is
+        # the near-miss a guard would be written for: `2.0.` and `1e5.` have no
+        # second component to fail, and `.5` never reaches the `float` branch's
+        # trailing-dot test in the first place.
+        self.assert_renders_like_django("{{ 2.0. }}", {})
+        self.assert_renders_like_django("{{ 1e5. }}", {})
+        self.assert_renders_like_django("{{ .5 }}", {})
 
     def test_a_filter_chain(self):
         # A built-in filter, resolved through the `Parser` the shell builds —
@@ -547,6 +567,13 @@ class ResolverParityTests(_ParityTest):
         """
         self.assert_resolves_like_django("2.", {})
         self.assert_resolves_like_django("2.", {"2": "two"})
+        # The class, one level down as well: `_native.resolve` still classifies
+        # (the shipped path no longer does — `resolve_lookups` takes the
+        # components), so this row is where a Rust `float` that diverged from
+        # CPython on underscores would show up as a *classification* difference
+        # rather than as a rendered byte difference.
+        self.assert_resolves_like_django("1_0.", {})
+        self.assert_resolves_like_django("1_0.", {"1_0": "ten"})
 
     def test_a_dotted_lookup_and_two_missing_keys(self):
         self.assert_resolves_like_django("a.b", {"a": {"b": "B"}})

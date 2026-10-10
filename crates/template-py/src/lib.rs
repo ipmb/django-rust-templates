@@ -2427,7 +2427,7 @@ fn log_resolution_failure(
 /// `tests/test_resolve_invalid.py`, `tests/test_resolve_callarm.py` and
 /// `tests/test_m8_side_effects.py` can compare a lookup against Django's **at
 /// the method**, with the arm that failed named in the report. Those five
-/// harnesses exercise `silent_variable_failure` — `test_render_parity.py:588`
+/// harnesses exercise `silent_variable_failure` — `test_render_parity.py:615`
 /// and `test_resolve_callarm.py:86` are named for it — so an `_native.resolve`
 /// that returned the raw failure would diverge from the pinned method on exactly
 /// the rows they were built for.
@@ -2594,9 +2594,12 @@ fn literal_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
 /// *and* take the string branch as well (`template-core/src/parser/variable.rs:
 /// 66-73`), so `2.` carries `literal = 2.0` and `lookups = ("2", "")` at once —
 /// exactly as Django's own `Variable("2.")` does. Reading the literal first
-/// prints `2.0` where Django prints `string_if_invalid`. Reached in practice
-/// because the shell joins `self.lookups` back into a path before calling here,
-/// and `"2."` re-parses as a number:
+/// prints `2.0` where Django prints `string_if_invalid`. The shipped path used to
+/// reach that state through the shell's `".".join(self.lookups)`, which re-parses
+/// `"2."` as a number; **it no longer does** — the shell calls
+/// [`resolve_lookups`] with the components, and this function is kept for the
+/// harnesses that compare a *path* and therefore the classification too, which is
+/// what `ResolverParityTests`' trailing-dot row is.
 /// `.review/m19-measurements/lookup_roundtrip.txt`, sections 3 and 4.
 #[pyfunction]
 fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {
@@ -2624,6 +2627,58 @@ fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>
         };
     };
 
+    resolve_components(py, lookups, context)
+}
+
+/// `_resolve_lookup` with the path already **split**, which is the entry point the
+/// shipped render path uses.
+///
+/// `crates/template-core/src/lookup.rs`'s `resolve_lookup` takes `&[String]`, and
+/// `Variable._resolve_lookup`'s whole input is the component tuple
+/// `Variable.__init__` produced — so this is the *closer* mirror of the method,
+/// and [`resolve`] is this plus a classification. Two entry points rather than
+/// one because the classification is a different thing to test:
+/// `ResolverParityTests` compares `resolve`'s classify-then-resolve composition
+/// against `pinned_resolve_lookup()(Variable(path), …)` and its
+/// `test_a_trailing_dot_numeral_is_a_path_not_a_number` row is the one that found
+/// the `2.` divergence, so the path form has to stay reachable.
+///
+/// **No `translate` arm**, and its absence is the point rather than an
+/// oversight. `_("x y")` sets `translate` *and* `lookups` (`unescape_string_literal`
+/// rejects the unquoted body, so `__init__` falls through to the string branch),
+/// which is why [`resolve`] refuses it — but `Variable.resolve` applies the
+/// translation to the *value* one frame out and after `_resolve_lookup` returns,
+/// and the shell reaches here only from `if self.lookups is not None`. So a
+/// translation is never this function's to apply, and refusing it here would
+/// refuse a render Django performs.
+///
+/// Why it exists: until M19 this took a **path** and the shell re-joined the
+/// components into one (`".".join(self.lookups)`), which is exact componentwise
+/// and not faithful in *classification* — `"2."` re-parses as a number, and that
+/// is `{{ 2. }}` rendering `2.0` where Django renders `string_if_invalid`. Passing
+/// the components removes the input class rather than ordering the dispatch
+/// around it. Measured: `.review/m19-measurements/production_render_path.txt` §3d.
+#[pyfunction]
+fn resolve_lookups(
+    py: Python<'_>,
+    lookups: Vec<String>,
+    context: Py<PyAny>,
+) -> PyResult<Py<PyAny>> {
+    resolve_components(py, &lookups, context)
+}
+
+/// The tail [`resolve`] and [`resolve_lookups`] share: one arena, one `pending`,
+/// one `PyTarget` root, one `outcome_to_py`.
+///
+/// Factored rather than duplicated because the two entry points differ **only**
+/// in how the components were obtained, and a second copy of this would be a
+/// second place for the `PyTarget` contract to drift out of step with
+/// `LookupScope::resolve`, which is the third caller of the same shape.
+fn resolve_components(
+    py: Python<'_>,
+    lookups: &[String],
+    context: Py<PyAny>,
+) -> PyResult<Py<PyAny>> {
     let arena = Rc::new(RefCell::new(Vec::new()));
     let pending = Rc::new(Cell::new(None));
     // Bound first, because `resolve_lookup` takes the context by value into the
@@ -3262,6 +3317,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_variable, m)?)?;
     m.add_function(wrap_pyfunction!(parse_filter_expression, m)?)?;
     m.add_function(wrap_pyfunction!(resolve, m)?)?;
+    m.add_function(wrap_pyfunction!(resolve_lookups, m)?)?;
     m.add_function(wrap_pyfunction!(compile_template, m)?)?;
     m.add_function(wrap_pyfunction!(parse_desc, m)?)?;
     m.add_function(wrap_pyfunction!(render_floor, m)?)?;

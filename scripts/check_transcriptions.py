@@ -178,13 +178,13 @@ COMPARED_PATH = {
         (860, 877, "FilterExpression.args_check"),
         (909, 960, "Variable.__init__"),
         (962, 978, "Variable.resolve"),
-        (1089, 1101, "Node.get_nodes_by_type"),
-        (1109, 1110, "NodeList.render"),
-        (1112, 1117, "NodeList.get_nodes_by_type"),
-        (1123, 1124, "TextNode.__init__"),
-        (1132, 1139, "TextNode.render_annotated"),
-        (1161, 1162, "VariableNode.__init__"),
-        (1182, 1226, "token_kwargs"),
+        (1083, 1095, "Node.get_nodes_by_type"),
+        (1103, 1104, "NodeList.render"),
+        (1106, 1111, "NodeList.get_nodes_by_type"),
+        (1117, 1118, "TextNode.__init__"),
+        (1126, 1133, "TextNode.render_annotated"),
+        (1155, 1156, "VariableNode.__init__"),
+        (1176, 1220, "token_kwargs"),
     ],
     # 8 functions, spans 56-214 — the same instrument and the same pin
     # relation as `base.py`, re-measured by
@@ -834,14 +834,17 @@ DECLARED = {
             # blank line between them keeping the two hunks apart. M16 removed
             # the in-function `from django_rust_templates import _native` and
             # the blank line that followed it, so the two hunks now abut and
-            # `difflib` reports them as one — our 995-1047 against upstream's
+            # `difflib` reports them as one — our 995-1041 against upstream's
             # 957-1028, the whole body replaced by a comment block and a call.
-            # (The span read 995-1033 until M19 lengthened the comment block by
-            # fourteen lines to record the `2.` divergence; the upstream side
-            # did not move, because the *pairing* is unaffected by how much
-            # prose our side carries. Re-derived with the checker's own
-            # `differing_lines`, not by adding fourteen to the old number:
-            # `.review/m19-measurements/rederive_base_regions.py`.)
+            # (The span read 995-1033 until M19 lengthened the comment block to
+            # record the `2.` divergence, and 995-1047 while the shell still
+            # re-joined the path; M19's step 1 then shortened the block by six
+            # lines, because the join is no longer this method's input and the
+            # paragraph explaining the join's inexactness is gone with it. The
+            # upstream side has not moved in any of it, because the *pairing* is
+            # unaffected by how much prose our side carries. Re-derived with the
+            # checker's own `differing_lines`, not by adding a delta to the old
+            # number: `.review/m19-measurements/rederive_base_regions.py`.)
             # That is a *merge* rather than a split, so it is the direction the
             # M11 note calls a tax reduction rather than a tax; and the region
             # count is unchanged (two `compile_nodelist`, the marker, the
@@ -880,9 +883,9 @@ DECLARED = {
             # not — a non-raising signature carries the bit on an ordinary return
             # value) is what makes the alternative live rather than closed.
             (
-                (995, 1047),
+                (995, 1041),
                 (957, 1028),
-                'return _native.resolve(".".join(self.lookups), context)',
+                'return _native.resolve_lookups(self.lookups, context)',
             ),
             # **M18.1's seventh region was here, and it was removed on the day it
             # was written** — the reason is the region count rather than the line.
