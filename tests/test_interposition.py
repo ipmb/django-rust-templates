@@ -1665,6 +1665,92 @@ class FilterRoutingTests(unittest.TestCase):
             "body's",
         )
 
+    def test_a_bare_number_argument_reaches_the_walk(self):
+        """`|floatformat:2` — a *number* is a `var_arg`, and the walk carries it.
+
+        `var_chars` includes digits (`base.py:714`), so a bare number takes the
+        `lookup=True` alternative — `args.append((True, Variable("2")))`
+        (`base.py:770`) — and `Variable.__init__` then makes it a **literal**:
+        `self.literal = int("2")` with `lookups` left `None` (`base.py:887-895`),
+        which `resolve` returns without touching the context (`base.py:929-931`).
+        The planner read that `None` as a variable it could not resolve and handed
+        the node back: the right answer, no failure anywhere, and the corpus row
+        named for filter arguments reporting coverage the walk did not have —
+        the reviewer's finding, measured in
+        `.review/m19-measurements/filter_arg_route.py`, where the corpus's only
+        two filter arguments are both this shape.
+        """
+        from django_rust_templates.engine import Engine
+
+        rendered, crossed, applied, _ = self._render_with_both_meters(
+            Engine(), "{{ x|floatformat:2 }}", {"x": 1.2345}
+        )
+
+        self.assertEqual(rendered, "1.23")
+        self.assertEqual(
+            applied,
+            [("floatformat", 1)],
+            "the walk did not apply `floatformat` itself: a `lookup=True` "
+            "argument whose `lookups` is `None` is a number, not a variable it "
+            "cannot resolve",
+        )
+        self.assertEqual(crossed, [], "the filter was applied from Python too")
+
+    def test_the_number_reaches_the_body_as_a_number(self):
+        """The literal is Django's `int`, not its text — the mistake to guard.
+
+        The plausible wrong fix is to take the constant arm's `mark_safe`, and
+        that arm is not merely redundant here: `mark_safe(2)` does not wrap a
+        non-string, it *stringifies* — `SafeString(2)` is `"2"`. `floatformat`
+        tells the two apart (`int(2.5)` is `2`, `int("2.5")` raises `ValueError`
+        and returns the input unchanged), so the row is the same template with
+        the argument written three ways and Django's own three answers.
+        """
+        from django_rust_templates.engine import Engine
+
+        cases = [
+            ("2.5", "1.23", "a number: `int(2.5)` is 2"),
+            ('"2.5"', "1.2345", "a quoted constant: `floatformat` takes its "
+                                "`int()` failure path"),
+        ]
+        for argument, expected, why in cases:
+            with self.subTest(argument=argument):
+                rendered, crossed, applied, _ = self._render_with_both_meters(
+                    Engine(), "{{ x|floatformat:" + argument + " }}", {"x": 1.2345}
+                )
+                self.assertEqual(rendered, expected, why)
+                self.assertEqual(applied, [("floatformat", 1)])
+                self.assertEqual(crossed, [])
+
+    def test_a_number_argument_lets_the_loop_seal(self):
+        """The consequence that is bigger than the one node.
+
+        A loop body seals only if **every** node in it is walk-rendered, so one
+        bare number in one filter argument used to hand the whole `{% for %}` —
+        and the table it builds — back to Python. The probe's loop row read
+        `delegated: ForNode=1` before this and reads `handled` after, and the
+        assertion here is the meter's own form of that: `applied` counts the
+        walk's applications over the iterations, and a delegated loop contributes
+        nothing to it because its render is Python's.
+        """
+        from django_rust_templates.engine import Engine
+
+        rendered, crossed, applied, _ = self._render_with_both_meters(
+            Engine(),
+            "{% for r in rows %}{{ r|floatformat:2 }}{% endfor %}",
+            {"rows": [1.2345, 2.3456]},
+        )
+
+        self.assertEqual(rendered, "1.232.35")
+        self.assertEqual(
+            applied,
+            [("floatformat", 2)],
+            "the walk applied `floatformat` twice, once per iteration: two "
+            "applications is the seal, and a loop Python rendered reads as an "
+            "empty `applied`",
+        )
+        self.assertEqual(crossed, [], "the filter was applied from Python too")
+
     def test_the_parser_finds_our_defaultfilters(self):
         """The premise, on its own, so a green counter cannot be the whole story.
 

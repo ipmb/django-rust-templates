@@ -274,3 +274,216 @@ one that prices it.**  The census's 0.7% row is where the step's whole
 justification lives — a loop that seals — and it is a row `bench.py`'s corpus
 does not contain; the bench's largest honest move is `complex`'s −9.3%, because
 the pages it can reach are the ones this step could already reach.
+
+## 4. Follow-up — the third argument shape: a node the walk declined and reported as covered
+
+This section is a follow-up to §1, and the finding is the reviewer's.
+`django-only/filter-arg` was reporting a `handled` row it did not have: the walk
+declined every `{{ r|floatformat:2 }}` in it, and the *census* said so while the
+family's node count did not, because a delegated `ForNode` carries the whole loop
+with it and appears as one delegate.
+
+**Django parses a filter argument in three shapes, not two.** `plan_steps` read
+`(lookup, value)` and took two: `lookup=False` is a constant (`mark_safe(arg)`,
+`base.py:768`/`807`) and `lookup=True` is a `Variable(var_arg)` resolved against
+the context per render (`base.py:770`).  But `var_chars` is `\w\.\+-`
+(`base.py:714`) — digits included — so a **bare number** in the argument position
+matches `var_arg` too, and `Variable.__init__` turns it into a literal:
+`self.literal = int(var)` with `lookups` left `None` (`base.py:887-895`), which
+`resolve` returns without touching the context (`base.py:929-931`).
+`base.py:685-687` says why it is spelled this way — *"Numbers are treated as
+variables for implementation reasons (so that they retain their type when passed
+to filters)"* — and that sentence is the whole reason the third shape must keep
+the **`int`** and not its text: `mark_safe(2)` would not merely skip a wrapper, it
+would stringify (`SafeString(2)` is `"2"`).  The two are observably different:
+`{{ x|floatformat:2.5 }}` on `1.2345` is `1.23` with the literal (`int(2.5)` is
+`2`) and `1.2345` with the string, and both readings were taken against stock
+Django before the row that asserts them was written.
+
+**`lookups is None` in this arm means the numeric branch ran, and that is an
+argument about the regex rather than about `Variable`.**  `Variable.__init__`
+reaches `lookups = None` with a literal set by two other routes — the quoted
+string at `base.py:906` and, in the `lookup=False` arm, `resolve({})`'s own
+`SafeString` — and a reader who inspects the class alone sees three shapes with
+`lookups is None`, not one.  What closes it is that `var_chars` cannot spell a
+leading quote and `unescape_string_literal` raises unless `s[0]` is one
+(`utils/text.py:457`), so within `lookup=True` the `base.py:906` route is
+unreachable.  Measured on the pinned 6.0.9: `Variable("2")` → `literal=2`,
+`lookups=None`; `Variable("2.")` → `literal=2.0` **and** `lookups=('2','')`, so
+`resolve` raises `VariableDoesNotExist` and the node takes the *variable* arm —
+"the argument looks like a number" is not the test, "the numeric branch completed"
+is.
+
+`plan_steps`'s `lookup` arm read `value.lookups` and returned `Ok(None)` when it
+was `None` — which is this shape *and only this shape* — so the node went back to
+Python.  Output right, bytes right, coverage absent, and nothing failed.
+
+### The route, before and after
+
+Two artifacts, same machine, adjacent in time: pre-fix
+`sha256:4c14186d0f95…` (the arm reverted to `lookups.is_none() → None`, source
+hash `b5e47af4…` verified restored afterwards) and post-fix
+`sha256:82ce0e2f0d95…`.  Full transcripts: `filter_arg_route.before.txt` and
+`filter_arg_route.txt`.
+
+| argument | before | after |
+|---|---|---|
+| `floatformat:2` (bare) | `delegated VariableNode=1`, `applied -` | `handled`, `applied floatformat=1` |
+| `floatformat:2.5` (bare float) | `delegated VariableNode=1`, `applied -` | `handled`, `applied floatformat=1` |
+| `truncatechars:3` (bare) | `delegated VariableNode=1`, `applied -` | `handled`, `applied truncatechars=1` |
+| `add:2` (bare) | `delegated VariableNode=1`, `applied -` | `handled`, `applied add=1` |
+| `add:-2` (signed) | `delegated VariableNode=1`, `applied -` | `handled`, `applied add=1` |
+| `floatformat:2` in a loop | `delegated ForNode=1`, `applied -` | `handled`, `applied floatformat=2` |
+| `floatformat:"2"`, `:n`, `cut:"a"`, `slice:":2"` | `handled` | `handled` (unmoved) |
+
+Every row's bytes are stock's in both columns — the hole was never a correctness
+bug, which is why a differential gate could not have found it and the census did.
+The loop row is the one that matters beyond the single expression: the same arm is
+what decides whether a `{% for %}` seals, so the fix buys a loop.
+
+### The census, and the one row that moved
+
+Nineteen rows in `node_census.txt`; the diff against the committed file touches
+**one of them**, and the other eighteen are byte-identical.
+
+```
+django-only/filter-arg   walked  4 nodes   2/4   deleg  50.0%  out 2454/2469  deleg  99.4%
+                         handled:   TextNode=2
+                         delegated: LoadNode=1 ForNode=1
+                         applied:   -                     body xings: 0
+                                                                          ↓
+django-only/filter-arg   walked  4 nodes 253/254 deleg   0.4%  out    0/2469  deleg   0.0%
+                         handled:   TextNode=152 VariableNode=100 ForNode=1
+                         delegated: LoadNode=1
+                         applied:   floatformat=50        body xings: 200
+```
+
+`applied: floatformat=50` and `body xings: 200` are the two meters agreeing on the
+new state: 50 applications, 4 interior host crossings each — `floatformat`'s body
+is Python.  Under the pre-fix build this row printed `applied: -` with
+`body xings: 200`, and that pairing is exactly what the third meter was added to
+make visible (§0).
+
+**`django-only/realistic` holds the same argument and does not move, and that is
+not a miss.** Its `{{ …|floatformat:2 }}` sits inside a `{% block %}`, so the
+`BlockNode` above it is delegated whole and no argument shape can reach the walk
+there.  The argument census (`filter_arg_route.py`) counts two numeric arguments
+in the corpus and the coverage census moves one of them; both are right, and the
+difference is *reachability*, which is the next slice's subject.  Corpus-wide the
+argument census reads **0 constant, 0 variable, 2 numeric literal** — and its
+control, a plain `\|\w+:[^\s|}]*` regex over the whole source rather than only the
+`{{ … }}` tokens, returns the same 2, so the scan is a census of the corpus and not
+a floor from a narrow pattern.
+
+### Timing — six runs, three artifacts, and a comment-only control
+
+`scripts/bench.py`, `--repeats 7`, `.venv/bin/python -I`, same machine, ratios are
+ours/stock, **lower is better**.  Six runs: **two on the pre-fix artifact
+`sha256:4c14186d0f95…`** (`preA`, `preB`) and **four on the fixed code, split
+across two artifacts** — `82ce0e2f0d95…` (`postA`, `postB`) and `bc4c750a6940…`
+(`postC`, `postD`), which is the *same code* rebuilt after the doc comments in
+§4's first paragraph were re-keyed to the line numbers measured here.
+
+**The comment-only rebuild is a control, and it is the control this A/B needs.**
+Nothing about it can change behaviour, so if the instrument were reading the
+rebuild rather than the code, A-vs-C would show it.  It does not: median 0.73%,
+p90 2.05%.  **That is what licenses reading pre-vs-post as a code-only
+comparison** rather than a comparison of two builds that differ in two ways.
+
+All six runs' own output is archived under `bench-ab/` (`pre-a`, `pre-b`,
+`post-a` … `post-d`), and each file's header line prints the artifact's sha256 and
+the profile it came from (`→ release (target/release/lib_native.dylib)`), so the
+three-artifact claim above is checkable in the transcripts rather than taken from
+this prose.
+
+**The scatter, before the numbers it bounds.**  Same-tree, ratio-against-ratio
+over all 36 (row, mode) pairs:
+
+| pair | artifacts | median | p90 | max |
+|---|---|---|---|---|
+| pre A/B | same, `4c14186d` | 0.81% | 1.91% | 2.90% |
+| post A/B | same, `82ce0e2f` | 0.72% | 2.06% | 4.33% |
+| post C/D | same, `bc4c750a` | 0.85% | 2.03% | **8.58%** |
+| post A vs C | comment-only rebuild | 0.73% | 2.05% | 7.26% |
+| post A vs D | comment-only rebuild | 0.76% | 2.44% | 7.11% |
+
+**The max is not a per-row bound.**  Every one of those maxima comes from the same
+handful of rows — `real-world/large` parse, `micro/lookup` parse, `micro/loop-text`
+parse — so a single row can wander 7–8.6% while the median row repeats to 0.8%.
+The band describes the population; for one row the test has to be *that row's own
+range across the runs*.  Stated that way, over all six runs:
+
+| row | mode | pre range (2 runs) | post range (4 runs) | ranges |
+|---|---|---|---|---|
+| `django-only/filter-arg` | render | 1.374–1.398 | 1.086–1.108 | **disjoint, gap +24.0%** |
+| `django-only/filter-arg` | parse | 1.401–1.404 | 1.123–1.136 | **disjoint, gap +23.4%** |
+| `django-only/escape-table` | render | 0.571–0.585 | 0.592–0.598 | disjoint, gap −1.3% |
+| `micro/include` | render | 0.732–0.736 | 0.703–0.717 | disjoint, gap +2.0% |
+| `django-only/realistic` | render | 0.923–0.929 | 0.913–0.921 | disjoint, gap +0.3% |
+| `micro/extends` | parse | 1.240–1.253 | 1.260–1.273 | disjoint, gap −0.6% |
+| `micro/if` | render | 0.930–0.935 | 0.938–0.948 | disjoint, gap −0.3% |
+| `micro/loop-var` | render | 0.244–0.251 | 0.253–0.255 | disjoint, gap −0.8% |
+| `micro/variable` | render | 0.763–0.763 | 0.780–0.784 | disjoint, gap −2.2% |
+| `real-world/large` | parse | 1.069–1.069 | 0.998–1.084 | overlap, span 8.1% |
+| `micro/lookup` | parse | 1.555–1.574 | 1.500–1.615 | overlap, span 7.3% |
+| the other 25 (row, mode) pairs | | | | overlap, span ≤ 5.0% |
+
+**Nine of the 36 pairs are disjoint, and seven of them are the trap.**  A pre side
+with two samples makes disjointness cheap — `micro/variable` render's fires because
+both pre runs happened to land on the same value to three decimals, which is a
+pre range of width zero and not a separation.  Those seven gaps run 0.3% to 2.2%
+and go **in both directions** (five read as regressions, two as improvements), and
+none of them can be caused by this change: the corpus holds exactly two filter
+arguments (the census above), `realistic`'s sits inside a delegated `BlockNode`, and
+the node census — a *different instrument* — reports 18 of its 19 rows
+byte-identical.  So disjointness at n=2 vs n=4 is not evidence, and it is exactly
+the shape a real finding would have; what separates the treatment is the size of
+the gap, 23–24%, and the mechanism.  `micro/include`'s 2.0% and `realistic`'s 0.3%
+are named here so nobody quotes them later as wins.
+
+**The treatment, however, is 20% and holds across all four post runs:**
+
+| row | mode | pre (mean of 2) | post (mean of 4) | move |
+|---|---|---|---|---|
+| `django-only/filter-arg` | render | 1.386 | 1.101 | **−20.5%** |
+| `django-only/filter-arg` | parse | 1.403 | 1.128 | **−19.6%** |
+
+The same move in both modes is the diagnostic (spec §4 item 9): a per-*compile*
+saving would show in `parse` and not in `render`, and here both move by ~20%, so
+the saving is per-render — which is what the census says it is, 253 nodes per
+render walked instead of 100 variables delegated from inside a Python loop.  In
+absolute µs our render on that row went `623.2 / 626.8 → 483.0 / 483.7 / 488.3 /
+488.2` (−22.3% on the means) against the control's own −2.2%: stock Django on the
+same row moved `453.7 / 448.4 → 436.5 / 445.5 / 441.8 / 440.6`, in an engine this
+change never touches.  The ratio is the measure and the raw pair is the
+corroboration, in that order because the control moved.
+
+The family tiles hold, and §1's acceptance line is unaffected — real-world
+**render** geometric mean over the five post-fix runs `0.54–0.558` (pre
+`0.546–0.550`), **parse** `0.875–0.903` (pre `0.896–0.900`): both far below 1.00,
+and the one 0.875 is `postC`'s own wander, which is the *tile* moving 3% between
+runs of the same code rather than a regression.  `docs/bench.html` is regenerated
+on the shipped artifact and its own tiles read **0.54× render / 0.90× parse**.
+`django-only` moves as the one row predicts: render `0.770 / 0.775 → 0.743 /
+0.740 / 0.742 / 0.743` (−3.9%), parse `0.939 / 0.936 → 0.896 / 0.899 / 0.901 /
+0.900` (−4.2%), and one row of five moving −20% is a family move of
+`0.8^(1/5) = −4.4%`, so the arithmetic closes on the mechanism rather than merely
+agreeing with it.
+
+### What this row is now, stated plainly
+
+**The row is still a loss against stock: 1.10× at render, 1.13× at parse.**  The
+fix moved it from 1.39× to 1.10×; it did not make it a win, and the commit message
+says so.  Its remaining 44.7 µs at render (485.8 ours against 441.1 stock, on the
+four-run means) is ~0.9 µs per loop iteration, where each iteration applies one
+filtered expression, and the census reads 4 interior
+host crossings per application because `floatformat`'s body is Python.  **That the
+residual is those crossings is a plausible reading and not a measurement** — the
+decomposition of it is not taken here, and the next decision that would rest on it
+owes its own instrument.
+
+The gate that keeps the fix fixed, in two places: the route table above (a
+regression flips those rows back to `delegated`, which is how the hole was found)
+and three unit rows in `tests/test_interposition.py` — the argument reaching the
+walk, the number reaching the body *as a number* (`floatformat:2.5` vs
+`floatformat:"2.5"`, which must not agree), and the loop sealing.

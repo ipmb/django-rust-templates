@@ -1,0 +1,36 @@
+=== routes: does the walk take the node, and do the bytes agree ===
+
+`template` is the template-level stop (`plan is None` → `NodeList.render`) and
+`node` is the node-level one (`Act::Delegate` for this node).  They are two
+different answers and a row where they disagree is a walked template that
+walked nothing.
+
+argument                               template  plan  node       delegated            applied              xings  bytes
+floatformat:2 (bare number)            walked        1 handled    -                    floatformat=1        4      same
+floatformat:"2" (quoted)               walked        1 handled    -                    floatformat=1        5      same
+floatformat:n (variable)               walked        1 handled    -                    floatformat=1        4      same
+floatformat:2.5 (bare float)           walked        1 handled    -                    floatformat=1        5      same
+truncatechars:3 (bare number)          walked        1 handled    -                    truncatechars=1      1      same
+truncatechars:"3" (quoted)             walked        1 handled    -                    truncatechars=1      2      same
+add:2 (bare number)                    walked        1 handled    -                    add=1                1      same
+add:"2" (quoted)                       walked        1 handled    -                    add=1                1      same
+add:-2 (signed number)                 walked        1 handled    -                    add=1                1      same
+cut:"a" (quoted)                       walked        1 handled    -                    cut=1                0      same
+slice:":2" (quoted)                    walked        1 handled    -                    slice=1              2      same
+floatformat:2 inside a loop            walked        1 handled    -                    floatformat=2        8      same
+
+=== sweep: every filter argument in the corpus, by shape ===
+
+row                        template           filter           arg
+django-only/filter-arg     page.html          floatformat      2
+django-only/realistic      page.html          floatformat      2
+
+arguments: 0 constant, 0 variable, 2 numeric literal  (2 total)
+  control, `\|name:arg` by plain regex: 2 — agree
+    django-only/filter-arg     page.html          |floatformat:2
+    django-only/realistic      page.html          |floatformat:2
+
+=== confirm: the real `(lookup, arg)` pair for each numeric argument ===
+
+django-only/filter-arg     page.html          floatformat:2          scan=numeric literal lookup=True arg=Variable literal=2 lookups=None
+django-only/realistic      page.html          floatformat:2          scan=numeric literal lookup=True arg=Variable literal=2 lookups=None

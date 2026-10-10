@@ -988,9 +988,30 @@
       (0.74× stock, 7.2 µs against Jinja2's 6.1) and <code>micro/extends</code> (1.05×, 10.0
       against 5.1) are the two rows Jinja2 still wins outright, because it precompiles
       inheritance and this engine still crosses into Python for <code>{% include %}</code>.
-      <code>django-only/filter-arg</code> remains the one row both slower than stock (1.40×)
-      and outside the three-engine intersection, for the reason recorded above.
+      <code>django-only/filter-arg</code> remains the one row both slower than stock (1.10×)
+      and outside the three-engine intersection — Jinja2 spells a filter argument
+      <code>floatformat(2)</code>, not <code>floatformat:2</code>, so the row runs on two engines.
     </p>
+    <p class="sub" style="margin-top:16px">
+      <b>A bare number in a filter argument was the one shape the walk silently declined, and
+      that is now fixed.</b> Django parses a filter argument three ways, not two:
+      <code>{{ r|floatformat:2 }}</code> is stored as <code>(True, Variable("2"))</code> — a
+      <i>variable</i> argument, because digits are in <code>var_chars</code> — and
+      <code>Variable</code> turns that into a literal rather than a context lookup, which is
+      Django's deliberate design so the number keeps its type when it reaches the filter. The
+      walk read "no lookups" as "not mine" and handed the node back, so every such expression
+      was delegated whole while the node count still reported the row as covered. Carrying the
+      literal instead takes <code>django-only/filter-arg</code> from <b>99.4% of its output
+      returned from Python to 0.0%</b>, its render ratio from <b>1.39× to 1.10×</b> of stock and
+      its parse from <b>1.40× to 1.13×</b>, and the <code>django-only</code> family's geometric
+      mean from 0.77× to 0.74× — with the acceptance tiles unmoved (real-world render
+      0.55× → 0.54×, parse 0.90×). The literal has to be the <b><code>int</code></b> and not
+      its text: marking it safe would stringify it, and <code>floatformat:2.5</code> is where
+      the two part company (<code>1.23</code> against <code>1.2345</code>). The corpus holds
+      exactly two such arguments, and the other one — inside a <code>{% block %}</code> in
+      <code>django-only/realistic</code> — does not move, because the block above it is
+      delegated whole; that is reachability rather than argument shape, and it is the next
+      slice.
     <p class="sub" style="margin-top:16px">
       <b>Until M18 it was a substitution, and that machinery is gone.</b> Earlier revisions of
       this page described a meta-path finder that served a transcription of

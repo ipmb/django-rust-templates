@@ -69,11 +69,11 @@ real-world/large         walked      461  nodes  791/791  deleg   0.0%  out     
                            delegated: -
                            applied:   -
                            body xings: 0
-django-only/filter-arg   walked        4  nodes    2/4    deleg  50.0%  out   2454/2469   deleg  99.4%
-                           handled:   TextNode=2
-                           delegated: LoadNode=1 ForNode=1
-                           applied:   -
-                           body xings: 0
+django-only/filter-arg   walked        4  nodes  253/254  deleg   0.4%  out      0/2469   deleg   0.0%
+                           handled:   TextNode=152 VariableNode=100 ForNode=1
+                           delegated: LoadNode=1
+                           applied:   floatformat=50
+                           body xings: 200
 django-only/i18n         walked        6  nodes    3/6    deleg  50.0%  out    868/922    deleg  94.1%
                            handled:   TextNode=3
                            delegated: LoadNode=1 TranslateNode=1 ForNode=1

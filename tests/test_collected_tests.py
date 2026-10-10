@@ -608,8 +608,27 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # (`test_collected_tests.py`'s own pin moves with it, which is this paragraph),
 # and no row is renamed or deleted — 487 + 4 = 491.
 #
-# Counts at close: 491 collected, proxy and discovery agreeing.
-PINNED = 491
+# 491 → 494 is **+3**, all in `tests/test_interposition.py`, and they close a hole
+# in the walk's filter arguments rather than adding a meter. Django parses an
+# unquoted number in the argument position as a `var_arg` — `var_chars` is
+# `\w\.\+-` (`base.py:714`), digits included — and `Variable.__init__` makes that a
+# *literal*: `self.literal = int("2")` with `lookups` left `None` (`base.py:887-895`),
+# which `resolve` returns directly (`base.py:929-931`). `plan_steps` read only
+# `value.lookups` and declined the node when it was `None`, so every
+# `{{ x|floatformat:2 }}` was delegated whole — output right, coverage absent, and
+# `django-only/filter-arg` reporting a `handled` row it did not have. The three
+# rows are: the argument reaching the walk (`applied == [("floatformat", 1)]`,
+# `crossed == []`); the *number* reaching the body as a number, asserted on
+# `floatformat:2.5` versus `floatformat:"2.5"` because `mark_safe(2)` would
+# stringify and the two must not agree; and a loop row, because the same fix is
+# what lets `{% for %}` seal.
+# Measured the other way, as this ledger's rule asks: `git diff -U0 tests/` adds
+# **3** `def test_` lines and removes none, no module gains a row but this one
+# (`test_collected_tests.py`'s own pin moves with it, which is this paragraph),
+# and no row is renamed or deleted — 491 + 3 = 494.
+#
+# Counts at close: 494 collected, proxy and discovery agreeing.
+PINNED = 494
 
 
 def collected() -> unittest.TestSuite:

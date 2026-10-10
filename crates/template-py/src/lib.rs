@@ -2887,13 +2887,16 @@ enum Head {
     Value(Py<PyAny>),
 }
 
-/// One filter argument, in Django's two shapes.
+/// One filter argument, in Django's three shapes.
 ///
 /// `FilterExpression` stores each argument as `(lookup, value)` and
 /// `resolve` reads the flag (`base.py:806-809`), so the same pair decides here:
 /// `lookup=False` is a constant — `arg_vals.append(mark_safe(arg))` — and
 /// `lookup=True` is `Variable(var_arg)`, resolved against the context on every
-/// render.
+/// render. The third shape hides inside the second: a `var_arg` may be a number,
+/// which `Variable` turns into a literal rather than a lookup, so `lookup=True`
+/// carries two cases and `lookups` is what tells them apart. [`FilterArg::Literal`]
+/// is that one.
 enum FilterArg {
     /// `mark_safe(arg)`, folded to plan time.
     ///
@@ -2914,6 +2917,27 @@ enum FilterArg {
         /// argument reads it cannot be sealed.
         head: String,
     },
+    /// A `Variable(var_arg)` that is a **number**, so `resolve` returns the
+    /// literal rather than a context lookup — `value = self.literal`
+    /// (`base.py:929-931`), where `literal` is the `int`/`float` the parser
+    /// computed (`base.py:887-895`).
+    ///
+    /// This is Django's *third* argument shape and it is easy to miss because it
+    /// arrives as a `var_arg`: `var_chars` is `\w\.\+-` (`base.py:714`), digits
+    /// included, so `|floatformat:2` is parsed `(True, Variable("2"))` and only
+    /// the `lookup=True` flag says otherwise. The comment that explains the
+    /// design is `base.py:686-687` — *"Numbers are treated as variables for
+    /// implementation reasons (so that they retain their type when passed to
+    /// filters)"* — and `retain their type` is the load-bearing half: the value
+    /// here is the **`int` 2**, not the string `"2"`.
+    ///
+    /// So it is **not** `Constant`: Django's `lookup=True` arm of `arg_vals` does
+    /// not `mark_safe` (`base.py:806-809`), and `mark_safe(2)` would not merely
+    /// skip a wrapper, it would *stringify* — `SafeString(2)` is `"2"`. That
+    /// difference is observable: `{{ x|floatformat:2.5 }}` on `1.2345` is
+    /// `1.23` with the literal (`int(2.5)` is `2`) and `1.2345` with the string
+    /// (`int("2.5")` raises `ValueError`, and `floatformat` returns the input).
+    Literal(Py<PyAny>),
 }
 
 /// One `|name` or `|name:arg` the walk applies itself.
@@ -3325,17 +3349,40 @@ fn plan_steps(py: Python<'_>, expression: &Bound<'_, PyAny>) -> PyResult<Option<
                 let value = operand.get_item(1)?;
                 if lookup {
                     // `args.append((True, Variable(var_arg)))` (`base.py:770`) —
-                    // a real variable, so `lookups` is set and the head can be
-                    // read off the object rather than re-derived from the token.
+                    // a `var_arg`, which is either a real variable (lookups set)
+                    // or a **number** (lookups `None`), and `base.py:686-687` is
+                    // why the second is spelled the same as the first.
                     let lookups = value.getattr("lookups")?;
                     if lookups.is_none() {
-                        return Ok(None);
+                        // `Variable.__init` leaves `lookups` unset for exactly one
+                        // shape in this arm — a number (`self.literal = int(var)`,
+                        // `base.py:887-895`) — and `resolve` hands that literal
+                        // back without touching the context (`base.py:929-931`).
+                        // "In this arm" is doing work: `Variable` reaches
+                        // `lookups=None` with a literal set by a second route, the
+                        // quoted string at `base.py:906`, and what rules that route
+                        // out is the regex above it rather than the class —
+                        // `var_chars` (`base.py:714`) cannot spell a leading quote
+                        // and `unescape_string_literal` raises unless `s[0]` is one
+                        // (`utils/text.py:457`). Note also that the test is *the
+                        // numeric branch completed*, not "the argument looks like a
+                        // number": `Variable("2.")` sets `literal=2.0` **and**
+                        // `lookups=('2','')`, so it resolves as a variable.
+                        // A `literal` of `None` here would be a `Variable` neither
+                        // arm explains, so the node goes back rather than a `None`
+                        // argument reaching a filter.
+                        let literal = value.getattr("literal")?;
+                        if literal.is_none() {
+                            return Ok(None);
+                        }
+                        Some(FilterArg::Literal(literal.unbind()))
+                    } else {
+                        let lookups: Vec<String> = lookups.extract()?;
+                        Some(FilterArg::Variable {
+                            variable: value.unbind(),
+                            head: lookups.first().cloned().unwrap_or_default(),
+                        })
                     }
-                    let lookups: Vec<String> = lookups.extract()?;
-                    Some(FilterArg::Variable {
-                        variable: value.unbind(),
-                        head: lookups.first().cloned().unwrap_or_default(),
-                    })
                 } else {
                     // `args.append((False, Variable(constant_arg).resolve({})))`
                     // (`base.py:768`) hands already resolved, and
@@ -3517,7 +3564,10 @@ fn emit_sealable(emit: &Emit, loopvar: &str) -> bool {
     head_sealable(&emit.head)
         && emit.steps.iter().all(|step| match &step.arg {
             Some(FilterArg::Variable { head, .. }) => head != loopvar && head != "forloop",
-            Some(FilterArg::Constant(_)) | None => true,
+            // A literal reads nothing, so it cannot be the reason a body
+            // refuses — which is what makes `{% for r in rows %}{{ r|floatformat:2 }}`
+            // seal where `{{ r|floatformat:n }}` does not.
+            Some(FilterArg::Constant(_)) | Some(FilterArg::Literal(_)) | None => true,
         })
 }
 
@@ -4176,11 +4226,15 @@ impl<'py> Walk<'py> {
         let py = self.py;
         // `arg_vals`: a constant was `mark_safe`d at plan time, a variable is
         // `arg.resolve(context)` with **no handler**, so a failed argument
-        // propagates out of `resolve` and each caller decides what it means.
+        // propagates out of `resolve` and each caller decides what it means. A
+        // literal is neither resolved nor wrapped — it is the object `resolve`
+        // would have returned (`value = self.literal`), which for a numeric
+        // argument is a number and not its text.
         let mut args: Vec<Py<PyAny>> = Vec::with_capacity(1);
         match &step.arg {
             None => {}
             Some(FilterArg::Constant(constant)) => args.push(constant.clone_ref(py)),
+            Some(FilterArg::Literal(literal)) => args.push(literal.clone_ref(py)),
             Some(FilterArg::Variable { variable, .. }) => args.push(
                 variable
                     .bind(py)
