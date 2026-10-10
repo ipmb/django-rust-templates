@@ -36,6 +36,22 @@ where a *later* slice's compile question gets asked: step 5's claim is about
 `real-world/normal`, and a claim about a corpus row has to be measured on that
 row's source rather than on a micro row's.  The rows are named on the command
 line rather than defaulted, so a run says which population it covered.
+
+**`scripts/bench.py` has a `compile` mode now, and this probe is what it was
+checked against.**  The report used to carry `render` and `parse` and nothing
+that could show a per-compile cost, so step 5's `+4.6%…+11.7%` was measured here
+and reported from a record — an instrument off the gate's path, which is where a
+claim goes to stop being checkable.  The mode is in the report as of this file's
+last edit; the probe stays because a second implementation of a definition is the
+only thing that can catch a definition that is wrong (here it also runs a
+*different* iteration count — 200 pinned against the mode's calibrated-per-row).
+The two land in the same place on all eight shared rows, with a bound rather than
+the word "agree": the `rust` cell within 2.13% of this probe's two-run span, the
+`stock` cell within 2.50%, the ratio within 3.48% — six ratios below the span,
+the two real-world ones 0.55% and 1.02% above, and the µs columns with no
+consistent sign.  The gap is unattributed; the two also differ in warmup
+(`max(3, iters // 4)` there against this file's own).  `real-world/normal` is the
+row to look at: 166.36 there against 166.12–167.50 here.
 """
 
 import sys

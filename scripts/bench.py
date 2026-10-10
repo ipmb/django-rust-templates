@@ -22,14 +22,21 @@ prints which engines ran it and why the others did not, because a row that
 silently drops an engine is a row whose column a reader will fill in from the
 row above it.
 
-**Two modes per row.** `parse` compiles the template and renders it, through
+**Three modes per row.** `parse` compiles the template and renders it, through
 `from_string` on all three engines — the compile a cold request pays. `render` is
 the same template compiled once and rendered repeatedly, which is the hot path
-with the parse removed. Both are reported for every row rather than one being
-chosen for the reader, since which one matters depends on whether the reader is
-asking about a page cache or a cold request. `from_string` rather than
-`get_template` is not a detail: see `measure` for the cache asymmetry that made
-the first version of this column not a comparison at all.
+with the parse removed. `compile` is `from_string` alone, with no render at all.
+All three are reported for every row rather than one being chosen for the reader,
+since which one matters depends on whether the reader is asking about a page
+cache, a cold request, or the cost of a deploy that re-parses every template.
+`from_string` rather than `get_template` is not a detail: see `measure` for the
+cache asymmetry that made the first version of this column not a comparison at
+all. **`compile` is not `parse - render`** — the two terms of that subtraction are
+a compile of *this* iteration's template against a warm handle that has already
+paid its lazy work, so it carries `compile + (cold - warm)` and the second term is
+not small. Measured at M19 step 5 the subtraction read −1.3 us where this mode
+read +17.5 us on `real-world/normal`: they disagree in sign, which is how the mode
+came to exist (`.review/m19-measurements/step5.md`).
 
 **An equality gate, not a courtesy.** Each row's output is hashed per engine and
 compared against the control's. `rust` differing from `django` anywhere is a hard
@@ -91,7 +98,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 RENDER = "render"
 PARSE = "parse"
-MODES = (RENDER, PARSE)
+COMPILE = "compile"
+MODES = (RENDER, PARSE, COMPILE)
 
 # What the number under each mode *is*, and which way is better. It lives in the
 # payload rather than in the report's prose because a chart that states its
@@ -106,12 +114,21 @@ MODE_METRIC = {
         "what": "render a template that is already compiled",
         "better": "lower",
         "why": "the same work costs fewer microseconds",
+        "button": "render only (template pre-compiled)",
     },
     PARSE: {
         "unit": "microseconds per call",
         "what": "compile a template and render it, in one call",
         "better": "lower",
         "why": "the same work costs fewer microseconds",
+        "button": "parse & render (template compiled each call)",
+    },
+    COMPILE: {
+        "unit": "microseconds per call",
+        "what": "compile a template without rendering it",
+        "better": "lower",
+        "why": "the same compile costs fewer microseconds",
+        "button": "compile only (template parsed, not rendered)",
     },
 }
 
@@ -190,8 +207,15 @@ def calibrate(engine, workload, handle, mode, context, target: float) -> int:
     else:
         source = workload.templates[workload.entry]
 
-        def call():
-            return engine.render(engine.from_string(source), context)
+        if mode == COMPILE:
+
+            def call():
+                return engine.from_string(source)
+
+        else:
+
+            def call():
+                return engine.render(engine.from_string(source), context)
 
     for _ in range(3):  # settle lazy work before anything is timed
         call()
@@ -248,6 +272,11 @@ def measure(
         def call():
             return engine.render(handle, context)
 
+    elif mode == COMPILE:
+
+        def call():
+            return engine.from_string(source)
+
     else:
 
         def call():
@@ -271,14 +300,21 @@ def measure(
         for _ in range(iters):
             out = call()
         samples.append((time.perf_counter() - start) / iters)
+    # **`compile` mode's product is a compiled template, not bytes**, so the
+    # identity gate reads what it *renders*. That keeps one invariant across all
+    # three modes — a (row, engine) hashes the same bytes whichever mode timed it —
+    # and it is checked rather than assumed: `main` refuses a run whose modes
+    # disagree. Rendering here is outside every timed loop, so it reaches no figure.
+    out_bytes = engine.render(out, context) if mode == COMPILE else out
+    first_bytes = engine.render(first, context) if mode == COMPILE else first
     # A workload whose data the render mutates would drift across the samples and
     # be reported as a timing. Cheap to catch, and silently wrong if not caught.
-    if out != first:
+    if out_bytes != first_bytes:
         raise AssertionError(
             f"{workload.key}/{mode} on {engine.name}: the output changed between the "
             f"first and the last call, so this row is not a fixed amount of work"
         )
-    return min(samples) * 1e6, max(samples) * 1e6, iters, out
+    return min(samples) * 1e6, max(samples) * 1e6, iters, out_bytes
 
 
 MIN_ITERS = 5
@@ -294,7 +330,7 @@ FLOOR_ENTRY = "floor.html"
 
 
 def measure_floor(engines: list[str], repeats: int, target: float) -> dict:
-    """Per (mode, engine), what a `render` call costs when the template does nothing.
+    """Per (mode, engine), what a call costs when the template does nothing.
 
     **This is the number that says whether a micro row is about its construct.**
     Every row pays the engine's call overhead before it does any template work, and
@@ -304,6 +340,12 @@ def measure_floor(engines: list[str], repeats: int, target: float) -> dict:
     measurement of the call; the report prints the share (`call N%`) beside every
     cell so a reader can tell which rows those are instead of taking the family's
     word for it.
+
+    **The floor is per mode, because the call is not the same call.** `render`'s is
+    `Template.render` on an empty node list; `parse`'s is that plus the compile of
+    the empty source; `compile`'s is the compile alone. Each mode's share is taken
+    against its own — dividing a compile cell by the render floor would read a
+    compile as "mostly call" for the opposite reason.
 
     **It is not subtracted from anything.** The subtraction is tempting and it is
     wrong at the row level: a loop's fixed setup is *not* the empty template's cost.
@@ -543,7 +585,7 @@ def print_table(records: list[dict], verdicts: dict, engines: list[str]) -> None
     shown = [e for e in bench_engines.ENGINES if e in engines]
     width = max((len(r["key"]) for r in records), default=10)
     width = max(width, 12)
-    header = f"{'workload':{width}s} {'mode':6s} {'iters':>6s} " + " ".join(
+    header = f"{'workload':{width}s} {'mode':7s} {'iters':>6s} " + " ".join(
         f"{e:>10s}" for e in shown
     )
     print(header + f" {'ours/stock':>10s}  out")
@@ -582,7 +624,7 @@ def print_table(records: list[dict], verdicts: dict, engines: list[str]) -> None
                 ratio_cell = f"{ratio:10.3f}" if ratio == ratio else f"{'-':>10s}"
                 iters_cell = f"{control_iters:6d}" if control_iters else f"{'-':>6s}"
                 print(
-                    f"{key:{width}s} {mode:6s} {iters_cell} "
+                    f"{key:{width}s} {mode:7s} {iters_cell} "
                     + " ".join(
                         f"{cells[e]:10.1f}" if e in cells else f"{'-':>10s}" for e in shown
                     )
@@ -618,6 +660,28 @@ def disagreement_detail(records: list[dict], verdicts: dict) -> list[str]:
             continue
         lines.append(f"  {key} / {mode}: {', '.join(others)} render different bytes from stock Django")
     return lines
+
+
+def mode_disagreements(records: list[dict]) -> list[str]:
+    """Every (row, engine) whose modes did not all hash the same bytes.
+
+    **This is what makes `compile` a measurement of the same subject.** A
+    compile-only figure is comparable to the other two only if the template it
+    compiled is the one they rendered, and `measure` renders a compile-mode
+    handle for precisely that reason — it returns rendered bytes rather than the
+    handle. Here the three shas are compared, so "the modes are three timings of
+    one template" is checked instead of asserted. A mode that diverged would be a
+    column of the same table measuring something else.
+    """
+    by_row: dict[tuple, dict[str, str]] = {}
+    for rec in records:
+        by_row.setdefault((rec["key"], rec["engine"]), {})[rec["mode"]] = rec["sha256"]
+    out = []
+    for (key, engine), per_mode in sorted(by_row.items()):
+        if len(set(per_mode.values())) > 1:
+            detail = ", ".join(f"{m}={s[:12]}" for m, s in sorted(per_mode.items()))
+            out.append(f"{key} / {engine}: modes rendered different bytes ({detail})")
+    return out
 
 
 # --- main --------------------------------------------------------------------------
@@ -714,6 +778,13 @@ def main() -> int:
     if bad:
         print("\nREFUSING: our engine and stock Django rendered different bytes.\n")
         print("\n".join(f"  {line}" for line in bad))
+        return 2
+
+    mixed = mode_disagreements(records)
+    if mixed:
+        print("\nREFUSING: one (row, engine)'s modes rendered different bytes from each")
+        print("other, so the modes are not three timings of one template.\n")
+        print("\n".join(f"  {line}" for line in mixed))
         return 2
 
     payload = build_payload(records, verdicts, engines, args, floor)

@@ -424,7 +424,7 @@ def _fastest_tile(grouped: dict, metrics: dict) -> str:
 def _table(grouped: dict, engines: list[str], families: dict, metrics: dict, floor: dict) -> str:
     """Every measurement, one row per workload.
 
-    The direction goes in **two** places, because the table holds both modes at
+    The direction goes in **two** places, because the table holds every mode at
     once and they are not interchangeable. The engine column says the unit and the
     direction, which is what a reader needs to read a single cell; the family banner
     row says it again beside the mode name, because the mode is what picks the
@@ -436,7 +436,7 @@ def _table(grouped: dict, engines: list[str], families: dict, metrics: dict, flo
     """
     units = {metrics[m]["unit"] for m in metrics}
     betters = {metrics[m]["better"] for m in metrics}
-    # Both modes are microseconds-per-call and both are lower-is-better today, so
+    # Every mode is microseconds-per-call and every one is lower-is-better today, so
     # this collapses to one sentence. If a mode ever inverts, the header can no
     # longer speak for the table and the banner does the work alone — saying so is
     # cheaper than a header that is true of half the rows under it.
@@ -475,11 +475,12 @@ def _table(grouped: dict, engines: list[str], families: dict, metrics: dict, flo
                 if control is not None and rec["sha256"] != control["sha256"]:
                     marker = '<span class="no">&ne;</span>'
                 spread = rec["worst_us"] / rec["best_us"] if rec["best_us"] else 1.0
-                # The share of this cell that is the `render` call itself, from the
-                # engine's own empty-template floor. Capped at 100 because the row
-                # and the floor are two separate measurements: a row that adds almost
-                # nothing to the floor can land a hair above it, and "104% call" is a
-                # sentence that means nothing. The legend says so.
+                # The share of this cell that is the call itself, from the engine's
+                # own floor *for this mode* — `render`'s floor is the render call,
+                # `compile`'s is the compile of an empty source. Capped at 100
+                # because the row and the floor are two separate measurements: a row
+                # that adds almost nothing to the floor can land a hair above it, and
+                # "104% call" is a sentence that means nothing. The legend says so.
                 call = ""
                 if floor and rec["best_us"]:
                     share = floor.get(mode, {}).get(engine, 0.0) / rec["best_us"] * 100
@@ -647,6 +648,24 @@ def render(payload: dict) -> str:
             for i in range(len(SERIES_LIGHT))
         ),
         "@@LEGEND@@": legend,
+        # **The mode buttons are generated from the payload, not written here.** The
+        # two that used to be spelled out above would have survived a mode being
+        # *added* by simply not existing, and a report whose controls list two of its
+        # three modes is a report a reader scrolls past without noticing what is
+        # missing — the third mode's panels would be in the markup and reachable only
+        # by the JS below, whose button set is this list. The first button is the
+        # pressed one and the first panel is the visible one, which is the same
+        # choice `hidden` makes further down.
+        "@@MODEBUTTONS@@": "".join(
+            f'<button class="mode" data-mode="{html.escape(m)}" '
+            f'aria-pressed="{"true" if i == 0 else "false"}">'
+            f'{html.escape(payload["metrics"][m]["button"])}</button>'
+            for i, m in enumerate(modes)
+        ),
+        "@@MODENOTE@@": "; ".join(
+            f'<b>{html.escape(m)}</b> &mdash; {html.escape(payload["metrics"][m]["what"])}'
+            for m in modes
+        ),
         "@@HEROES@@": _heroes(grouped, modes, shared, payload["metrics"], engines),
         "@@PANELS@@": "".join(panels),
         "@@TABLE@@": _table(
@@ -822,8 +841,7 @@ pre.cmd { background: var(--surface-2); border: 1px solid var(--border);
 
 <div class="controls">
   <span class="lbl">show</span>
-  <button class="mode" data-mode="render" aria-pressed="true">render only (template pre-compiled)</button>
-  <button class="mode" data-mode="parse" aria-pressed="false">parse &amp; render (template compiled each call)</button>
+@@MODEBUTTONS@@
   <span class="legend-inline">@@LEGEND@@</span>
 </div>
 
@@ -850,9 +868,13 @@ Down a column the floor is fixed and the share answers one question: how much of
 
 <h2>How this was measured</h2>
 <dl class="env">@@ENVIRONMENT@@</dl>
-<p class="cap">Modes: <b>render</b> times a template that is already compiled;
-<b>parse</b> includes the compile, through <code>from_string</code> on all three
-engines so that none of them is served from a cache the others do not have. One
+<p class="cap">Modes: @@MODENOTE@@ &mdash; and every one of them goes through
+<code>from_string</code> on all three engines, so that none of them is served
+from a cache the others do not have.
+<b>compile</b> is not <code>parse &minus; render</code>: the two terms of that
+subtraction are a compile of the current iteration&rsquo;s template against a
+<i>warm</i> handle that has already paid its lazy work, so it carries
+<code>compile + (cold &minus; warm)</code> and the second term is not small. One
 asymmetry is inside these numbers and is named here rather than left for a
 reader to find: the Django-side engines are handed a <code>Context</code> built
 once per row rather than once per call, which is what the milestone table this

@@ -1071,6 +1071,19 @@
       <b>render's saving minus compile's new cost</b> — against ~240 µs on
       <code>normal</code> the cost is ~17 µs — and the compile gap widens from 1.21× to 1.34×,
       which is what eager materialisation is for.
+      <b>The report can show this number now.</b> <code>scripts/bench.py</code> carried
+      <code>render</code> and <code>parse</code> and neither could separate it, so it gained a
+      third mode — <code>compile</code>, <code>from_string</code> alone, across the corpus, on
+      the report's own floor and byte-identity discipline — and every chart says its direction
+      as the other modes do. It was checked against the ad-hoc probe that first measured this
+      rather than trusted — the two land in the same place on all eight shared rows at
+      different pinned iteration counts, the <code>rust</code> cell within 2.13% of the
+      probe's two-run span, the <code>stock</code> cell within 2.50% and the ratio within
+      3.48%, and the residual difference is stated rather than explained. Its first reading
+      is a level, not a delta, because the page is a snapshot rather
+      than a differ — <code>real-world/normal</code> compiles in <b>166 µs against stock's
+      123 µs (1.36×)</b>, and the compile <i>floor</i> is <b>ours 4.6 µs / stock 1.5 / Jinja2
+      56.3</b>, so on a small template most of our compile is fixed cost.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>One design change against its own prediction, made because the guard refused the

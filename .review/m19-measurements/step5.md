@@ -315,4 +315,42 @@ they are what `bench_scatter.py` and the §2 table were computed from, and a ban
 quoted without its input is a number a reader cannot check.
 
 All `.review/` records rather than shipped instruments, and none on the gate's
-path.
+path. **One of them is no longer only a record.** `scripts/bench.py` gained a
+third mode, `compile` — `from_string(source)` alone, across the whole corpus, on
+the report's own floor and byte-identity discipline — because the report had
+`render` and `parse` and no way to show the thing this slice moved most: the two
+committed modes could separate neither of the terms the per-compile cost is made
+of, and slice 2 is another descent pass with the same shape of cost. The mode is
+not `parse − render`; its docstring carries the sign disagreement that killed
+that subtraction.
+
+It was checked against `compile_only.py` rather than trusted, and the two land in
+the same place on all eight shared sources at different pinned iteration counts
+(the probe's 200, the mode's calibrated per row), which is what makes it a second
+instrument rather than the same one twice. **The bound, since "agree" without one
+is not a number:** bench.py's `rust` cell is within 2.13% of the probe's two-run
+span and its `stock` cell within 2.50%, and the ratio within 3.48%. Six of the
+eight ratios sit 1.2%–3.5% *below* the probe's span and the two real-world ones
+0.55% and 1.02% *above* it; the µs columns carry no consistent sign. Two of the
+eight `rust` cells and one `stock` cell fall inside the span exactly, and no
+ratio does. The gap is unattributed and the two instruments differ in more than
+one way (iteration count, and `measure`'s `max(3, iters // 4)` warmup against the
+probe's), so it is stated rather than explained. The three rows worth naming:
+`micro/text` ours **6.71** against 6.71–6.83, `micro/extends` **24.09** against
+24.16–24.49, `real-world/normal` **166.36** against 166.12–167.50.
+
+Its first reading, as levels rather than as a delta:
+the compile floor is **ours 4.63 / stock 1.49 / jinja2 56.3 µs**, so on a small
+template most of our compile is fixed cost — `micro/text` is 6.7 against stock's
+1.9, and the floor is quoted beside that row rather than subtracted from it,
+which is `measure_floor`'s own rule (a floor is an intercept at one point, and
+`micro_slope.py` puts a loop's at ~4.0 µs against the empty template's ~1.7). On
+the page the slice is about, `real-world/normal`
+compiles in 166.4 µs against stock's 122.6, a ratio of **1.36×** where the
+pre-slice tree's was 1.21×.
+
+The report is still a snapshot and not a differ: it shows the compile *level* per
+row, so the tax becomes visible by comparing this `docs/bench.html` with the
+previous one, not within a single page. A `--compare <payload.json>` that carries
+the band and prints the delta is the obvious next instrument and is not this one.
+
