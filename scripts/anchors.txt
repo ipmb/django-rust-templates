@@ -53,7 +53,7 @@ crates/template-py/src/lib.rs:2149	crates/template-py/src/lib.rs	2149	-	let resu
 crates/template-py/src/lib.rs:2170	crates/template-py/src/lib.rs	2170	-	Python::attach(|py| self.dir(py, bit))	-
 crates/template-py/src/lib.rs:2716-2717	crates/template-py/src/lib.rs	2716	2717	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
 crates/template-py/src/lib.rs:2773-2778	crates/template-py/src/lib.rs	2773	2778	fn resolve_lookups(	resolve_components(py, &lookups, context)
-crates/template-py/src/lib.rs:4686-4688	crates/template-py/src/lib.rs	4686	4688	fn render_value_in_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {	-
+crates/template-py/src/lib.rs:4868	crates/template-py/src/lib.rs	4868	-	fn render_value_in_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-
@@ -851,14 +851,18 @@ engine/base.py:1119	python/django_rust_templates/engine/base.py	1119	-	return _n
 engine/base.py:1135	python/django_rust_templates/engine/base.py	1135	-	def render_annotated(self, context):	-
 engine/base.py:1135-1164	python/django_rust_templates/engine/base.py	1135	1164	def render_annotated(self, context):	-
 engine/base.py:1199-1200	python/django_rust_templates/engine/base.py	1199	1200	return SafeString("".join([node.render_annotated(context) for node in self]))	-
-engine/base.py:1308	python/django_rust_templates/engine/base.py	1308	-	if type(value) is int and (	-
 engine/base.py:1288-1296	python/django_rust_templates/engine/base.py	1288	1296	-	-
+engine/base.py:1308	python/django_rust_templates/engine/base.py	1308	-	if type(value) is int and (	-
 engine/base.py:1351-1354	python/django_rust_templates/engine/base.py	1351	1354	except UnicodeDecodeError:	-
 python/django_rust_templates/engine/base.py:1356	python/django_rust_templates/engine/base.py	1356	-	render_value_in_context(output, context)	-
 engine/defaulttags.py:193-258	python/django_rust_templates/engine/defaulttags.py	193	258	def render(self, context):	-
+engine/defaulttags.py:194-198	python/django_rust_templates/engine/defaulttags.py	194	198	with context.push():	-
 engine/defaulttags.py:198	python/django_rust_templates/engine/defaulttags.py	198	-	with context.push():	-
+engine/defaulttags.py:198-206	python/django_rust_templates/engine/defaulttags.py	198	206	return self.nodelist_empty.render(context)	-
 engine/defaulttags.py:204	python/django_rust_templates/engine/defaulttags.py	204	-	len_values = len(values)	-
 engine/defaulttags.py:208-216	python/django_rust_templates/engine/defaulttags.py	208	216	loop_dict = context["forloop"] = {	-
+engine/defaulttags.py:214-217	python/django_rust_templates/engine/defaulttags.py	214	217	-	-
+engine/defaulttags.py:214-227	python/django_rust_templates/engine/defaulttags.py	214	227	-	-
 engine/defaulttags.py:220-221	python/django_rust_templates/engine/defaulttags.py	220	221	i + 1	-
 engine/defaulttags.py:220-227	python/django_rust_templates/engine/defaulttags.py	220	227	loop_dict["counter0"] = i	-
 engine/defaulttags.py:248	python/django_rust_templates/engine/defaulttags.py	248	-	context[self.loopvars[0]] = item	-

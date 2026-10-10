@@ -218,7 +218,7 @@ the sentence:
   reaches the escape filter.
 - **(b) is inherited**, and it is the whole of the floor's per-variable cost:
   `render_floor` fetches `render_value_in_context` once per render
-  (`crates/template-py/src/lib.rs:4686-4688`) and calls it per variable in
+  (`crates/template-py/src/lib.rs:4868`) and calls it per variable in
   `append_expression_value`. That the floor and `render_desc` share exactly these
   two helpers — the resolver and the escaper — is the floor's own claim about
   itself, and it is what makes the subtraction isolate dispatch. *(The floor's
