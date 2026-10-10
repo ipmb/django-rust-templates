@@ -19,16 +19,37 @@ prices a row out of the four-engine corpus or reshapes it:
    Django tries item before attribute and returns the value. `keys`, `values`,
    `get`, `copy`, `count` and `update` are the same trap, so the corpus data
    avoids all of them — the nested-loop key is `parts`, not `items`.
-3. **`{% empty %}` and `{% else %}` are each one engine's spelling of the same
-   idea** and neither engine knows the other's.
+3. **`{% empty %}` and `{% else %}` are two spellings of one idea, and the split
+   is one-against-two rather than one-against-one.** Django refuses
+   `{% for … %}{% else %}` and accepts `{% empty %}`; Jinja2 and minijinja both do
+   the opposite. The first version of this list said "each one engine's spelling
+   … neither engine knows the other's", which reads as one engine each and is
+   wrong by a count.
 4. **Filter arguments have different syntax** — `floatformat:2` against
    `floatformat(2)` — so *any* filter with an argument is a one-family row. This
-   is why `django-only` is a family and not an afterthought.
-5. **A chained lookup through an undefined name is fine in Django and Jinja2 and
-   an error in minijinja** (`{{ nope.deeper }}`). Every shared row therefore
-   supplies its data; the parse-bound row that renders `{{ section0.field0 }}`
-   against an empty context is a *Django-only* row, which is where it belongs
-   anyway.
+   is why `django-only` is a family and not an afterthought. It is weaker than it
+   looks in one direction: `floatformat(2)` is not merely unsupported in Jinja2,
+   it is a *parse* error (`expected token 'end of print statement'`), so the row
+   is not "the same construct spelled differently" but "a construct two engines
+   have no grammar for".
+5. **A chained lookup through an undefined name raises in Jinja2 *and*
+   minijinja** (`{{ nope.deeper }}` → `UndefinedError`, `TemplateError`), and
+   Django returns `''`. This list first said "fine in Django and Jinja2 and an
+   error in minijinja", which is wrong about Jinja2 — its default `Undefined`
+   raises on an attribute of an undefined, so the exclusion is two engines wide.
+   Every shared row therefore supplies its data; the parse-bound row that renders
+   `{{ section0.field0 }}` against an empty context is a *Django-only* row, which
+   is where it belongs anyway.
+
+The probe's own output is `.review/m19-measurements/subset_probe.txt`: 20 cases,
+10 shared, 10 excluded, and each exclusion printing the bytes that produce it.
+Its first run was wrong in a way worth recording, because the failure mode is
+this file's whole subject: it called `handle.render(context)` directly instead of
+`engine.render(handle, context)`, and every minijinja row came back
+`AttributeError: '_Inline' object has no attribute 'render'` — which reads as
+"minijinja differs on everything" rather than as a probe that cannot drive one of
+its four engines. A probe whose four arms are not all known to work is a probe
+that will report an exclusion for the wrong reason.
 
 The shared family is therefore the intersection, and every one of its rows is
 expected to hash identically on all four engines — which `bench.py` asserts
