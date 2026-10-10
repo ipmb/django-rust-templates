@@ -286,6 +286,44 @@ class RenderParityTests(_ParityTest):
         self.assert_renders_like_django("{{ a.b }}", {"a": {"b": "B"}})
         self.assert_renders_like_django("{{ a.1 }}", {"a": [10, 20]})
 
+    def test_a_trailing_dot_numeral(self):
+        """`2.` is a literal *and* a path, and Django reads the path first.
+
+        Django's `Variable.__init__` assigns `float(var)` and then raises on a
+        trailing dot, so the token keeps `literal = 2.0` **and** takes the string
+        branch, ending with `lookups == ('2', '')` as well. `resolve` reads
+        `if self.lookups is not None` first (`base.py:926-928`), so it does the
+        lookup — and the key `2` is not in the context, so `string_if_invalid`
+        is what renders.
+
+        Nothing before this row covered it, and it is reachable: the shell's
+        `Variable._resolve_lookup` joins `self.lookups` back into the path it
+        hands `_native.resolve`, and `'.'.join(('2', ''))` is `'2.'`, which
+        `parse_variable` re-classifies as a number. With `_native.resolve`
+        reading the literal before the lookups, `{{ 2. }}` rendered `2.0` here
+        and `''` in stock Django — a drop-in divergence on the shipped engine
+        that the 1547 cannot see, because no template in `template_tests/`
+        writes a trailing-dot numeral. Measured, with the population, the render
+        comparison that caught it and the search over the suite:
+        `.review/m19-measurements/lookup_roundtrip.txt`.
+
+        The second row is why "make `2.` raise instead" is not the fix. Stock
+        renders `''` whether or not the context holds a key `2`, because the path
+        has a second, empty bit that misses either way — so the behaviour to
+        reproduce is *run the lookup*, not *reject the numeral*. The two engines
+        differ on both rows for the same reason: one never runs the path at all.
+        """
+        self.assert_renders_like_django("{{ 2. }}", {})
+        self.assert_renders_like_django("{{ 2. }}", {"2": "two"})
+        # The neighbours, so that "the literal branch was read first" cannot be
+        # repaired by reading it never: these were correct before the fix and
+        # are the control for it. `lookups` is `None` for each, which is what
+        # makes the literal branch the only branch.
+        self.assert_renders_like_django("{{ 2.0 }}", {})
+        self.assert_renders_like_django("{{ 5 }}", {})
+        self.assert_renders_like_django("{{ 2.e3 }}", {})
+        self.assert_renders_like_django("{{ 'quoted' }}", {})
+
     def test_a_filter_chain(self):
         # A built-in filter, resolved through the `Parser` the shell builds —
         # which is the one thing in this class that exercises D5's argument.
@@ -492,6 +530,23 @@ class ResolverParityTests(_ParityTest):
                     lambda: pinned_resolve_lookup()(Variable(path), theirs_context)
                 )
         self.assertEqual(ours, theirs, f"path: {path!r}")
+
+    def test_a_trailing_dot_numeral_is_a_path_not_a_number(self):
+        """The dispatch order itself, one level below the render row.
+
+        `test_a_trailing_dot_numeral` asserts the bytes; this asserts the
+        mechanism, by comparing against Django's own `_resolve_lookup` rather
+        than its `resolve`. Both sides must raise `VariableDoesNotExist`. With
+        the literal read first this row compared `("value", 2.0)` against
+        `("raised", VariableDoesNotExist, ...)`, which is what makes it a pin on
+        the ordering and not a second copy of the render row.
+
+        The second context is not a variation on the first: the first bit
+        resolves there and the path still misses, so the row is not satisfied by
+        an engine that refuses every trailing-dot numeral.
+        """
+        self.assert_resolves_like_django("2.", {})
+        self.assert_resolves_like_django("2.", {"2": "two"})
 
     def test_a_dotted_lookup_and_two_missing_keys(self):
         self.assert_resolves_like_django("a.b", {"a": {"b": "B"}})

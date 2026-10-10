@@ -1020,12 +1020,26 @@ class Variable:
         #
         # `".".join(self.lookups)` is this method's whole input because
         # `_native.resolve` takes the dotted path, as `Variable.__init__` took
-        # it. It is exact rather than a round trip: `lookups` is
-        # `var.split(VARIABLE_ATTRIBUTE_SEPARATOR)` on the same string, after the
-        # `_(…)` wrapper is stripped, so no bit can contain the separator and no
-        # `translate` flag survives into the path — which is why the M12 refusal
-        # `_native.resolve` raises for a translated variable is unreachable from
-        # here.
+        # it. No bit can contain the separator (`lookups` is `var.split(
+        # VARIABLE_ATTRIBUTE_SEPARATOR)` on the same string, after the `_(…)`
+        # wrapper is stripped) and no `translate` flag survives into the path —
+        # which is why the M12 refusal `_native.resolve` raises for a translated
+        # variable is unreachable from here.
+        #
+        # **The join is componentwise exact and still not faithful.** `lookups`
+        # round-trips on every input; what does not round-trip is the
+        # *classification*, because `parse_variable` classifies as well as
+        # splits. `2.` is the counterexample: `Variable.__init__` assigns the
+        # float and then rejects the trailing dot, so the token holds
+        # `lookups == ('2', '')`, the join hands back that same `"2."`, and the
+        # re-parse assigns `literal = 2.0` a second time. Both are then set, and
+        # the two dispatch orders disagree — `Variable.resolve` reads `lookups`
+        # first (`base.py:926-928`) and looks up the key `2`; reading the literal
+        # first prints `2.0`. M19's step 1 removes the input class by passing
+        # the components instead of the path; until then the Rust order is the
+        # one that has to be right. `.review/m19-measurements/lookup_roundtrip.txt`
+        # has the population, the render comparison that caught this, and the
+        # search showing the 1547 never writes one.
         #
         # Reached only when `self.lookups is not None` (see `resolve`), so the
         # literal and translate branches of `Variable.resolve` — which stay

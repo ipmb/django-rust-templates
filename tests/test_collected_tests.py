@@ -539,7 +539,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # while the unit run happened to be the first consumer, which it did not assert, and
 # `differential.py`, `check_transcriptions.py` and the acceptance run all read the
 # extension. Counts at close: 477 collected, proxy and discovery agreeing.
-PINNED = 477
+#
+# 477 → 479 is **+2**, both in `tests/test_render_parity.py` and both about one
+# input class: `2.`, which `Variable.__init__` gives a `2.0` literal *and* the
+# lookups `("2", "")`. `RenderParityTests.test_a_trailing_dot_numeral` asserts the
+# bytes and `ResolverParityTests.test_a_trailing_dot_numeral_is_a_path_not_a_number`
+# asserts the dispatch, against Django's `resolve` in the first case and its
+# `_resolve_lookup` in the second. The first would pass an engine that refused every
+# trailing-dot numeral; the second would pass an engine that returned a number. Measured
+# the other way, as this ledger's rule asks: no module lost a row, no other module
+# gained one, and 477 + 2 = 479. See `.review/m19-measurements/lookup_roundtrip.txt`.
+#
+# Counts at close: 479 collected, proxy and discovery agreeing.
+PINNED = 479
 
 
 def collected() -> unittest.TestSuite:

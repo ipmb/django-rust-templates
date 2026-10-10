@@ -44,14 +44,14 @@ crates/template-py/src/lib.rs:146	crates/template-py/src/lib.rs	146	-	fn filter_
 crates/template-py/src/lib.rs:740	crates/template-py/src/lib.rs	740	-	fn if_condition_to_py	-
 crates/template-py/src/lib.rs:1104	crates/template-py/src/lib.rs	1104	-	-	-
 crates/template-py/src/lib.rs:1251	crates/template-py/src/lib.rs	1251	-	-	-
-crates/template-py/src/lib.rs:2591-2592	crates/template-py/src/lib.rs	2591	2592	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
-crates/template-py/src/lib.rs:2861-2863	crates/template-py/src/lib.rs	2861	2863	fn escape_fn<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {	getattr("render_value_in_context")
+crates/template-py/src/lib.rs:2602-2603	crates/template-py/src/lib.rs	2602	2603	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
+crates/template-py/src/lib.rs:2871-2873	crates/template-py/src/lib.rs	2871	2873	fn escape_fn<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {	getattr("render_value_in_context")
 crates/template-py/src/lib.rs:2059	crates/template-py/src/lib.rs	2059	-	Python::attach(|py| self.dir(py, bit))	-
 crates/template-py/src/lib.rs:2038	crates/template-py/src/lib.rs	2038	-	let result = Python::attach(|py| -> PyResult<Py<PyAny>> {	-
 crates/template-py/src/lib.rs:2033	crates/template-py/src/lib.rs	2033	-	Python::attach(|py| self.value.bind(py).getattr(bit)	-
 crates/template-py/src/lib.rs:2022	crates/template-py/src/lib.rs	2022	-	let result = Python::attach(|py| {	-
 crates/template-py/src/lib.rs:2012	crates/template-py/src/lib.rs	2012	-	Python::attach(|py| {	-
-crates/template-py/src/lib.rs:2658-2660	crates/template-py/src/lib.rs	2658	2660	django.template.base.render_value_in_context	-
+crates/template-py/src/lib.rs:2670-2672	crates/template-py/src/lib.rs	2670	2672	django.template.base.render_value_in_context	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-
@@ -825,13 +825,13 @@ timesince.py:138-143	django/utils/timesince.py	138	143	timeuntil	-
 django/utils/timezone.py:146-161	django/utils/timezone.py	146	161	settings.USE_TZ if use_tz is None else use_tz	-
 timezone.py:155-158	django/utils/timezone.py	155	158	should_convert = (	and not is_naive(value)
 django/utils/translation/__init__.py:275	django/utils/translation/__init__.py	275	-	get_language_info(lang_info["fallback"][0])	-
-engine/base.py:1049	python/django_rust_templates/engine/base.py	1049	-	def render_annotated(self, context):	-
+engine/base.py:1063	python/django_rust_templates/engine/base.py	1063	-	def render_annotated(self, context):	-
 engine/engine.py:233	python/django_rust_templates/engine/engine.py	233	-	extra_data = getattr(template, "extra_data", {})	-
 engine/loader_tags.py:154	python/django_rust_templates/engine/loader_tags.py	154	-	for n in compiled_parent.nodelist.get_nodes_by_type(BlockNode)	-
 engine/loader_tags.py:148	python/django_rust_templates/engine/loader_tags.py	148	-	for node in compiled_parent.nodelist:	-
 engine/parser.py:546	python/django_rust_templates/engine/parser.py	546	-	template.extra_data = {} if parser is None else parser.extra_data	-
 engine/defaulttags.py:1253	python/django_rust_templates/engine/defaulttags.py	1253	-	partials = parser.extra_data.setdefault("partials", {})	-
-engine/base.py:1033	python/django_rust_templates/engine/base.py	1033	-	return _native.resolve(".".join(self.lookups), context)	-
+engine/base.py:1047	python/django_rust_templates/engine/base.py	1047	-	return _native.resolve(".".join(self.lookups), context)	-
 django/utils/translation/__init__.py:279	django/utils/translation/__init__.py	279	-	if "-" not in lang_code:	-
 django/utils/translation/__init__.py:280	django/utils/translation/__init__.py	280	-	raise KeyError("Unknown language code %s." % lang_code)	-
 django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	290	-	info["name_translated"] = gettext_lazy(info["name"])	-
@@ -841,7 +841,7 @@ django_suite/run.py:85	django_suite/run.py	85	-	-	-
 django_suite/template_tests/syntax_tests/test_for.py:334	django_suite/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 django_suite/template_tests/test_partials.py:14	django_suite/template_tests/test_partials.py	14	-	engines["django"]	-
 python/django_rust_templates/engine/base.py:829	python/django_rust_templates/engine/base.py	829	-	django_own_filters().get(func)	-
-python/django_rust_templates/engine/base.py:1161	python/django_rust_templates/engine/base.py	1161	-	render_value_in_context(output, context)	-
+python/django_rust_templates/engine/base.py:1175	python/django_rust_templates/engine/base.py	1175	-	render_value_in_context(output, context)	-
 python/django_rust_templates/engine/exceptions.py:38	python/django_rust_templates/engine/exceptions.py	38	-	-	-
 python/django_rust_templates/engine/parser.py:179	python/django_rust_templates/engine/parser.py	179	-	"BlockTranslateNode": BlockTranslateNode,	-
 python/django_rust_templates/engine/parser.py:285	python/django_rust_templates/engine/parser.py	285	-	-	-
@@ -884,7 +884,7 @@ tests.py:148-155	tests/template_tests/tests.py	148	155	def test_compile_tag_extr
 .django/tests/template_tests/tests.py:148-155	tests/template_tests/tests.py	148	155	-	-
 tests/template_tests/tests.py:231-243	tests/template_tests/tests.py	231	243	def test_callable_uses_deferred_annotations(self):	self.assertEqual(template.render(Context({"obj": MyObject()})), "")
 tests/test_host_tags.py:36-44	tests/test_host_tags.py	36	44	PROJECT_ROOT = Path(__file__).resolve().parent.parent	sys.path.insert(0, str(_path))
-test_render_parity.py:533	tests/test_render_parity.py	533	-	def test_a_silent_variable_failure_is_substituted(self):	-
+test_render_parity.py:588	tests/test_render_parity.py	588	-	def test_a_silent_variable_failure_is_substituted(self):	-
 test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
 .django/tests/timezones/tests.py:1051-1071	tests/timezones/tests.py	1051	1071	test_localtime_filters_do_not_raise_exceptions	-
 .django/tests/utils_tests/test_html.py:204-217	tests/utils_tests/test_html.py	204	217	-	-

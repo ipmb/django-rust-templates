@@ -2427,7 +2427,7 @@ fn log_resolution_failure(
 /// `tests/test_resolve_invalid.py`, `tests/test_resolve_callarm.py` and
 /// `tests/test_m8_side_effects.py` can compare a lookup against Django's **at
 /// the method**, with the arm that failed named in the report. Those five
-/// harnesses exercise `silent_variable_failure` — `test_render_parity.py:533`
+/// harnesses exercise `silent_variable_failure` — `test_render_parity.py:588`
 /// and `test_resolve_callarm.py:86` are named for it — so an `_native.resolve`
 /// that returned the raw failure would diverge from the pinned method on exactly
 /// the rows they were built for.
@@ -2582,11 +2582,22 @@ fn literal_to_py(py: Python<'_>, value: &AttrValue) -> PyResult<Py<PyAny>> {
 ///   literal, because `_("x")` sets both: `resolve` applies translation to the
 ///   value, and returning the untranslated literal is the quiet wrong answer D4
 ///   exists to avoid.
-/// * `literal` → the literal, without touching the context. This is
-///   `Variable.resolve`'s first branch, and skipping it would make
-///   `_native.resolve("5", {})` a lookup of the key `5`.
 /// * `lookups` → the port, with one arena and one `pending` shared across the
-///   call.
+///   call. **This is the branch `Variable.resolve` reads first** — `base.py:926-928`
+///   is `if self.lookups is not None` — so it is read first here too.
+/// * `literal` → the literal, without touching the context. Taken only when
+///   there are no lookups, which is nearly always: skipping it would make
+///   `_native.resolve("5", {})` a lookup of the key `5`.
+///
+/// **The two are not exclusive, and the order between them is a render
+/// divergence rather than a style.** The trailing-dot numerals assign the float
+/// *and* take the string branch as well (`template-core/src/parser/variable.rs:
+/// 66-73`), so `2.` carries `literal = 2.0` and `lookups = ("2", "")` at once —
+/// exactly as Django's own `Variable("2.")` does. Reading the literal first
+/// prints `2.0` where Django prints `string_if_invalid`. Reached in practice
+/// because the shell joins `self.lookups` back into a path before calling here,
+/// and `"2."` re-parses as a number:
+/// `.review/m19-measurements/lookup_roundtrip.txt`, sections 3 and 4.
 #[pyfunction]
 fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {
     let desc = match template_core::parser::variable::parse_variable(path) {
@@ -2600,18 +2611,17 @@ fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>
         ));
     }
 
-    if let Some(literal) = &desc.literal {
-        return literal_to_py(py, literal);
-    }
-
     let Some(lookups) = desc.lookups.as_ref() else {
-        // `Variable.__init__` guarantees one of the two is set: every branch of
-        // its `except ValueError` assigns a literal or the lookups. This is an
-        // invariant of *our* parse, so it is a runtime error and not a template
-        // error.
-        return Err(PyRuntimeError::new_err(
-            "a parsed variable has neither a literal nor lookups",
-        ));
+        return match &desc.literal {
+            Some(literal) => literal_to_py(py, literal),
+            // `Variable.__init__` guarantees one of the two is set: every branch of
+            // its `except ValueError` assigns a literal or the lookups. This is an
+            // invariant of *our* parse, so it is a runtime error and not a template
+            // error.
+            None => Err(PyRuntimeError::new_err(
+                "a parsed variable has neither a literal nor lookups",
+            )),
+        };
     };
 
     let arena = Rc::new(RefCell::new(Vec::new()));
