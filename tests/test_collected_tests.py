@@ -800,7 +800,35 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # reading, and it is what the unsound spelling prints.
 #
 # Counts at close: 532 collected, proxy and discovery agreeing.
-PINNED = 532
+#
+# 532 → 536 is **+4**, and it is the adversarial round's findings on that same
+# lever, all four of them measured against **stock Django 6.0.9** rather than
+# reasoned about. Two are wrong renders the transcription produced and Django did
+# not. A layer whose `__contains__` shortens `dicts` is not an uncertain case:
+# `list_reverseiterator` re-reads the list's length, so Django's `for` ends and its
+# `raise KeyError` runs — treating it as a bail re-walked a partly-consumed stack
+# and answered `HIT` where Django answers `''`. And `reversed()` dispatches to
+# `list.__reversed__`, so a `list` subclass overriding it decides which layers
+# Django walks — the transcription now requires the exact type and answers
+# `FROM_REVERSED` where positional indexing answered `FROM_SECOND`. The third row
+# is the *same* bail seen from the side-effect end: a bail runs Django's method over
+# the whole stack, so probing before bailing calls each layer's `__contains__`
+# twice, which is observable because `__contains__` is a user method.
+#
+# The fourth is the reason the pin is sound, and it was prose in three places and a
+# test in none. `engine/base.py` binds the pin during its own import, and no project
+# can run earlier — **because the package's first import reaches that module**:
+# `engine/__init__.py:26`'s `from .engine import Engine` → `engine.py:7`'s
+# `from .base import Template`. `base.py`'s own `from .context import BaseContext` is
+# downstream of that and is not the reason, which matters because the reason is what
+# names the line to protect. `PinOrderProcessTests` takes the measurement from the
+# other door — a fresh interpreter that imports the *class*'s module and asserts the
+# pin's module came with it and still holds the original — because every other row
+# in that file imports `django_rust_templates.engine` first, which is the very
+# statement a reorder would move.
+#
+# Counts at close: 536 collected, proxy and discovery agreeing.
+PINNED = 536
 
 
 def collected() -> unittest.TestSuite:

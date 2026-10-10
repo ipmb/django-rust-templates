@@ -501,21 +501,29 @@ class InterpositionTests(unittest.TestCase):
         #
         # **The fifteenth entry is M19 step 5.5 lever 3, it is the last, and it is
         # the first op here that sits at the end of *our* file.** `engine/base.py`
-        # gains `BASE_CONTEXT_GETITEM = BaseContext.__getitem__` at ours 1433, so
-        # the run is ours 1408-1433 against upstream's 1207: twenty-six lines, one
-        # statement and twenty-five that are comment and blank. It is ours alone,
+        # gains `BASE_CONTEXT_GETITEM = BaseContext.__getitem__` at ours 1443, so
+        # the run is ours 1408-1443 against upstream's 1207: thirty-six lines, one
+        # statement and thirty-five that are comment and blank. It is ours alone,
         # so it is a `delete`, and `equal` moves by nothing for the fourth time in
         # this sequence and for the same reason — an insertion with no matched line
         # inside it cannot take a line out of an equal block. Re-measured: ours is
-        # 1433 lines, 315 of them differ, upstream's 1207 with 89, and
-        # 1433-315 = 1207-89 = 1118.
+        # 1443 lines, 325 of them differ, upstream's 1207 with 89, and
+        # 1443-325 = 1207-89 = 1118. The block grew from twenty-six lines to
+        # thirty-six in the round that repaired the pin's *stated* reason — the
+        # statement never moved, so no declared span moved either, which is the
+        # property the paragraph below is about.
         #
         # Its *position* is the assertion and not a fact about the edit's size. The
-        # binding has to be in this module, because the name is only resolvable by
-        # importing it and `engine/base.py:61` — `from .context import BaseContext` —
-        # is the statement that hands
-        # `BaseContext` to whoever means to rebind it — but it has to be *below
-        # every declared span*, and those are literal line ranges: the highest ends
+        # binding has to be in this module because **the package's import order
+        # runs this module's body before any project code can reach the class**:
+        # `django_rust_templates/engine/__init__.py:26` — `from .engine import
+        # Engine`, the package's first statement — reaches
+        # `engine/engine.py:7`'s `from .base import Template`, so any route to
+        # `BaseContext` has already run the block below it. `engine/base.py:61`'s
+        # `from .context import BaseContext` is *downstream* of that and not the
+        # reason. `test_loop_read_guard.py` pins the invariant. But it has to be
+        # *below every declared span*, and those are literal line ranges: the
+        # highest ends
         # at 1407, `token_kwargs`'s, which was this file's last line. A binding one
         # line higher would have re-keyed that span and every other one under it in
         # `scripts/check_transcriptions.py`. So this is the one edit in the

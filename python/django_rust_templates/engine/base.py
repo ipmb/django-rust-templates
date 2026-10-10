@@ -1420,11 +1420,21 @@ def token_kwargs(bits, parser, support_legacy=False):
 # *replacement*, after which the guard licenses the transcribed body and answers a
 # lookup the class no longer performs — silently, and green everywhere.
 #
-# Reading this name requires importing this module, and every route to
-# `BaseContext` runs through this module's import of it, so the binding below
-# happens *inside* the statement that hands the class to whoever means to rebind
-# it. The pin therefore cannot be late. It cannot be early either: the import it
-# reads is 60 lines above.
+# Reading this name requires importing this module, and **the import order of
+# the package this module is in is what makes that unavoidable** — not this
+# module's own `from .context import BaseContext` 60 lines above, which is
+# *downstream* of the fact. Any route to `BaseContext` executes
+# `django_rust_templates/engine/__init__.py` first, because that is how a
+# submodule is reached, and its first statement is `from .engine import Engine`
+# (`engine/__init__.py:26`) → `from .base import Template` (`engine/engine.py:7`) → this
+# module's body, which is where the binding below happens. A project can
+# therefore only reach `engine/context.py` after the pin exists. Measured, in a
+# fresh interpreter: `import django_rust_templates.engine.context` alone leaves
+# `django_rust_templates.engine.base` in `sys.modules` with this name already
+# bound, and rebinding the class attribute immediately afterwards makes the walk
+# fall back. **The invariant is that first import**, so it is the line to protect
+# and `tests/test_loop_read_guard.py` pins it; the pin cannot be late, and it
+# cannot be early either — the `BaseContext` it reads is bound 60 lines above.
 #
 # **At end of file on purpose.** Every `COMPARED_PATH["base.py"]` span in
 # `scripts/check_transcriptions.py` is a literal line range over this file, and the

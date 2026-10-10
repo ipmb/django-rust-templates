@@ -624,27 +624,32 @@
       like rather than three different templates — and the harness prints the engine it
       built, the extension it loaded and which profile built it, refusing to print a table
       for any other engine. Measured 2026-10-10 local, the day the report stamps its run in
-      UTC (2026-10-10 21:20, the stamp <code>docs/bench.html</code> itself carries from the run
+      UTC (2026-10-10 21:58, the stamp <code>docs/bench.html</code> itself carries from the run
       that wrote it, on the tree that transcribes the root read in Rust as well as
       pre-building a loop's seven state keys once per plan): the port is
       <b>0.42× at render and
       0.76× at parse</b> on the real-world pages (geometric mean of three pages; the three
-      whole-page render rows run 0.33×–0.56×), and the worst row in the corpus is compile of a template that is
-      almost nothing but the call — <b>3.43× / 3.43×</b>, 6.60 / 6.65 µs against stock's
-      1.93 / 1.94 µs. The three
-      tiles are the build's and not a run's: four runs alternating two builds put render at
-      <b>0.494 / 0.498</b> before the loop-key lever and <b>0.466 / 0.462</b> after it, and a second
-      four-run ABBA puts the same quantity at 0.463 / 0.473 before the read lever and
-      <b>0.416 / 0.426</b> after — the middle pair being one build read in two different
-      four-run sets, 0.6%–1.9% apart across the three modes, which is what makes the two
-      experiments comparable. Parse
-      runs 0.830 / 0.824 → 0.797 / 0.787 → 0.783 / 0.791 → <b>0.748 / 0.764</b> along the same
-      chain, and compile 1.398 / 1.354 → 1.384 / 1.356 → 1.344 / 1.344 → 1.364 / 1.348, which is
-      the null the read lever predicts for it. The
-      page the four runs are quoted from carries its own number too, and it is one of
+      whole-page render rows run 0.33×–0.57×), and the worst row in the corpus is compile of a template that is
+      almost nothing but the call — <b>3.48× / 3.48×</b>, 6.98 / 6.79 µs against stock's
+      2.00 / 1.95 µs. The three
+      tiles are the build's and not a run's: three four-run sets, ABBA over two builds each,
+      put render at <b>0.494 / 0.498</b> before the loop-key lever and <b>0.466 / 0.462</b>
+      after it, then 0.463 / 0.473 before the read lever and <b>0.416 / 0.426</b> after it,
+      and — because the read lever's fast path was repaired after that second set was taken —
+      0.454 / 0.461 before it and <b>0.429 / 0.414</b> after. The lever-1 build is the
+      <code>before</code> side of all three sets, so it has been read three times — <b>0.466 /
+      0.462</b>, <b>0.463 / 0.473</b>, <b>0.454 / 0.461</b>, a 4.2% spread over six readings of
+      one artifact — and that spread, not the band of any single set, is the scale every delta
+      in this paragraph has to be quoted against. Parse
+      runs 0.830 / 0.824 → 0.797 / 0.787 → 0.783 / 0.791 → <b>0.748 / 0.764</b> → 0.790 / 0.802 →
+      <b>0.760 / 0.759</b> along the same chain, and compile 1.398 / 1.354 → 1.384 / 1.356 →
+      1.344 / 1.344 → 1.364 / 1.348 → 1.363 / 1.403 → 1.373 / 1.352, which is the null the read
+      lever predicts for it: compile moves −1.5% on a mode whose rows the lever's own record
+      says do not move, and the treated side's four readings span 1.352–1.403 on their own. The
+      page the runs are quoted from carries its own number too, and it is one of
       them rather than a fifth measurement: the run that wrote <code>docs/bench.html</code>
-      is the second ABBA's after side's first (<code>b1</code>, 21:20 UTC), so the file's own tiles are
-      <b>0.42× / 0.75× / 1.36×</b> — the same pair's other reading to two decimals, and
+      is the third set's after side's first (<code>b1</code>, 21:58 UTC), so the file's own tiles are
+      <b>0.43× / 0.76× / 1.37×</b> — the same pair's other reading to two decimals, and
       the figure a reader of the HTML sees. The
       render tile therefore reads <b>0.42×</b>, against the <b>0.50×</b> the deletion
       published, the <b>0.41×</b> the ordered pass before it and the <b>0.46×</b> the loop-key
@@ -658,20 +663,23 @@
       inherit the wrong direction silently. The fastest-engine tile is scoped for the same
       reason: counted over every row it used to read "django 19, jinja2 7", which reads as
       <i>Django is faster</i>, while Jinja2 wins <b>2 of the 3 whole-page renders</b> at
-      0.29×–0.42× stock's time. That count is 3/3 on the tree before this lever and 2/3
+      0.30×–0.42× stock's time. That count is 3/3 on the tree before this lever and 2/3
       after it, because <code>real-world/normal</code> changes hands: the port renders it in
-      <b>160.2 / 162.4 µs</b> against Jinja2's 171.8 / 171.3, where before the lever it was
-      183.9 / 187.4 against 171.0 / 172.6. It is the first whole page the port renders faster
-      than Jinja2, and it does so in both after-runs and neither before-run. The tile's own
+      <b>167.1 / 167.0 µs</b> against Jinja2's 177.0 / 176.3, where before the lever it was
+      185.5 / 188.0 against 174.1 / 177.7. It is the first whole page the port renders faster
+      than Jinja2, and it does so in both after-runs and neither before-run, in this set and
+      in the pre-repair one it replaces. The tile's own
       caption said "jinja2 wins <i>every one</i> of these 3 pages" while its value said 2/3 —
       a sentence written from the leader's identity rather than its count, true only while
       the leader swept — and it is fixed in this commit and the page re-rendered from the
       same payload. The port's time as a multiple of Jinja2's,
-      per run, is now <b>0.93× / 0.95×</b> on <code>normal</code>, <b>1.36× / 1.38×</b> on
-      <code>complex</code> and <b>1.14× / 1.17×</b> on <code>large</code>, from 1.09× / 1.07×,
-      1.46× / 1.42× and 1.32× / 1.26× after the loop-key lever and 1.11× / 1.12×,
-      1.52× / 1.56× and 1.44× / 1.35× before it: below both of each page's
-      before figures, and below 1.00 on one. Both statements are true of this tree;
+      per run, is now <b>0.94× / 0.95×</b> on <code>normal</code>, <b>1.41× / 1.34×</b> on
+      <code>complex</code> and <b>1.17× / 1.13×</b> on <code>large</code>. The same three
+      multiples read 0.93× / 0.95×, 1.36× / 1.38× and 1.14× / 1.17× on the pre-repair build
+      this one replaces, 1.09× / 1.07×, 1.46× / 1.42× and 1.32× / 1.26× after the loop-key
+      lever, and 1.11× / 1.12×, 1.52× / 1.56× and 1.44× / 1.35× before it: below both of
+      each page's before figures at every step, and below 1.00 on one page. Both statements
+      are true of this tree;
       <code>parse</code> is where they invert,
       because Jinja2 compiles to Python source and Django does not.
     </p>
@@ -1528,28 +1536,33 @@
       the largest of the slice's three levers. The soundness argument is a single pinned
       identity: the Rust side holds the <em>function</em> that was the class attribute at
       import, and a context whose class attribute has been rebound is left to Python rather
-      than answered by a stale transcription. <b>Measured, at ≈ −103 ns a read</b>: a fitted
-      slope difference of +0.6873 → +0.5845 µs in <code>render</code> and +0.6903 → +0.5862 in
+      than answered by a stale transcription. <b>Measured, at ≈ −93 ns a read</b>: a fitted
+      slope difference of +0.6859 → +0.5969 µs in <code>render</code> and +0.6948 → +0.5954 in
       <code>parse</code>, with six fit-free paired estimators straddling those fits
-      (−97.9 to −106.9 ns) and a control loop that reads nothing flat at −0.0003/−0.0005. That
-      is <b>15% off a read</b> and 41–60% of what §5.5 priced a read that leaves Rust at,
-      because the per-layer object protocol is still paid.
+      (−90.7 to −98.6 ns, centre −92.6) and a control loop that reads nothing flat at
+      +0.0004/+0.0007. That is <b>13% off a read</b> and 37–55% of what §5.5 priced a read
+      that leaves Rust at (+0.17 to +0.25 µs), because the per-layer object protocol is still
+      paid. The honest form of the number is a range — <b>−89 to −99 ns a read</b>, the fit at
+      the two ends and the fit-free arithmetic inside it — and it is the round's repair that
+      widened it: the pre-repair build read −0.1027/−0.1041 µs, so three repairs against a
+      non-<code>dict</code> layer cost <b>≈ 10 ns a read, about 10%</b>, the pre-pass over
+      every layer being the whole of it.
       <b>On the page, it is the first lever that closes its own arithmetic.</b> The pages make
       257, 276 and 370 root reads a render — counted, not estimated, with a
       <code>sys.setprofile</code> hook on the pinned function's own <code>__code__</code> — and
-      reads × 0.1027 µs predicts −26.4/−27.1/−38.0 µs against −24.4/−30.2/−29.1 µs measured:
-      ratios of <b>0.92 / 1.11 / 0.77</b>, i.e. a per-read unit measured on a one-construct loop
-      predicts a whole page's saving to ±25%. Only 12 reads still leave Rust afterwards, all 12
-      on <code>complex</code> and all from <code>NodeList._render_with_plan</code> — the
-      delegated route, not a bail-out of the walk's own transcription. Under the same
-      four-run ABBA the render tile goes <b>0.47× → 0.42×</b> and parse <b>0.79× → 0.76×</b>,
-      compile a null — <b>1.34× → 1.36×</b>, +0.9%, inside the ±3.7% the stock denominator
-      alone moves on those rows. The <code>0.47×</code> is the lever-1 build read a second
-      time in this set — <b>0.468</b> by the same side rule that gave lever 1's own
-      <b>0.464</b> (its readings 0.466 / 0.462), 0.9% apart on one artifact, which is why
+      covered reads × 0.0890 µs predicts −22.9/−23.5/−32.9 µs against −19.7/−24.8/−23.0 µs
+      measured: ratios of <b>0.86 / 1.06 / 0.70</b>, i.e. a per-read unit measured on a
+      one-construct loop predicts a whole page's saving to ±30%. Only 12 reads still leave Rust
+      afterwards, all 12 on <code>complex</code> and all from
+      <code>NodeList._render_with_plan</code> — the delegated route, not a bail-out of the walk's
+      own transcription. Under the same four-run ABBA the render tile goes <b>0.46× → 0.42×</b>
+      and parse <b>0.80× → 0.76×</b>, compile a null — <b>1.38× → 1.36×</b>, −1.5% on a lever
+      that cannot touch compiling. The <code>0.46×</code> is the lever-1 build read a second
+      time in this set — <b>0.457</b> by the same side rule that gave lever 1's own
+      <b>0.464</b> (its readings 0.466 / 0.462), 1.5% apart on one artifact, which is why
       the tile's second decimal is quoted at all. And
       <code>real-world/normal</code> render takes the port below Jinja2 for
-      the first time, <b>1.075× / 1.085× → 0.932× / 0.948×</b>, in both after-runs and neither
+      the first time, <b>1.065× / 1.058× → 0.944× / 0.947×</b>, in both after-runs and neither
       before-run. The slice's record is
       <code>.review/m19-measurements/root-read.md</code>.
     </p>

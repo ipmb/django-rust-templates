@@ -1,4 +1,4 @@
-import json, math, pathlib, sys
+import json, math, pathlib
 def tiles(paths):
     """paths = (a1, a2, b1, b2). Rule: per row, mean of a side's two runs;
     ratio = mean rust / mean stock; geo mean over the three real-world rows."""
@@ -19,15 +19,18 @@ def tiles(paths):
         out[mode] = (side((a1, a2)), side((b1, b2)))
     return out, keys
 
-L = "/Users/pete/projects/lincolnloop/django-rust-templates/.review/m19-measurements/"
-print("=== validation: lever-1 payloads, published 0.494/0.498 → 0.466/0.462 (render) ===")
-o, keys = tiles([L + f"headline-lever1-{n}.json" for n in ("a1", "a2", "b1", "b2")])
-for m, (b, a) in o.items():
-    print(f"  {m:8} before {b:.3f}   after {a:.3f}")
-print(f"  real-world rows: {[k for k,_ in keys]}")
-print()
-H = "/Users/pete/.claude/jobs/627577b5/tmp/headline3/"
-print("=== lever-3 payloads ===")
-o2, _ = tiles([H + f"{n}.json" for n in ("a1", "a2", "b1", "b2")])
-for m, (b, a) in o2.items():
-    print(f"  {m:8} before {b:.3f}   after {a:.3f}")
+# Every payload lives beside this script: the tiles are a function of the archived
+# JSONs and of nothing else, so re-running this file reproduces §5's table.
+L = pathlib.Path(__file__).resolve().parent
+SETS = [
+    ("lever 1 (`dc174855d926defc` -> `3d3e99e63eddc036`)", "headline-lever1"),
+    ("lever 3, pre-repair (`3d3e99e63eddc036` -> `f702a231cf4fa410`)", "headline-lever3"),
+    ("lever 3, repaired (`3d3e99e63eddc036` -> `caf1589798eac0cf`)", "headline-lever3fix"),
+]
+for label, pre in SETS:
+    o, keys = tiles([L / f"{pre}-{n}.json" for n in ("a1", "a2", "b1", "b2")])
+    print(f"=== {label}   (side rule: mean of a side's two runs, then ratio, then geomean)")
+    for m, (b, a) in o.items():
+        print(f"  {m:8} before {b:.3f}   after {a:.3f}")
+    if pre == "headline-lever1":
+        print(f"  real-world rows: {[k for k, _ in keys]}")

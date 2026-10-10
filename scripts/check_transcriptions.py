@@ -1341,7 +1341,7 @@ DECLARED = {
             #   fast path is *not* taken once the class attribute is moved — and that
             #   test is the control for this line, not the guard.
             (
-                (1408, 1433),
+                (1408, 1443),
                 None,
                 "BASE_CONTEXT_GETITEM = BaseContext.__getitem__",
             ),

@@ -48,14 +48,14 @@ crates/template-py/src/lib.rs:1289	crates/template-py/src/lib.rs	1289	-	fn pytho
 crates/template-py/src/lib.rs:1490	crates/template-py/src/lib.rs	1490	-	.map_err(|error| python_host_error(py, &error))?;	-
 crates/template-py/src/lib.rs:1612	crates/template-py/src/lib.rs	1612	-	.map_err(|error| python_host_error(host.py(), &error))?;	-
 crates/template-py/src/lib.rs:1687	crates/template-py/src/lib.rs	1687	-	.map_err(|error| python_host_error(host.py(), &error))?;	-
-crates/template-py/src/lib.rs:2206	crates/template-py/src/lib.rs	2206	-	Python::attach(|py| {	-
-crates/template-py/src/lib.rs:2215	crates/template-py/src/lib.rs	2215	-	fn get_item(&self, bit: &str) -> Step {	-
-crates/template-py/src/lib.rs:2231	crates/template-py/src/lib.rs	2231	-	Python::attach(|py| self.value.bind(py).getattr(bit)	-
-crates/template-py/src/lib.rs:2236	crates/template-py/src/lib.rs	2236	-	let result = Python::attach(|py| -> PyResult<Py<PyAny>> {	-
-crates/template-py/src/lib.rs:2257	crates/template-py/src/lib.rs	2257	-	Python::attach(|py| self.dir(py, bit))	-
-crates/template-py/src/lib.rs:2828-2829	crates/template-py/src/lib.rs	2828	2829	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
-crates/template-py/src/lib.rs:2885-2890	crates/template-py/src/lib.rs	2885	2890	fn resolve_lookups(	resolve_components(py, &lookups, context)
-crates/template-py/src/lib.rs:4708	crates/template-py/src/lib.rs	4708	-	/// `django_rust_templates.engine.base.render_value_in_context`, cached once.	-
+crates/template-py/src/lib.rs:2242	crates/template-py/src/lib.rs	2242	-	Python::attach(|py| {	-
+crates/template-py/src/lib.rs:2251	crates/template-py/src/lib.rs	2251	-	fn get_item(&self, bit: &str) -> Step {	-
+crates/template-py/src/lib.rs:2267	crates/template-py/src/lib.rs	2267	-	Python::attach(|py| self.value.bind(py).getattr(bit)	-
+crates/template-py/src/lib.rs:2272	crates/template-py/src/lib.rs	2272	-	let result = Python::attach(|py| -> PyResult<Py<PyAny>> {	-
+crates/template-py/src/lib.rs:2293	crates/template-py/src/lib.rs	2293	-	Python::attach(|py| self.dir(py, bit))	-
+crates/template-py/src/lib.rs:2869-2870	crates/template-py/src/lib.rs	2869	2870	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
+crates/template-py/src/lib.rs:2926-2931	crates/template-py/src/lib.rs	2926	2931	fn resolve_lookups(	resolve_components(py, &lookups, context)
+crates/template-py/src/lib.rs:4749	crates/template-py/src/lib.rs	4749	-	/// `django_rust_templates.engine.base.render_value_in_context`, cached once.	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-
@@ -848,6 +848,9 @@ django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	29
 django_suite/run.py:85	django_suite/run.py	85	-	-	-
 django_suite/template_tests/syntax_tests/test_for.py:334	django_suite/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 django_suite/template_tests/test_partials.py:14	django_suite/template_tests/test_partials.py	14	-	engines["django"]	-
+engine/__init__.py:26	python/django_rust_templates/engine/__init__.py	26	-	from .engine import Engine	-
+django_rust_templates/engine/__init__.py:26	python/django_rust_templates/engine/__init__.py	26	-	from .engine import Engine	-
+engine/engine.py:7	python/django_rust_templates/engine/engine.py	7	-	from .base import Template	-
 engine/base.py:61	python/django_rust_templates/engine/base.py	61	-	from .context import BaseContext	-
 engine/base.py:819-832	python/django_rust_templates/engine/base.py	819	832	except VariableDoesNotExist:	-
 engine/base.py:868-874	python/django_rust_templates/engine/base.py	868	874	for func, args in self.filters:	-

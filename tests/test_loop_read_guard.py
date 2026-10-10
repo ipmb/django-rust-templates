@@ -19,8 +19,12 @@ side is worth. Two spellings of the right-hand side are possible and they differ
 in *when they resolve*:
 
 * ``engine/base.py`` binds ``BASE_CONTEXT_GETITEM = BaseContext.__getitem__``
-  during its own import — the statement that hands ``BaseContext`` to whoever
-  wants to rebind it is the same statement that records the original.
+  during the **package's own first import** — ``engine/__init__.py:26``'s
+  ``from .engine import Engine`` reaches ``engine.py:7``'s ``from .base import
+  Template``, so this module's body runs, and its last line records the original,
+  before any route to ``BaseContext`` from outside the package can complete. The
+  import order is the invariant, not this module's own ``from .context import
+  BaseContext``, which is downstream of it.
 * The Rust side could instead capture ``type(context).__getitem__`` on first use.
   That spelling is **unsound**, and not in a corner: a project that rebinds
   ``BaseContext.__getitem__`` before its first render pins the *replacement*, the
@@ -321,6 +325,87 @@ class RootReadTranscriptionTests(unittest.TestCase):
         self.assertEqual(caught.exception.args, ("nope",))
         self.assertEqual(self.engine.from_string("{{ nope }}").render(context), "")
 
+    def test_a_truncated_dicts_ends_the_search_where_django_ends_it(self):
+        """A layer whose ``__contains__`` shortens ``dicts`` is **not** an uncertain
+        case, and treating it as one is a wrong render rather than a slow path.
+
+        ``for d in reversed(self.dicts)`` is driven by a ``list_reverseiterator``,
+        which re-reads the list's length on every step: a layer that truncates the
+        stack makes the next step find ``it_index >= PyList_GET_SIZE(seq)``, the
+        iterator stops, and the ``for`` falls through to ``raise KeyError(key)``.
+        The transcription ends the search the same way. Measured against **stock
+        Django 6.0.9**, which answers ``''`` here: a bail instead re-walks the
+        stack the walk has already partly consumed, finds the key an
+        already-examined layer gained, and answers ``HIT``."""
+        calls = []
+
+        def build():
+            class Shortening(dict):
+                def __contains__(self, key):
+                    calls.append(key)
+                    self.owner.dicts[1]["k"] = "HIT"
+                    del self.owner.dicts[2:]
+                    return dict.__contains__(self, key)
+
+            context = Context({})
+            context.dicts = [context.dicts[0], {"a": 1}, {"b": 2}, Shortening({})]
+            context.dicts[3].owner = context
+            return context
+
+        with self.assertRaises(KeyError):
+            build()["k"]
+        del calls[:]
+        self.assertEqual(read("{{ k }}", build()), "")
+        self.assertEqual(calls, ["k"], "each layer is probed exactly once")
+
+    def test_a_list_subclass_that_overrides_reversed_is_not_transcribed(self):
+        """Condition 3 is *exactly* a ``list``, not a subclass of one.
+
+        ``reversed()`` dispatches to ``list.__reversed__``, so a subclass that
+        overrides it decides which layers Django walks. Measured against **stock
+        Django 6.0.9**, which answers ``FROM_REVERSED``: positional indexing from
+        the list's own length answers ``FROM_SECOND``, the layer below the one
+        ``__reversed__`` names. The walk must fall back — the entry count is what
+        says it did, since the two readings differ in value here as well."""
+        calls = []
+
+        class Rev(list):
+            def __reversed__(self):
+                calls.append(1)
+                return iter([{"x": "FROM_REVERSED"}])
+
+        context = Context({"x": "FROM_DICTS"})
+        context.dicts = Rev(context.dicts + [{"x": "FROM_SECOND"}])
+        self.assertEqual(context["x"], "FROM_REVERSED")
+        out, entered = counted("{{ x }}", context)
+        self.assertEqual(out, "FROM_REVERSED")
+        self.assertEqual(entered, 1, "the walk indexed the list instead of bailing")
+
+    def test_a_bailed_walk_does_not_probe_a_layer_twice(self):
+        """A non-``dict`` layer is a bail, and a bail runs Django's own method over
+        the whole stack — so the walk must not have probed anything first, or every
+        layer above the non-``dict`` one has its ``__contains__`` called twice.
+        ``__contains__`` is a user method and its calls are observable, so the
+        counts are the assertion and Django's own method is the reference."""
+
+        def build(log):
+            class Probe(dict):
+                def __contains__(self, key):
+                    log.append(key)
+                    return False
+
+            context = Context({})
+            context.dicts = [context.dicts[0], UserDict({"y": 1}), Probe({})]
+            return context
+
+        reference_log = []
+        with self.assertRaises(KeyError):
+            build(reference_log)["nope"]
+
+        ours_log = []
+        self.assertEqual(read("{{ nope }}", build(ours_log)), "")
+        self.assertEqual(ours_log, reference_log)
+
 
 class PinSoundnessProcessTests(unittest.TestCase):
     """The only row in this file that can tell the two spellings of the pin apart.
@@ -380,6 +465,67 @@ print(Engine().from_string("{{{{ a }}}}").render(Context({{"a": 1}})))
             f"the probe did not run:\n{done.stdout}\n{done.stderr}",
         )
         self.assertEqual(done.stdout.strip(), "REBOUND")
+
+
+class PinOrderProcessTests(unittest.TestCase):
+    """The invariant the pin's soundness rests on, and it is an import order.
+
+    ``engine/base.py`` binds the pin while its module body runs, and no project can
+    run earlier — *because* ``django_rust_templates/engine/__init__.py`` reaches
+    ``engine/base.py`` as its **first** import: ``from .engine import Engine``
+    (line 26) pulls ``engine/engine.py``, whose ``from .base import Template``
+    (line 7) is what runs the module the pin lives in. ``base.py``'s own
+    ``from .context import BaseContext`` is *downstream* of that and is not the
+    reason, which matters because the reason is what tells a future reader which
+    line to protect.
+
+    The row exists because that reason was prose only. If the package's first
+    import were deferred or reordered, a project's ``import
+    django_rust_templates.engine.context`` could rebind the class attribute before
+    ``base.py`` ever ran, the pin would capture the replacement, and the guard
+    would compare it with itself and pass — silently. **Every other row in this
+    file would still pass in that world**, because they all import
+    ``django_rust_templates.engine`` first, which is precisely the statement that
+    would have moved. So the measurement is taken from the *other* door."""
+
+    SCRIPT = """
+import sys
+sys.path.insert(0, {root!r})
+sys.path.insert(0, {checkout!r})
+import django_rust_templates.engine.context as context_module
+print("django_rust_templates.engine.base" in sys.modules)
+import django_rust_templates.engine.base as engine_base
+from django_rust_templates.engine.context import BaseContext
+print(engine_base.BASE_CONTEXT_GETITEM is BaseContext.__getitem__)
+"""
+
+    def test_reaching_the_class_has_already_run_the_module_that_binds_the_pin(self):
+        """Expected ``True`` then ``True``.
+
+        The process imports the *class*'s module and nothing else of ours. If
+        ``engine/base.py`` had not run by then, the first line would print
+        ``False``; if the pin had somehow captured a later binding, the second
+        would. No settings are configured and nothing renders, so the probe cannot
+        be reading a state the engine reached by another route."""
+        done = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                self.SCRIPT.format(
+                    root=str(PROJECT_ROOT), checkout=str(DJANGO_CHECKOUT)
+                ),
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            done.returncode,
+            0,
+            f"the probe did not run:\n{done.stdout}\n{done.stderr}",
+        )
+        self.assertEqual(done.stdout.split(), ["True", "True"])
 
 
 if __name__ == "__main__":

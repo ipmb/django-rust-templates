@@ -2129,13 +2129,24 @@ impl PyTarget {
     ///    every use and never cached — `Context.__getitem__` can be rebound while
     ///    a body runs, and `engine/base.py` binds that name at import time and
     ///    argues why that is the only moment it can be trusted,
-    /// 3. `context.dicts` is a `list`, and
-    /// 4. every layer walked over is a `dict` or a `dict` subclass.
+    /// 3. `context.dicts` is **exactly** a `list` — `PyList_CheckExact`, because
+    ///    `reversed()` dispatches to `list.__reversed__` and a subclass may
+    ///    override it, and
+    /// 4. every layer in it is a `dict` or a `dict` subclass.
     ///
     /// Condition 4 is about `ContextDict` — `class ContextDict(dict):`
     /// (`context.py:14`) — the subclass `push()` appends for `{% with %}` and
     /// `{% include %}`: a subclass is still Django's `d[key]`, so it is admitted. A
-    /// layer that is not a dict at all is not.
+    /// layer that is not a dict at all is not, and that is decided **before** the
+    /// walk probes anything, so a bail does not run a layer's `__contains__` twice.
+    ///
+    /// A truncated `dicts` is **not** a bail. Django's `for` is driven by a
+    /// `list_reverseiterator`, which reads the list's length on every step, so a
+    /// layer whose `__contains__` shortens the list ends the loop and the
+    /// `raise KeyError(key)` below it runs; the transcription does the same
+    /// (`break`, then the same `KeyError`). Treating it as "not certain" and
+    /// falling back re-walks a stack that has already been partly consumed, and
+    /// can answer a key Django never sees.
     ///
     /// **Membership before subscription**, and both through the *object protocol*
     /// rather than the raw `PyDict` calls — because for a `dict` subclass the two
@@ -2170,25 +2181,50 @@ impl PyTarget {
         let Ok(dicts) = value.getattr(intern!(py, "dicts")) else {
             return Ok(None);
         };
+        // **Exactly** a `list`, not a subclass of one, because `reversed(self.dicts)`
+        // is `list.__reversed__` and a subclass may override it: measured, a
+        // `class Rev(list)` returning `iter([{"x": "FROM_REVERSED"}])` from
+        // `__reversed__` makes Django answer `FROM_REVERSED` where positional
+        // indexing from the list's own length answers `FROM_SECOND`. A subclass
+        // overriding only `__len__` or `__getitem__` does *not* diverge — the
+        // iterator reads the list through `PyList_GET_SIZE`/`PyList_GET_ITEM`, and
+        // so does `PyList::len`/`get_item` — but the exact check costs nothing
+        // (`push`, `update` and `_reset_dicts` only ever build a plain list) and it
+        // makes the condition true as written rather than nearly true.
+        if !dicts.is_exact_instance_of::<PyList>() {
+            return Ok(None);
+        }
         let Ok(dicts) = dicts.cast::<PyList>() else {
             return Ok(None);
         };
         let key = PyString::new(py, bit);
+        // Every layer must be a `dict` **before** any of them is probed. A layer
+        // that is not one is a bail, and a bail runs Django's own method over the
+        // whole stack — so probing first would run the layers *above* the non-dict
+        // one twice, and `__contains__` is a user method whose calls are
+        // observable. Measured, with a logging `__contains__` on the top layer and
+        // a non-dict below it: Django logs one call, probing-then-bailing logs two.
+        for layer in dicts.iter() {
+            if !layer.is_instance_of::<PyDict>() {
+                return Ok(None);
+            }
+        }
         // `reversed(self.dicts)` is a `list_reverseiterator`, and that object
         // re-reads the list's length on every step: a layer whose `__contains__`
-        // shortens the list ends the loop early and Django raises `KeyError`. The
-        // length is therefore read here per step too — a snapshot taken once at
-        // the top would walk indices the iterator would have stopped at.
+        // shortens the list ends the loop early. The length is therefore read here
+        // per step too, and a shortened list **ends the search** — `break`, not a
+        // bail: the iterator's stop is a certain answer, and Django's `for` falling
+        // through to `raise KeyError(key)` is what that answer is. Bailing here
+        // instead re-walked a stack the transcription had already partly consumed:
+        // measured, an already-examined layer gaining the key while the stack
+        // truncates makes Django answer `''` where a bail answers `HIT`.
         let mut index = dicts.len();
         while index > 0 {
             index -= 1;
             if index >= dicts.len() {
-                return Ok(None);
+                break;
             }
             let layer = dicts.get_item(index)?;
-            if !layer.is_instance_of::<PyDict>() {
-                return Ok(None);
-            }
             if layer.contains(&key)? {
                 return Ok(Some(layer.get_item(&key)?.unbind()));
             }
@@ -2452,7 +2488,12 @@ fn base_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 /// *after* a project rebinds the attribute, and would then license the transcribed
 /// body against a class that no longer runs it. What is cached here is a name that
 /// was already correct when it was bound, and the region in `engine/base.py` argues
-/// why no project can reach the class before that binding happens.
+/// why no project can reach the class before that binding happens — the argument
+/// rests on `django_rust_templates/engine/__init__.py`'s *first* import
+/// (`from .engine import Engine`, line 26) reaching `engine.py:7`'s
+/// `from .base import Template`, so this module's body runs before any route to
+/// `BaseContext` can complete. That ordering, not `base.py`'s own import of
+/// `context`, is the invariant; `test_loop_read_guard.py` pins it.
 /// `tests/test_loop_read_guard.py` is the control: it moves the class attribute and
 /// asserts that the walk stops taking this path.
 static BASE_CONTEXT_GETITEM: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
