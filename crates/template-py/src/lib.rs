@@ -3038,7 +3038,7 @@ struct ForPlan {
     loopvar: String,
     /// Whether a sealed body holds a node that reads the context — a delegate,
     /// or a nested `{% for %}` — and so whether the loop must write Django's
-    /// per-iteration state (`Frame::in_context`). See [`needs_context_state`].
+    /// per-iteration state (`Frame::stated`). See [`needs_context_state`].
     ///
     /// Computed once, here, rather than asked per iteration: it is a property of
     /// the plan and not of the render, and a body shape that changed between
@@ -3608,72 +3608,111 @@ fn emit_sealable(emit: &Emit, loopvar: &str) -> bool {
 /// makes the recursion honest — a nested `{% if %}` body is asked the same
 /// question as its parent, and asking it while rewriting would make the answer
 /// depend on the order the two ran in.
-/// **Whether rendering this body can write the context — and the rewrite below
-/// only happens when it cannot.** The two are one question and were two.
+fn seal(body: &mut [Slot], loopvar: &str) -> Option<Written> {
+    if !body.iter().all(|slot| sealable(&slot.act, loopvar)) {
+        return None;
+    }
+    Some(rewrite_body(body, loopvar, Written::default()))
+}
+
+/// What the write pass found as it went, which is also the caller's answer.
 ///
-/// A frame read is `frame.item`, the value the loop resolved for this iteration.
-/// It is the right answer exactly while `context[loopvar]` would give the same
-/// thing, and the loop itself keeps that true: [`Walk::run_stated`] writes
-/// `context[loopvar] = frame.item` at the **top of every iteration**, so a write
-/// from an earlier iteration is gone before the next one reads. What survives
-/// that is a write made *inside this iteration, by this body* — and then a frame
-/// read downstream is stale where the context is right.
+/// Two fields rather than one because [`seal`]'s caller has two questions, and
+/// they are answered by *where* the pass stopped rather than by whether it did:
+/// a read left on the context ([`ForPlan::context_state`] owes it Django's state
+/// write) and whether the body hands Python the context at all.
+#[derive(Clone, Copy, Default)]
+struct Written {
+    /// A loop-variable read was **left on the context**, because a node that
+    /// hands Python the context had already gone by at its position.
+    on_context: bool,
+    /// A node that hands Python the context has gone by, so every read from here
+    /// on stays where it was. The two differ by whether a read then followed.
+    python_seen: bool,
+}
+
+/// The write pass of [`seal`]: every read of the loop variable becomes a frame
+/// read — **up to the point in the body where the walk hands Python the context.**
 ///
-/// Three things can write, and only the first is not ruled out by construction:
+/// This replaced a body-wide predicate (`may_write_context`), and both the places
+/// that predicate was wrong are why the pass is ordered rather than a property of
+/// the body:
 ///
-/// * **A node this walk does not model.** `Act::Delegate` is arbitrary Python
-///   with the context in hand, and `{% cycle "X" as s silent %}` writes the
-///   loop variable *upward* — `CycleNode.render` calls `context.set_upward`
+/// * **A node this walk does not model hands Python the loop variable too.** An
+///   [`Act::Delegate`] is arbitrary Python holding `context`, and the first thing
+///   that noticed was `{% cycle "X" as s silent %}` writing the loop variable
+///   *upward* — `CycleNode.render` calls `context.set_upward`
 ///   (`defaulttags.py:104-114`), which lands the name in the innermost
 ///   layer already holding it, i.e. the enclosing loop's own. So
 ///   `{% for s in sections %}{% cycle "X" as s silent %}{{ s }}{% endfor %}` is
 ///   `X` in Django and was `old` here: the read had been rewritten to the frame.
 ///
-/// * **Not a filter.** `FilterExpression.resolve` hands a filter only
-///   `autoescape` and the arguments (`base.py:812-815`) — `takes_context`
-///   is `simple_tag`'s protocol, and a *filter* never receives the context, so a
-///   `{{ … }}` cannot write it however it refuses. That is what lets this
-///   predicate skip [`Act::Emit`] rather than descend into it.
+/// * **A filter *can* write the context, and a nested loop's sequence is a
+///   filter expression.** The predicate's docstring argued both away and both
+///   arguments were false. `FilterExpression.resolve` hands a filter every
+///   argument the template gave it, and the context object is a value a template
+///   can name — `{{ xs|writes:ctx }}` reaches Python holding the context. And an
+///   [`Act::For`] resolves its **sequence** in Python with the context in hand
+///   ([`Walk::run_loop_body`]) *before* its body runs, so a nested loop is a
+///   writer at the position of its sequence. Descending into `body`/`empty` and
+///   not into `sequence` missed it.
 ///
-/// * **Not a nested loop the walk runs.** Its own writes — its loop variable and
-///   its `forloop` — go into the layer *it* pushes and are popped with it, and
-///   its sequence is read, not written. So an `Act::For` matters here only for
-///   what its body can do, which is why this descends into one.
+/// **Position is the whole argument, and it makes this finer than the predicate
+/// rather than merely different.** Rendering is sequential and [`Walk::run_stated`]
+/// writes `context[loopvar] = frame.item` at the **top of every iteration**, so
+/// `context[loopvar]` equals the frame at the body's first node and can only have
+/// been moved by Python that has already run. A read *before* the first such node
+/// is frame-correct whatever follows it — which the predicate denied itself: the
+/// `{% blocktranslate %}` delegate of `django-only/realistic` comes after two
+/// reads, and those two were being kept on the context for nothing.
 ///
-/// A body that fails this predicate is still **sealed** — it just keeps reading
-/// its loop variable out of the context, which the stated loop is maintaining
-/// anyway. What sealing still buys it is every other name in the body staying a
-/// frame read.
-fn may_write_context(body: &[Slot]) -> bool {
-    body.iter().any(|slot| match &slot.act {
-        Act::Delegate => true,
-        // The `{% empty %}` branch too: it renders while the enclosing loop is
-        // running and reads the enclosing loop's variables like any other part
-        // of the body, so a delegate in it is a writer in the same position.
-        Act::For(plan) => may_write_context(&plan.body) || may_write_context(&plan.empty),
-        Act::If(plan) => plan
-            .branches
-            .iter()
-            .any(|(_, body)| may_write_context(body)),
-        Act::Text(_) | Act::Emit(_) => false,
-    })
-}
-
-fn seal(body: &mut [Slot], loopvar: &str) -> bool {
-    if !body.iter().all(|slot| sealable(&slot.act, loopvar)) {
-        return false;
-    }
-    // **`sealable` says the body may be sealed; this says its reads may move to
-    // the frame, and they are not the same question.** A body holding a delegate
-    // is sealable — that is the whole of step 5 slice 2 — but its loop-variable
-    // reads must stay on the context, because the delegate may write that name
-    // where the frame cannot see it ([`may_write_context`]).
-    if !may_write_context(body) {
-        for slot in body.iter_mut() {
-            rewrite(&mut slot.act, loopvar);
+/// **What is not ruled out is Python this pass cannot see**, and it is stated
+/// rather than closed: a refused node — a `{{ … }}` whose lookup missed — is
+/// handed back to Python with the context in hand ([`Walk::delegate_slot`]), and
+/// a *value* that holds the context writes the loop variable when it renders,
+/// whether it is the loop variable itself (`{{ s }}{{ s }}` where `__str__`
+/// writes) or a property of one. That route has no static position, it is older
+/// than step 5 (the frame route landed at `888b5a9`), and it is why `on_context`
+/// is not the same flag as `python_seen`: a read left on the context is a read
+/// the loop owes Django's state write, and a write this pass cannot see is a
+/// residual. See §2 of `.review/m19-measurements/frame-rewrite-fix.md`, whose
+/// probe measures both.
+fn rewrite_body(body: &mut [Slot], loopvar: &str, mut written: Written) -> Written {
+    for slot in body.iter_mut() {
+        match &mut slot.act {
+            Act::Text(_) => {}
+            // **The two nodes that hand Python the context** — one by being
+            // Python, the other by resolving its sequence in Python. Nothing after
+            // them in this body may be rewritten; nothing before them is affected.
+            Act::Delegate | Act::For(_) => written.python_seen = true,
+            Act::Emit(emit) => {
+                if written.python_seen {
+                    written.on_context = true;
+                } else {
+                    rewrite_head(&mut emit.head, loopvar);
+                }
+            }
+            // A condition's head is rewritten for the same reason an emit's is: a
+            // condition is resolved against the context, and inside a sealed loop
+            // the loop variable is not there. A branch's reads are at the
+            // position of the branch, and a branch hands its answer back — a
+            // branch holding Python makes the rest of the *enclosing* body
+            // Python-reachable too.
+            Act::If(plan) => {
+                for (condition, branch) in plan.branches.iter_mut() {
+                    if let Some(condition) = condition {
+                        if written.python_seen {
+                            written.on_context = true;
+                        } else {
+                            rewrite_head(&mut condition.head, loopvar);
+                        }
+                    }
+                    written = rewrite_body(branch, loopvar, written);
+                }
+            }
         }
     }
-    true
+    written
 }
 
 /// The read pass of [`seal`], one node deep with `{% if %}` recursion.
@@ -3731,11 +3770,13 @@ fn sealable(act: &Act, loopvar: &str) -> bool {
 ///   reads `forloop` and the loop variable out of the very dict sealing elides.
 ///
 /// * [`Act::For`] — a nested `{% for %}` (M19 step 5 slice 3). A loop the walk
-///   runs reads two things out of the context that a sealed enclosing loop would
-///   not have put there: its `sequence` (`{% for line in s.lines %}`, resolved
-///   against the context by [`Walk::run_for`]) where `s` is the enclosing loop's
-///   variable, and — if the nested loop is itself stated — `context["forloop"]`
-///   for its `parentloop` (`engine/defaulttags.py:194-198`).
+///   runs **writes the state itself** (`{% for %}` opens with Django's
+///   `context.push()`, [`Walk::run_for`]), and it reads two things out of the
+///   context that a sealed enclosing loop would not have put there: its
+///   `sequence` (`{% for line in s.lines %}`, resolved against the context by
+///   [`Walk::run_loop_body`]) where `s` is the enclosing loop's variable, and —
+///   if the nested loop is itself stated — `context["forloop"]` for its
+///   `parentloop` (`engine/defaulttags.py:194-197`).
 ///
 /// Either way the answer is [`Walk::run_stated`]: Django's two writes per
 /// iteration, the loop variable and the `forloop` dict, so a reader of the
@@ -3743,12 +3784,19 @@ fn sealable(act: &Act, loopvar: &str) -> bool {
 /// only thing that answers them.** This docstring used to end "the nodes that
 /// read the frame still read the frame, which is why the state is written
 /// *beside* them and not instead of them" — and that sentence was false for
-/// exactly the bodies this predicate is about: `seal` moves a read to the frame
-/// only in a body that cannot write the context ([`may_write_context`]), so a
-/// stated body's loop-variable reads *are* context reads, and the state is
-/// written instead of them where it matters. Writing the state beside a frame
-/// read is not a semantics-preserving move when something in the body can change
-/// the state; it is a stale read.
+/// exactly the bodies this predicate is about: [`seal`] moves a read to the frame
+/// only up to the first node that hands Python the context ([`rewrite_body`]), so
+/// a stated body's later loop-variable reads *are* context reads, and the state is
+/// written instead of them where it matters. Writing the state beside a frame read
+/// is not a semantics-preserving move when something in the body can change the
+/// state; it is a stale read.
+///
+/// The caller asks this **as well as** the write pass's own `on_context`, and the
+/// second answer cannot disagree with the first: a read is left on the context
+/// only after a `Delegate` or a `For` has gone by, which is what this predicate
+/// looks for. Deriving `context_state` from the two together is what makes the
+/// coupling unarguable rather than argued — if the pass ever leaves a read on the
+/// context somewhere this predicate does not look, the loop is stated anyway.
 ///
 /// Every [`Act`] of a sealed body has already passed [`sealable`], so these two
 /// are the only ways in; [`Act::If`] is descended because a body under it is the
@@ -3768,33 +3816,12 @@ fn needs_context_state(body: &[Slot]) -> bool {
     })
 }
 
-/// The write pass of [`seal`]: every read of the loop variable becomes a frame
-/// read, at any depth, in a body the read pass has already accepted.
-fn rewrite(act: &mut Act, loopvar: &str) {
-    match act {
-        Act::Text(_) | Act::For(_) | Act::Delegate => {}
-        Act::Emit(emit) => rewrite_head(&mut emit.head, loopvar),
-        // A condition's head is rewritten for the same reason an emit's is: a
-        // condition is resolved against the context, and inside a sealed loop the
-        // loop variable is not there.
-        Act::If(plan) => {
-            for (condition, body) in plan.branches.iter_mut() {
-                if let Some(condition) = condition {
-                    rewrite_head(&mut condition.head, loopvar);
-                }
-                for slot in body.iter_mut() {
-                    rewrite(&mut slot.act, loopvar);
-                }
-            }
-        }
-    }
-}
-
 /// A loop-variable read becomes a frame read; nothing else in a head moves.
 ///
-/// A filter **argument** is not rewritten even when it names the loop variable,
-/// and it does not need to be: the read pass refused such a body, so no accepted
-/// body has one.
+/// Called only where [`rewrite_body`] has not yet passed a node that hands Python
+/// the context. A filter **argument** is not rewritten even when it names the loop
+/// variable, and it does not need to be: [`emit_sealable`] refused such a body, so
+/// no accepted body has one.
 fn rewrite_head(head: &mut Head, loopvar: &str) {
     if let Head::Lookups { lookups, local } = head {
         if lookups.first().map(String::as_str) == Some(loopvar) {
@@ -3834,13 +3861,18 @@ fn plan_for(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResul
     // An unpacking loop writes one context entry per name and pops them back
     // per iteration, and each name is a frame of its own. Declined rather than
     // half-done.
-    if loopvars.len() != 1 || !seal(&mut body, &loopvars[0]) {
+    if loopvars.len() != 1 {
         return Ok(None);
     }
-    // Asked of the **sealed** body, which is the only body there is: a delegate
-    // or an `Act::For` that the write pass did not rewrite is still one, and
-    // `rewrite` never changes an `Act`'s variant.
-    let context_state = needs_context_state(&body);
+    let Some(written) = seal(&mut body, &loopvars[0]) else {
+        return Ok(None);
+    };
+    // **Asked of the write pass and of the sealed body, which are the two halves
+    // of one question.** A read the pass left on the context needs Django's state
+    // written; a delegate or an `Act::For` needs it for its own reasons. Neither
+    // answer can be dropped without the other: the second is implied by the first
+    // by construction, and asking both is what keeps that from being an argument.
+    let context_state = written.on_context || needs_context_state(&body);
     Ok(Some(ForPlan {
         body,
         empty,
@@ -4190,8 +4222,17 @@ struct Frame<'a, 'py> {
     /// never saw, `takes_context=True`) or names the enclosing loop is holding
     /// (`{% for line in s.lines %}`). [`Walk::run_stated`] is that path, and a
     /// reader of the context therefore finds the state already written and must
-    /// not push a layer of its own.
-    in_context: bool,
+    /// not write it again.
+    stated: bool,
+    /// `context["forloop"]` **as it was before the loop's own layer existed**,
+    /// read once per loop above the push (`engine/defaulttags.py:194-197`).
+    ///
+    /// Carried on the frame rather than read where it is used
+    /// ([`Walk::delegate_slot`] writes the state of a refused node) because the
+    /// body runs *inside* the loop's layer: a read there finds the `forloop` this
+    /// loop wrote on the previous iteration and names the loop its own parent.
+    /// Django's own order is this one — read once, before the layer.
+    parentloop: &'a Bound<'py, PyAny>,
 }
 
 /// The render-invariant state of one walk.
@@ -4326,25 +4367,27 @@ impl<'py> Walk<'py> {
     /// (`engine/defaulttags.py:193-258`).
     ///
     /// **Three routes reach here, and the first is the arm this method exists
-    /// for.** A *refused* `{{ … }}` (a lookup that missed, a filter the Rust
-    /// registry does not answer) and a *refused* `{% if %}` are the two that can
-    /// appear in a body with no delegate, and for those the loop wrote nothing.
-    /// The third is [`Act::Delegate`] itself, which seals now — and a body with
-    /// one is a body whose loop wrote the state, so `frame.in_context` is set and
-    /// this method is not what puts it there. Checking it first is the whole
-    /// distinction: a *second* push for a delegate in a stated loop would make
-    /// the layer this node reads one deeper than Django's, and the read that
-    /// would notice is `parentloop`, which is exactly the key this method's
-    /// `write_frame` argument is about.
+    /// for.** A *refused* `{{ … }}` and a *refused* `{% if %}` — a node whose
+    /// filter answered the seam's sentinel because the answer is a lone surrogate
+    /// ([`cannot_hold`], [`Rendered`]) — are the two that can appear in a body with
+    /// no delegate, and for those the loop wrote nothing. The third is
+    /// [`Act::Delegate`] itself, which seals now — and a body with one is a body
+    /// whose loop *stated* the state, so `frame.stated` is set and nothing is
+    /// written here.
     ///
-    /// **Per delegated node, not per loop.** Django pushes once per loop because
-    /// its dict is live for the whole body; this pushes once per *delegate*,
-    /// because every other node in the body is native and reads nothing. Each
-    /// layer is popped before the next is pushed, so the nesting is
-    /// unobservable — and the alternative, a push for every iteration of every
-    /// sealed loop, would be most of what sealing saves.
+    /// **The write goes into the loop's layer, and this method does not pop it.**
+    /// Django writes the state inside the layer its `with` opened and leaves it
+    /// there for the whole body (`engine/defaulttags.py:198`, `engine/defaulttags.py:248`), so the same
+    /// layer is the right home here: the loop closes it at its `{% endfor %}`
+    /// ([`Walk::run_for`]). A layer of this method's own would be one deeper than
+    /// Django's, which `len(context.dicts)` sees; popping the loop's layer here
+    /// would take a job that belongs to the loop.
+    ///
+    /// **Writing it lazily rather than per iteration is the whole of what sealing
+    /// still saves.** Only a refused node reads the context — every native node in
+    /// the body reads the frame — so a body that never refuses never writes the
+    /// state, and a body that refuses writes it in the iteration that refused.
     fn delegate_slot(&mut self, slot: &Slot, frame: Option<&Frame<'_, 'py>>) -> PyResult<()> {
-        let py = self.py;
         let Some(frame) = frame else {
             // Not inside a sealed body at all: `Act::If` bodies inherit the
             // frame and a nested `Act::For` builds its own, so every node with a
@@ -4352,30 +4395,13 @@ impl<'py> Walk<'py> {
             // would have written.
             return self.delegate(slot);
         };
-        if frame.in_context {
-            // The loop already made this node's layer current, once, for the
-            // whole body. See the docstring.
-            return self.delegate(slot);
+        if !frame.stated {
+            // The loop's layer is current but does not hold this iteration's
+            // state. `frame.parentloop` was read before the push; reading it here
+            // would find the `forloop` *this* loop wrote on an earlier iteration.
+            self.write_frame(frame, frame.parentloop)?;
         }
-        // `if "forloop" in context: parentloop = context["forloop"]` — read
-        // **before** the push, which is Django's order
-        // (`engine/defaulttags.py:194-198`) and the only order that works.
-        let parentloop = self.parentloop()?;
-        // `with context.push():` (`engine/defaulttags.py:198`) — the layer both
-        // writes go into, and the one that takes them back out.
-        let pushed = self.context.call_method0("push")?;
-        let result = match self.write_frame(frame, &parentloop) {
-            Ok(()) => self.delegate(slot),
-            Err(error) => Err(error),
-        };
-        // On both paths, which is what `with` does: a failed delegate must not
-        // leave the context a layer deeper than it found it. `__exit__` is
-        // called explicitly because the exception is *travelling* here, not
-        // unwinding through the `with`.
-        let popped = pushed.call_method1("__exit__", (py.None(), py.None(), py.None()));
-        result?;
-        popped?;
-        Ok(())
+        self.delegate(slot)
     }
 
     /// `if "forloop" in context: parentloop = context["forloop"] else: {}`
@@ -4713,14 +4739,61 @@ impl<'py> Walk<'py> {
     }
 
     /// A sealed `{% for %}`, in `ForNode.render`'s order
-    /// (`engine/defaulttags.py:193-258`) with the two per-iteration writes elided.
+    /// (`engine/defaulttags.py:193-258`) with the per-iteration writes elided.
     ///
-    /// The order is the whole correctness argument: `values` is resolved and
-    /// normalised to something with a length *before* the empty test, the length
-    /// is read *before* the reversal, and the empty branch is rendered *before*
-    /// any loop state exists. A sealed loop is the only kind that reaches here —
-    /// every other `{% for %}` is an `Act::Delegate`.
+    /// **The layer is Django's, it is opened once per loop, and it opens before
+    /// the sequence resolves.** Both halves of that sentence were wrong until the
+    /// second adversarial review, and neither is a detail:
+    ///
+    /// * `with context.push():` is entered at `engine/defaulttags.py:198` and
+    ///   `values = self.sequence.resolve(context, ignore_failures=True)` is the
+    ///   first statement inside it (`engine/defaulttags.py:198-199`). A sequence is a `FilterExpression` —
+    ///   arbitrary Python this walk handed the **context** — so it can both read
+    ///   the layer stack and write into it, and resolving one layer out gets both
+    ///   wrong: a filter reading `len(context.dicts)` sees one too few, and a
+    ///   filter that assigns `context[name]` writes a layer where Django's write
+    ///   is popped with the `{% endfor %}`.
+    /// * `parentloop = context["forloop"]` is read *above* the `with`
+    ///   (`engine/defaulttags.py:194-197`) for **every** loop, and it has to be read here too: once
+    ///   the loop's own layer can hold a `forloop` — a refused node writes one,
+    ///   see [`Walk::delegate_slot`] — reading it inside the body would name
+    ///   *this* loop its own parent from the second iteration on.
+    ///
+    /// The push is per loop and not per iteration, which is what keeps it
+    /// compatible with sealing: the writes sealing elides are the per-iteration
+    /// ones, and the layer was opened and closed once either way.
+    ///
+    /// The order inside the layer is the rest of the argument: `values` is
+    /// resolved and normalised to something with a length *before* the empty
+    /// test, the length is read *before* the reversal, and the empty branch is
+    /// rendered *before* any loop state exists. A sealed loop is the only kind
+    /// that reaches here — every other `{% for %}` is an `Act::Delegate`.
     fn run_for(&mut self, plan: &ForPlan, depth: usize) -> PyResult<()> {
+        let py = self.py;
+        let parentloop = self.parentloop()?;
+        let pushed = self.context.call_method0("push")?;
+        let result = self.run_loop_body(plan, &parentloop, depth);
+        // On both paths, as `with` does: an exception must not leave the
+        // context a layer deeper than the loop found it. `__exit__` is called
+        // explicitly because the exception is *travelling* here, not unwinding
+        // through the `with`.
+        let popped = pushed.call_method1("__exit__", (py.None(), py.None(), py.None()));
+        result?;
+        popped?;
+        Ok(())
+    }
+
+    /// [`Walk::run_for`]'s body, inside the loop's layer: the sequence, the empty
+    /// test, the reversal, and the two ways of running the iterations.
+    ///
+    /// Split out rather than written inline so that the layer is closed on every
+    /// way out of the loop, error included, from one place.
+    fn run_loop_body(
+        &mut self,
+        plan: &ForPlan,
+        parentloop: &Bound<'py, PyAny>,
+        depth: usize,
+    ) -> PyResult<()> {
         let py = self.py;
         let mut values = plan
             .sequence
@@ -4737,24 +4810,15 @@ impl<'py> Walk<'py> {
         // order that works: `reversed(values)` is an iterator and has no length.
         let length = values.len()?;
         if length < 1 {
-            // **Inside a layer, because Django's is.** The `with context.push():`
-            // opens *before* the empty test, and the empty arm is returned from
-            // inside it (`engine/defaulttags.py:198-206`), so a delegate in an
-            // `{% empty %}` body has its context write discarded with the loop's
-            // layer. Rendering the arm outside any push keeps the write — and the
-            // write is observable, which is not a thing that can be argued away:
-            // `{% for r in none %}{% empty %}{% writes "foo" %}{% endfor %}{{ foo }}`
-            // renders `[]` in stock and `[W]` without this.
-            //
-            // The push is here rather than around `run_for` because a *non*-empty
-            // loop pays its own, once, and paying two would put this loop's state
-            // one layer deeper than `ForNode.render` puts it.
-            let pushed = self.context.call_method0("push")?;
-            let result = self.run(&plan.empty, None, depth);
-            let popped = pushed.call_method1("__exit__", (py.None(), py.None(), py.None()));
-            result?;
-            popped?;
-            return Ok(());
+            // Inside the layer, because Django's is. The `with` opens *before*
+            // the empty test, and the empty arm is returned from inside it
+            // (`engine/defaulttags.py:198-206`), so a write an `{% empty %}` body
+            // makes is discarded with the loop's layer. Rendering the arm outside
+            // any push keeps the write — and the write is observable, which is
+            // not a thing that can be argued away: `{% for r in none %}{% empty
+            // %}{% writes "foo" %}{% endfor %}{{ foo }}` renders `[]` in stock and
+            // `[W]` without this.
+            return self.run(&plan.empty, None, depth);
         }
         if plan.is_reversed {
             values = py
@@ -4766,32 +4830,23 @@ impl<'py> Walk<'py> {
         // render *entirely* natively, so the loop pays Django's two writes after
         // all — once per iteration, around every node rather than around the node
         // that needed them, because the rest of the body reads the frame and only
-        // that node reads the context. `push` once for the whole loop, which is
-        // Django's own (`with context.push():`, `engine/defaulttags.py:198`) and
-        // which is why `parentloop` is read before it: see [`Walk::parentloop`].
+        // that node reads the context.
         if plan.context_state {
-            let parentloop = self.parentloop()?;
-            let pushed = self.context.call_method0("push")?;
-            let result = self.run_stated(plan, &values, length, &parentloop, depth);
-            // On both paths, as `with` does: an exception must not leave the
-            // context a layer deeper than the loop found it.
-            let popped = pushed.call_method1("__exit__", (py.None(), py.None(), py.None()));
-            result?;
-            popped?;
-            return Ok(());
+            return self.run_stated(plan, &values, length, parentloop, depth);
         }
-        // No `context.push()`, no `context[loopvar] = item`, no `forloop` dict:
-        // the two writes per iteration are what sealing buys, and every node in
-        // the body reads its names out of the frame instead. The frame is built
-        // anyway, because a *refused* node has to be able to hand Python the
-        // state it expects — see [`Walk::delegate_slot`].
+        // No `context[loopvar] = item`, no `forloop` dict: the two writes per
+        // iteration are what sealing buys, and every node in the body reads its
+        // names out of the frame instead. The frame is built anyway, because a
+        // *refused* node has to be able to hand Python the state it expects —
+        // see [`Walk::delegate_slot`].
         for (index, item) in values.try_iter()?.enumerate() {
             let frame = Frame {
                 item: item?,
                 loopvar: &plan.loopvar,
                 counter: index + 1,
                 length,
-                in_context: false,
+                stated: false,
+                parentloop,
             };
             self.run(&plan.body, Some(&frame), depth)?;
         }
@@ -4821,7 +4876,7 @@ impl<'py> Walk<'py> {
         plan: &ForPlan,
         values: &Bound<'py, PyAny>,
         length: usize,
-        parentloop: &Bound<'_, PyAny>,
+        parentloop: &Bound<'py, PyAny>,
         depth: usize,
     ) -> PyResult<()> {
         let py = self.py;
@@ -4835,7 +4890,8 @@ impl<'py> Walk<'py> {
                 loopvar: &plan.loopvar,
                 counter: index + 1,
                 length,
-                in_context: true,
+                stated: true,
+                parentloop,
             };
             self.context.set_item(frame.loopvar, &frame.item)?;
             let (counter, last) = (frame.counter, frame.counter == length);
@@ -5475,15 +5531,48 @@ mod walk_depth {
     }
 
     /// Every slot in this plan is an `Act::For`, so the walk never reaches
-    /// `emit`/`push_python` and the `escape`/`context` fields below are never
-    /// read. They are dummies rather than a real Django context because the
-    /// subject is the guard's placement in the recursion, and building a context
-    /// would put the engine's own imports between the test and that.
+    /// `emit`/`push_python` and the `escape` field below is never read.
+    ///
+    /// **The context, though, is read, and the first version of this fixture was
+    /// wrong about that.** It passed `None`, on the argument that the plan holds
+    /// no `Emit` and therefore nothing the walk would resolve *against* the
+    /// context — true of the reads, and false of the loop: `run_for` asks the
+    /// context whether a `forloop` is already there (the parent loop) and pushes
+    /// the loop's own layer before resolving its sequence, because that is the
+    /// order `ForNode.render` uses (`engine/defaulttags.py:198-199`). So the
+    /// fixture answers exactly those three calls and nothing else, which keeps
+    /// the engine's own imports out of the row while letting the recursion reach
+    /// the guard on a path a real loop also walks.
+    #[pyclass]
+    struct DepthContext;
+
+    #[pymethods]
+    impl DepthContext {
+        fn __contains__(&self, _key: &Bound<'_, PyAny>) -> bool {
+            false
+        }
+
+        fn push(&self, py: Python<'_>) -> Py<PyAny> {
+            Py::new(py, DepthLayer).unwrap().into_any()
+        }
+    }
+
+    /// What `push` hands back. `with` calls `__exit__` on it, and so does
+    /// `run_for`, on both the success and the error path; nothing else of it is
+    /// ever touched.
+    #[pyclass]
+    struct DepthLayer;
+
+    #[pymethods]
+    impl DepthLayer {
+        fn __exit__(&self, _t: &Bound<'_, PyAny>, _v: &Bound<'_, PyAny>, _tb: &Bound<'_, PyAny>) {}
+    }
+
     fn walk_depth_of(py: Python<'_>, slots: &[Slot]) -> PyResult<()> {
         let none = py.None().into_bound(py);
         let mut walk = Walk {
             py,
-            context: none.clone(),
+            context: Bound::new(py, DepthContext)?.into_any(),
             escape: none.clone(),
             scope: LookupScope::new(&none),
             autoescape: false,

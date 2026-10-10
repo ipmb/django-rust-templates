@@ -21,6 +21,12 @@
 # Usage:  scripts/adversarial_reviewer.sh [agent-name] [pane-name]
 #         (defaults: adversarial-reviewer, the current herdr pane)
 #
+# A session that has gone bad does not recover by being prompted again: it prints
+# `failed to load workspace requirements`, accepts the prompt into its composer,
+# and never starts a turn (`herdr agent prompt --wait --until working` is the check
+# — a live one reaches `working` within seconds).  Start a new one under a second
+# name rather than reusing the broken pane.
+#
 # Requires HERDR_ENV=1 and a herdr workspace; see `herdr --help`.
 
 set -euo pipefail
@@ -35,8 +41,14 @@ PANE="${2:-}"
 export HERDR_ENV
 
 if [[ -z "$PANE" ]]; then
-  PANE="$(herdr pane split --current --direction right --cwd "$PROJECT_ROOT" --no-focus)"
+  # `herdr pane split` prints a JSON envelope, not a pane id, and `herdr agent
+  # start --pane` takes the id — passing the envelope through gets
+  # `agent_pane_not_found` with the whole blob quoted back at you.  The id lives
+  # at `.result.pane.pane_id`.
+  PANE="$(herdr pane split --current --direction right --cwd "$PROJECT_ROOT" --no-focus \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
 fi
+[[ -n "$PANE" ]] || { echo "could not determine a pane id from 'herdr pane split'" >&2; exit 1; }
 
 # The prompt goes in as a file, not as an argument: `-c` overrides force codex's
 # embedded mode, and the embedded mode is the one that reads

@@ -623,10 +623,11 @@
       like rather than three different templates — and the harness prints the engine it
       built, the extension it loaded and which profile built it, refusing to print a table
       for any other engine. Measured 2026-10-10 local, the day the report stamps its run in
-      UTC (2026-10-10 11:02): the port is <b>0.39× at render and
-      0.75× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
-      run 0.30×–1.11×), and the worst row in the corpus is compile of a template that is
-      almost nothing but the call — <b>3.52×</b>, 6.73 µs against stock's 1.91 µs. Compatibility has
+      UTC (2026-10-10 16:45, regenerated on the tree that carries both repairs): the port is
+      <b>0.41× at render and
+      0.74× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
+      run 0.33×–1.05×), and the worst row in the corpus is compile of a template that is
+      almost nothing but the call — <b>3.45×</b>, 6.76 µs against stock's 1.96 µs. Compatibility has
       been the priority throughout, and the measurement is published here rather than only
       the number that would flatter it. <b>Every chart, tile and table block states which
       way "better" runs</b>, and the word is read from the payload (<code>bench.py</code>'s
@@ -817,8 +818,8 @@
     <p class="sub" style="margin-top:16px">
       <b>The differential harness was reporting a green it had not earned, and that is worth
       a line more than the fix.</b> It rendered <b>48</b> cases through both engines and compared
-      the results at the time of this finding (the corpus is <b>52</b> now, and the four added
-      rows are named in the fix's paragraph below); <b>11 of the 48 resolve an <code>int</code></b>, and with settings
+      the results at the time of this finding (the corpus is <b>59</b> now, and the eleven added
+      rows are named in the fix's paragraphs below); <b>11 of the 48 resolve an <code>int</code></b>, and with settings
       unconfigured both engines <i>refuse</i> to render one — so those 11 columns were two
       <code>ImproperlyConfigured</code> reprs, matching because both engines read the same
       setting first. The case was covering nothing, and it said so only when the first
@@ -1262,14 +1263,14 @@
       <code>NodeList.get_nodes_by_type</code>, is on the compared path and needs a
       <code>TRANSFORMS</code> row for the generated <code>loader_tags.py</code> verified to be
       picking the new line up. The corpus aggregate barely moves, which is the honest headline:
-      the report on this build reads render <b>0.39×</b>, parse <b>0.75×</b>, compile <b>1.36×</b>
+      the report on this build reads render <b>0.41×</b>, parse <b>0.74×</b>, compile <b>1.36×</b>
       ours-vs-stock real-world, <b>39/39</b> three-engine rows byte-agreeing. Acceptance is
       unmoved: <b>1547 tests, OK (skipped=6)</b>, the six skips by identity, differential harness
-      52 cases identical.
+      <b>59</b> cases identical.
     </p>
     <p class="sub" style="margin-top:16px">
-      <b>An adversarial review found a wrong render the whole suite was blind to, and the
-      reason it was blind is worth more than the fix.</b> Slice 2 made a loop seal with a
+      <b>An adversarial review found a wrong render the whole suite was blind to — and its
+      second round found two more in the first repair.</b> Slice 2 made a loop seal with a
       delegate <i>inside</i> it, and sealing rewrites every read of the loop variable in that
       body onto the <i>frame</i> — the value the iteration resolved. That is sound only while
       <code>context[loopvar]</code> would give the same thing, and a delegate is arbitrary
@@ -1278,35 +1279,56 @@
       <code>defaulttags.py:104-114</code>), which lands it in the innermost layer already
       holding it — the enclosing loop's own. So
       <code>{% for s in sections %}{% cycle "X" as s silent %}{{ s }}{% endfor %}</code>
-      rendered <code>X</code> in Django and <code>old</code> here. <b>The repair separates two
-      questions that had been one.</b> <code>sealable</code> asks whether a body <i>may</i> be
-      sealed; the new <code>may_write_context</code> asks whether its reads may move to the
-      frame, and a body holding a delegate or a loop fails the second while passing the first —
-      it is still sealed, it just keeps reading its loop variable out of the context, which the
-      stated loop was maintaining anyway. Two candidate writers are ruled out by argument
-      rather than by code, and both were checked against Django rather than reasoned about: a
-      <i>filter</i> cannot write the context (<code>FilterExpression.resolve</code> hands it only
-      <code>autoescape</code> and the arguments, <code>base.py:812-815</code>), and a nested loop
-      the walk runs writes only into the layer it pushes. <b>The defect is older than the slice
-      that exposed it, and that is measured rather than argued</b>: the differential harness
-      reads <b>2 of 52 differing</b> on slice 2's own source, <b>4 of 52</b> on slice 3's, and
-      <b>52 identical</b> here — 2 → 4 → 0 over the three artifacts.
+      rendered <code>X</code> in Django and <code>old</code> here. The first repair separated two
+      questions that had been one: <code>sealable</code> asks whether a body <i>may</i> be
+      sealed, the new <code>may_write_context</code> asks whether its reads may move to the
+      frame, and a body holding a delegate fails the second while passing the first — it is
+      still sealed, it just keeps reading its loop variable out of the context, which the stated
+      loop was maintaining anyway. <b>The re-review rejected that repair on two BLOCKING
+      findings, and both land on an <i>argument</i> in the predicate's docstring rather than on
+      a line of code.</b> "A filter cannot write the context" is false: a filter is handed the
+      arguments the <i>template</i> gave it, and the context object is a value a template can
+      name. "A nested loop's sequence is read, not written" is false too: a nested
+      <code>{% for %}</code> resolves its sequence in Python with the context in hand, so it is
+      a writer at the position of its sequence — and the predicate descended into the nested
+      loop's body and never looked at the sequence. <b>And a third finding that no widening of
+      the predicate could have repaired:</b> Django opens <code>with context.push():</code>
+      <i>before</i> it resolves the sequence (<code>defaulttags.py:198-199</code>), so a
+      sequence is resolved inside the loop's own layer — it can read that depth and write into
+      it — while the walk resolved one layer out. <b>The repair is an ordered write pass</b>:
+      reads move to the frame only up to the first node that hands Python the context (a
+      delegate, or a nested loop, whose sequence is Python), and the loop opens its layer once
+      per loop, before the sequence resolves. Position is the whole argument, and it is
+      <i>finer</i> than the predicate rather than merely different — a read before the boundary
+      is frame-correct whatever follows it, so reads the gate was keeping on the context for
+      nothing now move again.
     </p>
     <p class="sub" style="margin-top:16px">
-      <b>And the differential corpus could not have carried the decision, which is why a census
-      row pins it.</b> Two ways make those four cases pass — keep the reads on the context (the
-      fix), or hand the loop back to Python — and they render byte-identical output while
-      costing differently, so a byte-comparing harness sees neither. The four added rows are
-      <code>cycle_rebinds_the_loop_variable</code>,
-      <code>cycle_rebinds_the_loop_variable_and_survives_the_loop</code> (the rebinding is still
-      <code>X</code> after <code>{% endfor %}</code>, because it was written past the loop),
-      <code>nested_for_keeps_an_ancestor_rebinding</code>, and
-      <code>cycle_then_nested_for_reads_the_rebound_name</code>, taking the corpus 48 → 52. What
-      separates the fix from a re-delegation is
-      <code>test_a_loop_whose_body_can_write_the_context_still_seals</code>, which asserts the
-      <i>census</i>: <code>ForNode</code> in <code>handled:</code> and absent from
-      <code>delegated:</code>, with <code>delegated == [("CycleNode", 1)]</code>. The python
-      unit-test pin moved <b>509 → 510</b>.
+      <b>The defects are older than the slice that exposed them, and that is measured rather
+      than argued.</b> The differential harness reads <b>2 of 52 differing</b> on slice 2's own
+      source, <b>4 of 52</b> on slice 3's, and <b>52 identical</b> after the first repair. The
+      corpus has since grown to <b>59</b> cases — the second round's shapes — and over the four
+      artifacts reads <b>5 / 11 / 7 / 0</b>: slice 2, slice 3, the first repair, this tree.
+      Three of those seven rows diverge on the <i>slice-2</i> build, with no nesting and no seal
+      involved, so the push order is a property of the frame route the walk has had since
+      <code>888b5a9</code> and not of step 5 at all.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>And the differential corpus could not have carried the decision, which is why census
+      rows pin it.</b> Two ways make those cases pass — keep the reads on the context (the fix),
+      or hand the loop back to Python — and they render byte-identical output while costing
+      differently, so a byte-comparing harness sees neither. What separates the fix from a
+      re-delegation is the <i>census</i>:
+      <code>test_a_loop_whose_body_can_write_the_context_still_seals</code> reads
+      <code>ForNode</code> in <code>handled:</code> and absent from <code>delegated:</code>
+      (<code>delegated == [("CycleNode", 1)]</code>), and its sibling
+      <code>..._whose_sequence_can_write_...</code> does the same for both loops of the nested
+      shape, where <code>delegated == [("LoadNode", 1)]</code> because <code>{% load %}</code> is
+      the only node the walk does not model. A third row counts what no output can show —
+      <code>test_a_read_before_the_delegate_is_served_from_the_frame</code> records every
+      <code>Context.__getitem__</code> in a render and requires the loop variable to be read
+      from the context <b>once</b>, where a body-wide gate and a re-delegation both read it
+      twice. The python unit-test pin moved <b>510 → 512</b>.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>What the fix costs, in the unit the fix is about.</b> A body that keeps the context
@@ -1316,19 +1338,32 @@
       <code>django-only/realistic</code> <b>+25.58 µs = +2.57% render</b> and
       <code>real-world/complex</code> <b>+8.40 µs = +1.63%</b>, against a control floor of
       <b>0.745%</b> taken from the same runs over the four rows the change cannot reach —
-      3.5× and 2.2× the floor. <b>Compile pays nothing</b>: the family's per-read slope in
-      compile mode is <b>−0.0004 µs</b>, i.e. the predicate is a compile-time question about an
-      already-built plan and does not survive into the artifact. The measurement took four
-      instruments; the three that failed are recorded in the fix's own note, and the one that
-      worked alternates the two builds round by round so the cost is a <i>cross-build delta of
-      one template</i> with no subtraction of two baselines anywhere — the earlier attempt at
-      exactly that subtraction disagreed with itself by <b>7×</b> on a single artifact.
-      <b>The page's headline ratios are unaffected at the precision they print</b>: the three
-      <code>real-world</code> pages it geomeans move −0.29% / +1.63% / −0.74% render and
-      −0.21% / +1.28% / +0.31% parse under the fix, a +0.20% / +0.46% shift of the mean, so
-      <b>0.39×</b> and <b>0.75×</b> stand.
-      Acceptance is unmoved: <b>1547 tests, OK (skipped=6)</b>, <b>510</b> python unit tests,
-      <b>787</b> Rust tests, differential harness 52 cases identical.
+      3.5× and 2.2× the floor. <b>Those are the first repair's numbers</b>, and the ordered pass
+      is a different tree: it moves the reads before each boundary back to the frame, so the
+      second measurement is taken against the first repair rather than against slice 3, and it
+      is reported with the paired per-round median as well as the two separate medians the
+      re-review asked to be replaced. <b>Compile shows no resolved per-read effect in these
+      measurements</b>: the family's per-read slope in compile mode is <b>−0.0004 µs</b>, inside
+      the instrument's own spread, so what is bounded is a per-parse plan walk below that
+      resolution rather than a zero. The measurement took four instruments; the three that
+      failed are recorded in the fix's own note, and the one that worked alternates the two
+      builds round by round so the cost is a <i>cross-build delta of one template</i> with no
+      subtraction of two baselines anywhere — the earlier attempt at exactly that subtraction
+      disagreed with itself by <b>7×</b> on a single artifact.
+      <b>The page's headline ratios were unaffected by the first repair at the precision they
+      print</b> — the three <code>real-world</code> pages it geomeans move −0.29% / +1.63% /
+      −0.74% render and −0.21% / +1.28% / +0.31% parse under it, a +0.20% / +0.46% shift of the
+      mean, measured over 12 alternating rounds of the two builds rather than assumed.
+      <b>The ordered pass is the one that moves the page, and the page was regenerated on it
+      rather than the shift inferred from the A/B</b>: render <b>0.39× → 0.41×</b>, parse and
+      compile unmoved at the precision they print. The whole of it is one row —
+      <code>real-world/large</code> render, the loop-heavy page, where the second finding's
+      per-<code>{% for %}</code> push order is paid 20 times; the other two pages and both
+      other modes move inside the ~3% floor that the two control rows (<code>filter-arg</code>,
+      <code>i18n</code>) and the stock denominator's own run-to-run spread put on that
+      comparison. The row-by-row table is in the fix's own note (§5.4).
+      Acceptance is unmoved: <b>1547 tests, OK (skipped=6)</b>, <b>512</b> python unit tests,
+      <b>787</b> Rust tests, differential harness <b>59</b> cases identical.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>Until M18 it was a substitution, and that machinery is gone.</b> Earlier revisions of

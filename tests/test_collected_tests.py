@@ -663,8 +663,32 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # (`test_collected_tests.py`'s own pin moves with it, which is this paragraph),
 # and no row is renamed or deleted — 509 + 1 = 510.
 #
-# Counts at close: 510 collected, proxy and discovery agreeing.
-PINNED = 510
+# 510 → 512 is **+2**, and it is the second adversarial round's two BLOCKING
+# findings against that same fix. Both name a route the first repair's predicate
+# had *argued* away rather than one it read: a filter receives the arguments the
+# template gave it, so the context object is reachable as a value, and a nested
+# `{% for %}` resolves its *sequence* in Python with the context in hand — so a
+# nested loop's sequence can write its ancestor's loop variable, and Django opens
+# `with context.push():` *before* that resolve
+# (`engine/defaulttags.py:198-199`) while the walk resolved one layer out.
+# `tests/differential/cases.py` gained the seven templates that reproduce both
+# (+4 earlier in the same round, 48 → 59), and this file gains two rows:
+#   * `test_a_loop_whose_sequence_can_write_the_context_still_seals` — the same
+#     census question as the 509 → 510 row, for the nested shape both of whose
+#     loops must stay the walk's (`delegated == [("LoadNode", 1)]`);
+#   * `test_a_read_before_the_delegate_is_served_from_the_frame` — a *count*
+#     rather than a census (`Context.__getitem__`), because the ordered write
+#     pass and the body-wide gate it replaces render the same bytes.
+# Both fail on the trees that carry the defects: 2 of the 3 rows above fail on
+# the `35ff15c` build and all 3 on slice 3's and slice 2's, measured by swapping
+# the artifact (`sha256:b0c073c33ecdfe6c` etc.).
+# Measured the other way, as this ledger's rule asks: `git diff -U0 tests/` adds
+# **2** `def test_` lines and removes none, no module gains a row but this one
+# (`test_collected_tests.py`'s own pin moves with it, which is this paragraph),
+# and no row is renamed or deleted — 510 + 2 = 512.
+#
+# Counts at close: 512 collected, proxy and discovery agreeing.
+PINNED = 512
 
 
 def collected() -> unittest.TestSuite:

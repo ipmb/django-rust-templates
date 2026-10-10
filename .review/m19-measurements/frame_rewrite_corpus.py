@@ -33,8 +33,26 @@ import bench_engines  # noqa: E402
 # is skipped.  The controls are the three shapes that keep one of those two
 # halves and must not move: `filter-arg` reads the loop variable with no delegate
 # (the rewrite must still run), `i18n` holds a delegate with no walk-owned read
-# (the predicate fires and has nothing to skip), and `large` has no loop at all.
-# `normal`'s one `{% include %}` is at block level, outside the loop.
+# (the predicate fires and has nothing to skip), and `large` holds no delegate
+# anywhere.  `normal`'s one `{% include %}` is at block level, outside the loop.
+#
+# **That last one said "`large` has no loop at all", and it is false**: the
+# template appends a `{% for item in section{i}.parts %}` per section, 20 loop
+# statements and 60 iterations a render.  The property `large` has is *no
+# delegate*, which is what makes it a control for the gate's **action** — the
+# gate skipped only a body holding one — and it is emphatically not a control for
+# a cost every `{% for %}` pays, which is what `frame_rewrite_ab2.txt` measured on
+# this row (+20.479 us render, 20 x the family's +0.930 us per-loop floor, and
+# the row that reconciles the floor to a page).  Corrected rather than deleted,
+# because the false reason was load-bearing for a true control and a reader has to
+# see which half was which.  The loop-free row in the family set is `C`.
+#
+# For `frame_rewrite_ab2.txt` (the ordered pass against the gate) the control
+# population is the two rows the *ordered pass* cannot reach — `filter-arg` and
+# `i18n`, each holding exactly **one** loop statement, the same shape as the
+# family's `D` floor row — and not the four the gate cannot reach.  Every row in
+# this corpus holds at least one `{% for %}`, so a row without one is not
+# available here at all.
 ROWS = (
     "django-only/realistic",
     "real-world/complex",

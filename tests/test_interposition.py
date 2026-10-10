@@ -1859,6 +1859,152 @@ class FilterRoutingTests(unittest.TestCase):
             "be sound, which is a different test",
         )
 
+    def test_a_loop_whose_sequence_can_write_the_context_still_seals(self):
+        """The second adversarial round's first finding, at the census.
+
+        `ForNode.render` opens `with context.push():` **before**
+        `values = self.sequence.resolve(context, ignore_failures=True)`
+        (`engine/defaulttags.py:198-199`), and a sequence is a
+        `FilterExpression`, which hands its filter the arguments the template
+        gave it — the context is one of them, when the template names it. So a
+        **nested** loop's sequence can write its *ancestor's* loop variable, and
+        a read of that variable after the inner loop must not come from the
+        frame. The old body-wide predicate (`may_write_context`) had argued
+        exactly that away — "a sequence is read, not written" — and seven rows in
+        `tests/differential/cases.py` diverged on the `35ff15c` build because of
+        it (`differential-fix2.txt`: 7 of 59). The walk's write pass now stops
+        rewriting reads at an `Act::For` as well as at a delegate, which is what
+        makes the inner loop a boundary.
+
+        This row is the sibling of the one above for the same reason that one
+        exists: the rows in the corpus pass if the loop is *re-delegated*, and
+        the census is what separates the port from that. Both loops are the
+        walk's here, and the only delegated node is the `{% load %}`.
+        """
+        from django_rust_templates import _native
+        from django_rust_templates.engine import Context, Engine
+
+        libraries = {"ctxwrite": "tests.differential.ctxwrite_library"}
+        source = (
+            "{% load ctxwrite %}{% for s in sections %}"
+            "{% for x in xs|rebind_up:ctx %}{% endfor %}{{ s }}{% endfor %}"
+        )
+        engine = Engine(libraries=libraries)
+        context = Context({"sections": ["old"], "xs": []})
+        context["ctx"] = context
+
+        _native.census_start()
+        try:
+            rendered = engine.from_string(source).render(context)
+        finally:
+            handled, delegated, _, _, _ = _native.census_take()
+
+        self.assertEqual(
+            rendered,
+            "X",
+            "`rebind_up` writes `s` upward into the outer loop's layer, so the "
+            "read after the inner loop must see it — `differential-fix2.txt` "
+            "reads `old` for this row on the pre-fix builds",
+        )
+        self.assertIn(
+            ("ForNode", 2),
+            handled,
+            "both loops must be the walk's: a `ForNode` missing from `handled` "
+            "is a loop `ForNode.render` rendered",
+        )
+        for count in (1, 2):
+            self.assertNotIn(
+                ("ForNode", count),
+                delegated,
+                "a loop was handed back to Python. Both corpus rows and this "
+                "row's output pass that way, which is why the assertion is the "
+                "census",
+            )
+        self.assertEqual(
+            delegated,
+            [("LoadNode", 1)],
+            "`{% load %}` is the only node here the walk does not model — every "
+            "other node is the walk's own, so a `ForNode` in this list would be "
+            "a loop handed back to Python",
+        )
+
+    def test_a_read_before_the_delegate_is_served_from_the_frame(self):
+        """The ordered write pass, counted — the one claim bytes cannot carry.
+
+        A body holding a delegate is sealed, and *where* the pass stops
+        rewriting is the second adversarial round's second finding: Django's
+        `ForNode.render` pushes the loop's layer before it resolves the sequence
+        (`engine/defaulttags.py:198-199`), so everything before the first
+        Python-visible node — the sequence of a nested loop, a delegate — can
+        still be a frame read. The old predicate was body-wide and refused the
+        whole body, which renders the same bytes and is measurably slower, so
+        no corpus row can tell them apart.
+
+        What can tell them apart is a count, because a **frame** read is answered
+        in Rust (`FrameTarget::get_item`,
+        `crates/template-py/src/lib.rs:5084`) and a **context** read is
+        `PyObject_GetItem` on the context object, i.e. `Context.__getitem__`.
+        `{% for s in sections %}{{ title }}{{ s }}{% cycle "X" as s silent %}{{ s }}{% endfor %}`
+        reads `s` once before the delegate and once after, and the whole list is
+        measured rather than reasoned — on the fixed tree
+        (`sha256:0013195e7af12bb4`) `['sections', 'title', 's']` and on the
+        body-wide gate (`sha256:b0c073c33ecdfe6c`) `['sections', 'title', 's',
+        's']`, both rendered by `.review/m19-measurements/reads_probe.py`. So the
+        subject is **one** `s` on the fix and **two** on the gate; a re-delegated
+        loop also reads it twice, because Python's own `ForNode` renders the body.
+        Note what `sections` shows even here: its first read is the loop's
+        *sequence*, which `ForNode.render` resolves in Python, and the second is
+        `{{ title }}`'s sibling head. That is why the control is `title` and not
+        `sections` — `title` is read by nothing but the emit, so its count is one
+        on both builds and does not move with the sequence's route.
+
+        `title` is the control, drawn from the same render: a head that is not
+        the loop variable is never rewritten, so it must reach the context — and
+        if the instrument were not connected at all this count would be 0 and
+        this row would fail rather than pass.
+        """
+        from django_rust_templates.engine import Context, Engine
+
+        class CountingContext(Context):
+            """A `Context` that records every key read out of it."""
+
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.reads = []
+
+            def __getitem__(self, key):
+                self.reads.append(key)
+                return super().__getitem__(key)
+
+        source = (
+            "{% for s in sections %}{{ title }}{{ s }}"
+            '{% cycle "X" as s silent %}{{ s }}{% endfor %}'
+        )
+        context = CountingContext({"sections": ["old"], "title": "T"})
+        rendered = Engine().from_string(source).render(context)
+
+        self.assertEqual(
+            rendered,
+            "ToldX",
+            "the read after `{% cycle %}` must see the rebound name — `X` — and "
+            "the read before it the item, which is still `old`",
+        )
+        self.assertEqual(
+            context.reads.count("title"),
+            1,
+            "the control: a head that is not the loop variable is never "
+            "rewritten, so `{{ title }}` must read the context. A 0 here means "
+            "this instrument never saw the render, and the `s` count below "
+            "would be vacuous",
+        )
+        self.assertEqual(
+            context.reads.count("s"),
+            1,
+            "the read before the delegate did not come from the frame: a "
+            "body-wide gate reads `s` twice and a re-delegated loop reads it "
+            "twice as well",
+        )
+
     def test_the_parser_finds_our_defaultfilters(self):
         """The premise, on its own, so a green counter cannot be the whole story.
 

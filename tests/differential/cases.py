@@ -190,10 +190,11 @@ CASES = [
     # so a body that can move that name in the context makes the rewrite stale.
     # `{% cycle … as s %}` is the one built-in that does it (`context.set_upward`
     # in `CycleNode.render`), and the name it writes lands in the layer already
-    # holding `s`, i.e. the loop's own.  All four rendered Django's answer before
-    # the fix, and the nested pair is the shape M19 step 5 slice 3 opened: the
-    # first two rows fail on the *slice-2* tree as well, so they are older than
-    # the slice that made them visible.
+    # holding `s`, i.e. the loop's own.  All four **diverge** on the pre-fix tree
+    # — `differential-fix.txt` reads 4 of 52 differing there and 52 identical
+    # after the fix — and the nested pair is the shape M19 step 5 slice 3 opened:
+    # the first two rows differ on the *slice-2* tree as well (2 of 52), so they
+    # are older than the slice that made them visible.
     {
         "name": "cycle_rebinds_the_loop_variable",
         "template": '{% for s in sections %}{% cycle "X" as s silent %}{{ s }}{% endfor %}',
@@ -219,6 +220,81 @@ CASES = [
             "{% for l in s %}{{ l }}{% endfor %}{{ s }}{% endfor %}"
         ),
         "context": {"sections": ["old"]},
+    },
+    # **A loop's *sequence* is Python, and it runs inside the loop's layer.**
+    # The second adversarial round's two BLOCKING findings, both on the fix above
+    # and both reproduced here. `ForNode.render` opens `with context.push():`
+    # *before* `values = self.sequence.resolve(...)` — entered at
+    # `engine/defaulttags.py:198`, resolved at `engine/defaulttags.py:198-199` — so a
+    # sequence sees the loop's layer and writes into it; and a
+    # sequence is a `FilterExpression`, whose filters receive the arguments the
+    # template gave them — including the context, named `ctx` here by
+    # `context_ref`. `rewrite_body`'s old body-wide predicate
+    # (`may_write_context`) had argued both away: "a filter cannot write the
+    # context", and a nested loop's "sequence is read, not written".
+    #
+    # All seven diverge on the `35ff15c` build (`sha256:b0c073c33ecdfe6c`): the
+    # first four by *values*, the last three by a layer count.
+    {
+        "name": "nested_sequence_filter_rebinds_an_ancestor",
+        "template": (
+            "{% load ctxwrite %}{% for s in sections %}"
+            "{% for x in xs|rebind_up:ctx %}{% endfor %}{{ s }}{% endfor %}"
+        ),
+        "context": {"sections": ["old"], "xs": []},
+        "libraries": {"ctxwrite": "ctxwrite_library"},
+        "context_ref": "ctx",
+    },
+    {
+        "name": "nested_sequence_filter_rebinds_an_ancestor_around_a_body",
+        "template": (
+            "{% load ctxwrite %}{% for s in sections %}"
+            "{% for x in xs|rebind_up:ctx %}{{ x }}{% endfor %}{{ s }}{% endfor %}"
+        ),
+        "context": {"sections": ["old"], "xs": ["z"]},
+        "libraries": {"ctxwrite": "ctxwrite_library"},
+        "context_ref": "ctx",
+    },
+    {
+        "name": "nested_sequence_filter_writes_only_its_own_layer",
+        "template": (
+            "{% load ctxwrite %}{% for s in sections %}"
+            "{% for x in xs|rebind_item:ctx %}{% endfor %}{% firstof s %}{% endfor %}"
+        ),
+        "context": {"sections": ["old"], "xs": []},
+        "libraries": {"ctxwrite": "ctxwrite_library"},
+        "context_ref": "ctx",
+    },
+    {
+        "name": "top_level_sequence_filter_writes_only_its_own_layer",
+        "template": "{% load ctxwrite %}{% for x in xs|rebind_item:ctx %}{% endfor %}[{{ s }}]",
+        "context": {"s": "old", "xs": []},
+        "libraries": {"ctxwrite": "ctxwrite_library"},
+        "context_ref": "ctx",
+    },
+    {
+        "name": "sequence_filter_sees_the_loops_layer",
+        "template": "{% load ctxwrite %}{% for x in ab|ctxdepth:ctx %}{{ x }}{% endfor %}",
+        "context": {"ab": "12"},
+        "libraries": {"ctxwrite": "ctxwrite_library"},
+        "context_ref": "ctx",
+    },
+    {
+        "name": "nested_sequence_filter_sees_both_layers",
+        "template": (
+            "{% load ctxwrite %}{% for s in sections %}"
+            "{% for x in ab|ctxdepth:ctx %}{{ x }}{% endfor %}{% endfor %}"
+        ),
+        "context": {"sections": ["old"], "ab": "12"},
+        "libraries": {"ctxwrite": "ctxwrite_library"},
+        "context_ref": "ctx",
+    },
+    {
+        "name": "empty_loop_sequence_filter_sees_the_loops_layer",
+        "template": "{% load ctxwrite %}{% for x in xs|ctxdepth:ctx %}{{ x }}{% endfor %}",
+        "context": {"xs": []},
+        "libraries": {"ctxwrite": "ctxwrite_library"},
+        "context_ref": "ctx",
     },
     {
         "name": "with_tag",

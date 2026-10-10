@@ -1,0 +1,43 @@
+=== artifact sha256:0013195e7af12bb4 (side new)
+  PASS  a_read_before_the_delegate_is_served_from_the_frame
+  PASS  a_loop_whose_sequence_can_write_the_context_still_seals
+
+=== artifact sha256:b0c073c33ecdfe6c (side firstfix)
+  FAIL  a_read_before_the_delegate_is_served_from_the_frame
+        AssertionError: 2 != 1 : the read before the delegate did not come from the frame: a body-wide gate reads `s` twice and a re-delegated loop reads it twice as well
+  FAIL  a_loop_whose_sequence_can_write_the_context_still_seals
+        AssertionError: 'old' != 'X' : `rebind_up` writes `s` upward into the outer loop's layer, so the read after the inner loop must see it — `differential-fix2.txt` reads `old` for this row on the pre-fix
+
+=== artifact sha256:e6a72702ba5877cb (side slice3)
+  FAIL  a_read_before_the_delegate_is_served_from_the_frame
+        AssertionError: 'Toldold' != 'ToldX' : the read after `{% cycle %}` must see the rebound name — `X` — and the read before it the item, which is still `old`
+  FAIL  a_loop_whose_sequence_can_write_the_context_still_seals
+        AssertionError: 'old' != 'X' : `rebind_up` writes `s` upward into the outer loop's layer, so the read after the inner loop must see it — `differential-fix2.txt` reads `old` for this row on the pre-fix
+
+=== artifact sha256:1ec2563e926cb649 (side slice2)
+  FAIL  a_read_before_the_delegate_is_served_from_the_frame
+        AssertionError: 'Toldold' != 'ToldX' : the read after `{% cycle %}` must see the rebound name — `X` — and the read before it the item, which is still `old`
+  FAIL  a_loop_whose_sequence_can_write_the_context_still_seals
+        AssertionError: ('ForNode', 2) not found in [] : both loops must be the walk's: a `ForNode` missing from `handled` is a loop `ForNode.render` rendered
+
+=== artifact sha256:81b87938647bd42b (side mutant)
+  PASS  a_read_before_the_delegate_is_served_from_the_frame
+  FAIL  a_loop_whose_sequence_can_write_the_context_still_seals
+        AssertionError: 'old' != 'X' : `rebind_up` writes `s` upward into the outer loop's layer, so the read after the inner loop must see it — `differential-fix2.txt` reads `old` for this row on the pre-fix
+
+=== artifact sha256:46ebc888fcc33853 (side mutant_push)
+  PASS  a_read_before_the_delegate_is_served_from_the_frame
+  PASS  a_loop_whose_sequence_can_write_the_context_still_seals
+
+restored: live artifact sha256:0013195e7af12bb4
+
+=== artifact sha256:81b87938647bd42b (side mutant) exit 0
+  Ran 1547 tests in 3.768s
+  OK (skipped=6)
+
+=== artifact sha256:46ebc888fcc33853 (side mutant_push) exit 0
+  Ran 1547 tests in 3.762s
+  OK (skipped=6)
+
+restored: live artifact sha256:0013195e7af12bb4
+

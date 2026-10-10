@@ -211,14 +211,25 @@ LINE = "<tr><td>{{ line.sku|upper }}</td><td>{{ line.note }}</td><td>{{ line.qty
 
 
 def large_template() -> str:
-    """A ~9 KB page with no loop: the parse-bound row.
+    """A ~9 KB page: the parse-bound row.
 
-    Alternating `{{ section.N }}` and `{% if %}`/`{% for %}` so the node count is
-    dominated by variables and control tags rather than text. There is no
-    `{% load i18n %}`: this row is in the shared family and Jinja2 has no such
-    library. The `load_i18n` parameter this used to take had one call site, and it
-    passed `False` — a dead branch in a corpus whose whole argument is that a row
-    is where it is for a reason, so it is gone.
+    Twenty sibling sections, each with ten variables, an `{% if %}`, and a
+    `{% for %}` over three items, so the node count is dominated by variables and
+    control tags rather than text. There is no `{% load i18n %}`: this row is in
+    the shared family and Jinja2 has no such library. The `load_i18n` parameter
+    this used to take had one call site, and it passed `False` — a dead branch in
+    a corpus whose whole argument is that a row is where it is for a reason, so it
+    is gone.
+
+    This docstring said "no loop" until the frame-rewrite fix's second round
+    measured against it: the body below has appended a `{% for %}` per section
+    since the row was written, i.e. **20 loop statements and 60 iterations per
+    render**, and a per-loop cost therefore lands on this row twenty times over.
+    No body holds a delegate, and *that* is the property the row has — it is what
+    made it a control for the gate's action in `frame_rewrite_ab.txt`, and a
+    subject for the loop's own push order in `frame_rewrite_ab2.txt`. A row named
+    by the property it does not have is the `a-measurement-names-a-code-path`
+    trap; a row named by one it does have is a control.
     """
     parts = ["<article>"]
     for i in range(20):
@@ -438,7 +449,7 @@ def workloads() -> list[Workload]:
         W(
             "real-world/large",
             "real-world",
-            "a 9 KB page with no loop: the parse-bound row",
+            "a 9 KB page of 20 sections, 20 loop statements: the parse-bound row",
             _one(large_template()),
             "page.html",
             LARGE_DATA,

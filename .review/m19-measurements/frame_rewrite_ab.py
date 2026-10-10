@@ -21,6 +21,16 @@ Two sets are run, and they answer two different questions:
     which it cannot, so the per-read cost can be scaled to a page a reader
     recognizes.
 
+**Which rows are controls depends on the two trees, and the report says which.**
+The family's B/D rows hold a `{% for %}` and no delegate, so they carry the *push
+order* — the fix's other half, which every loop pays — and they are therefore
+controls **only** for a comparison in which the push order is the same on both
+sides (`frame_rewrite_ab.txt`: the gate, against slice 3).  In
+`frame_rewrite_ab2.txt` (the ordered pass, against the gate) B/D are *subject*
+rows for that half and `C` is the only control the change cannot touch, which is
+what the report's two lines print rather than one line labelled "must be 0".
+A control line that is false at the point of output is worse than no line.
+
 The iteration counts are calibrated once, on one side, and pinned for every run:
 `bench.measure`'s own rule, and the reason a faster artifact is not handed a
 larger N and a tighter best-of-N.
@@ -153,6 +163,21 @@ def _med(vals):
     return statistics.median(vals) if vals else float("nan")
 
 
+def _paired(p, f):
+    """The per-round differences the two sides' *separate* medians cannot carry.
+
+    `_load` returns each side's runs in round order, and `cmd_ab` runs the round's
+    two sides back to back (order reversed on even rounds), so `f[i] - p[i]` is a
+    difference taken within one round: whatever drifted between rounds — thermal,
+    machine load, a daemon waking up — is in both terms and cancels. The median of
+    those 12 differences is therefore the estimate, and the two separate medians
+    printed beside it are the reading the second adversarial round asked to be
+    replaced: they are taken over different moments in time, so their difference
+    is a delta *plus* the drift between the two halves of the session.
+    """
+    return [b - a for a, b in zip(p, f)] if len(p) == len(f) else []
+
+
 def _fit(xs, ys):
     n = len(xs)
     mx, my = sum(xs) / n, sum(ys) / n
@@ -171,8 +196,9 @@ def cmd_report(args) -> int:
         print(f"########## {setname}")
         for mode in ("render", "parse", "compile"):
             print(f"--- ours, {mode}")
-            print(f"{'label':34}{'prefix med us':>14}{'fixed med us':>13}{'delta us':>10}"
-                  f"{'delta':>8}{'p drift':>9}{'f drift':>9}   (12 runs a side)")
+            print(f"{'label':28}{'prefix med':>12}{'fixed med':>11}{'sep delta':>11}"
+                  f"{'paired med':>12}{'paired min':>12}{'paired max':>12}"
+                  f"{'p drift':>9}{'f drift':>9}   (12 runs a side)")
             deltas = {}
             for k in keys:
                 key = f"family/{k}" if setname == "family" else k
@@ -181,20 +207,26 @@ def cmd_report(args) -> int:
                 if not p or not f:
                     continue
                 mp, mf = _med(p), _med(f)
+                pair = _paired(p, f)
                 dp = (max(p) - min(p)) / min(p)
                 df = (max(f) - min(f)) / min(f)
-                deltas[k] = mf - mp
-                sub = abs((mf - mp) / mp) > 0.02
-                print(f"{k:34}{mp:>14.3f}{mf:>13.3f}{mf - mp:>+10.3f}"
-                      f"{(mf - mp) / mp:>+8.2%}{dp:>9.2%}{df:>9.2%}   "
-                      f"{'MOVE' if sub else ''}")
+                deltas[k] = _med(pair) if pair else mf - mp
+                sub = abs(deltas[k] / mp) > 0.02
+                print(f"{k:28}{mp:>12.3f}{mf:>11.3f}{mf - mp:>+11.3f}"
+                      f"{deltas[k]:>+12.3f}"
+                      f"{(min(pair) if pair else float('nan')):>+12.3f}"
+                      f"{(max(pair) if pair else float('nan')):>+12.3f}"
+                      f"{dp:>9.2%}{df:>9.2%}   {'MOVE' if sub else ''}")
             if setname == "family":
-                ctrl = [deltas[k] for k in ("B1", "B2", "B4", "C", "D") if k in deltas]
-                print(f"   controls (must be 0): "
-                      + "  ".join(f"{k} {deltas[k]:+.3f}" for k in ("B1", "B2", "B4", "C", "D")
-                                  if k in deltas))
-                print(f"   control |delta| max {max(abs(c) for c in ctrl):.3f} us"
-                      f"   subject min {min(abs(deltas[k]) for k in subjects):.3f} us")
+                loops = [k for k in ("B1", "B2", "B4", "D") if k in deltas]
+                print("   no-delegate loops (a `{% for %}` pays them, so they carry the "
+                      "push order): " + "  ".join(f"{k} {deltas[k]:+.3f}" for k in loops))
+                if "C" in deltas:
+                    print(f"   no-loop control (this change cannot touch it): "
+                          f"C {deltas['C']:+.3f} us")
+                print(f"   subject min {min(abs(deltas[k]) for k in subjects):.3f} us"
+                      f"   push-order floor (D: one loop, no reads) "
+                      f"{deltas.get('D', float('nan')):+.3f} us")
                 if all(k in deltas for k in subjects):
                     ks = [1, 2, 4]
                     inter, slope = _fit(ks, [deltas[f"A{k}"] for k in ks])

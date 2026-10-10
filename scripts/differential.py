@@ -146,12 +146,34 @@ def render_all(mode: str) -> dict[str, str]:
         importlib.import_module(ENGINES[mode]), "Engine"
     )
     engine = engine_cls()
+    # **A case may name a library and a context that holds itself**, and both are
+    # still JSON: ``libraries`` is a mapping of tag-library name to module path and
+    # ``context_ref`` is a name. That is what lets a case reach a *filter handed the
+    # context as an argument* — the route that falsified "a filter cannot write the
+    # context" — without pickling a callable or an object graph into the case file.
+    # Engines are built per library set and cached, because the module a case names
+    # is importable from `CASES_DIR`, which is already on `sys.path` above.
+    engines_by_library: dict[tuple, object] = {}
+
+    def engine_for(case: dict) -> object:
+        libraries = case.get("libraries")
+        if not libraries:
+            return engine
+        key = tuple(sorted(libraries.items()))
+        if key not in engines_by_library:
+            engines_by_library[key] = engine_cls(libraries=dict(key))
+        return engines_by_library[key]
+
     results: dict[str, str] = {}
     for case in cases.CASES:
         name = case["name"]
         try:
-            template = engine.from_string(case["template"])
-            results[name] = template.render(Context(case.get("context", {})))
+            context = Context(case.get("context", {}))
+            reference = case.get("context_ref")
+            if reference:
+                context[reference] = context
+            template = engine_for(case).from_string(case["template"])
+            results[name] = template.render(context)
         except Exception as exc:
             results[name] = f"!!{type(exc).__name__}: {exc}"
 

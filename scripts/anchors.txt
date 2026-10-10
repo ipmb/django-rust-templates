@@ -53,7 +53,7 @@ crates/template-py/src/lib.rs:2149	crates/template-py/src/lib.rs	2149	-	let resu
 crates/template-py/src/lib.rs:2170	crates/template-py/src/lib.rs	2170	-	Python::attach(|py| self.dir(py, bit))	-
 crates/template-py/src/lib.rs:2716-2717	crates/template-py/src/lib.rs	2716	2717	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
 crates/template-py/src/lib.rs:2773-2778	crates/template-py/src/lib.rs	2773	2778	fn resolve_lookups(	resolve_components(py, &lookups, context)
-crates/template-py/src/lib.rs:4982	crates/template-py/src/lib.rs	4982	-	fn render_value_in_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {	-
+crates/template-py/src/lib.rs:5038	crates/template-py/src/lib.rs	5038	-	fn render_value_in_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-
@@ -844,6 +844,7 @@ django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	29
 django_suite/run.py:85	django_suite/run.py	85	-	-	-
 django_suite/template_tests/syntax_tests/test_for.py:334	django_suite/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 django_suite/template_tests/test_partials.py:14	django_suite/template_tests/test_partials.py	14	-	engines["django"]	-
+crates/template-py/src/lib.rs:5084	crates/template-py/src/lib.rs	5084	-	fn get_item(&self, bit: &str) -> Step {	-
 engine/base.py:819-832	python/django_rust_templates/engine/base.py	819	832	except VariableDoesNotExist:	-
 engine/base.py:868-874	python/django_rust_templates/engine/base.py	868	874	for func, args in self.filters:	-
 python/django_rust_templates/engine/base.py:889	python/django_rust_templates/engine/base.py	889	-	names.get(func)	-
@@ -857,8 +858,10 @@ engine/base.py:1351-1354	python/django_rust_templates/engine/base.py	1351	1354	e
 python/django_rust_templates/engine/base.py:1356	python/django_rust_templates/engine/base.py	1356	-	render_value_in_context(output, context)	-
 engine/defaulttags.py:193-258	python/django_rust_templates/engine/defaulttags.py	193	258	def render(self, context):	-
 engine/defaulttags.py:194-198	python/django_rust_templates/engine/defaulttags.py	194	198	with context.push():	-
+engine/defaulttags.py:194-197	python/django_rust_templates/engine/defaulttags.py	194	197	-	-
 engine/defaulttags.py:198	python/django_rust_templates/engine/defaulttags.py	198	-	with context.push():	-
 engine/defaulttags.py:198-206	python/django_rust_templates/engine/defaulttags.py	198	206	return self.nodelist_empty.render(context)	-
+engine/defaulttags.py:198-199	python/django_rust_templates/engine/defaulttags.py	198	199	-	-
 engine/defaulttags.py:204	python/django_rust_templates/engine/defaulttags.py	204	-	len_values = len(values)	-
 engine/defaulttags.py:208-216	python/django_rust_templates/engine/defaulttags.py	208	216	loop_dict = context["forloop"] = {	-
 engine/defaulttags.py:214-217	python/django_rust_templates/engine/defaulttags.py	214	217	-	-
