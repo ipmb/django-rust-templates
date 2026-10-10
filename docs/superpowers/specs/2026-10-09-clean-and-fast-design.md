@@ -5,6 +5,23 @@ BLOCKING items and six defects. §8 is the reply: what changed, and the one clai
 I dispute with a measurement. Supersedes the M18.0 gating argument (§7 of the M18
 design) on one point, and takes over M18.2–M18.4.
 
+**Addendum, 2026-10-10 — the sealing design was reversed after implementation.**
+§5's step 5 was built on a *seal*: the walk deciding, from a loop body's node
+kinds, whether that body's reads of the loop variable could be served from a
+local frame instead of the context. It landed, and three adversarial rounds then
+falsified it. The deciding property does not belong to a node — `{{ holder.s }}`,
+`{% if holder %}`, `{{ holder }}` and `{% if holder.s %}` are four nodes that
+differ only in how a *value* is reached, and the value can hold the context and
+write to it through `@property`, `__str__` or `__bool__`. So no predicate over
+plan shapes terminates, and the frame route was deleted rather than widened:
+every `{% for %}` the walk owns now writes Django's per-iteration state
+unconditionally, in Django's order, and every read goes to the context. Read
+**`.review/m19-measurements/frame-rewrite-fix.md` §7** for the current argument,
+§5.5 for what the deletion costs, and treat the `seal` sentence in §5's item 2
+(the "Step 3a" paragraph) as history — the measurements it reports were taken on
+the tree that had the mechanism, and they stand; only the mechanism's name does
+not.
+
 ## 0. What this milestone is
 
 Pete's brief: *"clean this up and make it fast"*, with a benchmark against stock
@@ -218,7 +235,7 @@ the sentence:
   reaches the escape filter.
 - **(b) is inherited**, and it is the whole of the floor's per-variable cost:
   `render_floor` fetches `render_value_in_context` once per render
-  (`crates/template-py/src/lib.rs:5038`) and calls it per variable in
+  (`crates/template-py/src/lib.rs:4573`) and calls it per variable in
   `append_expression_value`. That the floor and `render_desc` share exactly these
   two helpers — the resolver and the escaper — is the floor's own claim about
   itself, and it is what makes the subtraction isolate dispatch. *(The floor's
@@ -769,7 +786,10 @@ the identity check are **not** re-specified here — §0's correction.
    (`TemplateLiteral` conditions only; an operator condition still delegates the
    node), and `seal` therefore accepts a loop body containing either — which is
    the point of the step, because a body is sealed only if *every* node in it is
-   walk-rendered. **The acceptance row was published before the run**
+   walk-rendered. **[Superseded — see the addendum at the head of this file:
+   `seal` no longer exists, and the body is no longer inspected to decide
+   anything. The numbers in this paragraph were taken on the tree that had it
+   and are not restated.]** **The acceptance row was published before the run**
    (`.review/m19-measurements/step3a_prediction.md`): the census's `flat/normal`
    — the corpus's `real-world/normal` with its two `BlockNode`s spliced away —
    goes **98.2% (5623/5728) → 0.7% (41/5728)** of output delegated, the 41
@@ -862,8 +882,10 @@ the identity check are **not** re-specified here — §0's correction.
    inheriting them, and the `38 across 22 files` reproduces exactly.
 3. **Is the culprit-span protocol per-node or per-descriptor?** §3.3 needs a span
    on every natively-rendered node; whether that is an `Option<(u32, u32)>` on
-   the walk's frame or a table the walk indexes is an implementation choice with
-   a measurable difference, and I would rather measure it than pick.
+   the walk's per-node state or a table the walk indexes is an implementation
+   choice with a measurable difference, and I would rather measure it than pick.
+   (Untouched by the addendum's deletion: this is the walk's own bookkeeping, not
+   the sealed-body frame that went away.)
 
 ## 8. Reply to the review
 

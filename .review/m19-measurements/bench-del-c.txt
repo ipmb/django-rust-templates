@@ -1,0 +1,87 @@
+python:  3.14.4 on macOS-27.0.1-arm64-arm-64bit-Mach-O
+django:  6.0.9
+native:  _native.cpython-314-darwin.so 2701680 bytes sha256:f921c593cf7338ab -> release (target/release/lib_native.dylib)
+corpus:  18 rows, 3 engine(s): django, rust, jinja2
+
+workload                 mode     iters     django       rust     jinja2 ours/stock  out
+------------------------------------------------------------------------------------------------
+
+== micro — one construct per row, so a regression names itself. It is two families and the earlier note here claimed one: the single-node rows (text, variable, lookup, if, filter, escape) are mostly a measurement of the render call, and the loop, include and extends rows are a measurement of the construct. The call share in the caption says where the split falls on this run
+micro/text               render   19357        1.8        1.9        3.5      1.052  ===
+micro/text               parse     8392        3.9        9.4       84.7      2.376  ===
+micro/text               compile  19677        2.0        6.9       77.2      3.535  ===
+micro/variable           render   12245        3.1        2.4        3.9      0.796  ===
+micro/variable           parse     4138        9.9       15.8      135.5      1.586  ===
+micro/variable           compile   7692        6.3       12.4      126.4      1.975  ===
+micro/lookup             render   13041        3.2        2.7        4.5      0.833  ===
+micro/lookup             parse     4166       10.2       16.3      180.2      1.599  ===
+micro/lookup             compile   6857        6.3       13.0      172.2      2.054  ===
+micro/loop-text          render    3217       15.0       19.8        5.7      1.321  ===
+micro/loop-text          parse     1643       26.3       37.0      190.2      1.409  ===
+micro/loop-text          compile   4494       10.4       15.7      178.5      1.512  ===
+micro/loop-var           render     605       80.9       45.3       32.8      0.559  ===
+micro/loop-var           parse      486       97.0       70.1      273.9      0.722  ===
+micro/loop-var           compile   3007       14.9       21.2      236.2      1.424  ===
+micro/if                 render   16441        2.4        2.2        3.7      0.928  ===
+micro/if                 parse     2864       14.3       26.2      179.9      1.829  ===
+micro/if                 compile   3934       11.2       22.7      171.3      2.029  ===
+micro/filter             render   12903        3.3        2.9        4.1      0.866  ===
+micro/filter             parse     1840       16.2       22.8      165.0      1.403  ===
+micro/filter             compile   3157       12.0       18.8      157.9      1.572  ===
+micro/escape             render   14285        3.1        2.4        4.1      0.758  ===
+micro/escape             parse     4428        9.4       12.3      110.6      1.307  ===
+micro/escape             compile   8450        5.6        9.2      103.5      1.656  ===
+micro/include            render    3908       10.1        7.1        6.2      0.701  ===
+micro/include            parse     1749       21.9       22.7      133.3      1.035  ===
+micro/include            compile   4898        9.3       12.6      119.8      1.350  ===
+micro/extends            render    2877        9.6        9.7        5.2      1.008  ===
+micro/extends            parse     1243       28.4       36.3      252.6      1.280  ===
+micro/extends            compile   2586       17.4       24.1      239.0      1.387  ===
+
+== real-world — whole pages, rendered by all three engines
+real-world/normal        render     120      418.5      201.6      172.8      0.482  ===
+real-world/normal        parse       85      568.2      390.8     1375.7      0.688  ===
+real-world/normal        compile    352      128.3      171.2     1165.4      1.335  ===
+real-world/complex       render      57      854.1      538.3      339.5      0.630  ===
+real-world/complex       parse       50      981.1      684.8     1281.8      0.698  ===
+real-world/complex       compile    506       90.8      114.7      905.8      1.264  ===
+real-world/large         render      73      682.0      272.8      202.4      0.400  ===
+real-world/large         parse       23     2152.9     2437.8    17480.6      1.132  ===
+real-world/large         compile     34     1444.6     2156.6    17377.9      1.493  ===
+
+== django-only — the constructs outside the three-engine intersection, rendered by the two engines that have them
+django-only/filter-arg   render     106      453.9      548.2          -      1.208  == 
+django-only/filter-arg   parse       96      508.7      625.0          -      1.228  == 
+django-only/filter-arg   compile   1465       29.7       54.1          -      1.822  == 
+django-only/i18n         render      71      680.6      384.6          -      0.565  == 
+django-only/i18n         parse       66      742.8      470.2          -      0.633  == 
+django-only/i18n         compile   1235       36.4       57.5          -      1.582  == 
+django-only/for-tags     render     132      370.0      195.0          -      0.527  == 
+django-only/for-tags     parse      113      434.0      261.6          -      0.603  == 
+django-only/for-tags     compile   1062       44.2       54.2          -      1.226  == 
+django-only/escape-table render    8450        5.5        3.4          -      0.611  == 
+django-only/escape-table parse     2166       20.1       24.3          -      1.210  == 
+django-only/escape-table compile   3448       13.9       20.1          -      1.446  == 
+django-only/realistic    render      41     1209.1     1045.3          -      0.865  == 
+django-only/realistic    parse       37     1305.5     1195.9          -      0.916  == 
+django-only/realistic    compile    537       82.9      118.5          -      1.429  == 
+
+out: '=' output identical to the django control, 'x' not, '-' engine absent,
+     ' ' engine did not run this row. ours/stock = rust best / django best.
+iters: calls per timed sample, calibrated once per row on the *control*
+     and used for every engine on that row, so all engines are timed
+     over the same number of calls to about --target seconds each.
+
+floor [render]: a template that renders nothing, microseconds per call
+              django 1.742 rust 1.829 jinja2 3.500
+
+floor [parse]: a template that renders nothing, microseconds per call
+              django 3.383 rust 6.924 jinja2 61.186
+
+floor [compile]: a template that renders nothing, microseconds per call
+              django 1.498 rust 4.599 jinja2 57.036
+              a row's `call N%` in the table below is its cost divided by
+              its engine's floor, so a row near 100% measures the call.
+
+wrote /Users/pete/projects/lincolnloop/django-rust-templates/.review/m19-measurements/bench-del-c.json
+wrote /Users/pete/projects/lincolnloop/django-rust-templates/docs/bench.html

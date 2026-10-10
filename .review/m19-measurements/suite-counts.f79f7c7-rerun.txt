@@ -1,0 +1,18 @@
+The suite-counts step of scripts/check.sh, run against the *committed* tree of
+f79f7c7 (git archive f79f7c7 | tar -x -C <empty dir>), which is the tree its own
+committed gate-2026-10-10.txt was written beside.
+
+That transcript reads  "suite counts: 21 line(s), every one with its provenance".
+This run reads:
+
+.review/m19-measurements/step5-slice3.md:336: [check\.sh] `Ran 1547 tests in 3.790s`, **`OK (skipped=6)`**, six skips by identit
+.review/m19-measurements/step5.md:284: [check\.sh] * **The acceptance suite: `Ran 1547 tests … OK (skipped=6)`**, plus th
+
+22 count line(s)
+
+`Ran N tests` with no provenance within 12 lines:
+
+  .review/m19-measurements/frame-rewrite-fix.md:364: asserted per swap (`suite_probe.py`, in `mutant_rows.txt`): `Ran 1547 tests`, `OK
+
+Name the run in the surrounding prose: `django_suite/run.py` or `python -m unittest` for the invocation, `checkout pinned and unmodified` for the pre-flight, `stock Django` when the figure is the baseline rather than ours.
+exit=1

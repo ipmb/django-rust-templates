@@ -1809,13 +1809,16 @@ class FilterRoutingTests(unittest.TestCase):
     def test_a_loop_whose_body_can_write_the_context_still_seals(self):
         """The seal decision, asserted where bytes cannot see it.
 
-        A body holding a delegate is sealable — M19 step 5 slice 2 — and the
-        delegate is what makes the loop **stated**: it writes Django's
-        per-iteration state, because a node the walk does not model reads the
-        context. What the body cannot have is a *frame* read of the loop
-        variable, because a delegate may write that name where the frame cannot
-        see it — `{% cycle "X" as s silent %}` does exactly that, through
-        `context.set_upward` (`CycleNode.render`).
+        A body holding a delegate is still the walk's loop — M19 step 5 slice 2 —
+        and that delegate is what makes the loop write Django's per-iteration
+        state, because a node the walk does not model reads the context. What has
+        changed in the third round is *why* that is now true of **every** loop
+        rather than of a body shape the plan could decide: the walk writes the
+        state unconditionally, so the delegate's `{% cycle "X" as s silent %}`
+        (`context.set_upward`, `CycleNode.render`) and this loop's own write of
+        `s` are the same write. See
+        `test_every_read_of_the_loop_variable_reaches_the_context` for the row
+        that pins the deletion of the frame route.
 
         So there are two ways to make the rebinding rows in
         `tests/differential/cases.py` pass: keep the reads on the context, or
@@ -1855,8 +1858,7 @@ class FilterRoutingTests(unittest.TestCase):
             delegated,
             [("CycleNode", 1)],
             "`{% cycle %}` is the delegate this row is about; if it stopped "
-            "being delegated the body would be pure and the frame rewrite would "
-            "be sound, which is a different test",
+            "being delegated the body would be pure, which is a different test",
         )
 
     def test_a_loop_whose_sequence_can_write_the_context_still_seals(self):
@@ -1868,13 +1870,14 @@ class FilterRoutingTests(unittest.TestCase):
         `FilterExpression`, which hands its filter the arguments the template
         gave it — the context is one of them, when the template names it. So a
         **nested** loop's sequence can write its *ancestor's* loop variable, and
-        a read of that variable after the inner loop must not come from the
-        frame. The old body-wide predicate (`may_write_context`) had argued
-        exactly that away — "a sequence is read, not written" — and seven rows in
+        a read of that variable after the inner loop must see the write. The old
+        body-wide predicate (`may_write_context`) had argued exactly that away —
+        "a sequence is read, not written" — and seven rows in
         `tests/differential/cases.py` diverged on the `35ff15c` build because of
-        it (`differential-fix2.txt`: 7 of 59). The walk's write pass now stops
-        rewriting reads at an `Act::For` as well as at a delegate, which is what
-        makes the inner loop a boundary.
+        it (`differential-fix2.txt`: 7 of 59). The ordered pass that replaced it
+        stopped rewriting reads at an `Act::For` as well as at a delegate; the
+        third round deleted the rewriting altogether, so this row and its
+        siblings no longer depend on where a boundary is drawn.
 
         This row is the sibling of the one above for the same reason that one
         exists: the rows in the corpus pass if the loop is *re-delegated*, and
@@ -1928,40 +1931,32 @@ class FilterRoutingTests(unittest.TestCase):
             "a loop handed back to Python",
         )
 
-    def test_a_read_before_the_delegate_is_served_from_the_frame(self):
-        """The ordered write pass, counted — the one claim bytes cannot carry.
+    def test_every_read_of_the_loop_variable_reaches_the_context(self):
+        """The third round's fix, counted — the claim bytes cannot carry.
 
-        A body holding a delegate is sealed, and *where* the pass stops
-        rewriting is the second adversarial round's second finding: Django's
-        `ForNode.render` pushes the loop's layer before it resolves the sequence
-        (`engine/defaulttags.py:198-199`), so everything before the first
-        Python-visible node — the sequence of a nested loop, a delegate — can
-        still be a frame read. The old predicate was body-wide and refused the
-        whole body, which renders the same bytes and is measurably slower, so
-        no corpus row can tell them apart.
+        A loop body used to be *sealed*: the walk elided Django's per-iteration
+        state and served the body's reads of the loop variable from a Rust frame,
+        and *where* a read was allowed to stay on the frame was the argument that
+        failed three adversarial rounds — a body-wide predicate, then an ordered
+        pass with a boundary set of `{Act::Delegate, Act::For(_)}`, then this.
+        None of it was fixable by widening the set, because the thing that moves
+        the name is a *runtime value* holding the context (a property, a
+        `__str__`, a `__bool__`), which no plan can see.
 
-        What can tell them apart is a count, because a **frame** read is answered
-        in Rust (`FrameTarget::get_item`,
-        `crates/template-py/src/lib.rs:5084`) and a **context** read is
-        `PyObject_GetItem` on the context object, i.e. `Context.__getitem__`.
+        **So the frame route is gone**, and this row is its negative: every read
+        of the loop variable is a context read, on every build. A **frame** read
+        was answered in Rust and never touched `Context.__getitem__`, so a
+        counter on the context separates the two routes:
         `{% for s in sections %}{{ title }}{{ s }}{% cycle "X" as s silent %}{{ s }}{% endfor %}`
-        reads `s` once before the delegate and once after, and the whole list is
-        measured rather than reasoned — on the fixed tree
-        (`sha256:0013195e7af12bb4`) `['sections', 'title', 's']` and on the
-        body-wide gate (`sha256:b0c073c33ecdfe6c`) `['sections', 'title', 's',
-        's']`, both rendered by `.review/m19-measurements/reads_probe.py`. So the
-        subject is **one** `s` on the fix and **two** on the gate; a re-delegated
-        loop also reads it twice, because Python's own `ForNode` renders the body.
-        Note what `sections` shows even here: its first read is the loop's
-        *sequence*, which `ForNode.render` resolves in Python, and the second is
-        `{{ title }}`'s sibling head. That is why the control is `title` and not
-        `sections` — `title` is read by nothing but the emit, so its count is one
-        on both builds and does not move with the sequence's route.
+        reads `s` once before the delegate and once after, and **both** now go to
+        the context. The subject is two.
 
-        `title` is the control, drawn from the same render: a head that is not
-        the loop variable is never rewritten, so it must reach the context — and
-        if the instrument were not connected at all this count would be 0 and
-        this row would fail rather than pass.
+        `title` is the control, drawn from the same render and read by nothing
+        but the emit: it must reach the context on every build, so a 0 there
+        means the instrument never saw the render and the `s` count below would
+        be vacuous. `sections` is deliberately *not* the control — its first read
+        is the loop's *sequence*, which Python resolves, so its count moves with
+        the sequence's route rather than with the body's.
         """
         from django_rust_templates.engine import Context, Engine
 
@@ -1992,17 +1987,111 @@ class FilterRoutingTests(unittest.TestCase):
         self.assertEqual(
             context.reads.count("title"),
             1,
-            "the control: a head that is not the loop variable is never "
-            "rewritten, so `{{ title }}` must read the context. A 0 here means "
-            "this instrument never saw the render, and the `s` count below "
-            "would be vacuous",
+            "the control: `{{ title }}` is read by the emit and by nothing else, "
+            "so its count is one on every build. A 0 here means this instrument "
+            "never saw the render, and the `s` count below would be vacuous",
         )
         self.assertEqual(
             context.reads.count("s"),
-            1,
-            "the read before the delegate did not come from the frame: a "
-            "body-wide gate reads `s` twice and a re-delegated loop reads it "
-            "twice as well",
+            2,
+            "a read of the loop variable did not reach the context, which can "
+            "only mean a frame route came back. Both reads are before or after "
+            "`{% cycle %}` writes `s` through `context.set_upward`, so a frame "
+            "answer for either is a wrong answer the moment any node in the body "
+            "can write the name",
+        )
+
+    def test_a_value_side_writer_inside_an_emit_is_visible_to_a_later_read(self):
+        """The third round's first BLOCKING finding, at the render.
+
+        `{{ holder.s }}` is an `Act::Emit`, and its head resolves a *property* —
+        Python that can hold the context and write the loop variable. The ordered
+        pass at `f79f7c7` treated an emit as no boundary at all (its set was
+        `{Act::Delegate, Act::For(_)}`), so `{{ s }}` after it was answered from
+        the frame and the row rendered `Zold` where stock renders `ZX` — a
+        regression against the gate before it, which rendered `ZX`.
+
+        The late `{% firstof "Q" as ignored %}` is the reviewer's and it is
+        load-bearing: `firstof` with `as` is a node the walk does not plan, so
+        the body holds a delegate *after* the writer, which is the shape the
+        ordered pass rewrote around. The same row without it would pass on the
+        bug, because a body with no delegate was never rewritten.
+        """
+        from django_rust_templates.engine import Context, Engine
+
+        class Holder:
+            def __init__(self, context):
+                self.context = context
+
+            @property
+            def s(self):
+                self.context.set_upward("s", "X")
+                return "Z"
+
+            def __bool__(self):
+                self.context.set_upward("s", "X")
+                return True
+
+        context = Context({"sections": ["old"]})
+        context["holder"] = Holder(context)
+        rendered = (
+            Engine()
+            .from_string(
+                '{% for s in sections %}{{ holder.s }}{{ s }}'
+                '{% firstof "Q" as ignored %}{% endfor %}'
+            )
+            .render(context)
+        )
+
+        self.assertEqual(
+            rendered,
+            "ZX",
+            "the property wrote `s` = `X` before `{{ s }}` was resolved, so the "
+            "read must see `X`. `Zold` is the pre-fix answer: the read came from "
+            "a frame the write could not reach",
+        )
+
+    def test_a_value_side_writer_inside_an_if_condition_is_visible_to_a_later_read(
+        self,
+    ):
+        """The third round's second BLOCKING finding, at the render.
+
+        The sibling of the row above, one position over. An owned `{% if %}`
+        condition is the same Python chain as an emit's head **plus a truth
+        test** (`__bool__` / `__len__`), so a `Holder.__bool__` is a writer the
+        ordered pass could not name either — condition reads were not a boundary
+        — and the row rendered `old` where stock renders `X`. Widening the set to
+        "every Python-capable `Act::Emit`" would not have covered it, which is
+        why the fix is the deletion of the frame route rather than a wider
+        boundary.
+        """
+        from django_rust_templates.engine import Context, Engine
+
+        class Holder:
+            def __init__(self, context):
+                self.context = context
+
+            def __bool__(self):
+                self.context.set_upward("s", "X")
+                return True
+
+        context = Context({"sections": ["old"]})
+        context["holder"] = Holder(context)
+        rendered = (
+            Engine()
+            .from_string(
+                "{% for s in sections %}{% if holder %}{{ s }}{% endif %}"
+                '{% firstof "Q" as ignored %}{% endfor %}'
+            )
+            .render(context)
+        )
+
+        self.assertEqual(
+            rendered,
+            "X",
+            "the condition wrote `s` = `X` before the branch ran, so `{{ s }}` "
+            "inside it must see `X`. `old` is the pre-fix answer: the read came "
+            "from a frame the condition's write could not reach",
         )
 
     def test_the_parser_finds_our_defaultfilters(self):

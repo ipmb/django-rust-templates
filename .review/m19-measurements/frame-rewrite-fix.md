@@ -4,11 +4,25 @@
 codex, `VERDICT: FAIL` on the step-5 slice-3 tree); a first fix landed as
 `35ff15c`; the re-dispatched reviewer returned `VERDICT: FAIL` again with two
 **BLOCKING** findings against that fix, both naming a route its docstring had
-argued away; the second fix is in `crates/template-py/src/lib.rs` in this tree.
-Verified by **59** differential cases, two census/read-count rows in
-`tests/test_interposition.py`, a 17-row probe, and the 1547 vendored-suite tests;
-priced by two alternating A/Bs, `frame_rewrite_ab.txt` (the gate, against slice 3)
-and `frame_rewrite_ab2.txt` (the ordered pass, against the gate).
+argued away; a second fix (an ordered write pass) landed as `f79f7c7`; the third
+dispatch returned `VERDICT: FAIL` **again**, on two BLOCKING findings against the
+ordered pass, and the third fix is in `crates/template-py/src/lib.rs` in this tree.
+
+**§1–§3 are history and §7 is the current tree.** Those two sections describe
+repairs that no longer exist, kept because each is the measured reason the next
+one was needed — §3 in particular is the design the third round falsified. Its
+"Option A / Option B" (§3.2) is a *different* choice from §7's — where the loop's
+layer is pushed, versus whether the frame route exists at all — and the names
+collide. Nothing in §1–§6 should be read as a description of this tree's code.
+
+Verified by **59** differential cases, three rows in `tests/test_interposition.py`,
+a **19**-row probe, and the 1547 vendored-suite tests; priced by three alternating
+A/Bs, `frame_rewrite_ab.txt` (the gate, against slice 3), `frame_rewrite_ab2.txt`
+(the ordered pass, against the gate) and `deletion-price/` (§5.5, the deletion,
+against the ordered pass) — whose two runs, `ab4` (the run of record) and `ab3`
+(the same pair, measured with a busy-wait poll loop of mine on the machine, kept
+as the comparison), are both in-tree with every JSON carrying its own build's
+sha256.
 
 ## 1. The defect
 
@@ -107,6 +121,11 @@ made a nested `{% for %}` sealable, which is why the corpus count moves
 **5 → 11 → 7 → 0** across the four artifacts (§4).
 
 ## 3. The second fix: an ordered write pass, and the loop's own layer
+
+> **Superseded by §7.** Everything below describes `f79f7c7`. The pass it defines
+> was falsified by the third round and deleted; "this tree" in §3–§6 means the
+> ordered pass, not the tree you are reading. §3.2's Option A/B is about *where
+> the loop's layer is pushed*; §7's is about *whether the frame route exists*.
 
 **Two changes, and they answer the two different kinds of finding.**
 
@@ -287,6 +306,9 @@ count:
 
 ### 4.4 The probe
 
+> **Superseded by §7.2.** The probe is **19** rows, not 17, and on the tree you
+> are reading it reads **0 of 19 DIFF**. The reading below is `f79f7c7`'s.
+
 `.review/m19-measurements/ctx_write_channels.py`: **17** rows, each rendered by
 both engines from the same `Context` object (the context stored in itself under
 `ctx`), printed with `!r`, with the artifact's sha printed first. It covers D1's
@@ -360,8 +382,9 @@ mutant resolves the sequence outside the loop's layer and differs on the two
 **layer** rows. Neither row set contains a row from the other, and all five rows
 pass on this tree.
 
-**The 1547 vendored tests pass under both mutants** — run here, with the sha
-asserted per swap (`suite_probe.py`, in `mutant_rows.txt`): `Ran 1547 tests`, `OK
+**The 1547 vendored tests pass under both mutants** — run here through
+`django_suite/run.py -v 2 template_tests`, with the sha asserted per swap
+(`suite_probe.py`, in `mutant_rows.txt`): `Ran 1547 tests`, `OK
 (skipped=6)`, exit 0 on `81b87938647bd42b` and on `46ebc888fcc33853`. The other
 four trees in the table are milestone trees whose acceptance *was* this suite, and
 it was green for each. That is the finding that started all of this: **the
@@ -643,14 +666,20 @@ doc-comment edit that added or removed a line would have moved it.
 
 ### 5.4 The headline, on this tree
 
-`docs/bench.html` was regenerated on this tree and is the instrument of record
-here — not §5.2's six rows, which were chosen to *resolve* a delta
-(`bench-fix2.txt`, `bench-fix2.json`; artifact `sha256:0013195e7af12bb4`,
-2720176 bytes, stamped **2026-10-10 16:45 UTC**). Against the previous page,
-which was the **slice 3** tree — `bench-report.slice3.json`, artifact
+**Superseded by §5.5.** The page this section reads is `f79f7c7`'s — the ordered
+pass, the second fix — and the third round deleted that pass, so these are not
+this tree's ratios. Its payload is kept in-tree as `bench-fix2.json` (2720176
+bytes, `sha256:0013195e7af12bb4`, stamped **2026-10-10 16:45 UTC**), because
+§5.5's price is a difference *against* it, and a difference needs both terms
+readable. `docs/bench.html` has since been regenerated on the tree that carries
+the deletion; §5.5 prints its rows.
+
+This section compares that page against the one before it — not §5.2's six rows,
+which were chosen to *resolve* a delta (`bench-fix2.txt`, `bench-fix2.json`).
+That previous page was the **slice 3** tree — `bench-report.slice3.json`, artifact
 `e6a72702ba5877cb`, written 05:02 local = 11:02 UTC, i.e. *before either fix*:
 
-| tile (real-world, geometric mean of 3 pages) | slice 3 page | this page |
+| tile (real-world, geometric mean of 3 pages) | slice 3 page | the ordered pass's page |
 |---|---|---|
 | render | 0.3872 → prints **0.39×** | 0.4093 → prints **0.41×** |
 | parse | 0.7472 → prints **0.75×** | 0.7366 → prints **0.74×** |
@@ -717,6 +746,341 @@ diverged (`differential-fix2.txt`) are rendered wrong by the previous tree, and
 also the lever §5.2 owed: skipping `ForNode.render`'s `context.push()` where the
 layer is unobservable would take most of these 26 µs back.
 
+### 5.5 The deletion's price, against the ordered pass
+
+Measured with the same instrument as §5.1 and §5.4 — `frame_rewrite_ab.py`, 12
+rounds a side, ABBA, `pin_iters` calibrated once and handed to both sides, the
+live artifact's sha256 re-resolved after **every one of the 24 swaps** — with
+`prefix` = **the ordered pass**, `f79f7c7`, artifact `sha256:0013195e7af12bb4`
+(2720176 bytes), and `fixed` = **this tree**, `sha256:f921c593cf7338ab` (2701680
+bytes). That is the build the A/B and the bench payloads below name in-band; the
+tree *as committed* differs from it in 86 bytes and in no instruction, and §7.1
+measures the difference byte by byte rather than asserting it away. The transcript
+is `.review/m19-measurements/deletion-price/ab4/`:
+`report.txt`, the per-round sha log, and the 48 JSONs — each of which carries its
+own build's sha in-band, so the identity of both sides is checkable from the data
+and not only from the prose.
+
+`deletion-price/ab3/` beside it is the **same pair, run thirty minutes earlier
+while a poll loop of mine was on the machine** (`until …; do :; done`, which forks
+without pause). It is kept rather than deleted, and the comparison it affords is
+worth the paragraph it costs: `D`, the statement, agrees to **0.2%** between the
+two runs (+14.331 vs +14.360 µs); the `f`-side drift columns are 2–3× worse in
+`ab3` (up to 10.2% against 4.9%); and the one row where the two runs *disagree in
+sign* is `C`, the control both runs decline to classify. `ab4` is the run of
+record, and `ab3` is the measurement that shows what the load could and could not
+move.
+
+**The family, in µs, paired medians over 12 rounds a side:**
+
+| row | render | parse |
+|---|---|---|
+| `D` — one `{% for %}` over 50 rows, **empty body, no reads** | 3.851 → 18.235 = **+14.360** | 18.800 → 33.249 = **+14.460** |
+| `A1` — 1 read + include | 156.357 → 168.957 = +12.428 | 188.479 → 199.363 = +11.509 |
+| `A2` — 2 reads + include | 173.212 → 192.605 = +20.171 | +19.793 |
+| `A4` — 4 reads + include | 204.229 → 243.444 = +39.197 | +38.509 |
+| `B1` / `B2` / `B4` — k reads, no include | +24.036 / +32.711 / +50.499 | +24.538 / +32.892 / +50.744 |
+| `C` — a loop whose body is `{% include 'inc.html' %}`, no reads | 139.884 → 141.124 = **+1.421** | +1.437 |
+
+**Each row now answers a different question than it did in §5.1, and saying which
+is most of what this section has to say.** The family was built for the ordered
+pass, where the question was *when* a statement lands. Against the deletion it
+decomposes the per-iteration cost, because the two builds differ in exactly two
+ways and each row cancels one of them:
+
+* `A{k}` and `C` hold an `{% include %}` — a delegate — so **both** builds write
+  the state for them (§5.4's `run_stated`, this tree's
+  `Walk::run_loop_body`). The statement therefore **cancels** in `A{k}`'s
+  difference and what is left is `k` reads' worth per iteration. `A{k}` is the
+  *read* meter, not a cost meter.
+* `B{k}` holds no delegate, so the ordered pass sealed it and wrote nothing at
+  all while this tree writes the statement and serves the reads from the context.
+  `B4 − B2` and `B2 − B1` are then differences of two rows that differ by
+  **exactly 50 reads** and in nothing else: the statement cancels there too, and
+  neither term is a baseline that has to be subtracted from anything.
+* `D` is a 50-row loop with an **empty body** — the one row that reads the loop
+  variable nowhere — so the elision had nothing to preserve and wrote nothing per
+  iteration. `D` is the statement, alone, and it is exactly the number §5.4's
+  `no context[loopvar] = item, no forloop dict: the two writes per iteration are
+  what sealing buys` was buying.
+* `C` must not move, and is checked for it rather than assumed.
+
+**The cancellation is checkable in the table rather than asserted.** `A1`'s template
+does everything `B1`'s does — one loop over the same 50 rows, one read of the loop
+variable per iteration — **and one `{% include %}` more**, so on any reading in
+which both builds write state for both rows, `A1`'s delta would sit *above* `B1`'s
+by the include's own term. It reads **+12.428 against `B1`'s +24.036**, 11.6 µs
+*less*. A row cannot get cheaper by doing more work; it gets cheaper only if the
+thing the other row pays, this one does not — and the thing `B1` pays and `A1` does
+not is the statement. That is why the `A{k}` column is a read meter — and it is the
+one claim in this family that does not rest on the fit, since it compares two rows
+rather than two points of one line.
+
+**The statement is +0.2872 µs per iteration.** `D` — one loop statement, 50
+iterations, nothing in the body that could read anything — goes **3.851 → 18.235
+µs = +14.360 µs** paired, with the tightest interval in the family (+14.170…
++14.612, ±1.5%), which is **+0.2872 µs per iteration** render and +0.2892 parse.
+Read relatively the row is **4.7×**, and that factor is the honest headline for
+the statement: a bare iteration cost 77 ns on the ordered pass and costs 365 ns
+here, so the transcription of `ForNode.render`'s per-iteration state is 79% of
+what iterating an empty loop now costs. Seven `set_item` calls per iteration
+(`crates/template-py/src/lib.rs:4434-4440`: six counters into the `forloop` dict,
+then `context[loopvars[0]] = item`) is what the 288 ns buys. Nothing about that is
+an accident of this implementation: it is the state Django writes, written where
+Django writes it, and the third round is the argument that it cannot be written
+conditionally.
+
+**A read that leaves Rust is +0.17 to +0.25 µs, and four of the five estimators say
++0.17/+0.18:**
+
+| estimator | render | parse |
+|---|---|---|
+| `B4 − B2` — 100 reads, two rows that differ in nothing else | **+0.1779** | **+0.1785** |
+| `B2 − B1` — 50 reads, same shape | **+0.1735** | **+0.1671** |
+| slope of `A{k}` over k = 1, 2, 4 | **+0.1801** | **+0.1810** |
+| `A1/50` alone — the row to distrust | +0.2486 | +0.2302 |
+
+`A{k}`'s fitted line has a **positive intercept, +2.915 µs** (parse +2.151), which
+is an extrapolation to k = 0 that no row measures — the include is in both builds
+and subtracts out, so it is not the include, and §5.1 saw the same shape on the
+older pair (there +1.480). And `A1` is the noisiest row of the family by a
+distance: its `f` drift is **12.58%** against 2.31–4.88% for every other row, and
+its paired interval spans +8.884…+30.318 µs. The single-point reading is quoted
+because it is the largest of the four estimators and not because it is the best
+one; the slope and the two `B` differences, which share no arithmetic, agree to
+**4%**.
+
+The mechanism is not a lookup getting slower: **the read stops being a scan of a
+Rust-side frame and becomes a Python-level one.** In this tree a loop variable read
+resolves through `PyTarget::get_item` (`crates/template-py/src/lib.rs:2132`), i.e.
+`PyObject_GetItem` on the context, i.e. our transcribed `Context.__getitem__` —
+which is `return self.dicts[-1][key]`
+(`python/django_rust_templates/engine/context.py:209`, Django's own `Context`
+override at `.django/django/template/context.py:207`: the **innermost layer only**,
+not `BaseContext`'s walk upward). A `µs`-scale difference for one dict probe is not
+a dict probe; it is the price of crossing into Python to ask.
+
+**§5.1's number is the same quantity, and the two trees agree as closely as the
+family's own estimators do.** The ordered pass measured this read leaving the
+frame at **+0.2076** (slope) / **+0.2418** (`A1/50`) render and **+0.1991 /
++0.2133** parse. So the two trees' `A1/50` readings sit **2.8%** apart while their
+slopes sit 14% apart — the disagreement is in the *estimator*, not between the
+trees, which is what the five-way table above says from the inside. Both readings
+are consistent with a per-read cost of about 0.18–0.25 µs, and no reading supports
+a claim finer than that. It is worth saying plainly what that means for §5.2: the
+gate's cost and the deletion's cost are not "the same" as a matter of opinion; they
+are the same *measured quantity*, taken on two trees with two denominators, and
+they overlap.
+
+**The control is a bound of ±2 µs on a 140 µs row, not a zero.** `C` — a loop whose
+body is `{% include 'inc.html' %}` (the included template is one character, `x`,
+and it reads the loop variable nowhere) — reads **+1.421 µs** render and +1.437
+parse, 1.0% of its own 139.9 µs. Its paired interval spans zero (−0.113…+3.866), so
+the report does not classify it as a move, and neither does this section: what `C`
+bounds is that any number below ~2 µs on this row would be invisible here, and no
+claim below is made on one. `ab3` reads the same row at −0.297 µs — the same
+magnitude, the other sign — which is the same sentence about the same row from a
+different run.
+
+**Compile is flat, and that is a claim about the instrument.** Every family row's
+compile delta is inside ±0.47 µs, the fitted slope is **−0.0012 µs/read**, and `D`
+is −0.131. The deletion removes a pass over every loop body that the *compiler* ran,
+so the expected direction is cheaper; what is bounded here is an effect below
+±0.5 µs on a 13–36 µs row, not a zero.
+
+**The corpus.** Ours in µs (medians), the paired median of the difference, and the
+ratio against stock *taken inside the same run* (so a row's ratio and its µs answer
+the same question). The `rel` column is **the paired median over the prefix median**
+— the same numerator as the µs column, so the two are one reading:
+
+| row | render: ordered pass → this tree | rel | × stock | parse: paired | × stock |
+|---|---|---|---|---|---|
+| `real-world/normal` | 135.567 → 201.386 | **+48.4%** | 0.330 → **0.490** | +63.709 | 0.569 → 0.679 |
+| `real-world/large` | 228.085 → 275.406 | **+20.2%** | 0.335 → **0.405** | +49.997 | 1.087 → 1.114 |
+| `django-only/filter-arg` | 487.862 → 535.346 | **+10.1%** | 1.090 → **1.195** | +43.326 | 1.125 → 1.223 |
+| `django-only/realistic` | 1002.663 → 1027.308 | +2.3% | 0.833 → 0.858 | +17.520 | 0.885 → 0.907 |
+| `django-only/i18n` | 385.205 → 386.105 | +0.1% | 0.573 → 0.579 | +2.631 | 0.633 → 0.640 |
+| `real-world/complex` | 524.255 → 524.163 | −0.7% | 0.614 → 0.617 | −1.662 | 0.686 → 0.685 |
+
+Two other estimators sit beside that one and both are below the resolution of the
+sentence, but a reader computing either should find their number here rather than
+have to decide whether the table is wrong. **The change in the ratio itself**
+(`corpus_ratio.py`, and the number the page prints) reads **+48.25 / +20.84 / +9.70
+/ +3.01 / +1.01 / +0.48%** — never more than 0.6% from the column above, the
+difference being stock's own drift between the two builds; **the separated medians'
+difference over the prefix median** (the instrument's `sep delta`, uncorrected for
+the pairing) reads +48.55 / +20.74 / +9.73 / +2.46 / +0.23 / −0.02%. The three agree
+on which rows moved, which is the only claim the table is used for.
+
+The paired medians are +65.649 / +46.078 / +49.183 / +22.770 / +0.205 / −3.788 µs
+render, and the report classifies the first four and `large` parse as moves: a row
+that moved where its own control did not is the only kind of row this instrument
+claims. Compile is negative on all six rows and small (−0.19 to −7.14 µs paired; the
+last is `large`, whose compile pair has a ±100 µs interval and is not a claim).
+
+**The corpus rows have a counted denominator, and counting changes what the two rows
+that did not move mean.** `corpus_loop_count.py` counts, under stock Django, each row's
+loop statements, its iterations (a `BaseContext.__setitem__` of a *live* loop variable —
+the one write Django makes per iteration) and its reads of one; then renders the same
+row under the walk on this tree with a counter on **our** `Context` and with the walk's
+own census. Four things come out of it, and the fourth is the one this section did not
+have before:
+
+| row | loops | iters | reads | reads, ours / any key | the walk | floor | measured | m/floor |
+|---|---|---|---|---|---|---|---|---|
+| `real-world/normal` | 1 | 50 | 250 | 250 / 257 | 1 run, 0 delegated | 59.4 | **+65.649** | 1.11 |
+| `real-world/large` | 20 | 60 | 120 | 120 / 370 | 20 run, 0 delegated | 38.8 | **+46.078** | 1.19 |
+| `django-only/filter-arg` | 1 | 50 | 100 | 100 / 101 | 1 run, 0 delegated | 32.4 | **+49.183** | 1.52 |
+| `django-only/realistic` | 1 | 50 | 150 | 150 / 251 | 1 run, 0 delegated | 41.4 | +22.770 | 0.55 |
+| `real-world/complex` | 13 | 84 | 260 | 260 / 276 | 13 run, 0 delegated | 71.0 | −3.788 | −0.05 |
+| `django-only/i18n` | 1 | 50 | 50 | 50 / 151 | 1 run, 0 delegated | 23.4 | +0.205 | 0.01 |
+
+* **Every loop of every row is run by the walk**, `complex`'s thirteen included. So
+  "the rows this change cannot move" is not a sentence about delegation: the change
+  reaches all six rows. (Ownership is read off *this* tree; the deletion removed
+  elision, not dispatch, so the prefix build ran the same set of nodes.)
+* **The context traffic matches stock exactly** — 257, 276, 370, 101, 151, 251 reads
+  of any key, ours and stock's, equal on every row, and the loop-variable subsets
+  equal too. Whatever the deletion costs, it is not extra reads.
+* **So `complex` and `i18n` did not move with their loops in the walk's hands.** The
+  only per-iteration difference between the two builds is *whether* the walk writes
+  Django's state, so a row the walk runs whose delta is zero is a row the **ordered
+  pass was already writing state for**. That is the deduction §5.4's control rows
+  could only suggest, and it is now the reading of those two rows rather than an
+  inference from the silence of their intervals.
+* **The floor is a floor.** `iters × 0.2872 + reads × 0.1801` is built from two
+  constants measured in micro-templates, and the three rows that moved come in at
+  **1.11, 1.19 and 1.52×** it. Since the read counts are equal, the excess is not
+  traffic: it is the two constants not transferring from a 50-row loop over dicts to
+  a whole page, and the excess is 0.13 µs per iteration on `normal` and `large` (which
+  agree to 5%) against 0.34 on `filter-arg`, the row whose read is consumed by a filter
+  application. I have no measured account of that excess and am not going to invent
+  one; the decomposition above holds to a factor of 1.5 on whole pages, and exactly
+  where the family measured it. `realistic` at 0.55 sits between the two groups and is
+  left unclassified rather than assigned to either.
+
+**§5.4's control sentence must not be reused here.** That paragraph says *"the rows
+these two fixes cannot reach at all — `filter-arg` and `i18n`"*, and that is true of
+the **gate**, whose action was to *skip* a body holding a delegate: neither row has
+a loop body the gate rewrote. It is false of this change, which reaches **every**
+loop — `filter-arg` moves by **49 µs** in this pair, one of the three largest
+deltas in the corpus. The rows this change cannot move are the ones whose loops the
+ordered pass already wrote state for, and `complex` and `i18n` are the two that read
+that way here (both unclassified, at −3.788 and +0.205 µs — `i18n`'s interval spans
+−7.2…+17.6, so it is bounded rather than pinned).
+
+**The page, on this tree.** `docs/bench.html` is regenerated from the payload of
+record on this build (`bench-del-a.json`, `sha256:f921c593cf7338ab`, 2701680
+bytes, 2026-10-10 17:30 UTC) with the benchmark's own `bench_report.render`, the
+same function `bench.py --html` calls — so the page is the instrument's output
+and not a hand-assembled reading of it. Its `env` block prints that sha, because
+that is the sha the payload carries; a reader who resolves the `.so` in the tree
+now gets `32ee8d6cb88bcd86`, and the 86 bytes between the two are §7.1's table —
+the page is a snapshot of a *build*, which is what it claims to be, and it is not
+claiming to be a snapshot of a *commit*. Its hero tiles, against the ordered
+pass's in the same slot:
+
+| ours vs stock Django, real-world geomean | ordered pass | this tree |
+|---|---|---|
+| render | 0.41× | **0.50×** |
+| parse | 0.74× | **0.82×** |
+| compile | 1.36× | 1.36× |
+
+Four runs of one build (a–d, 17:30–17:38 UTC) put those tiles at
+0.50/0.49/0.50/0.50, 0.82/0.80/0.82/0.82 and 1.36/1.36/1.36/1.37, so the headline
+is stable to a unit in the second decimal and the deletion's render tile is a
+property of the *build*, not of one run. **The trade is that sentence**: the
+render advantage over stock falls from 2.4× to 2.0×, and parse gives back most of
+its margin. The three real-world pages read 0.620× (`complex`) / 0.416× (`large`)
+/ 0.482× (`normal`) at render; at parse `complex` 0.688×, `normal` 0.688× and
+`large` **1.135×** — the large page's parse has crossed to the wrong side of
+parity, which it had not on the ordered pass (1.046×, itself already above 1).
+Across all 18 rows the ratio spans 0.416–1.318 render, 0.598–2.356 parse and
+1.257–3.510 compile. The worst **render** row is now **`micro/loop-text` at
+1.318×** (19.63 against 14.89 µs), where it was `micro/text` at 1.058×; the report's
+worst row in any mode is still `micro/text` **compile** at 3.510× (6.737 against
+1.919 µs), a one-off cost this change moves by 0.06 µs. **Jinja2 now wins every
+whole-page render**: `normal` 173.07 against our
+197.51 µs, `large` 201.14 against 282.23, `complex` 341.34 against 524.97 — where
+on the ordered pass we won `normal`. That is the project's goal moving away from
+us on this change, and it is said here rather than left for the page's reader to
+notice.
+
+**What the report's own differ says, and what its band can carry.**
+`bench.py --compare bench-fix2.json bench-del-a.json --band bench-del-b.json
+bench-del-d.json` reads **37 of 54 cells outside their row's band**, band median
+|rel| **0.89%** and max **9.87%**. (The band pair moves those aggregates: the same
+comparison banded on runs `a`/`b` reads 39 outside with a 0.82% median, and no
+verdict this section uses changes between them — which is the point of quoting
+the invocation beside the number.) The movers are what §5.5's family predicts and
+in its order: `micro/loop-text` render **+318.93%**, `micro/loop-var` render
+**+107.57%**, `micro/loop-text` parse +67.84%, `real-world/normal` render
++47.90%, `real-world/large` render +22.13%, `django-only/filter-arg` render
++15.62%. Two rows *improved*, and **nothing in the family predicts a negative
+row** — its cheapest are `C` at +1.42 and `D` at +14.36 µs, both positive, so the
+improvement is a fact with no account here. The only shape of explanation the
+measurements allow is the one the census gives `complex` and `i18n`: for a row whose
+loops the ordered pass was already writing state for, the deletion removes the frame
+build and the compiler's body pass and adds nothing, which makes the deletion a pure
+saving there. `django-only/for-tags` is a page of nothing but loops — the row family
+where that term would be largest — and it improves **−17.56%** at render and
+**−15.19%** at parse, the parse figure being the larger share of a one-off, which is
+the render/parse signature §4 item 9 exists to catch. I have not measured that
+decomposition and it is offered as a hypothesis, not as this section's finding.
+**A single pair's band is one draw, not the scatter.** The same
+differ run over two runs of *one* build — `a` against `d`, banded on `b`/`c` —
+lands outside its row's band on **31 of 54** rows, essentially half, which is what
+two independent draws of one scatter look like when the band is itself estimated
+from a single pair. Its one verdict that differs from the pair above is
+`real-world/large` parse (+8.54%: `outside` there, `inside` here), which is the
+`large` row whose §5.4 interval is already the widest in the corpus. So "inside" is
+a statement about resolution and not about the code, and only the movers above, far
+outside any band this tree can produce, are read as moves.
+
+**And the output is still Django's.** In this run's own `verdicts`, 54 cells and
+**no cell in which any two engines that ran disagree**; 39 cells where all three
+ran and agree byte-for-byte. The change is a price, not a defect.
+
+**Three levers, all of them cost reductions on an *unconditional* statement, and
+none of them taken here.** They are named because the price is now on the page and
+a reader is owed the route back. Each would need its own measurement *and* its own
+review; the third especially needs §5.1's `render`/`parse` pair discipline, since a
+per-object saving is invisible in one mode and 7–20% in the other:
+
+* **the seven key strings.** `forloop.set_item("counter0", …)` and its five siblings
+  (`crates/template-py/src/lib.rs:4434-4439`) and
+  `self.context.set_item(&plan.loopvar, …)` (`:4440`) each take a `&str`, so PyO3
+  builds a `PyString` and hashes it on **every call** — 350 string builds per
+  50-iteration loop, which is most of `D`'s +14.360 µs. All seven names are static:
+  six are literals and the seventh is `plan.loopvar`, known at plan time. Seven
+  `Py<PyString>`s built once per loop (or once per plan) remove the build; the dict
+  still hashes on insert, which no pre-built key can avoid.
+* **the target dict.** The write's last step is `Context.__setitem__`, whose whole
+  body is `self.dicts[-1][key] = value`
+  (`python/django_rust_templates/engine/context.py:69-71`). Routing the walk's write
+  to that layer dict directly — `dicts` fetched once per *iteration* and indexed at
+  `-1`, so that a body which `push`es or `pop`s a layer is still respected — replaces
+  a Python-level call with three C-API operations. It is sound for the transcribed
+  class and **not** for a subclass that overrides `__setitem__`, so it needs a
+  once-per-loop check on `type(context)` — a check on a *class*, which is the safe
+  direction, not on a value's behaviour, which is §7's argument.
+* **the read.** Every loop-variable read now enters Python at `PyTarget::get_item`
+  (`crates/template-py/src/lib.rs:2132`) to reach a method whose entire body is
+  `return self.dicts[-1][key]`
+  (`python/django_rust_templates/engine/context.py:209`). Implementing that one line
+  in Rust — `dicts`, index `-1`, one `PyObject_GetItem` — with a fallback for a layer
+  that is not a `PyDict` and the same `type(context)` guard, keeps the read Rust-side
+  **without caching anything**, and so without a staleness window for the third
+  round's own finding to reopen on the next template. It applies to *every* root
+  lookup the walk makes and not only to loop variables, which makes it the largest
+  of the three and the one I would take first.
+* **what is not a lever** is any return to a conditional statement —
+  `plan.context_state`, a predicate, a boundary, a node-kind test. §7 is the argument
+  that no widening of one terminates, and the second round's §5.3 is the demonstration
+  that a version of it looks right for three templates and is wrong on the fourth.
+  The push lever §5.4 owed (skipping `ForNode.render`'s `context.push()` where the
+  layer is unobservable) is separate, still owed, and unaffected by any of this.
+
 ## 6. What went wrong with the first attempt at the price
 
 The first instrument tried to get the cost out of **one** build, by differencing
@@ -741,3 +1105,201 @@ both are worth recording because each failed for a different reason:
 * **the same corpus rows, absolute µs**: each side's own run-to-run spread over 12
   runs is **3–6%**, larger than any delta measured. Reported beside the result,
   never as evidence for it.
+
+## 7. The third round: the route is deleted
+
+The re-dispatched reviewer returned `VERDICT: FAIL` against `f79f7c7` with two
+BLOCKING findings, and both are a **position** the ordered pass does not name:
+
+```
+{% load ctxwrite %}{% for s in sections %}{{ holder.s }}{{ s }}
+    {% firstof "Q" as ignored %}{% endfor %}                       -> Zold / old
+{% load ctxwrite %}{% for s in sections %}{% if holder %}{{ s }}{% endif %}
+    {% firstof "Q" as ignored %}{% endfor %}                       -> old / X
+```
+
+`holder` is a value that holds the context and writes `s` upward when its `s`
+property is read, or when it is truth-tested. Both render `ZX` / `X` in Django and
+`Zold` / `old` on `f79f7c7`. The ordered pass rewrites a read to the frame *up to
+the first node that hands Python the context* — and in the first template the
+writer is **inside** the node before that boundary (the `{{ holder.s }}` emit),
+while in the second the writer is the `{% if %}` **condition** itself, which is the
+same chain plus a truth test. Neither is a boundary the pass could have moved: the
+write has already happened by the time the boundary is reached.
+
+**The finding was not "widen the boundary", and the second finding says why.**
+The predicate and the pass are both properties of the *plan* — a node kind, a
+position. What writes the loop variable in these templates is a **runtime value
+that holds the context**, and that is a property of the *value*, not of the node
+that happens to hold it. `{{ holder.s }}`, `{% if holder %}`, `{{ holder }}` and
+`{% if holder.s %}` are four nodes, and the value can be reached through an
+attribute, an index, a filter argument, a sequence, or a `{% with %}`. A boundary
+set enumerated over node kinds is therefore not merely incomplete today, it is
+**the wrong kind of answer** — the reviewer's second finding is the general form
+of the same argument, and no widening of it can terminate.
+
+So the elision goes, and with it the question.
+
+### 7.1 What was deleted
+
+Two structs, `Frame<'a, 'py>` and `FrameTarget` (with its `impl LookupTarget`),
+and `Written` with its three fields `stated` / `python_seen` / `on_context`;
+twelve free functions and methods, `head_sealable`, `emit_sealable`, `seal`,
+`sealable`, `needs_context_state`, `rewrite_body`, `rewrite_head`, `delegate_slot`,
+`write_frame`, `run_stated`, and `LookupScope::resolve_local`; and three fields:
+`Head::Lookups::local`, `ForPlan::context_state`, and `FilterArg::Variable::head`
+— the last one dead the moment `emit_sealable` went, and that is checkable rather
+than testimonial: on the ordered pass that field is **written at one place and read
+at exactly one** (`FilterArg::Variable { head, .. } => head != loopvar && …`, the
+predicate `emit_sealable` at `lib.rs:3578-3581` of `f79f7c7`), so deleting the
+predicate leaves a written-and-never-read field, which is the `warning: field 'head'
+is never read` the build printed while the deletion was in progress. Worth the
+sentence because the build is an auditor on this deletion: a field that only a
+deleted reader read is a line the diff would otherwise have left behind. In `lib.rs`: `161 insertions,
+721 deletions`; the built artifact goes 2 720 176 → 2 701 680 bytes, which is an
+observation and not a size of anything.
+
+The rule that replaces all of it is one sentence: **every `{% for %}` the walk owns
+writes Django's per-iteration state, unconditionally, and every read goes to the
+context.** `Walk::run_loop_body` is `ForNode.render`'s order transcribed —
+`loop_dict = context["forloop"]`, then the six counters into the dict
+(`engine/defaulttags.py:220-227`), then `context[loopvars[0]] = item`
+(`engine/defaulttags.py:248`) — and `Head::Lookups` resolves through
+`Variable.resolve` like any other expression. There is no `local` case, because
+there is no read the context cannot answer correctly.
+
+**A pre-existing ordering bug was corrected while in there.** `run_stated` wrote
+`context[loopvar] = item` *before* the six counters; Django writes the counters
+first. It is observable when the loop is named `forloop`, and it is wrong on
+every earlier tree in this record — the fix does not depend on it, and it is
+recorded here rather than folded into the fix's justification.
+
+**The delete left two things behind, and only the gate's second cargo step could
+see either.** `Walk::run` lost the frame argument (`run(&mut self, slots, depth)`),
+and the production call site was updated while the *test* call site at
+`lib.rs:5011` still read `walk.run(slots, None, 0)`. `cargo test --workspace`
+compiles that crate with `extension-module` on, which gates the walk's tests out,
+so it stayed green; `scripts/check.sh`'s second step is the only thing that
+compiles them, and on the first gate run of this tree it stopped with `E0061: this
+method takes 2 arguments but 3 arguments were supplied`. That is the failure mode
+that step's own comment describes, met for the first time: *an empty test target
+reports as a pass*. With that fixed, the same step found the second thing, and it
+is the more interesting one: `the_depth_guard_raises_cpythons_error_at_the_cap_and_not_below_it`
+**failed** with `TypeError: 'builtins.DepthContext' object does not support item
+assignment`. The fixture in `mod walk_depth` modelled a context the walk only ever
+*read* — `__contains__` for the parent loop, `push` for the layer — because on the
+ordered pass a body this plan would have sealed wrote nothing at all. The
+deletion makes the write unconditional, so the fixture was asserting a contract the
+engine no longer has. `DepthContext` gained a no-op `__setitem__` and its docstring
+now says why it is the fourth call and not the third. Both fixes are in
+`#[cfg(all(test, not(feature = "extension-module")))]`, and the artifact is
+**byte-identical** after them — `sha256:f921c593cf7338ab`, 2701680 bytes, the same
+bytes §5.5's `fixed` side measured (rebuilt, not argued: §5.3's rule).
+
+**Then rustfmt moved the artifact, and the third item is that I can say exactly
+how.** The gate's fmt step found a stray blank line at `lib.rs:3557` — the only
+non-test source edit in this whole change that is neither the deletion nor a
+whitespace-neutral reflow — and removing it (the tree ships fmt-clean) rebuilt the
+same 2701680 bytes to a **different** sha, `sha256:32ee8d6cb88bcd86`. So the record
+now names two artifacts and owes the difference. It is **86 bytes**, and they are
+the identity stamp rather than the code:
+
+| bytes | where | what |
+|---|---|---|
+| 16 | load commands, offset 1928 | `LC_UUID` |
+| 6 × 1 | `__DATA_CONST.__const` (2031616–2211840) | the low byte of six little-endian `u32`s, each exactly **1 lower** (4540→4539, 4549→4548, 3605→3604, 4173→4172, 4302→4301, 4621→4620) — the line fields of six embedded panic `Location` records, all of them past 3559, which is what removing one line above them does |
+| 64 | `__LINKEDIT` (2228224–2701680) | two 32-byte ad-hoc code-signature page digests, over the one changed load command and over the one changed page of const data |
+
+**Zero of the 86 lie in `__TEXT`** — the 2031616 bytes holding every instruction,
+`__TEXT.__text` among them — and zero lie in `__DATA`; `strings` over both binaries
+is **4260 lines with 0 differences**, because the *file* each `Location` names is a
+shared string and only the line number beside it is an inline `u32`. The machine code
+is therefore the same bytes in both builds, and §5's numbers, measured on
+`f921c593cf7338ab`, are numbers about the code the commit contains — which is the
+claim §5 owes; it is not the claim that the two artifacts are identical, and that
+claim is the one this paragraph retires.
+
+**And the gate found a third thing, in the *previous* commit's evidence rather
+than in this change — the tree and its transcript disagree.** `f79f7c7` committed
+`gate-2026-10-10.txt`, whose suite-counts step reads `suite counts: 21 line(s),
+every one with its provenance`. Run against that commit's own tree,
+`scripts/check_suite_counts.py` counts **22** count lines there and refuses
+**one** of them: the §4 sentence recording the two mutants' suite runs, whose
+count named its instrument (`suite_probe.py`) and not the invocation. The run is
+committed beside this record as `suite-counts.f79f7c7-rerun.txt`, with `--list`'s
+22 rows and the refusal, so it is reproducible rather than asserted. So that
+transcript describes a tree with one fewer count line than the tree it was
+committed beside — the record gained the row after the run. The count was **21
+licensed** at the run and the tree is **22 with one bare**, which is one edit's
+worth of drift; the class is not the blank line's, because a gate transcript is a
+claim about a commit ([[a-reused-ab-pair-is-an-older-tree]]) and this one was made
+about the working tree a moment before the commit. Both rows are repaired here
+rather than in a follow-up, since the gate refuses the tree either way.
+
+### 7.2 What the evidence is
+
+* **The probe, and the whole residual class at once.** `ctx_write_channels.py` is
+  **19 rows** — the third round's two templates are added verbatim as 18 and 19,
+  and `Holder` gains `__bool__`, because a truth test is the `{% if %}`
+  condition's own last step. On this tree: **0 of 19 DIFF**. On `f79f7c7`: 3. On
+  the first repair: 10. On slice 3: 12. The five rows 15–19 that used to diverge
+  go to zero **together**, which is the reading that says the change removed a
+  class rather than patched two templates.
+* **The differential corpus**: **59 cases, identical** (`differential-fix2.txt`).
+* **The vendored suite**: `django_suite/run.py -v 2 template_tests` reads
+  `Ran 1547 tests ... OK (skipped=6)`, which it also said
+  on every wrong tree in §4.6 — it is reported because it is the acceptance
+  criterion, not because it is evidence about this defect.
+* **The python unit suite**: **514 OK**, the pin moved `512 → 514` for the two
+  new rows.
+* **The anchors**: `1577 anchor occurrence(s) checked, 925 cited of 925 manifest
+  entries, 0 failure(s)`.
+
+### 7.3 The two test rows, and the rename
+
+`test_interposition.py`:
+
+* `test_a_read_before_the_delegate_is_served_from_the_frame` becomes
+  **`test_every_read_of_the_loop_variable_reaches_the_context`**. It counts
+  `Context.__getitem__` for `s` and requires **2** (one per iteration) where it
+  required 1 — the row used to assert the frame read was taken, and there is no
+  frame read to take. The `title` count stays 1 as the in-row control, so the row
+  is not "the count went up".
+* Two new rows, one per reviewer template, with a real `Holder` carrying the `s`
+  property and `__bool__`: `…a_value_side_writer_inside_an_emit_is_visible_to_a_
+  later_read` asserts `ZX`, and `…inside_an_if_condition_is_visible_to_a_later_
+  read` asserts `X`. **Those are literals, and the byte-comparison against
+  Django is the probe's rows 18–19 rather than these rows**: the unit-test
+  session's `django` is the venv's, not the pinned `.django/` checkout
+  (`scripts/run_unit_tests.sh`: *"Not for the interpreter's sake — the venv
+  supplies Django"*), so an in-row comparison would be against the wrong oracle
+  or against ours. The literal is the review's own reported stock answer, and
+  `ctx_write_channels.py` renders the same template through both engines in one
+  process and reports row 18/19 as identical. What the rows own is the *pin*:
+  `ZX` is what a frame read cannot produce, since the frame is written before
+  the property runs.
+* The two census rows keep their assertions (`ForNode` in `handled:`,
+  `delegated == [("CycleNode", 1)]` / `[("LoadNode", 1)]`) and gain rewritten
+  docstrings, because the *reason* those rows exist is now the reverse of what
+  they said: they no longer distinguish a gate from a pass, they distinguish
+  **the walk owning the loop** from the loop being handed back to Python.
+
+**A census assertion cannot catch this class, and the rows say so.** Re-delegating
+the loop renders the same bytes *and* moves `ForNode` out of `handled:`, which is
+why the census rows fail on a re-delegation; but a *wrong frame read* renders the
+same bytes as nothing at all — 1547 green — and moves no census counter. The probe
+and the two new rows are the only things that see it.
+
+### 7.4 The transcription-numbering trap, recorded because it cost a pass
+
+Every citation added in this round was written with `.django/django/template/
+defaulttags.py` line numbers, and the anchor gate rejected them: `scripts/
+anchors.txt` rows spelled `engine/defaulttags.py:NNN` name **our transcription**
+(`python/django_rust_templates/engine/defaulttags.py`), whose lines are Django's
+**+ 2**. `:246` "does not contain `self.loopvars[0]` (it starts
+`context.update(unpacked_vars)`)". Ten dead `.django/`-numbered rows were pruned
+and the corrected ones seeded; `docs/superpowers/specs/2026-10-09-clean-and-fast
+-design.md:221` was retargeted off a stale `lib.rs:5038`. Nothing about this is
+subtle once seen, and it is exactly the shape of the earlier lesson that a
+citation expires when the tree moves: the file name in an anchor is not
+decoration, it selects which of two texts the number is about.

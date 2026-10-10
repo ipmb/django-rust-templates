@@ -1,0 +1,3023 @@
+{
+  "meta": {
+    "django": "6.0.9",
+    "cpython": "3.14.4",
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "cpu_count": "10",
+    "date": "2026-10-10 17:36 UTC"
+  },
+  "native": "native:  _native.cpython-314-darwin.so 2701680 bytes sha256:f921c593cf7338ab -> release (target/release/lib_native.dylib)",
+  "args": {
+    "repeats": 7,
+    "target": 0.05
+  },
+  "command": "python -I scripts/bench.py --json /Users/pete/projects/lincolnloop/django-rust-templates/.review/m19-measurements/bench-del-c.json --html /Users/pete/projects/lincolnloop/django-rust-templates/docs/bench.html",
+  "engines": [
+    {
+      "name": "django",
+      "control": true,
+      "identity": "django.template.engine.Engine"
+    },
+    {
+      "name": "rust",
+      "control": false,
+      "identity": "django_rust_templates.engine.engine.Engine"
+    },
+    {
+      "name": "jinja2",
+      "control": false,
+      "identity": "django.template.backends.jinja2.Jinja2"
+    }
+  ],
+  "ran": [
+    "django",
+    "rust",
+    "jinja2"
+  ],
+  "modes": [
+    "render",
+    "parse",
+    "compile"
+  ],
+  "metrics": {
+    "render": {
+      "unit": "microseconds per call",
+      "what": "render a template that is already compiled",
+      "better": "lower",
+      "why": "the same work costs fewer microseconds",
+      "button": "render only (template pre-compiled)"
+    },
+    "parse": {
+      "unit": "microseconds per call",
+      "what": "compile a template and render it, in one call",
+      "better": "lower",
+      "why": "the same work costs fewer microseconds",
+      "button": "parse & render (template compiled each call)"
+    },
+    "compile": {
+      "unit": "microseconds per call",
+      "what": "compile a template without rendering it",
+      "better": "lower",
+      "why": "the same compile costs fewer microseconds",
+      "button": "compile only (template parsed, not rendered)"
+    }
+  },
+  "floor": {
+    "render": {
+      "django": 1.7423500001314096,
+      "rust": 1.8286999998963438,
+      "jinja2": 3.5003416502149776
+    },
+    "parse": {
+      "django": 3.3828750847647044,
+      "rust": 6.924371177593375,
+      "jinja2": 61.18557391136215
+    },
+    "compile": {
+      "django": 1.4981542000896297,
+      "rust": 4.599033349950332,
+      "jinja2": 57.03629374911543
+    }
+  },
+  "families": {
+    "micro": "one construct per row, so a regression names itself. It is two families and the earlier note here claimed one: the single-node rows (text, variable, lookup, if, filter, escape) are mostly a measurement of the render call, and the loop, include and extends rows are a measurement of the construct. The call share in the caption says where the split falls on this run",
+    "real-world": "whole pages, rendered by all three engines",
+    "django-only": "the constructs outside the three-engine intersection, rendered by the two engines that have them"
+  },
+  "records": [
+    {
+      "key": "micro/text",
+      "family": "micro",
+      "summary": "one text node, no variables",
+      "note": "",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 1.8098104039380598,
+      "worst_us": 1.8398210990466914,
+      "iters": 19357,
+      "repeats": 7,
+      "sha256": "ed66fb1cb84448877791cef91250478259033976b99ecc74ca282592ecd65e3e",
+      "bytes": 38
+    },
+    {
+      "key": "micro/text",
+      "family": "micro",
+      "summary": "one text node, no variables",
+      "note": "",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 3.943145259579127,
+      "worst_us": 3.988327215404806,
+      "iters": 8392,
+      "repeats": 7,
+      "sha256": "ed66fb1cb84448877791cef91250478259033976b99ecc74ca282592ecd65e3e",
+      "bytes": 38
+    },
+    {
+      "key": "micro/text",
+      "family": "micro",
+      "summary": "one text node, no variables",
+      "note": "",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 1.953399502311833,
+      "worst_us": 2.101889261286279,
+      "iters": 19677,
+      "repeats": 7,
+      "sha256": "ed66fb1cb84448877791cef91250478259033976b99ecc74ca282592ecd65e3e",
+      "bytes": 38
+    },
+    {
+      "key": "micro/text",
+      "family": "micro",
+      "summary": "one text node, no variables",
+      "note": "",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 1.904263729024127,
+      "worst_us": 1.9470647825487717,
+      "iters": 19357,
+      "repeats": 7,
+      "sha256": "ed66fb1cb84448877791cef91250478259033976b99ecc74ca282592ecd65e3e",
+      "bytes": 38
+    },
+    {
+      "key": "micro/text",
+      "family": "micro",
+      "summary": "one text node, no variables",
+      "note": "",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 9.36907662104929,
+      "worst_us": 9.582504172362405,
+      "iters": 8392,
+      "repeats": 7,
+      "sha256": "ed66fb1cb84448877791cef91250478259033976b99ecc74ca282592ecd65e3e",
+      "bytes": 38
+    },
+    {
+      "key": "micro/text",
+      "family": "micro",
+      "summary": "one text node, no variables",
+      "note": "",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 6.904984246714127,
+      "worst_us": 7.1141413329710135,
+      "iters": 19677,
+      "repeats": 7,
+      "sha256": "ed66fb1cb84448877791cef91250478259033976b99ecc74ca282592ecd65e3e",
+      "bytes": 38
+    },
+    {
+      "key": "micro/text",
+      "family": "micro",
+      "summary": "one text node, no variables",
+      "note": "",
+      "mode": "render",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 3.4878037395728927,
+      "worst_us": 3.5476442626472733,
+      "iters": 19357,
+      "repeats": 7,
+      "sha256": "ed66fb1cb84448877791cef91250478259033976b99ecc74ca282592ecd65e3e",
+      "bytes": 38
+    },
+    {
+      "key": "micro/text",
+      "family": "micro",
+      "summary": "one text node, no variables",
+      "note": "",
+      "mode": "parse",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 84.6841437069036,
+      "worst_us": 86.64550059395101,
+      "iters": 8392,
+      "repeats": 7,
+      "sha256": "ed66fb1cb84448877791cef91250478259033976b99ecc74ca282592ecd65e3e",
+      "bytes": 38
+    },
+    {
+      "key": "micro/text",
+      "family": "micro",
+      "summary": "one text node, no variables",
+      "note": "",
+      "mode": "compile",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 77.24933297733634,
+      "worst_us": 78.52524099239655,
+      "iters": 19677,
+      "repeats": 7,
+      "sha256": "ed66fb1cb84448877791cef91250478259033976b99ecc74ca282592ecd65e3e",
+      "bytes": 38
+    },
+    {
+      "key": "micro/variable",
+      "family": "micro",
+      "summary": "one variable",
+      "note": "",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 3.0613617818283885,
+      "worst_us": 3.0986150246944084,
+      "iters": 12245,
+      "repeats": 7,
+      "sha256": "b6d1ff9aa560cf68d55029bf7fa030dd168d43bc693b5c7ab9e6715cbd8bfc28",
+      "bytes": 21
+    },
+    {
+      "key": "micro/variable",
+      "family": "micro",
+      "summary": "one variable",
+      "note": "",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 9.933411795679712,
+      "worst_us": 10.083222574326618,
+      "iters": 4138,
+      "repeats": 7,
+      "sha256": "b6d1ff9aa560cf68d55029bf7fa030dd168d43bc693b5c7ab9e6715cbd8bfc28",
+      "bytes": 21
+    },
+    {
+      "key": "micro/variable",
+      "family": "micro",
+      "summary": "one variable",
+      "note": "",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 6.267350233991515,
+      "worst_us": 6.387783931375752,
+      "iters": 7692,
+      "repeats": 7,
+      "sha256": "b6d1ff9aa560cf68d55029bf7fa030dd168d43bc693b5c7ab9e6715cbd8bfc28",
+      "bytes": 21
+    },
+    {
+      "key": "micro/variable",
+      "family": "micro",
+      "summary": "one variable",
+      "note": "",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 2.4378454062073094,
+      "worst_us": 2.497243771493806,
+      "iters": 12245,
+      "repeats": 7,
+      "sha256": "b6d1ff9aa560cf68d55029bf7fa030dd168d43bc693b5c7ab9e6715cbd8bfc28",
+      "bytes": 21
+    },
+    {
+      "key": "micro/variable",
+      "family": "micro",
+      "summary": "one variable",
+      "note": "",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 15.751963506120543,
+      "worst_us": 16.04321725499299,
+      "iters": 4138,
+      "repeats": 7,
+      "sha256": "b6d1ff9aa560cf68d55029bf7fa030dd168d43bc693b5c7ab9e6715cbd8bfc28",
+      "bytes": 21
+    },
+    {
+      "key": "micro/variable",
+      "family": "micro",
+      "summary": "one variable",
+      "note": "",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 12.37859139208635,
+      "worst_us": 12.618608161952594,
+      "iters": 7692,
+      "repeats": 7,
+      "sha256": "b6d1ff9aa560cf68d55029bf7fa030dd168d43bc693b5c7ab9e6715cbd8bfc28",
+      "bytes": 21
+    },
+    {
+      "key": "micro/variable",
+      "family": "micro",
+      "summary": "one variable",
+      "note": "",
+      "mode": "render",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 3.9119777066588233,
+      "worst_us": 4.000054470713301,
+      "iters": 12245,
+      "repeats": 7,
+      "sha256": "b6d1ff9aa560cf68d55029bf7fa030dd168d43bc693b5c7ab9e6715cbd8bfc28",
+      "bytes": 21
+    },
+    {
+      "key": "micro/variable",
+      "family": "micro",
+      "summary": "one variable",
+      "note": "",
+      "mode": "parse",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 135.46584509216328,
+      "worst_us": 139.23991058308067,
+      "iters": 4138,
+      "repeats": 7,
+      "sha256": "b6d1ff9aa560cf68d55029bf7fa030dd168d43bc693b5c7ab9e6715cbd8bfc28",
+      "bytes": 21
+    },
+    {
+      "key": "micro/variable",
+      "family": "micro",
+      "summary": "one variable",
+      "note": "",
+      "mode": "compile",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 126.4205452408162,
+      "worst_us": 128.49150636878488,
+      "iters": 7692,
+      "repeats": 7,
+      "sha256": "b6d1ff9aa560cf68d55029bf7fa030dd168d43bc693b5c7ab9e6715cbd8bfc28",
+      "bytes": 21
+    },
+    {
+      "key": "micro/lookup",
+      "family": "micro",
+      "summary": "one depth-3 lookup",
+      "note": "",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 3.2031381794192013,
+      "worst_us": 3.2990184803178737,
+      "iters": 13041,
+      "repeats": 7,
+      "sha256": "4cfc794812ca6f03f6b2c3f23988bcac789aff2eac0a93d3457c4ef50bfffcb6",
+      "bytes": 11
+    },
+    {
+      "key": "micro/lookup",
+      "family": "micro",
+      "summary": "one depth-3 lookup",
+      "note": "",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 10.182249161494834,
+      "worst_us": 10.46995511240506,
+      "iters": 4166,
+      "repeats": 7,
+      "sha256": "4cfc794812ca6f03f6b2c3f23988bcac789aff2eac0a93d3457c4ef50bfffcb6",
+      "bytes": 11
+    },
+    {
+      "key": "micro/lookup",
+      "family": "micro",
+      "summary": "one depth-3 lookup",
+      "note": "",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 6.345012396174979,
+      "worst_us": 6.470553303199627,
+      "iters": 6857,
+      "repeats": 7,
+      "sha256": "4cfc794812ca6f03f6b2c3f23988bcac789aff2eac0a93d3457c4ef50bfffcb6",
+      "bytes": 11
+    },
+    {
+      "key": "micro/lookup",
+      "family": "micro",
+      "summary": "one depth-3 lookup",
+      "note": "",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 2.6671618748126016,
+      "worst_us": 2.7258389708479984,
+      "iters": 13041,
+      "repeats": 7,
+      "sha256": "4cfc794812ca6f03f6b2c3f23988bcac789aff2eac0a93d3457c4ef50bfffcb6",
+      "bytes": 11
+    },
+    {
+      "key": "micro/lookup",
+      "family": "micro",
+      "summary": "one depth-3 lookup",
+      "note": "",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 16.278724676095116,
+      "worst_us": 16.88755209265081,
+      "iters": 4166,
+      "repeats": 7,
+      "sha256": "4cfc794812ca6f03f6b2c3f23988bcac789aff2eac0a93d3457c4ef50bfffcb6",
+      "bytes": 11
+    },
+    {
+      "key": "micro/lookup",
+      "family": "micro",
+      "summary": "one depth-3 lookup",
+      "note": "",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 13.032424239819607,
+      "worst_us": 13.346397839837016,
+      "iters": 6857,
+      "repeats": 7,
+      "sha256": "4cfc794812ca6f03f6b2c3f23988bcac789aff2eac0a93d3457c4ef50bfffcb6",
+      "bytes": 11
+    },
+    {
+      "key": "micro/lookup",
+      "family": "micro",
+      "summary": "one depth-3 lookup",
+      "note": "",
+      "mode": "render",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 4.5261642515068585,
+      "worst_us": 4.5931836511150195,
+      "iters": 13041,
+      "repeats": 7,
+      "sha256": "4cfc794812ca6f03f6b2c3f23988bcac789aff2eac0a93d3457c4ef50bfffcb6",
+      "bytes": 11
+    },
+    {
+      "key": "micro/lookup",
+      "family": "micro",
+      "summary": "one depth-3 lookup",
+      "note": "",
+      "mode": "parse",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 180.22599615890127,
+      "worst_us": 186.96481421170913,
+      "iters": 4166,
+      "repeats": 7,
+      "sha256": "4cfc794812ca6f03f6b2c3f23988bcac789aff2eac0a93d3457c4ef50bfffcb6",
+      "bytes": 11
+    },
+    {
+      "key": "micro/lookup",
+      "family": "micro",
+      "summary": "one depth-3 lookup",
+      "note": "",
+      "mode": "compile",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 172.22754119893904,
+      "worst_us": 175.17295581269892,
+      "iters": 6857,
+      "repeats": 7,
+      "sha256": "4cfc794812ca6f03f6b2c3f23988bcac789aff2eac0a93d3457c4ef50bfffcb6",
+      "bytes": 11
+    },
+    {
+      "key": "micro/loop-text",
+      "family": "micro",
+      "summary": "50-row loop, text body",
+      "note": "",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 15.01381970602726,
+      "worst_us": 15.194591232565344,
+      "iters": 3217,
+      "repeats": 7,
+      "sha256": "7c057e90268e6888e9095151f7ccf0386a426eddef483bcba0eeb3fafa85239a",
+      "bytes": 950
+    },
+    {
+      "key": "micro/loop-text",
+      "family": "micro",
+      "summary": "50-row loop, text body",
+      "note": "",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 26.282130856643988,
+      "worst_us": 27.30870908151743,
+      "iters": 1643,
+      "repeats": 7,
+      "sha256": "7c057e90268e6888e9095151f7ccf0386a426eddef483bcba0eeb3fafa85239a",
+      "bytes": 950
+    },
+    {
+      "key": "micro/loop-text",
+      "family": "micro",
+      "summary": "50-row loop, text body",
+      "note": "",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 10.356104585189168,
+      "worst_us": 10.534647978234226,
+      "iters": 4494,
+      "repeats": 7,
+      "sha256": "7c057e90268e6888e9095151f7ccf0386a426eddef483bcba0eeb3fafa85239a",
+      "bytes": 950
+    },
+    {
+      "key": "micro/loop-text",
+      "family": "micro",
+      "summary": "50-row loop, text body",
+      "note": "",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 19.826624179296577,
+      "worst_us": 19.910320173370003,
+      "iters": 3217,
+      "repeats": 7,
+      "sha256": "7c057e90268e6888e9095151f7ccf0386a426eddef483bcba0eeb3fafa85239a",
+      "bytes": 950
+    },
+    {
+      "key": "micro/loop-text",
+      "family": "micro",
+      "summary": "50-row loop, text body",
+      "note": "",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 37.0231795424286,
+      "worst_us": 37.61475471716218,
+      "iters": 1643,
+      "repeats": 7,
+      "sha256": "7c057e90268e6888e9095151f7ccf0386a426eddef483bcba0eeb3fafa85239a",
+      "bytes": 950
+    },
+    {
+      "key": "micro/loop-text",
+      "family": "micro",
+      "summary": "50-row loop, text body",
+      "note": "",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 15.659805742773413,
+      "worst_us": 15.918734090396091,
+      "iters": 4494,
+      "repeats": 7,
+      "sha256": "7c057e90268e6888e9095151f7ccf0386a426eddef483bcba0eeb3fafa85239a",
+      "bytes": 950
+    },
+    {
+      "key": "micro/loop-text",
+      "family": "micro",
+      "summary": "50-row loop, text body",
+      "note": "",
+      "mode": "render",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 5.668842703142233,
+      "worst_us": 5.966130559983176,
+      "iters": 3217,
+      "repeats": 7,
+      "sha256": "7c057e90268e6888e9095151f7ccf0386a426eddef483bcba0eeb3fafa85239a",
+      "bytes": 950
+    },
+    {
+      "key": "micro/loop-text",
+      "family": "micro",
+      "summary": "50-row loop, text body",
+      "note": "",
+      "mode": "parse",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 190.21246683096817,
+      "worst_us": 197.56299451691322,
+      "iters": 1643,
+      "repeats": 7,
+      "sha256": "7c057e90268e6888e9095151f7ccf0386a426eddef483bcba0eeb3fafa85239a",
+      "bytes": 950
+    },
+    {
+      "key": "micro/loop-text",
+      "family": "micro",
+      "summary": "50-row loop, text body",
+      "note": "",
+      "mode": "compile",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 178.46781820112497,
+      "worst_us": 181.05277391703916,
+      "iters": 4494,
+      "repeats": 7,
+      "sha256": "7c057e90268e6888e9095151f7ccf0386a426eddef483bcba0eeb3fafa85239a",
+      "bytes": 950
+    },
+    {
+      "key": "micro/loop-var",
+      "family": "micro",
+      "summary": "50-row loop, one variable per row",
+      "note": "",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 80.8822313873944,
+      "worst_us": 81.68188760765204,
+      "iters": 605,
+      "repeats": 7,
+      "sha256": "02ff49ef25b6ad2430aaa110643c1c42b54f969f7166c269b511a37e1d23d751",
+      "bytes": 1742
+    },
+    {
+      "key": "micro/loop-var",
+      "family": "micro",
+      "summary": "50-row loop, one variable per row",
+      "note": "",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 97.01954728565389,
+      "worst_us": 98.25025719145904,
+      "iters": 486,
+      "repeats": 7,
+      "sha256": "02ff49ef25b6ad2430aaa110643c1c42b54f969f7166c269b511a37e1d23d751",
+      "bytes": 1742
+    },
+    {
+      "key": "micro/loop-var",
+      "family": "micro",
+      "summary": "50-row loop, one variable per row",
+      "note": "",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 14.888191222308294,
+      "worst_us": 15.189253071915838,
+      "iters": 3007,
+      "repeats": 7,
+      "sha256": "02ff49ef25b6ad2430aaa110643c1c42b54f969f7166c269b511a37e1d23d751",
+      "bytes": 1742
+    },
+    {
+      "key": "micro/loop-var",
+      "family": "micro",
+      "summary": "50-row loop, one variable per row",
+      "note": "",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 45.250138808580594,
+      "worst_us": 47.44400830231299,
+      "iters": 605,
+      "repeats": 7,
+      "sha256": "02ff49ef25b6ad2430aaa110643c1c42b54f969f7166c269b511a37e1d23d751",
+      "bytes": 1742
+    },
+    {
+      "key": "micro/loop-var",
+      "family": "micro",
+      "summary": "50-row loop, one variable per row",
+      "note": "",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 70.08564812485741,
+      "worst_us": 71.6984732993476,
+      "iters": 486,
+      "repeats": 7,
+      "sha256": "02ff49ef25b6ad2430aaa110643c1c42b54f969f7166c269b511a37e1d23d751",
+      "bytes": 1742
+    },
+    {
+      "key": "micro/loop-var",
+      "family": "micro",
+      "summary": "50-row loop, one variable per row",
+      "note": "",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 21.20468905218823,
+      "worst_us": 21.505874953606536,
+      "iters": 3007,
+      "repeats": 7,
+      "sha256": "02ff49ef25b6ad2430aaa110643c1c42b54f969f7166c269b511a37e1d23d751",
+      "bytes": 1742
+    },
+    {
+      "key": "micro/loop-var",
+      "family": "micro",
+      "summary": "50-row loop, one variable per row",
+      "note": "",
+      "mode": "render",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 32.820593429082805,
+      "worst_us": 34.025965271948664,
+      "iters": 605,
+      "repeats": 7,
+      "sha256": "02ff49ef25b6ad2430aaa110643c1c42b54f969f7166c269b511a37e1d23d751",
+      "bytes": 1742
+    },
+    {
+      "key": "micro/loop-var",
+      "family": "micro",
+      "summary": "50-row loop, one variable per row",
+      "note": "",
+      "mode": "parse",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 273.91280863460906,
+      "worst_us": 303.5007716097137,
+      "iters": 486,
+      "repeats": 7,
+      "sha256": "02ff49ef25b6ad2430aaa110643c1c42b54f969f7166c269b511a37e1d23d751",
+      "bytes": 1742
+    },
+    {
+      "key": "micro/loop-var",
+      "family": "micro",
+      "summary": "50-row loop, one variable per row",
+      "note": "",
+      "mode": "compile",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 236.2235756611094,
+      "worst_us": 243.76985633087327,
+      "iters": 3007,
+      "repeats": 7,
+      "sha256": "02ff49ef25b6ad2430aaa110643c1c42b54f969f7166c269b511a37e1d23d751",
+      "bytes": 1742
+    },
+    {
+      "key": "micro/if",
+      "family": "micro",
+      "summary": "one if/else, taken branch",
+      "note": "",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 2.4124673077098304,
+      "worst_us": 2.4575527629130582,
+      "iters": 16441,
+      "repeats": 7,
+      "sha256": "a39dc1727352f21107bc366ef51e8b4fa85fa76f54e6540e96a0d6d0adb03ed3",
+      "bytes": 9
+    },
+    {
+      "key": "micro/if",
+      "family": "micro",
+      "summary": "one if/else, taken branch",
+      "note": "",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 14.327979402248513,
+      "worst_us": 14.459089729749577,
+      "iters": 2864,
+      "repeats": 7,
+      "sha256": "a39dc1727352f21107bc366ef51e8b4fa85fa76f54e6540e96a0d6d0adb03ed3",
+      "bytes": 9
+    },
+    {
+      "key": "micro/if",
+      "family": "micro",
+      "summary": "one if/else, taken branch",
+      "note": "",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 11.180149469179932,
+      "worst_us": 11.476889424237655,
+      "iters": 3934,
+      "repeats": 7,
+      "sha256": "a39dc1727352f21107bc366ef51e8b4fa85fa76f54e6540e96a0d6d0adb03ed3",
+      "bytes": 9
+    },
+    {
+      "key": "micro/if",
+      "family": "micro",
+      "summary": "one if/else, taken branch",
+      "note": "",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 2.2394952844938487,
+      "worst_us": 2.304416824342702,
+      "iters": 16441,
+      "repeats": 7,
+      "sha256": "a39dc1727352f21107bc366ef51e8b4fa85fa76f54e6540e96a0d6d0adb03ed3",
+      "bytes": 9
+    },
+    {
+      "key": "micro/if",
+      "family": "micro",
+      "summary": "one if/else, taken branch",
+      "note": "",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 26.20375034995715,
+      "worst_us": 26.88288512410773,
+      "iters": 2864,
+      "repeats": 7,
+      "sha256": "a39dc1727352f21107bc366ef51e8b4fa85fa76f54e6540e96a0d6d0adb03ed3",
+      "bytes": 9
+    },
+    {
+      "key": "micro/if",
+      "family": "micro",
+      "summary": "one if/else, taken branch",
+      "note": "",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 22.686800970549136,
+      "worst_us": 23.325432137108915,
+      "iters": 3934,
+      "repeats": 7,
+      "sha256": "a39dc1727352f21107bc366ef51e8b4fa85fa76f54e6540e96a0d6d0adb03ed3",
+      "bytes": 9
+    },
+    {
+      "key": "micro/if",
+      "family": "micro",
+      "summary": "one if/else, taken branch",
+      "note": "",
+      "mode": "render",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 3.6588863201977975,
+      "worst_us": 3.730949578212198,
+      "iters": 16441,
+      "repeats": 7,
+      "sha256": "a39dc1727352f21107bc366ef51e8b4fa85fa76f54e6540e96a0d6d0adb03ed3",
+      "bytes": 9
+    },
+    {
+      "key": "micro/if",
+      "family": "micro",
+      "summary": "one if/else, taken branch",
+      "note": "",
+      "mode": "parse",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 179.85498114630798,
+      "worst_us": 182.3125143214155,
+      "iters": 2864,
+      "repeats": 7,
+      "sha256": "a39dc1727352f21107bc366ef51e8b4fa85fa76f54e6540e96a0d6d0adb03ed3",
+      "bytes": 9
+    },
+    {
+      "key": "micro/if",
+      "family": "micro",
+      "summary": "one if/else, taken branch",
+      "note": "",
+      "mode": "compile",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 171.339921202583,
+      "worst_us": 173.89278317009533,
+      "iters": 3934,
+      "repeats": 7,
+      "sha256": "a39dc1727352f21107bc366ef51e8b4fa85fa76f54e6540e96a0d6d0adb03ed3",
+      "bytes": 9
+    },
+    {
+      "key": "micro/filter",
+      "family": "micro",
+      "summary": "one no-arg filter",
+      "note": "",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 3.3325518872353572,
+      "worst_us": 3.4650339444937988,
+      "iters": 12903,
+      "repeats": 7,
+      "sha256": "15f11731a07e07cbba29c59adf2a93a465dfd3319c4300f5913cc60ce86f3dee",
+      "bytes": 14
+    },
+    {
+      "key": "micro/filter",
+      "family": "micro",
+      "summary": "one no-arg filter",
+      "note": "",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 16.232744557150316,
+      "worst_us": 17.077128264329236,
+      "iters": 1840,
+      "repeats": 7,
+      "sha256": "15f11731a07e07cbba29c59adf2a93a465dfd3319c4300f5913cc60ce86f3dee",
+      "bytes": 14
+    },
+    {
+      "key": "micro/filter",
+      "family": "micro",
+      "summary": "one no-arg filter",
+      "note": "",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 11.954426671114879,
+      "worst_us": 12.13462147479691,
+      "iters": 3157,
+      "repeats": 7,
+      "sha256": "15f11731a07e07cbba29c59adf2a93a465dfd3319c4300f5913cc60ce86f3dee",
+      "bytes": 14
+    },
+    {
+      "key": "micro/filter",
+      "family": "micro",
+      "summary": "one no-arg filter",
+      "note": "",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 2.885314190751882,
+      "worst_us": 2.943695263398229,
+      "iters": 12903,
+      "repeats": 7,
+      "sha256": "15f11731a07e07cbba29c59adf2a93a465dfd3319c4300f5913cc60ce86f3dee",
+      "bytes": 14
+    },
+    {
+      "key": "micro/filter",
+      "family": "micro",
+      "summary": "one no-arg filter",
+      "note": "",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 22.77361846885786,
+      "worst_us": 23.6281929297231,
+      "iters": 1840,
+      "repeats": 7,
+      "sha256": "15f11731a07e07cbba29c59adf2a93a465dfd3319c4300f5913cc60ce86f3dee",
+      "bytes": 14
+    },
+    {
+      "key": "micro/filter",
+      "family": "micro",
+      "summary": "one no-arg filter",
+      "note": "",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 18.792933487431593,
+      "worst_us": 19.10207475251484,
+      "iters": 3157,
+      "repeats": 7,
+      "sha256": "15f11731a07e07cbba29c59adf2a93a465dfd3319c4300f5913cc60ce86f3dee",
+      "bytes": 14
+    },
+    {
+      "key": "micro/filter",
+      "family": "micro",
+      "summary": "one no-arg filter",
+      "note": "",
+      "mode": "render",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 4.060903200152132,
+      "worst_us": 4.112851663125158,
+      "iters": 12903,
+      "repeats": 7,
+      "sha256": "15f11731a07e07cbba29c59adf2a93a465dfd3319c4300f5913cc60ce86f3dee",
+      "bytes": 14
+    },
+    {
+      "key": "micro/filter",
+      "family": "micro",
+      "summary": "one no-arg filter",
+      "note": "",
+      "mode": "parse",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 165.04198369068985,
+      "worst_us": 181.7495923877805,
+      "iters": 1840,
+      "repeats": 7,
+      "sha256": "15f11731a07e07cbba29c59adf2a93a465dfd3319c4300f5913cc60ce86f3dee",
+      "bytes": 14
+    },
+    {
+      "key": "micro/filter",
+      "family": "micro",
+      "summary": "one no-arg filter",
+      "note": "",
+      "mode": "compile",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 157.87010357197755,
+      "worst_us": 164.8664741833229,
+      "iters": 3157,
+      "repeats": 7,
+      "sha256": "15f11731a07e07cbba29c59adf2a93a465dfd3319c4300f5913cc60ce86f3dee",
+      "bytes": 14
+    },
+    {
+      "key": "micro/escape",
+      "family": "micro",
+      "summary": "one variable needing escaping",
+      "note": "",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 3.1369502271832306,
+      "worst_us": 3.209050893418473,
+      "iters": 14285,
+      "repeats": 7,
+      "sha256": "0705df8ff49cc8ad61402c45a6fbf9b2982593c5a3e4bb9bbd86a2c173106725",
+      "bytes": 39
+    },
+    {
+      "key": "micro/escape",
+      "family": "micro",
+      "summary": "one variable needing escaping",
+      "note": "",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 9.387571592792085,
+      "worst_us": 9.754441511630507,
+      "iters": 4428,
+      "repeats": 7,
+      "sha256": "0705df8ff49cc8ad61402c45a6fbf9b2982593c5a3e4bb9bbd86a2c173106725",
+      "bytes": 39
+    },
+    {
+      "key": "micro/escape",
+      "family": "micro",
+      "summary": "one variable needing escaping",
+      "note": "",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 5.58273171380537,
+      "worst_us": 5.6141616567175765,
+      "iters": 8450,
+      "repeats": 7,
+      "sha256": "0705df8ff49cc8ad61402c45a6fbf9b2982593c5a3e4bb9bbd86a2c173106725",
+      "bytes": 39
+    },
+    {
+      "key": "micro/escape",
+      "family": "micro",
+      "summary": "one variable needing escaping",
+      "note": "",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 2.3786634935172377,
+      "worst_us": 2.4490228909210265,
+      "iters": 14285,
+      "repeats": 7,
+      "sha256": "0705df8ff49cc8ad61402c45a6fbf9b2982593c5a3e4bb9bbd86a2c173106725",
+      "bytes": 39
+    },
+    {
+      "key": "micro/escape",
+      "family": "micro",
+      "summary": "one variable needing escaping",
+      "note": "",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 12.267568201937586,
+      "worst_us": 12.495850267872221,
+      "iters": 4428,
+      "repeats": 7,
+      "sha256": "0705df8ff49cc8ad61402c45a6fbf9b2982593c5a3e4bb9bbd86a2c173106725",
+      "bytes": 39
+    },
+    {
+      "key": "micro/escape",
+      "family": "micro",
+      "summary": "one variable needing escaping",
+      "note": "",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 9.245867930495967,
+      "worst_us": 9.539358933682184,
+      "iters": 8450,
+      "repeats": 7,
+      "sha256": "0705df8ff49cc8ad61402c45a6fbf9b2982593c5a3e4bb9bbd86a2c173106725",
+      "bytes": 39
+    },
+    {
+      "key": "micro/escape",
+      "family": "micro",
+      "summary": "one variable needing escaping",
+      "note": "",
+      "mode": "render",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 4.127902204694346,
+      "worst_us": 4.206192370430469,
+      "iters": 14285,
+      "repeats": 7,
+      "sha256": "0705df8ff49cc8ad61402c45a6fbf9b2982593c5a3e4bb9bbd86a2c173106725",
+      "bytes": 39
+    },
+    {
+      "key": "micro/escape",
+      "family": "micro",
+      "summary": "one variable needing escaping",
+      "note": "",
+      "mode": "parse",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 110.64451580606156,
+      "worst_us": 121.17278319925478,
+      "iters": 4428,
+      "repeats": 7,
+      "sha256": "0705df8ff49cc8ad61402c45a6fbf9b2982593c5a3e4bb9bbd86a2c173106725",
+      "bytes": 39
+    },
+    {
+      "key": "micro/escape",
+      "family": "micro",
+      "summary": "one variable needing escaping",
+      "note": "",
+      "mode": "compile",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 103.46600094936876,
+      "worst_us": 107.58994083118641,
+      "iters": 8450,
+      "repeats": 7,
+      "sha256": "0705df8ff49cc8ad61402c45a6fbf9b2982593c5a3e4bb9bbd86a2c173106725",
+      "bytes": 39
+    },
+    {
+      "key": "micro/include",
+      "family": "micro",
+      "summary": "one include",
+      "note": "",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 10.123102102469664,
+      "worst_us": 10.153883059774577,
+      "iters": 3908,
+      "repeats": 7,
+      "sha256": "ee74e378523b807d5332c076e8a6a009abfdc20674b592c2bb948662b0d19a0c",
+      "bytes": 41
+    },
+    {
+      "key": "micro/include",
+      "family": "micro",
+      "summary": "one include",
+      "note": "",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 21.896869637867624,
+      "worst_us": 23.740708970146873,
+      "iters": 1749,
+      "repeats": 7,
+      "sha256": "ee74e378523b807d5332c076e8a6a009abfdc20674b592c2bb948662b0d19a0c",
+      "bytes": 41
+    },
+    {
+      "key": "micro/include",
+      "family": "micro",
+      "summary": "one include",
+      "note": "",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 9.310781547290883,
+      "worst_us": 9.511016536625341,
+      "iters": 4898,
+      "repeats": 7,
+      "sha256": "ee74e378523b807d5332c076e8a6a009abfdc20674b592c2bb948662b0d19a0c",
+      "bytes": 41
+    },
+    {
+      "key": "micro/include",
+      "family": "micro",
+      "summary": "one include",
+      "note": "",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 7.100221596109159,
+      "worst_us": 7.294268168469923,
+      "iters": 3908,
+      "repeats": 7,
+      "sha256": "ee74e378523b807d5332c076e8a6a009abfdc20674b592c2bb948662b0d19a0c",
+      "bytes": 41
+    },
+    {
+      "key": "micro/include",
+      "family": "micro",
+      "summary": "one include",
+      "note": "",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 22.65863807199937,
+      "worst_us": 27.172431676436094,
+      "iters": 1749,
+      "repeats": 7,
+      "sha256": "ee74e378523b807d5332c076e8a6a009abfdc20674b592c2bb948662b0d19a0c",
+      "bytes": 41
+    },
+    {
+      "key": "micro/include",
+      "family": "micro",
+      "summary": "one include",
+      "note": "",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 12.568037978296651,
+      "worst_us": 13.139368107961852,
+      "iters": 4898,
+      "repeats": 7,
+      "sha256": "ee74e378523b807d5332c076e8a6a009abfdc20674b592c2bb948662b0d19a0c",
+      "bytes": 41
+    },
+    {
+      "key": "micro/include",
+      "family": "micro",
+      "summary": "one include",
+      "note": "",
+      "mode": "render",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 6.156047341912344,
+      "worst_us": 6.192308599644073,
+      "iters": 3908,
+      "repeats": 7,
+      "sha256": "ee74e378523b807d5332c076e8a6a009abfdc20674b592c2bb948662b0d19a0c",
+      "bytes": 41
+    },
+    {
+      "key": "micro/include",
+      "family": "micro",
+      "summary": "one include",
+      "note": "",
+      "mode": "parse",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 133.28023154896633,
+      "worst_us": 145.88655403063333,
+      "iters": 1749,
+      "repeats": 7,
+      "sha256": "ee74e378523b807d5332c076e8a6a009abfdc20674b592c2bb948662b0d19a0c",
+      "bytes": 41
+    },
+    {
+      "key": "micro/include",
+      "family": "micro",
+      "summary": "one include",
+      "note": "",
+      "mode": "compile",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 119.81508616202504,
+      "worst_us": 129.9136296447432,
+      "iters": 4898,
+      "repeats": 7,
+      "sha256": "ee74e378523b807d5332c076e8a6a009abfdc20674b592c2bb948662b0d19a0c",
+      "bytes": 41
+    },
+    {
+      "key": "micro/extends",
+      "family": "micro",
+      "summary": "one level of extends, one block",
+      "note": "",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 9.583536316833285,
+      "worst_us": 9.788654145432153,
+      "iters": 2877,
+      "repeats": 7,
+      "sha256": "132e87801963ebd79d4c3021858562d16655e78290a03d13edafe1831b3d3725",
+      "bytes": 96
+    },
+    {
+      "key": "micro/extends",
+      "family": "micro",
+      "summary": "one level of extends, one block",
+      "note": "",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 28.360217216080738,
+      "worst_us": 29.702031384023655,
+      "iters": 1243,
+      "repeats": 7,
+      "sha256": "132e87801963ebd79d4c3021858562d16655e78290a03d13edafe1831b3d3725",
+      "bytes": 96
+    },
+    {
+      "key": "micro/extends",
+      "family": "micro",
+      "summary": "one level of extends, one block",
+      "note": "",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 17.369634570242017,
+      "worst_us": 17.624001159337734,
+      "iters": 2586,
+      "repeats": 7,
+      "sha256": "132e87801963ebd79d4c3021858562d16655e78290a03d13edafe1831b3d3725",
+      "bytes": 96
+    },
+    {
+      "key": "micro/extends",
+      "family": "micro",
+      "summary": "one level of extends, one block",
+      "note": "",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 9.655543978267431,
+      "worst_us": 9.891814387153847,
+      "iters": 2877,
+      "repeats": 7,
+      "sha256": "132e87801963ebd79d4c3021858562d16655e78290a03d13edafe1831b3d3725",
+      "bytes": 96
+    },
+    {
+      "key": "micro/extends",
+      "family": "micro",
+      "summary": "one level of extends, one block",
+      "note": "",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 36.31214802947618,
+      "worst_us": 37.22700401739766,
+      "iters": 1243,
+      "repeats": 7,
+      "sha256": "132e87801963ebd79d4c3021858562d16655e78290a03d13edafe1831b3d3725",
+      "bytes": 96
+    },
+    {
+      "key": "micro/extends",
+      "family": "micro",
+      "summary": "one level of extends, one block",
+      "note": "",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 24.09667439315085,
+      "worst_us": 24.932666279430293,
+      "iters": 2586,
+      "repeats": 7,
+      "sha256": "132e87801963ebd79d4c3021858562d16655e78290a03d13edafe1831b3d3725",
+      "bytes": 96
+    },
+    {
+      "key": "micro/extends",
+      "family": "micro",
+      "summary": "one level of extends, one block",
+      "note": "",
+      "mode": "render",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 5.175718453916377,
+      "worst_us": 5.284106712704178,
+      "iters": 2877,
+      "repeats": 7,
+      "sha256": "132e87801963ebd79d4c3021858562d16655e78290a03d13edafe1831b3d3725",
+      "bytes": 96
+    },
+    {
+      "key": "micro/extends",
+      "family": "micro",
+      "summary": "one level of extends, one block",
+      "note": "",
+      "mode": "parse",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 252.6066637161912,
+      "worst_us": 257.2707160012999,
+      "iters": 1243,
+      "repeats": 7,
+      "sha256": "132e87801963ebd79d4c3021858562d16655e78290a03d13edafe1831b3d3725",
+      "bytes": 96
+    },
+    {
+      "key": "micro/extends",
+      "family": "micro",
+      "summary": "one level of extends, one block",
+      "note": "",
+      "mode": "compile",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 238.96041183204125,
+      "worst_us": 263.7720417631257,
+      "iters": 2586,
+      "repeats": 7,
+      "sha256": "132e87801963ebd79d4c3021858562d16655e78290a03d13edafe1831b3d3725",
+      "bytes": 96
+    },
+    {
+      "key": "real-world/normal",
+      "family": "real-world",
+      "summary": "a report page: 2-level extends, 50-row loop, filters, if/else, one include",
+      "note": "",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 418.47049166487216,
+      "worst_us": 435.04062487045303,
+      "iters": 120,
+      "repeats": 7,
+      "sha256": "96206b1265b56bcc2c05276446fee4a422726c6a4e2a90ab89c0ff189327184f",
+      "bytes": 5728
+    },
+    {
+      "key": "real-world/normal",
+      "family": "real-world",
+      "summary": "a report page: 2-level extends, 50-row loop, filters, if/else, one include",
+      "note": "",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 568.2215649251114,
+      "worst_us": 583.2583414089373,
+      "iters": 85,
+      "repeats": 7,
+      "sha256": "96206b1265b56bcc2c05276446fee4a422726c6a4e2a90ab89c0ff189327184f",
+      "bytes": 5728
+    },
+    {
+      "key": "real-world/normal",
+      "family": "real-world",
+      "summary": "a report page: 2-level extends, 50-row loop, filters, if/else, one include",
+      "note": "",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 128.26929543569514,
+      "worst_us": 134.86269033984917,
+      "iters": 352,
+      "repeats": 7,
+      "sha256": "96206b1265b56bcc2c05276446fee4a422726c6a4e2a90ab89c0ff189327184f",
+      "bytes": 5728
+    },
+    {
+      "key": "real-world/normal",
+      "family": "real-world",
+      "summary": "a report page: 2-level extends, 50-row loop, filters, if/else, one include",
+      "note": "",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 201.60034158228274,
+      "worst_us": 205.33055818911333,
+      "iters": 120,
+      "repeats": 7,
+      "sha256": "96206b1265b56bcc2c05276446fee4a422726c6a4e2a90ab89c0ff189327184f",
+      "bytes": 5728
+    },
+    {
+      "key": "real-world/normal",
+      "family": "real-world",
+      "summary": "a report page: 2-level extends, 50-row loop, filters, if/else, one include",
+      "note": "",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 390.78627048772483,
+      "worst_us": 404.8764705657959,
+      "iters": 85,
+      "repeats": 7,
+      "sha256": "96206b1265b56bcc2c05276446fee4a422726c6a4e2a90ab89c0ff189327184f",
+      "bytes": 5728
+    },
+    {
+      "key": "real-world/normal",
+      "family": "real-world",
+      "summary": "a report page: 2-level extends, 50-row loop, filters, if/else, one include",
+      "note": "",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 171.1888040021718,
+      "worst_us": 172.9200994304847,
+      "iters": 352,
+      "repeats": 7,
+      "sha256": "96206b1265b56bcc2c05276446fee4a422726c6a4e2a90ab89c0ff189327184f",
+      "bytes": 5728
+    },
+    {
+      "key": "real-world/normal",
+      "family": "real-world",
+      "summary": "a report page: 2-level extends, 50-row loop, filters, if/else, one include",
+      "note": "",
+      "mode": "render",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 172.8409666005367,
+      "worst_us": 194.05554994591512,
+      "iters": 120,
+      "repeats": 7,
+      "sha256": "96206b1265b56bcc2c05276446fee4a422726c6a4e2a90ab89c0ff189327184f",
+      "bytes": 5728
+    },
+    {
+      "key": "real-world/normal",
+      "family": "real-world",
+      "summary": "a report page: 2-level extends, 50-row loop, filters, if/else, one include",
+      "note": "",
+      "mode": "parse",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 1375.723529524882,
+      "worst_us": 1410.0681295317104,
+      "iters": 85,
+      "repeats": 7,
+      "sha256": "96206b1265b56bcc2c05276446fee4a422726c6a4e2a90ab89c0ff189327184f",
+      "bytes": 5728
+    },
+    {
+      "key": "real-world/normal",
+      "family": "real-world",
+      "summary": "a report page: 2-level extends, 50-row loop, filters, if/else, one include",
+      "note": "",
+      "mode": "compile",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 1165.3799715945338,
+      "worst_us": 1221.0722045644864,
+      "iters": 352,
+      "repeats": 7,
+      "sha256": "96206b1265b56bcc2c05276446fee4a422726c6a4e2a90ab89c0ff189327184f",
+      "bytes": 5728
+    },
+    {
+      "key": "real-world/complex",
+      "family": "real-world",
+      "summary": "an invoice: 3-level extends, 12x6 nested loop, include per line, escaping",
+      "note": "",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 854.0504388388639,
+      "worst_us": 866.5321582699554,
+      "iters": 57,
+      "repeats": 7,
+      "sha256": "de9ea13d52790e48118bb03f575f711f0a722fbbda6d5ca24c2d8cc15895ca91",
+      "bytes": 5910
+    },
+    {
+      "key": "real-world/complex",
+      "family": "real-world",
+      "summary": "an invoice: 3-level extends, 12x6 nested loop, include per line, escaping",
+      "note": "",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 981.1441600322723,
+      "worst_us": 1081.1741597717628,
+      "iters": 50,
+      "repeats": 7,
+      "sha256": "de9ea13d52790e48118bb03f575f711f0a722fbbda6d5ca24c2d8cc15895ca91",
+      "bytes": 5910
+    },
+    {
+      "key": "real-world/complex",
+      "family": "real-world",
+      "summary": "an invoice: 3-level extends, 12x6 nested loop, include per line, escaping",
+      "note": "",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 90.78195059981212,
+      "worst_us": 93.27231619457379,
+      "iters": 506,
+      "repeats": 7,
+      "sha256": "de9ea13d52790e48118bb03f575f711f0a722fbbda6d5ca24c2d8cc15895ca91",
+      "bytes": 5910
+    },
+    {
+      "key": "real-world/complex",
+      "family": "real-world",
+      "summary": "an invoice: 3-level extends, 12x6 nested loop, include per line, escaping",
+      "note": "",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 538.2792452317581,
+      "worst_us": 559.2039470732408,
+      "iters": 57,
+      "repeats": 7,
+      "sha256": "de9ea13d52790e48118bb03f575f711f0a722fbbda6d5ca24c2d8cc15895ca91",
+      "bytes": 5910
+    },
+    {
+      "key": "real-world/complex",
+      "family": "real-world",
+      "summary": "an invoice: 3-level extends, 12x6 nested loop, include per line, escaping",
+      "note": "",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 684.7641599597409,
+      "worst_us": 695.9616602398455,
+      "iters": 50,
+      "repeats": 7,
+      "sha256": "de9ea13d52790e48118bb03f575f711f0a722fbbda6d5ca24c2d8cc15895ca91",
+      "bytes": 5910
+    },
+    {
+      "key": "real-world/complex",
+      "family": "real-world",
+      "summary": "an invoice: 3-level extends, 12x6 nested loop, include per line, escaping",
+      "note": "",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 114.7309782465721,
+      "worst_us": 119.1147075084373,
+      "iters": 506,
+      "repeats": 7,
+      "sha256": "de9ea13d52790e48118bb03f575f711f0a722fbbda6d5ca24c2d8cc15895ca91",
+      "bytes": 5910
+    },
+    {
+      "key": "real-world/complex",
+      "family": "real-world",
+      "summary": "an invoice: 3-level extends, 12x6 nested loop, include per line, escaping",
+      "note": "",
+      "mode": "render",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 339.5029119003499,
+      "worst_us": 345.1447369195848,
+      "iters": 57,
+      "repeats": 7,
+      "sha256": "de9ea13d52790e48118bb03f575f711f0a722fbbda6d5ca24c2d8cc15895ca91",
+      "bytes": 5910
+    },
+    {
+      "key": "real-world/complex",
+      "family": "real-world",
+      "summary": "an invoice: 3-level extends, 12x6 nested loop, include per line, escaping",
+      "note": "",
+      "mode": "parse",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 1281.771679641679,
+      "worst_us": 1335.5824997415766,
+      "iters": 50,
+      "repeats": 7,
+      "sha256": "de9ea13d52790e48118bb03f575f711f0a722fbbda6d5ca24c2d8cc15895ca91",
+      "bytes": 5910
+    },
+    {
+      "key": "real-world/complex",
+      "family": "real-world",
+      "summary": "an invoice: 3-level extends, 12x6 nested loop, include per line, escaping",
+      "note": "",
+      "mode": "compile",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 905.8153814348124,
+      "worst_us": 947.8068992328966,
+      "iters": 506,
+      "repeats": 7,
+      "sha256": "de9ea13d52790e48118bb03f575f711f0a722fbbda6d5ca24c2d8cc15895ca91",
+      "bytes": 5910
+    },
+    {
+      "key": "real-world/large",
+      "family": "real-world",
+      "summary": "a 9 KB page of 20 sections, 20 loop statements: the parse-bound row",
+      "note": "",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 681.985739765255,
+      "worst_us": 710.0542189955252,
+      "iters": 73,
+      "repeats": 7,
+      "sha256": "463265d5a852b696dc011890f857dab9c8e3d10ca67a8d7110f6aeceb7b5ab38",
+      "bytes": 4121
+    },
+    {
+      "key": "real-world/large",
+      "family": "real-world",
+      "summary": "a 9 KB page of 20 sections, 20 loop statements: the parse-bound row",
+      "note": "",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 2152.9257393685048,
+      "worst_us": 2348.9456520031167,
+      "iters": 23,
+      "repeats": 7,
+      "sha256": "463265d5a852b696dc011890f857dab9c8e3d10ca67a8d7110f6aeceb7b5ab38",
+      "bytes": 4121
+    },
+    {
+      "key": "real-world/large",
+      "family": "real-world",
+      "summary": "a 9 KB page of 20 sections, 20 loop statements: the parse-bound row",
+      "note": "",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 1444.5612939786824,
+      "worst_us": 1645.9301473600242,
+      "iters": 34,
+      "repeats": 7,
+      "sha256": "463265d5a852b696dc011890f857dab9c8e3d10ca67a8d7110f6aeceb7b5ab38",
+      "bytes": 4121
+    },
+    {
+      "key": "real-world/large",
+      "family": "real-world",
+      "summary": "a 9 KB page of 20 sections, 20 loop statements: the parse-bound row",
+      "note": "",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 272.8184929902168,
+      "worst_us": 286.8184931448674,
+      "iters": 73,
+      "repeats": 7,
+      "sha256": "463265d5a852b696dc011890f857dab9c8e3d10ca67a8d7110f6aeceb7b5ab38",
+      "bytes": 4121
+    },
+    {
+      "key": "real-world/large",
+      "family": "real-world",
+      "summary": "a 9 KB page of 20 sections, 20 loop statements: the parse-bound row",
+      "note": "",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 2437.80252133982,
+      "worst_us": 2667.5072617565647,
+      "iters": 23,
+      "repeats": 7,
+      "sha256": "463265d5a852b696dc011890f857dab9c8e3d10ca67a8d7110f6aeceb7b5ab38",
+      "bytes": 4121
+    },
+    {
+      "key": "real-world/large",
+      "family": "real-world",
+      "summary": "a 9 KB page of 20 sections, 20 loop statements: the parse-bound row",
+      "note": "",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 2156.578440917656,
+      "worst_us": 2317.324764376013,
+      "iters": 34,
+      "repeats": 7,
+      "sha256": "463265d5a852b696dc011890f857dab9c8e3d10ca67a8d7110f6aeceb7b5ab38",
+      "bytes": 4121
+    },
+    {
+      "key": "real-world/large",
+      "family": "real-world",
+      "summary": "a 9 KB page of 20 sections, 20 loop statements: the parse-bound row",
+      "note": "",
+      "mode": "render",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 202.37272598921027,
+      "worst_us": 206.57249324483007,
+      "iters": 73,
+      "repeats": 7,
+      "sha256": "463265d5a852b696dc011890f857dab9c8e3d10ca67a8d7110f6aeceb7b5ab38",
+      "bytes": 4121
+    },
+    {
+      "key": "real-world/large",
+      "family": "real-world",
+      "summary": "a 9 KB page of 20 sections, 20 loop statements: the parse-bound row",
+      "note": "",
+      "mode": "parse",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 17480.61591237986,
+      "worst_us": 18077.91847892551,
+      "iters": 23,
+      "repeats": 7,
+      "sha256": "463265d5a852b696dc011890f857dab9c8e3d10ca67a8d7110f6aeceb7b5ab38",
+      "bytes": 4121
+    },
+    {
+      "key": "real-world/large",
+      "family": "real-world",
+      "summary": "a 9 KB page of 20 sections, 20 loop statements: the parse-bound row",
+      "note": "",
+      "mode": "compile",
+      "engine": "jinja2",
+      "identity": "django.template.backends.jinja2.Jinja2",
+      "best_us": 17377.887265277368,
+      "worst_us": 17777.999999987725,
+      "iters": 34,
+      "repeats": 7,
+      "sha256": "463265d5a852b696dc011890f857dab9c8e3d10ca67a8d7110f6aeceb7b5ab38",
+      "bytes": 4121
+    },
+    {
+      "key": "django-only/filter-arg",
+      "family": "django-only",
+      "summary": "a filter with an argument (floatformat:2)",
+      "note": "Jinja2 spells a filter argument floatformat(2), not floatformat:2",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 453.94025471737996,
+      "worst_us": 465.6670564557162,
+      "iters": 106,
+      "repeats": 7,
+      "sha256": "1ccef38738d5346459bc2e003caeaded8ba8198acbe544e3ae4929474321aedd",
+      "bytes": 2469
+    },
+    {
+      "key": "django-only/filter-arg",
+      "family": "django-only",
+      "summary": "a filter with an argument (floatformat:2)",
+      "note": "Jinja2 spells a filter argument floatformat(2), not floatformat:2",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 508.7274272833989,
+      "worst_us": 513.401479414218,
+      "iters": 96,
+      "repeats": 7,
+      "sha256": "1ccef38738d5346459bc2e003caeaded8ba8198acbe544e3ae4929474321aedd",
+      "bytes": 2469
+    },
+    {
+      "key": "django-only/filter-arg",
+      "family": "django-only",
+      "summary": "a filter with an argument (floatformat:2)",
+      "note": "Jinja2 spells a filter argument floatformat(2), not floatformat:2",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 29.67755972970366,
+      "worst_us": 30.27664982227437,
+      "iters": 1465,
+      "repeats": 7,
+      "sha256": "1ccef38738d5346459bc2e003caeaded8ba8198acbe544e3ae4929474321aedd",
+      "bytes": 2469
+    },
+    {
+      "key": "django-only/filter-arg",
+      "family": "django-only",
+      "summary": "a filter with an argument (floatformat:2)",
+      "note": "Jinja2 spells a filter argument floatformat(2), not floatformat:2",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 548.1918303972498,
+      "worst_us": 561.0145470303185,
+      "iters": 106,
+      "repeats": 7,
+      "sha256": "1ccef38738d5346459bc2e003caeaded8ba8198acbe544e3ae4929474321aedd",
+      "bytes": 2469
+    },
+    {
+      "key": "django-only/filter-arg",
+      "family": "django-only",
+      "summary": "a filter with an argument (floatformat:2)",
+      "note": "Jinja2 spells a filter argument floatformat(2), not floatformat:2",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 624.9500935761413,
+      "worst_us": 667.8732603783525,
+      "iters": 96,
+      "repeats": 7,
+      "sha256": "1ccef38738d5346459bc2e003caeaded8ba8198acbe544e3ae4929474321aedd",
+      "bytes": 2469
+    },
+    {
+      "key": "django-only/filter-arg",
+      "family": "django-only",
+      "summary": "a filter with an argument (floatformat:2)",
+      "note": "Jinja2 spells a filter argument floatformat(2), not floatformat:2",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 54.074715367604185,
+      "worst_us": 55.58134265619079,
+      "iters": 1465,
+      "repeats": 7,
+      "sha256": "1ccef38738d5346459bc2e003caeaded8ba8198acbe544e3ae4929474321aedd",
+      "bytes": 2469
+    },
+    {
+      "key": "django-only/i18n",
+      "family": "django-only",
+      "summary": "{% translate %} and {% blocktranslate %} in a loop",
+      "note": "Jinja2 has no i18n tag library at all",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 680.6191407852399,
+      "worst_us": 716.6015209702276,
+      "iters": 71,
+      "repeats": 7,
+      "sha256": "f2c431a30e3ae2907cda0339240e6039ed4ace5771a5810676805f91bdadf7d0",
+      "bytes": 922
+    },
+    {
+      "key": "django-only/i18n",
+      "family": "django-only",
+      "summary": "{% translate %} and {% blocktranslate %} in a loop",
+      "note": "Jinja2 has no i18n tag library at all",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 742.8087119478732,
+      "worst_us": 751.6723483356393,
+      "iters": 66,
+      "repeats": 7,
+      "sha256": "f2c431a30e3ae2907cda0339240e6039ed4ace5771a5810676805f91bdadf7d0",
+      "bytes": 922
+    },
+    {
+      "key": "django-only/i18n",
+      "family": "django-only",
+      "summary": "{% translate %} and {% blocktranslate %} in a loop",
+      "note": "Jinja2 has no i18n tag library at all",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 36.3644736824625,
+      "worst_us": 37.57111986001826,
+      "iters": 1235,
+      "repeats": 7,
+      "sha256": "f2c431a30e3ae2907cda0339240e6039ed4ace5771a5810676805f91bdadf7d0",
+      "bytes": 922
+    },
+    {
+      "key": "django-only/i18n",
+      "family": "django-only",
+      "summary": "{% translate %} and {% blocktranslate %} in a loop",
+      "note": "Jinja2 has no i18n tag library at all",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 384.64319716784837,
+      "worst_us": 398.0105631315792,
+      "iters": 71,
+      "repeats": 7,
+      "sha256": "f2c431a30e3ae2907cda0339240e6039ed4ace5771a5810676805f91bdadf7d0",
+      "bytes": 922
+    },
+    {
+      "key": "django-only/i18n",
+      "family": "django-only",
+      "summary": "{% translate %} and {% blocktranslate %} in a loop",
+      "note": "Jinja2 has no i18n tag library at all",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 470.1982424276966,
+      "worst_us": 525.0252575162008,
+      "iters": 66,
+      "repeats": 7,
+      "sha256": "f2c431a30e3ae2907cda0339240e6039ed4ace5771a5810676805f91bdadf7d0",
+      "bytes": 922
+    },
+    {
+      "key": "django-only/i18n",
+      "family": "django-only",
+      "summary": "{% translate %} and {% blocktranslate %} in a loop",
+      "note": "Jinja2 has no i18n tag library at all",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 57.512550611946324,
+      "worst_us": 66.3143052646008,
+      "iters": 1235,
+      "repeats": 7,
+      "sha256": "f2c431a30e3ae2907cda0339240e6039ed4ace5771a5810676805f91bdadf7d0",
+      "bytes": 922
+    },
+    {
+      "key": "django-only/for-tags",
+      "family": "django-only",
+      "summary": "forloop.counter, {% cycle %}, {% widthratio %}, {% empty %}",
+      "note": "loop metadata is forloop.* in DTL and loop.* in Jinja2; {% empty %} has no counterpart there",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 370.03787865890473,
+      "worst_us": 376.770522879352,
+      "iters": 132,
+      "repeats": 7,
+      "sha256": "6284dad307daea5e8dcb4000ba590ada1471d7f68e025ac9984cb02692c79e57",
+      "bytes": 3423
+    },
+    {
+      "key": "django-only/for-tags",
+      "family": "django-only",
+      "summary": "forloop.counter, {% cycle %}, {% widthratio %}, {% empty %}",
+      "note": "loop metadata is forloop.* in DTL and loop.* in Jinja2; {% empty %} has no counterpart there",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 433.9870972047865,
+      "worst_us": 438.08369906577985,
+      "iters": 113,
+      "repeats": 7,
+      "sha256": "6284dad307daea5e8dcb4000ba590ada1471d7f68e025ac9984cb02692c79e57",
+      "bytes": 3423
+    },
+    {
+      "key": "django-only/for-tags",
+      "family": "django-only",
+      "summary": "forloop.counter, {% cycle %}, {% widthratio %}, {% empty %}",
+      "note": "loop metadata is forloop.* in DTL and loop.* in Jinja2; {% empty %} has no counterpart there",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 44.22763652907484,
+      "worst_us": 45.64854047846982,
+      "iters": 1062,
+      "repeats": 7,
+      "sha256": "6284dad307daea5e8dcb4000ba590ada1471d7f68e025ac9984cb02692c79e57",
+      "bytes": 3423
+    },
+    {
+      "key": "django-only/for-tags",
+      "family": "django-only",
+      "summary": "forloop.counter, {% cycle %}, {% widthratio %}, {% empty %}",
+      "note": "loop metadata is forloop.* in DTL and loop.* in Jinja2; {% empty %} has no counterpart there",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 195.04987126724288,
+      "worst_us": 200.98548482179245,
+      "iters": 132,
+      "repeats": 7,
+      "sha256": "6284dad307daea5e8dcb4000ba590ada1471d7f68e025ac9984cb02692c79e57",
+      "bytes": 3423
+    },
+    {
+      "key": "django-only/for-tags",
+      "family": "django-only",
+      "summary": "forloop.counter, {% cycle %}, {% widthratio %}, {% empty %}",
+      "note": "loop metadata is forloop.* in DTL and loop.* in Jinja2; {% empty %} has no counterpart there",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 261.587389555257,
+      "worst_us": 268.55124773630723,
+      "iters": 113,
+      "repeats": 7,
+      "sha256": "6284dad307daea5e8dcb4000ba590ada1471d7f68e025ac9984cb02692c79e57",
+      "bytes": 3423
+    },
+    {
+      "key": "django-only/for-tags",
+      "family": "django-only",
+      "summary": "forloop.counter, {% cycle %}, {% widthratio %}, {% empty %}",
+      "note": "loop metadata is forloop.* in DTL and loop.* in Jinja2; {% empty %} has no counterpart there",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 54.21982956445108,
+      "worst_us": 55.09125894981764,
+      "iters": 1062,
+      "repeats": 7,
+      "sha256": "6284dad307daea5e8dcb4000ba590ada1471d7f68e025ac9984cb02692c79e57",
+      "bytes": 3423
+    },
+    {
+      "key": "django-only/escape-table",
+      "family": "django-only",
+      "summary": "the escape tables, side by side",
+      "note": "Django writes &#x27; and &quot;; Jinja2 writes &#39; and &#34;; both leave the solidus alone",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 5.513215027666877,
+      "worst_us": 5.661637040775424,
+      "iters": 8450,
+      "repeats": 7,
+      "sha256": "91dc38ad6f9daba6c522b26821d73d778a4f81d5740303b2f4d7cbf6528b5744",
+      "bytes": 40
+    },
+    {
+      "key": "django-only/escape-table",
+      "family": "django-only",
+      "summary": "the escape tables, side by side",
+      "note": "Django writes &#x27; and &quot;; Jinja2 writes &#39; and &#34;; both leave the solidus alone",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 20.083621887503913,
+      "worst_us": 20.56884809718781,
+      "iters": 2166,
+      "repeats": 7,
+      "sha256": "91dc38ad6f9daba6c522b26821d73d778a4f81d5740303b2f4d7cbf6528b5744",
+      "bytes": 40
+    },
+    {
+      "key": "django-only/escape-table",
+      "family": "django-only",
+      "summary": "the escape tables, side by side",
+      "note": "Django writes &#x27; and &quot;; Jinja2 writes &#39; and &#34;; both leave the solidus alone",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 13.890286539940558,
+      "worst_us": 14.148902839747649,
+      "iters": 3448,
+      "repeats": 7,
+      "sha256": "91dc38ad6f9daba6c522b26821d73d778a4f81d5740303b2f4d7cbf6528b5744",
+      "bytes": 40
+    },
+    {
+      "key": "django-only/escape-table",
+      "family": "django-only",
+      "summary": "the escape tables, side by side",
+      "note": "Django writes &#x27; and &quot;; Jinja2 writes &#39; and &#34;; both leave the solidus alone",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 3.3666715976512114,
+      "worst_us": 3.4404437873270033,
+      "iters": 8450,
+      "repeats": 7,
+      "sha256": "91dc38ad6f9daba6c522b26821d73d778a4f81d5740303b2f4d7cbf6528b5744",
+      "bytes": 40
+    },
+    {
+      "key": "django-only/escape-table",
+      "family": "django-only",
+      "summary": "the escape tables, side by side",
+      "note": "Django writes &#x27; and &quot;; Jinja2 writes &#39; and &#34;; both leave the solidus alone",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 24.305536011934784,
+      "worst_us": 24.942963067846353,
+      "iters": 2166,
+      "repeats": 7,
+      "sha256": "91dc38ad6f9daba6c522b26821d73d778a4f81d5740303b2f4d7cbf6528b5744",
+      "bytes": 40
+    },
+    {
+      "key": "django-only/escape-table",
+      "family": "django-only",
+      "summary": "the escape tables, side by side",
+      "note": "Django writes &#x27; and &quot;; Jinja2 writes &#39; and &#34;; both leave the solidus alone",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 20.08132743947651,
+      "worst_us": 20.327762469474827,
+      "iters": 3448,
+      "repeats": 7,
+      "sha256": "91dc38ad6f9daba6c522b26821d73d778a4f81d5740303b2f4d7cbf6528b5744",
+      "bytes": 40
+    },
+    {
+      "key": "django-only/realistic",
+      "family": "django-only",
+      "summary": "the M16 page, verbatim: extends + i18n + floatformat over 50 rows",
+      "note": "kept verbatim so the milestone-to-milestone row does not change subject",
+      "mode": "render",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 1209.1310970235345,
+      "worst_us": 1263.9766337531732,
+      "iters": 41,
+      "repeats": 7,
+      "sha256": "72a0693dbb80e085023c8ce1521e4462367e7c2810600c120c5d3fb35a6535ad",
+      "bytes": 2976
+    },
+    {
+      "key": "django-only/realistic",
+      "family": "django-only",
+      "summary": "the M16 page, verbatim: extends + i18n + floatformat over 50 rows",
+      "note": "kept verbatim so the milestone-to-milestone row does not change subject",
+      "mode": "parse",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 1305.463973187363,
+      "worst_us": 1420.7578646459592,
+      "iters": 37,
+      "repeats": 7,
+      "sha256": "72a0693dbb80e085023c8ce1521e4462367e7c2810600c120c5d3fb35a6535ad",
+      "bytes": 2976
+    },
+    {
+      "key": "django-only/realistic",
+      "family": "django-only",
+      "summary": "the M16 page, verbatim: extends + i18n + floatformat over 50 rows",
+      "note": "kept verbatim so the milestone-to-milestone row does not change subject",
+      "mode": "compile",
+      "engine": "django",
+      "identity": "django.template.engine.Engine",
+      "best_us": 82.93474483298522,
+      "worst_us": 85.24844694572191,
+      "iters": 537,
+      "repeats": 7,
+      "sha256": "72a0693dbb80e085023c8ce1521e4462367e7c2810600c120c5d3fb35a6535ad",
+      "bytes": 2976
+    },
+    {
+      "key": "django-only/realistic",
+      "family": "django-only",
+      "summary": "the M16 page, verbatim: extends + i18n + floatformat over 50 rows",
+      "note": "kept verbatim so the milestone-to-milestone row does not change subject",
+      "mode": "render",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 1045.3424872205842,
+      "worst_us": 1107.3679027215737,
+      "iters": 41,
+      "repeats": 7,
+      "sha256": "72a0693dbb80e085023c8ce1521e4462367e7c2810600c120c5d3fb35a6535ad",
+      "bytes": 2976
+    },
+    {
+      "key": "django-only/realistic",
+      "family": "django-only",
+      "summary": "the M16 page, verbatim: extends + i18n + floatformat over 50 rows",
+      "note": "kept verbatim so the milestone-to-milestone row does not change subject",
+      "mode": "parse",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 1195.861486013274,
+      "worst_us": 1302.5461623722033,
+      "iters": 37,
+      "repeats": 7,
+      "sha256": "72a0693dbb80e085023c8ce1521e4462367e7c2810600c120c5d3fb35a6535ad",
+      "bytes": 2976
+    },
+    {
+      "key": "django-only/realistic",
+      "family": "django-only",
+      "summary": "the M16 page, verbatim: extends + i18n + floatformat over 50 rows",
+      "note": "kept verbatim so the milestone-to-milestone row does not change subject",
+      "mode": "compile",
+      "engine": "rust",
+      "identity": "django_rust_templates.engine.engine.Engine",
+      "best_us": 118.50411175998202,
+      "worst_us": 124.01171695021306,
+      "iters": 537,
+      "repeats": 7,
+      "sha256": "72a0693dbb80e085023c8ce1521e4462367e7c2810600c120c5d3fb35a6535ad",
+      "bytes": 2976
+    }
+  ],
+  "verdicts": {
+    "micro/text|render": {
+      "control_sha256": "ed66fb1cb84448877791cef91250478259033976b99ecc74ca282592ecd65e3e",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/text|parse": {
+      "control_sha256": "ed66fb1cb84448877791cef91250478259033976b99ecc74ca282592ecd65e3e",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/text|compile": {
+      "control_sha256": "ed66fb1cb84448877791cef91250478259033976b99ecc74ca282592ecd65e3e",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/variable|render": {
+      "control_sha256": "b6d1ff9aa560cf68d55029bf7fa030dd168d43bc693b5c7ab9e6715cbd8bfc28",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/variable|parse": {
+      "control_sha256": "b6d1ff9aa560cf68d55029bf7fa030dd168d43bc693b5c7ab9e6715cbd8bfc28",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/variable|compile": {
+      "control_sha256": "b6d1ff9aa560cf68d55029bf7fa030dd168d43bc693b5c7ab9e6715cbd8bfc28",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/lookup|render": {
+      "control_sha256": "4cfc794812ca6f03f6b2c3f23988bcac789aff2eac0a93d3457c4ef50bfffcb6",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/lookup|parse": {
+      "control_sha256": "4cfc794812ca6f03f6b2c3f23988bcac789aff2eac0a93d3457c4ef50bfffcb6",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/lookup|compile": {
+      "control_sha256": "4cfc794812ca6f03f6b2c3f23988bcac789aff2eac0a93d3457c4ef50bfffcb6",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/loop-text|render": {
+      "control_sha256": "7c057e90268e6888e9095151f7ccf0386a426eddef483bcba0eeb3fafa85239a",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/loop-text|parse": {
+      "control_sha256": "7c057e90268e6888e9095151f7ccf0386a426eddef483bcba0eeb3fafa85239a",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/loop-text|compile": {
+      "control_sha256": "7c057e90268e6888e9095151f7ccf0386a426eddef483bcba0eeb3fafa85239a",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/loop-var|render": {
+      "control_sha256": "02ff49ef25b6ad2430aaa110643c1c42b54f969f7166c269b511a37e1d23d751",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/loop-var|parse": {
+      "control_sha256": "02ff49ef25b6ad2430aaa110643c1c42b54f969f7166c269b511a37e1d23d751",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/loop-var|compile": {
+      "control_sha256": "02ff49ef25b6ad2430aaa110643c1c42b54f969f7166c269b511a37e1d23d751",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/if|render": {
+      "control_sha256": "a39dc1727352f21107bc366ef51e8b4fa85fa76f54e6540e96a0d6d0adb03ed3",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/if|parse": {
+      "control_sha256": "a39dc1727352f21107bc366ef51e8b4fa85fa76f54e6540e96a0d6d0adb03ed3",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/if|compile": {
+      "control_sha256": "a39dc1727352f21107bc366ef51e8b4fa85fa76f54e6540e96a0d6d0adb03ed3",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/filter|render": {
+      "control_sha256": "15f11731a07e07cbba29c59adf2a93a465dfd3319c4300f5913cc60ce86f3dee",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/filter|parse": {
+      "control_sha256": "15f11731a07e07cbba29c59adf2a93a465dfd3319c4300f5913cc60ce86f3dee",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/filter|compile": {
+      "control_sha256": "15f11731a07e07cbba29c59adf2a93a465dfd3319c4300f5913cc60ce86f3dee",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/escape|render": {
+      "control_sha256": "0705df8ff49cc8ad61402c45a6fbf9b2982593c5a3e4bb9bbd86a2c173106725",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/escape|parse": {
+      "control_sha256": "0705df8ff49cc8ad61402c45a6fbf9b2982593c5a3e4bb9bbd86a2c173106725",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/escape|compile": {
+      "control_sha256": "0705df8ff49cc8ad61402c45a6fbf9b2982593c5a3e4bb9bbd86a2c173106725",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/include|render": {
+      "control_sha256": "ee74e378523b807d5332c076e8a6a009abfdc20674b592c2bb948662b0d19a0c",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/include|parse": {
+      "control_sha256": "ee74e378523b807d5332c076e8a6a009abfdc20674b592c2bb948662b0d19a0c",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/include|compile": {
+      "control_sha256": "ee74e378523b807d5332c076e8a6a009abfdc20674b592c2bb948662b0d19a0c",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/extends|render": {
+      "control_sha256": "132e87801963ebd79d4c3021858562d16655e78290a03d13edafe1831b3d3725",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/extends|parse": {
+      "control_sha256": "132e87801963ebd79d4c3021858562d16655e78290a03d13edafe1831b3d3725",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "micro/extends|compile": {
+      "control_sha256": "132e87801963ebd79d4c3021858562d16655e78290a03d13edafe1831b3d3725",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "real-world/normal|render": {
+      "control_sha256": "96206b1265b56bcc2c05276446fee4a422726c6a4e2a90ab89c0ff189327184f",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "real-world/normal|parse": {
+      "control_sha256": "96206b1265b56bcc2c05276446fee4a422726c6a4e2a90ab89c0ff189327184f",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "real-world/normal|compile": {
+      "control_sha256": "96206b1265b56bcc2c05276446fee4a422726c6a4e2a90ab89c0ff189327184f",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "real-world/complex|render": {
+      "control_sha256": "de9ea13d52790e48118bb03f575f711f0a722fbbda6d5ca24c2d8cc15895ca91",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "real-world/complex|parse": {
+      "control_sha256": "de9ea13d52790e48118bb03f575f711f0a722fbbda6d5ca24c2d8cc15895ca91",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "real-world/complex|compile": {
+      "control_sha256": "de9ea13d52790e48118bb03f575f711f0a722fbbda6d5ca24c2d8cc15895ca91",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "real-world/large|render": {
+      "control_sha256": "463265d5a852b696dc011890f857dab9c8e3d10ca67a8d7110f6aeceb7b5ab38",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "real-world/large|parse": {
+      "control_sha256": "463265d5a852b696dc011890f857dab9c8e3d10ca67a8d7110f6aeceb7b5ab38",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "real-world/large|compile": {
+      "control_sha256": "463265d5a852b696dc011890f857dab9c8e3d10ca67a8d7110f6aeceb7b5ab38",
+      "ran": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "jinja2",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/filter-arg|render": {
+      "control_sha256": "1ccef38738d5346459bc2e003caeaded8ba8198acbe544e3ae4929474321aedd",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/filter-arg|parse": {
+      "control_sha256": "1ccef38738d5346459bc2e003caeaded8ba8198acbe544e3ae4929474321aedd",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/filter-arg|compile": {
+      "control_sha256": "1ccef38738d5346459bc2e003caeaded8ba8198acbe544e3ae4929474321aedd",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/i18n|render": {
+      "control_sha256": "f2c431a30e3ae2907cda0339240e6039ed4ace5771a5810676805f91bdadf7d0",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/i18n|parse": {
+      "control_sha256": "f2c431a30e3ae2907cda0339240e6039ed4ace5771a5810676805f91bdadf7d0",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/i18n|compile": {
+      "control_sha256": "f2c431a30e3ae2907cda0339240e6039ed4ace5771a5810676805f91bdadf7d0",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/for-tags|render": {
+      "control_sha256": "6284dad307daea5e8dcb4000ba590ada1471d7f68e025ac9984cb02692c79e57",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/for-tags|parse": {
+      "control_sha256": "6284dad307daea5e8dcb4000ba590ada1471d7f68e025ac9984cb02692c79e57",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/for-tags|compile": {
+      "control_sha256": "6284dad307daea5e8dcb4000ba590ada1471d7f68e025ac9984cb02692c79e57",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/escape-table|render": {
+      "control_sha256": "91dc38ad6f9daba6c522b26821d73d778a4f81d5740303b2f4d7cbf6528b5744",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/escape-table|parse": {
+      "control_sha256": "91dc38ad6f9daba6c522b26821d73d778a4f81d5740303b2f4d7cbf6528b5744",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/escape-table|compile": {
+      "control_sha256": "91dc38ad6f9daba6c522b26821d73d778a4f81d5740303b2f4d7cbf6528b5744",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/realistic|render": {
+      "control_sha256": "72a0693dbb80e085023c8ce1521e4462367e7c2810600c120c5d3fb35a6535ad",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/realistic|parse": {
+      "control_sha256": "72a0693dbb80e085023c8ce1521e4462367e7c2810600c120c5d3fb35a6535ad",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    },
+    "django-only/realistic|compile": {
+      "control_sha256": "72a0693dbb80e085023c8ce1521e4462367e7c2810600c120c5d3fb35a6535ad",
+      "ran": [
+        "django",
+        "rust"
+      ],
+      "agree": [
+        "django",
+        "rust"
+      ],
+      "differ": []
+    }
+  }
+}

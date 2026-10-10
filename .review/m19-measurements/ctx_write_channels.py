@@ -1,4 +1,4 @@
-"""Which Python routes into a *sealed* loop body can write the context?
+"""Which Python routes into a loop body can write the context?
 
 The adversarial reviewer's second round returned `VERDICT: FAIL` with two
 BLOCKING findings against the `may_write_context` fix at `35ff15c`, and both name
@@ -14,8 +14,18 @@ a route the predicate's docstring had argued away:
 
 This probe is the measurement for both, plus the two routes I would have to
 argue about otherwise: an `{% include %}` in the inner body, and whether the
-*frame* route's missing `context.push()` is observable on its own
-(`len(ctx.dicts)`).
+push order is observable on its own (`len(ctx.dicts)`).
+
+**Rows 15-19 are a second question, and the third round is where it was
+answered.** Rows 15-17 measure a *value* holding the context and writing from a
+property or a `__str__` while an `{{ }}` renders; 18-19 are the third round's
+two templates, which reach the same mechanism through the two positions the
+ordered pass at `f79f7c7` did not name. All five used to diverge — 12 of 17
+differed on slice 3 (`e6a72702ba5877cb`), 10 on that pass's gate
+(`b0c073c33ecdfe6c`), 3 on `f79f7c7` itself. **They are 0 now**, not because the
+boundary was widened but because there is no boundary: the walk writes Django's
+per-iteration state for every loop and every read is Django's own (`lib.rs`,
+`Walk::run_loop_body`), so a write from anywhere is visible to a read after it.
 
 Every row is rendered by both engines from the same `Context` object with the
 context stored in itself under `ctx`, and printed with `!r`.  The artifact sha
@@ -146,6 +156,25 @@ CASES = [
         "{% load ctxwrite %}{% for s in holders %}{{ s }}{{ s }}{% endfor %}",
         {"sections": ["old"], "holders": "__HOLDERS__"},
     ),
+    # --- the third round's two templates, verbatim --------------------------
+    # Both are the *same* mechanism as 15-17 — a runtime value holding the
+    # context — reached through the two positions the ordered pass at `f79f7c7`
+    # did not name: the value-side writer inside an `{% if %}` condition, and one
+    # inside an emit with a delegate *after* it. That pass rewrote the read that
+    # follows to the frame and rendered `Zold` / `old` where stock renders `ZX` /
+    # `X`; the gate before it (`b0c073c33ecdfe6c`) rendered both correctly, which
+    # is what made them a regression rather than an unfixed case. These two rows
+    # are the reviewer's, with `Holder.__bool__` added to the class below.
+    (
+        "18 emit's value-side writer, delegate after",
+        "{% load ctxwrite %}{% for s in sections %}{{ holder.s }}{{ s }}{% firstof \"Q\" as ignored %}{% endfor %}",
+        {"sections": ["old"], "holder": "__HOLDER__"},
+    ),
+    (
+        "19 {% if %} condition's writer, delegate after",
+        "{% load ctxwrite %}{% for s in sections %}{% if holder %}{{ s }}{% endif %}{% firstof \"Q\" as ignored %}{% endfor %}",
+        {"sections": ["old"], "holder": "__HOLDER__"},
+    ),
 ]
 
 
@@ -169,6 +198,13 @@ class Holder:
     def __str__(self):
         self._context.set_upward("s", "X")
         return "H"
+
+    def __bool__(self):
+        # The reviewer's third-round template: a truth test, which is the
+        # `{% if %}` condition's own last step and the other position the
+        # ordered pass did not name.
+        self._context.set_upward("s", "X")
+        return True
 
 tpl = {"p.html": "{{ s }}"}
 stock = Engine(libraries=LIBS, loaders=[("django.template.loaders.locmem.Loader", tpl)])

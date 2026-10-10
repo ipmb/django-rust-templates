@@ -619,23 +619,33 @@
       complexity, and the constructs that fall outside the three engines' shared syntax.
       <code>scripts/bench.py --html</code> writes <code>docs/bench.html</code>: charts, a
       table, and the provenance for every row. Each row hashes the bytes each engine
-      rendered — <b>39 of 39 three-engine rows byte-agree</b>, so the comparison is like for
+      rendered — <b>39 of 39 three-engine cells byte-agree, and no cell of the 54 has two
+      engines that ran disagreeing</b>, so the comparison is like for
       like rather than three different templates — and the harness prints the engine it
       built, the extension it loaded and which profile built it, refusing to print a table
       for any other engine. Measured 2026-10-10 local, the day the report stamps its run in
-      UTC (2026-10-10 16:45, regenerated on the tree that carries both repairs): the port is
-      <b>0.41× at render and
-      0.74× at parse</b> on the real-world pages (geometric mean of three pages; the six rows
-      run 0.33×–1.05×), and the worst row in the corpus is compile of a template that is
-      almost nothing but the call — <b>3.45×</b>, 6.76 µs against stock's 1.96 µs. Compatibility has
+      UTC (2026-10-10 17:30, regenerated on the tree that deletes the sealed loop's frame
+      route): the port is
+      <b>0.50× at render and
+      0.82× at parse</b> on the real-world pages (geometric mean of three pages; the six
+      whole-page render rows run 0.42×–1.22×), and the worst row in the corpus is compile of a template that is
+      almost nothing but the call — <b>3.51×</b>, 6.74 µs against stock's 1.92 µs. The three
+      tiles hold to a unit in the second decimal across four runs of that one build
+      (0.50/0.49/0.50/0.50 render, 0.82/0.80/0.82/0.82 parse, 1.36/1.36/1.36/1.37 compile), so
+      they are the build's and not a run's — and the render tile reads <b>0.50× against the
+      0.41×</b> the ordered pass published, which is the cost of that deletion stated where
+      the goal is stated. Compatibility has
       been the priority throughout, and the measurement is published here rather than only
       the number that would flatter it. <b>Every chart, tile and table block states which
       way "better" runs</b>, and the word is read from the payload (<code>bench.py</code>'s
       <code>MODE_METRIC</code>) rather than written into a caption, so a new chart cannot
       inherit the wrong direction silently. The fastest-engine tile is scoped for the same
       reason: counted over every row it used to read "django 19, jinja2 7", which reads as
-      <i>Django is faster</i>, while <b>Jinja2 wins every whole-page render</b> at
-      0.30×–0.42× stock's time. Both are true; <code>parse</code> is where they invert,
+      <i>Django is faster</i>, while <b>Jinja2 is fastest on every whole-page render</b> at
+      0.30×–0.42× stock's time — on the tree before this deletion it was fastest on two of
+      the three, <code>normal</code> being ours at 132.81 µs against Jinja2's 169.84, and
+      this change hands <code>normal</code> back. Both statements are true of this tree;
+      <code>parse</code> is where they invert,
       because Jinja2 compiles to Python source and Django does not.
     </p>
     <p class="sub" style="margin-top:16px">
@@ -1325,10 +1335,16 @@
       <code>..._whose_sequence_can_write_...</code> does the same for both loops of the nested
       shape, where <code>delegated == [("LoadNode", 1)]</code> because <code>{% load %}</code> is
       the only node the walk does not model. A third row counts what no output can show —
-      <code>test_a_read_before_the_delegate_is_served_from_the_frame</code> records every
+      <code>test_every_read_of_the_loop_variable_reaches_the_context</code>, renamed from
+      <code>..._is_served_from_the_frame</code> when the frame route was deleted, records every
       <code>Context.__getitem__</code> in a render and requires the loop variable to be read
-      from the context <b>once</b>, where a body-wide gate and a re-delegation both read it
-      twice. The python unit-test pin moved <b>510 → 512</b>.
+      from the context <b>twice</b> — the read before the delegate and the read after it, and
+      a frame route answers either in Rust and touches the context not at all, which is the
+      count that was <b>one</b> while the ordered pass served the first of them locally.
+      <code>title</code> is the row's own control, drawn from the same render: it is read by
+      the emit and by nothing else, so its count is <b>1</b> on every build and a 0 would mean
+      the instrument never saw the render. The python unit-test pin moved <b>510 → 512</b>
+      with the second round, and <b>512 → 514</b> with the third.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>What the fix costs, in the unit the fix is about.</b> A body that keeps the context
@@ -1362,8 +1378,43 @@
       other modes move inside the ~3% floor that the two control rows (<code>filter-arg</code>,
       <code>i18n</code>) and the stock denominator's own run-to-run spread put on that
       comparison. The row-by-row table is in the fix's own note (§5.4).
-      Acceptance is unmoved: <b>1547 tests, OK (skipped=6)</b>, <b>512</b> python unit tests,
-      <b>787</b> Rust tests, differential harness <b>59</b> cases identical.
+      Acceptance was unmoved at the second round: <b>1547 tests, OK (skipped=6)</b>, <b>512</b>
+      python unit tests,
+      <b>787</b> Rust tests, differential harness <b>59</b> cases identical. The counts for the
+      tree this page now describes are at the end of the next paragraph, because the third round
+      moved them.
+    </p>
+    <p class="sub" style="margin-top:16px">
+      <b>The page is regenerated on the tree that deletes the frame, and the goal moved with
+      it.</b> <code>docs/bench.html</code> is re-rendered from the run of record with the
+      benchmark's own renderer — <code>bench_report.render</code>, the function
+      <code>bench.py --html</code> calls — so the page is the instrument's output and not a
+      hand-assembled reading of it. Its tiles read <b>0.50× at render, 0.82× at parse, 1.36× at
+      compile</b> against the ordered pass's 0.41× / 0.74× / 1.36×: the deletion gives back
+      <b>0.09 of the render advantage</b> and most of parse's margin, while compile — a one-off —
+      is untouched, which is the shape a per-iteration price predicts. Four runs of that one build
+      put the tiles at 0.50/0.49/0.50/0.50, 0.82/0.80/0.82/0.82 and 1.36/1.36/1.36/1.37, so the
+      tiles are the build's and not a run's. The six whole-page render rows now run
+      <b>0.42×–1.22×</b> of stock, and <code>real-world/large</code> parse <b>crosses to
+      1.135×</b> — above parity, where the ordered pass had it at 1.046×. <b>Jinja2 is fastest on
+      every whole-page render</b> (normal 173.07 against our 197.51 µs; large 201.14 / 282.23;
+      complex 341.34 / 524.97), where on the tree before this change we won
+      <code>normal</code> at 132.81 against 169.84. <b>That is the project's stated goal — faster
+      than Jinja2 — moving away on this change</b>, and it is stated here rather than left for a
+      reader of the page to notice. The corpus counts behind those deltas were
+      <i>counted</i>, not inferred: every loop of every measured row is run by the walk with
+      <b>0 delegated</b> — <code>complex</code>'s thirteen included — and our context reads equal
+      stock's <b>exactly</b> (257/276/370/101/151/251), so the two rows that did not move did so
+      because the ordered pass was already writing their state, not because the walk skips them.
+      Acceptance on this tree: <b>1547 tests OK (skipped=6)</b>, the six skips by identity,
+      <b>514</b> python unit tests, <b>787</b> Rust tests, differential harness
+      <b>59</b> cases identical, and the benchmark's 54 cells with no cell in which any two
+      engines that ran disagree. The page's own provenance line names the build the numbers
+      were taken on (<code>f921c593cf7338ab</code>) and the tree builds to
+      <code>32ee8d6cb88bcd86</code>; the 86 bytes between them are a UUID, six embedded
+      source-line fields and the two code-signature pages over them, with <b>zero</b> bytes
+      differing in the binary's text and segment — measured by diffing the two images, and
+      written up in the record's §7.1.
     </p>
     <p class="sub" style="margin-top:16px">
       <b>Until M18 it was a substitution, and that machinery is gone.</b> Earlier revisions of

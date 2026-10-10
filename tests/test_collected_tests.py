@@ -688,7 +688,51 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # and no row is renamed or deleted — 510 + 2 = 512.
 #
 # Counts at close: 512 collected, proxy and discovery agreeing.
-PINNED = 512
+#
+# 512 → 514 is **+2**, and it is the third adversarial round's two BLOCKING
+# findings against *that* ordered pass — the same defect the 510 → 512 paragraph
+# is about, reached one position over in the same body. Both findings are "an
+# `Act` this walk owns can run Python that writes the context, and the pass's
+# boundary set did not name it": a **value-side writer inside an emit**
+# (`{{ holder.s }}`, a property that holds the context), and an **`{% if %}`
+# condition** (the same chain plus `__bool__`/`__len__`). The round's verdict was
+# FAIL, and its second BLOCKING finding said explicitly that widening the set to
+# "every Python-capable `Act::Emit`" would be *insufficient* — which is what
+# settled the repair.
+#
+# **The repair is a deletion, not a wider boundary.** No set can be complete:
+# what moves the loop variable is a runtime value holding the context, which is a
+# property of the value and not of a node kind. So the walk stopped eliding
+# Django's per-iteration state entirely (`Walk::run_loop_body`), the frame route
+# and everything that fed it went with it (`Head`'s `local` flag, `Frame`,
+# `FrameTarget`, `resolve_local`, `rewrite_body`, `rewrite_head`,
+# `delegate_slot`, `write_frame`), and every read is now `Context.__getitem__`.
+# This file's rows move with the *rule* rather than the argument:
+#   * `test_a_read_before_the_delegate_is_served_from_the_frame` is **renamed**
+#     to `test_every_read_of_the_loop_variable_reaches_the_context` and its
+#     subject moves 1 → 2: the row that used to pin where the frame window
+#     stopped now pins the window's absence, which is the same instrument read
+#     the other way;
+#   * `test_a_value_side_writer_inside_an_emit_is_visible_to_a_later_read` — the
+#     reviewer's first template verbatim, expecting `ZX` where the pass at
+#     `f79f7c7` rendered `Zold` and the gate before it (`b0c073c33ecdfe6c`)
+#     rendered `ZX`;
+#   * `test_a_value_side_writer_inside_an_if_condition_is_visible_to_a_later_read`
+#     — the reviewer's second template, expecting `X` where the pass rendered
+#     `old`.
+# The two new rows name the *mechanism* and the reviewer's templates name the
+# *symptom*; the probe carries both templates too
+# (`.review/m19-measurements/ctx_write_channels.py` rows 18-19), which is where
+# the class's whole history is measured — 12 of 17 rows differed on slice 3, 10
+# on the pass's gate, 3 on `f79f7c7`, and **0 of 19** now.
+# Measured the other way, as this ledger's rule asks: `git diff -U0 tests/` adds
+# **2** `def test_` lines, removes none, and renames one (a rename is neither, so
+# the count moves by the additions alone), and no module gains a row but this one
+# (`test_collected_tests.py`'s own pin moves with it, which is this paragraph) —
+# 512 + 2 = 514.
+#
+# Counts at close: 514 collected, proxy and discovery agreeing.
+PINNED = 514
 
 
 def collected() -> unittest.TestSuite:

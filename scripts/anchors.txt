@@ -53,7 +53,7 @@ crates/template-py/src/lib.rs:2149	crates/template-py/src/lib.rs	2149	-	let resu
 crates/template-py/src/lib.rs:2170	crates/template-py/src/lib.rs	2170	-	Python::attach(|py| self.dir(py, bit))	-
 crates/template-py/src/lib.rs:2716-2717	crates/template-py/src/lib.rs	2716	2717	fn resolve(py: Python<'_>, path: &str, context: Py<PyAny>) -> PyResult<Py<PyAny>> {	let desc = match template_core::parser::variable::parse_variable(path) {
 crates/template-py/src/lib.rs:2773-2778	crates/template-py/src/lib.rs	2773	2778	fn resolve_lookups(	resolve_components(py, &lookups, context)
-crates/template-py/src/lib.rs:5038	crates/template-py/src/lib.rs	5038	-	fn render_value_in_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {	-
+crates/template-py/src/lib.rs:4573	crates/template-py/src/lib.rs	4573	-	-	-
 global_settings.py:676	django/conf/global_settings.py	676	-	URLIZE_ASSUME_HTTPS = False	-
 layermapping.py:12	django/contrib/gis/utils/layermapping.py	12	-	from decimal import InvalidOperation as DecimalInvalidOperation	-
 layermapping.py:419	django/contrib/gis/utils/layermapping.py	419	-	except DecimalInvalidOperation:	-
@@ -159,7 +159,6 @@ base.py:805-820	django/template/base.py	805	820	if getattr(func, "expects_localt
 base.py:806-807	django/template/base.py	806	807	-	-
 base.py:806-809	django/template/base.py	806	809	arg_vals.append(mark_safe(arg))	-
 base.py:807	django/template/base.py	807	-	arg_vals.append(mark_safe(arg))	-
-base.py:809	django/template/base.py	809	-	arg.resolve(context)	-
 base.py:810-811	django/template/base.py	810	811	if getattr(func, "expects_localtime", False):	-
 base.py:810-815	django/template/base.py	810	815	if getattr(func, "needs_autoescape", False):	-
 base.py:811	django/template/base.py	811	-	obj = template_localtime(obj, context.use_tz)	-
@@ -844,7 +843,6 @@ django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	29
 django_suite/run.py:85	django_suite/run.py	85	-	-	-
 django_suite/template_tests/syntax_tests/test_for.py:334	django_suite/template_tests/syntax_tests/test_for.py	334	-	ForNode.render() pops the values it pushes to the context (#28001).	-
 django_suite/template_tests/test_partials.py:14	django_suite/template_tests/test_partials.py	14	-	engines["django"]	-
-crates/template-py/src/lib.rs:5084	crates/template-py/src/lib.rs	5084	-	fn get_item(&self, bit: &str) -> Step {	-
 engine/base.py:819-832	python/django_rust_templates/engine/base.py	819	832	except VariableDoesNotExist:	-
 engine/base.py:868-874	python/django_rust_templates/engine/base.py	868	874	for func, args in self.filters:	-
 python/django_rust_templates/engine/base.py:889	python/django_rust_templates/engine/base.py	889	-	names.get(func)	-
@@ -856,19 +854,18 @@ engine/base.py:1288-1296	python/django_rust_templates/engine/base.py	1288	1296	-
 engine/base.py:1308	python/django_rust_templates/engine/base.py	1308	-	if type(value) is int and (	-
 engine/base.py:1351-1354	python/django_rust_templates/engine/base.py	1351	1354	except UnicodeDecodeError:	-
 python/django_rust_templates/engine/base.py:1356	python/django_rust_templates/engine/base.py	1356	-	render_value_in_context(output, context)	-
-engine/defaulttags.py:193-258	python/django_rust_templates/engine/defaulttags.py	193	258	def render(self, context):	-
+engine/defaulttags.py:193-258	python/django_rust_templates/engine/defaulttags.py	193	258	-	-
 engine/defaulttags.py:194-198	python/django_rust_templates/engine/defaulttags.py	194	198	with context.push():	-
-engine/defaulttags.py:194-197	python/django_rust_templates/engine/defaulttags.py	194	197	-	-
+engine/defaulttags.py:194-197	python/django_rust_templates/engine/defaulttags.py	194	197	parentloop = context["forloop"]	-
 engine/defaulttags.py:198	python/django_rust_templates/engine/defaulttags.py	198	-	with context.push():	-
 engine/defaulttags.py:198-206	python/django_rust_templates/engine/defaulttags.py	198	206	return self.nodelist_empty.render(context)	-
 engine/defaulttags.py:198-199	python/django_rust_templates/engine/defaulttags.py	198	199	-	-
+engine/defaulttags.py:199	python/django_rust_templates/engine/defaulttags.py	199	-	values = self.sequence.resolve(context, ignore_failures=True)	-
 engine/defaulttags.py:204	python/django_rust_templates/engine/defaulttags.py	204	-	len_values = len(values)	-
-engine/defaulttags.py:208-216	python/django_rust_templates/engine/defaulttags.py	208	216	loop_dict = context["forloop"] = {	-
-engine/defaulttags.py:214-217	python/django_rust_templates/engine/defaulttags.py	214	217	-	-
-engine/defaulttags.py:214-227	python/django_rust_templates/engine/defaulttags.py	214	227	-	-
-engine/defaulttags.py:220-221	python/django_rust_templates/engine/defaulttags.py	220	221	i + 1	-
-engine/defaulttags.py:220-227	python/django_rust_templates/engine/defaulttags.py	220	227	loop_dict["counter0"] = i	-
-engine/defaulttags.py:248	python/django_rust_templates/engine/defaulttags.py	248	-	context[self.loopvars[0]] = item	-
+engine/defaulttags.py:205-214	python/django_rust_templates/engine/defaulttags.py	205	214	-	-
+engine/defaulttags.py:214-229	python/django_rust_templates/engine/defaulttags.py	214	229	-	-
+engine/defaulttags.py:220-227	python/django_rust_templates/engine/defaulttags.py	220	227	-	-
+engine/defaulttags.py:248	python/django_rust_templates/engine/defaulttags.py	248	-	self.loopvars[0]	-
 engine/defaulttags.py:324-337	python/django_rust_templates/engine/defaulttags.py	324	337	-	-
 engine/defaulttags.py:329-330	python/django_rust_templates/engine/defaulttags.py	329	330	except VariableDoesNotExist:	-
 engine/defaulttags.py:337	python/django_rust_templates/engine/defaulttags.py	337	-	-	-

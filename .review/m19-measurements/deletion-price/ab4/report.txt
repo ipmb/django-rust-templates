@@ -1,0 +1,74 @@
+########## family
+--- ours, render
+label                         prefix med  fixed med  sep delta  paired med  paired min  paired max  p drift  f drift   (12 runs a side)
+A1                               156.357    168.957    +12.600     +12.428      +8.884     +30.318    1.90%   12.58%   MOVE
+A2                               173.212    192.605    +19.393     +20.171     +16.853     +23.016    1.92%    3.55%   MOVE
+A4                               204.229    243.444    +39.216     +39.197     +37.283     +43.984    2.62%    3.82%   MOVE
+B1                                19.220     43.656    +24.436     +24.036     +23.134     +24.923    5.52%    3.90%   MOVE
+B2                                34.515     67.107    +32.592     +32.711     +31.295     +34.561    4.83%    3.92%   MOVE
+B4                                64.480    114.298    +49.818     +50.499     +46.739     +51.880    3.06%    4.88%   MOVE
+C                                139.884    141.124     +1.241      +1.421      -0.113      +3.866    1.94%    2.40%   
+D                                  3.851     18.235    +14.383     +14.360     +14.170     +14.612    2.51%    2.31%   MOVE
+   no-delegate loops (a `{% for %}` pays them, so they carry the push order): B1 +24.036  B2 +32.711  B4 +50.499  D +14.360
+   no-loop control (this change cannot touch it): C +1.421 us
+   subject min 12.428 us   push-order floor (D: one loop, no reads) +14.360 us
+   per-read: A1/50 = +0.2486 us; slope over k = +0.1801 us/read; intercept +2.915 us (the include is in both builds)
+
+--- ours, parse
+label                         prefix med  fixed med  sep delta  paired med  paired min  paired max  p drift  f drift   (12 runs a side)
+A1                               188.479    199.363    +10.884     +11.509      +8.056     +15.915    2.91%    1.96%   MOVE
+A2                               208.860    229.019    +20.160     +19.793      +9.212     +21.874    5.54%    2.09%   MOVE
+A4                               246.560    285.093    +38.533     +38.509     +36.124     +44.063    1.57%    2.99%   MOVE
+B1                                38.832     63.431    +24.599     +24.538     +23.788     +26.264    2.49%    4.08%   MOVE
+B2                                57.697     90.830    +33.132     +32.892     +32.310     +34.523    3.13%    3.23%   MOVE
+B4                                95.204    146.058    +50.854     +50.744     +47.898     +52.815    2.42%    2.58%   MOVE
+C                                164.924    166.328     +1.404      +1.437      -0.108      +5.365    1.17%    3.48%   
+D                                 18.800     33.249    +14.449     +14.460     +13.783     +15.120    4.66%    3.38%   MOVE
+   no-delegate loops (a `{% for %}` pays them, so they carry the push order): B1 +24.538  B2 +32.892  B4 +50.744  D +14.460
+   no-loop control (this change cannot touch it): C +1.437 us
+   subject min 11.509 us   push-order floor (D: one loop, no reads) +14.460 us
+   per-read: A1/50 = +0.2302 us; slope over k = +0.1810 us/read; intercept +2.151 us (the include is in both builds)
+
+--- ours, compile
+label                         prefix med  fixed med  sep delta  paired med  paired min  paired max  p drift  f drift   (12 runs a side)
+A1                                24.392     24.412     +0.020      -0.012      -0.747      +0.404    2.91%    2.56%   
+A2                                28.383     27.914     -0.469      -0.410      -0.876      +0.447    2.98%    3.93%   
+A4                                36.036     35.825     -0.212      -0.256      -0.912      +0.009    2.20%    1.69%   
+B1                                17.506     17.428     -0.079      -0.061      -0.638      +0.113    2.60%    2.13%   
+B2                                21.360     21.304     -0.056      -0.062      -0.362      +0.149    1.49%    2.43%   
+B4                                28.801     28.660     -0.141      -0.075      -0.409      +0.213    2.23%    1.42%   
+C                                 20.430     20.316     -0.114      -0.091      -0.444      +0.613    4.05%    3.28%   
+D                                 13.537     13.410     -0.127      -0.131      -0.321      +0.261    3.19%    3.42%   
+   no-delegate loops (a `{% for %}` pays them, so they carry the push order): B1 -0.061  B2 -0.062  B4 -0.075  D -0.131
+   no-loop control (this change cannot touch it): C -0.091 us
+   subject min 0.012 us   push-order floor (D: one loop, no reads) -0.131 us
+   per-read: A1/50 = -0.0002 us; slope over k = -0.0012 us/read; intercept -0.089 us (the include is in both builds)
+
+########## corpus
+--- ours, render
+label                         prefix med  fixed med  sep delta  paired med  paired min  paired max  p drift  f drift   (12 runs a side)
+django-only/realistic           1002.663   1027.308    +24.645     +22.770      +5.847     +40.073    2.32%    3.35%   MOVE
+real-world/complex               524.255    524.163     -0.093      -3.788     -14.323      +7.865    2.82%    4.27%   
+django-only/filter-arg           487.862    535.346    +47.484     +49.183     +36.330     +59.221    4.75%    3.39%   MOVE
+django-only/i18n                 385.205    386.105     +0.900      +0.205      -7.247     +17.551    2.24%    5.27%   
+real-world/normal                135.567    201.386    +65.818     +65.649     +62.213     +68.783    2.66%    2.56%   MOVE
+real-world/large                 228.085    275.406    +47.321     +46.078     +39.770     +54.193    6.69%    3.97%   MOVE
+
+--- ours, parse
+label                         prefix med  fixed med  sep delta  paired med  paired min  paired max  p drift  f drift   (12 runs a side)
+django-only/realistic           1154.477   1176.397    +21.920     +17.520      -4.456     +43.247    1.82%    3.40%   
+real-world/complex               674.184    675.074     +0.890      -1.662     -21.339      +7.143    2.28%    3.62%   
+django-only/filter-arg           565.493    612.887    +47.394     +43.326     +35.661     +55.526    1.89%    3.53%   MOVE
+django-only/i18n                 461.521    464.676     +3.154      +2.631      -8.290      +9.692    2.29%    3.06%   
+real-world/normal                324.422    388.212    +63.790     +63.709     +57.540     +69.953    2.18%    3.03%   MOVE
+real-world/large                2324.718   2383.281    +58.562     +49.997      +6.948     +94.598    3.29%    2.53%   MOVE
+
+--- ours, compile
+label                         prefix med  fixed med  sep delta  paired med  paired min  paired max  p drift  f drift   (12 runs a side)
+django-only/realistic            116.424    116.238     -0.187      -0.193      -2.278      +1.104    1.73%    3.32%   
+real-world/complex               115.257    114.424     -0.832      -0.995      -2.837      +1.399    2.62%    2.59%   
+django-only/filter-arg            54.004     53.617     -0.387      -0.700      -2.293      +1.496    3.24%    5.74%   
+django-only/i18n                  57.031     56.775     -0.256      -0.231      -0.795      +0.788    1.98%    2.36%   
+real-world/normal                168.590    167.477     -1.113      -1.041      -3.646      +4.300    2.88%    2.93%   
+real-world/large                2072.426   2071.377     -1.048      -7.138     -34.579     +68.053    2.04%    4.19%   
+
