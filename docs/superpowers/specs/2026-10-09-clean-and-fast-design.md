@@ -514,6 +514,21 @@ What this milestone adds:
    browser reports and that a diff of the *generated* file does not make obvious,
    because the generated file is not the one anybody reads. Both are now generated
    from `SERIES_LIGHT`/`SERIES_DARK`, and `render` refuses any `@…@` left over.
+9. **The two modes are not interchangeable when the cost is lazy, and the pair
+   is what a slice reports.** `measure` builds its callable once per row: render
+   renders a pre-compiled handle, parse calls `from_string` every iteration. A
+   cost paid **once per template, per compile** is therefore amortised over
+   `iters` in one mode and paid `iters` times in the other, and **`render` is the
+   mode that cannot see it**. M19 measured this the hard way: the filter-routing
+   cache's first version had no guard, and `real-world/large` render sat flat at
+   866.6/870.8 against a 860.1/865.4 baseline while its parse row — the same
+   workload, ~300 expressions and not one filter — went 2900.5/2900.1 to
+   3113.6/3468.6 µs. One `if self.filters:` guard returned both to flat.
+   **Flat-in-render alone is ambiguous** between "the cost is free in this mode"
+   and "the change did nothing", and that ambiguity is not incidental: it is what
+   made the first version look like a success. Only the *pair* discriminates, so
+   a slice that reports its render number and not its parse number is reporting
+   the mode chosen to hide its cost (§5 step 2).
 
 The three-engine wiring, the corpus's intersection argument, the equality gate and
 the identity check are **not** re-specified here — §0's correction.
@@ -540,6 +555,13 @@ the identity check are **not** re-specified here — §0's correction.
    by its author is a description. One number, printed beside the prediction, on
    the first slice that makes it checkable — not at the end of the step, when the
    walk is already the shape that produced it.
+   **And the slice reports the render/parse *pair*, not the render row (§4 item
+   9), because this step is the hazard's largest instance.** "Build a structure
+   once, walk it many times" — a flat plan, a jump table, a compiled node form —
+   is the same shape as the filter-routing cache at a bigger scale: every such
+   structure is built on first render, amortised over `iters` in render mode, and
+   paid every iteration in parse mode. A slice reporting only its render number
+   is reporting the mode that cannot falsify the cost it just added.
 3. **`LookupTarget` takes `py`.** The signature change across `template-core`
    that removes the per-method `Python::attach` (§3.1 item 2). Its own step
    because it touches a trait the whole walk is written against, and because
