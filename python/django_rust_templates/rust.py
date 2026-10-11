@@ -72,6 +72,13 @@ from django_rust_templates.engine.engine import Engine
 from django_rust_templates.engine.exceptions import TemplateDoesNotExist
 from django_rust_templates.engine.library import InvalidTemplateLibrary
 
+# Imported for its import side effect, which is a capture: `engine/_stock.py` records the two
+# `Template` methods the native include slot stands in for, and it has to record them **before**
+# anything can rebind them, because a later read would agree with the rebind. This module is the
+# one door into the package — `EngineHandler` resolves it before a template is loaded — so
+# naming it here is the earliest moment the engine exists at all. See `_stock.py`.
+from django_rust_templates.engine import _stock  # noqa: F401
+
 __all__ = ("RustTemplates", "Template")
 
 

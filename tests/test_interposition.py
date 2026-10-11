@@ -30,7 +30,12 @@ import sys
 import tempfile
 import unittest
 
-from django_rust_templates.engine import Context, Engine, Template
+from django_rust_templates.engine import (
+    Context,
+    Engine,
+    Template,
+    TemplateDoesNotExist,
+)
 from django_rust_templates.engine.context import RenderContext
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -4879,6 +4884,91 @@ class IncludeCleanupTests(unittest.TestCase):
                     self._render_both_pops(source)
                 self.assertIsInstance(caught.exception.__context__, ValueError)
 
+    class PopWithItsOwnReason(Context):
+        """A ``pop`` whose failure already carries a reason of its own.
+
+        ``RuntimeError`` comes out of an ``except KeyError`` block, so Python hangs the
+        ``KeyError`` under it before ``pop`` returns — and the ``KeyError`` is where the
+        include's own failure belongs, because the include's failure is what was
+        travelling when the ``KeyError`` was raised.
+        """
+
+        def pop(self):
+            super().pop()
+            try:
+                {}["missing"]
+            except KeyError:
+                raise RuntimeError("pop failed")
+
+    def _render_through_a_failing_target(self, source):
+        """The include's own render fails, and the unwinding ``pop`` fails too."""
+        engine = Engine(
+            loaders=[
+                (
+                    "django_rust_templates.engine.loaders.locmem.Loader",
+                    {"a.html": '{% include "nowhere.html" %}'},
+                ),
+            ],
+        )
+        context = self.PopWithItsOwnReason({"which": "a.html"})
+        return engine.from_string(source).render(context)
+
+    def test_a_cleanup_failure_keeps_the_chain_python_built(self):
+        """The render's failure goes **under** the chain, not on top of it.
+
+        ``PopWithItsOwnReason`` raises out of an ``except KeyError``, so the
+        ``RuntimeError`` the caller sees already has ``KeyError`` as its
+        ``__context__``, and that ``KeyError`` is the exception that was travelling when
+        the include's target failed. Hanging the render's failure on the ``RuntimeError``
+        instead — which is what setting the context unconditionally does — throws the
+        ``KeyError`` away: measured, this file produced ``RuntimeError →
+        TemplateDoesNotExist`` where Django produces ``RuntimeError → KeyError →
+        TemplateDoesNotExist``.
+
+        Both rows are the same shape and differ only in which engine owns the unwinding:
+        a literal name is the slot's, a bare one is ``IncludeNode.render``'s. The rows
+        above assert *which* exception leaves; this one asserts what is underneath it.
+        """
+        for source in ['{% include "a.html" %}', "{% include which %}"]:
+            with self.subTest(source=source):
+                with self.assertRaises(RuntimeError) as caught:
+                    self._render_through_a_failing_target(source)
+                chain = _context_chain(caught.exception)
+                reasons = [error for error in chain if isinstance(error, KeyError)]
+                self.assertEqual(
+                    len(reasons),
+                    1,
+                    f"expected one KeyError in {[type(e).__name__ for e in chain]}",
+                )
+                self.assertIsInstance(reasons[0].__context__, TemplateDoesNotExist)
+                self.assertIsNone(reasons[0].__context__.__context__)
+
+
+class _MethodShaped:
+    """Something that answers ``__func__`` and ``__self__`` without being a method.
+
+    The two names are ordinary attributes, so carrying the right function and the right
+    receiver is a claim, not a proof: this object is not what ``target.render`` looks up,
+    it is what someone put in the way of it. ``__call__`` answers ``FAKE``, which is what
+    Django returns and what a slot reading only the shape would skip.
+    """
+
+    def __init__(self, function, receiver):
+        self.__func__ = function
+        self.__self__ = receiver
+
+    def __call__(self, context):
+        return "FAKE"
+
+
+def _context_chain(error):
+    """``error`` and everything ``__context__`` leads to, in order."""
+    chain = []
+    while error is not None and error not in chain:
+        chain.append(error)
+        error = error.__context__
+    return chain
+
 
 class _Loud(Template):
     """A target class whose ``render`` never reaches ``Template.render``."""
@@ -5053,6 +5143,67 @@ class IncludeProtocolTests(unittest.TestCase):
         self.assertEqual(output, "HOOK")
         self.assertIn("IncludeNode", delegated)
         self.assertNotIn("IncludeNode", handled)
+
+    def test_a_method_shaped_callable_is_not_a_method(self):
+        """The two names are attributes, so a claim to them is not the same as being it.
+
+        ``_MethodShaped`` carries ``Template.render`` as ``__func__`` and this target as
+        ``__self__``, which is exactly what a bound method of the right function on the
+        right object answers — and it is not one. Reading the pair without asking what
+        kind of object answered claims the target and renders its plan: measured, the slot
+        returned the template's own ``x`` where ``IncludeNode.render``'s
+        ``template.render(context)`` returns ``FAKE``.
+        """
+        self.assertEqual(self._render()[0], "x")
+        target = self._cached_target()
+        target.render = _MethodShaped(Template.render, target)
+
+        output, handled, delegated = self._render()
+        self.assertEqual(output, "FAKE")
+        self.assertIn("IncludeNode", delegated)
+        self.assertNotIn("IncludeNode", handled)
+
+    def test_a_rebound_render_is_not_the_implementation_the_slot_reproduces(self):
+        """The pair is the one ``engine/_stock.py`` captured, not whatever the class says.
+
+        Rebinding ``Template.render`` to a wrapper that adds brackets makes every stock
+        template's ``render`` something this slot does not reproduce. A check that reads
+        the class attribute again per render agrees with the wrapper and claims the target
+        anyway: measured, the slot rendered ``[x]`` where the wrapper is what Django would
+        have run, twice, for ``[[x]]``.
+
+        The control is the delegated row under it — the same rebind, the same template, and
+        the include going through ``IncludeNode.render`` either way.
+        """
+        self.addCleanup(setattr, Template, "render", Template.render)
+        self.assertEqual(self._render()[0], "x")
+
+        original = Template.render
+
+        def bracketed(self, context):
+            return "[" + original(self, context) + "]"
+
+        Template.render = bracketed
+
+        output, handled, delegated = self._render()
+        self.assertEqual(output, "[[x]]")
+        self.assertIn("IncludeNode", delegated)
+        self.assertNotIn("IncludeNode", handled)
+
+        controlled, _, _ = self._render_source("{% include which %}", {"which": "a.html"})
+        self.assertEqual(controlled, "[[x]]")
+
+    def _render_source(self, source, context):
+        """``_render``, for a source and context this class's ``setUp`` did not make."""
+        from django_rust_templates import _native
+
+        template = self.engine.from_string(source)
+        _native.census_start()
+        try:
+            output = template.render(Context(context))
+        finally:
+            handled, delegated, _, _, _ = _native.census_take()
+        return output, dict(handled), dict(delegated)
 
 
 class IncludeRecursionTests(unittest.TestCase):

@@ -2561,11 +2561,43 @@ impl<'py> ContextLayers<'py> {
 
 /// Report `error` as the failure that leaves, chaining the one it replaced onto it as
 /// `__context__` — a `finally` that raises does not erase the exception travelling through it, it
-/// makes that exception the new one's context (CPython's `_PyErr_SetObject`). Dropping the replaced
-/// error instead would lose it from every traceback that reports the survivor.
+/// makes that exception the new one's context (CPython's `_PyErr_SetObject`, which writes it at the
+/// moment the new exception is raised, while the old one is the topmost handled exception).
+///
+/// **At the end of `error`'s own chain, not on top of it.** The call that raised is Python's, and
+/// Python may already have chained something onto what it raised before returning it here: a
+/// `pop()` that catches `KeyError` and raises `RuntimeError` runs with the travelling exception
+/// active, so CPython hangs `KeyError` — which itself already carries the render's failure — under
+/// the `RuntimeError`, and the `KeyError` is what the render's error belongs under, not the top.
+/// Setting it on top instead is measured: this file chained `RuntimeError → TemplateDoesNotExist`
+/// where delegation chains `RuntimeError → KeyError → TemplateDoesNotExist`. Appending puts the
+/// travelling exception where it chronologically is, which reproduces both shapes.
+///
+/// The one case not reproduced is that Python's own `__exit__` machinery leaves the travelling
+/// exception where it lies rather than re-raising it, so the chain never repeats itself; the walk
+/// appends at the end of every failure it supersedes, and stops rather than loop if the chain
+/// closes on itself.
 fn supersede(last: &mut Option<PyErr>, error: PyErr, py: Python<'_>) {
-    if let Some(previous) = last.take() {
-        error.set_context(py, Some(previous));
+    let Some(previous) = last.take() else {
+        *last = Some(error);
+        return;
+    };
+    // The cursor walks to the tail and writes there; `error` is what leaves. `clone_ref` is a second
+    // reference to the same exception, so a write through the cursor is a write to `error`.
+    let mut cursor = error.clone_ref(py);
+    loop {
+        match cursor.context(py) {
+            None => {
+                cursor.set_context(py, Some(previous));
+                break;
+            }
+            Some(next) => {
+                if next.value(py).is(previous.value(py)) {
+                    break;
+                }
+                cursor = next;
+            }
+        }
     }
     *last = Some(error);
 }
@@ -3382,11 +3414,11 @@ struct Walk<'py> {
     /// is holding, the ordinal `NodeList.render`'s `"".join` would name for it.
     nodes: usize,
     census: Option<Census>,
-    /// `render` and `_render` as [`stock_pair`] reads them — the two functions an included
-    /// target must still answer to. `None` when they could not be read, in which case every include
-    /// declines. See [`Walk::renders_the_plan_in_place`], which is the only thing standing between
-    /// an include and rendering a target whose `render` is not what the slot is standing in for.
-    bypassed: Option<(Py<PyAny>, Py<PyAny>)>,
+    /// The implementations an included target must still answer to, read once per process by
+    /// [`stock`]. `None` when they could not be read, in which case every include declines. See
+    /// [`Walk::renders_the_plan_in_place`], which is the only thing standing between an include and
+    /// rendering a target whose `render` is not what the slot is standing in for.
+    bypassed: Option<&'static Stock>,
 }
 
 impl<'py> Walk<'py> {
@@ -3804,26 +3836,40 @@ impl<'py> Walk<'py> {
     /// object. That pair of reads replaces the type resolution and the `__dict__` check between
     /// them, because it asks about both at once.
     ///
-    /// **Against [`stock_pair`]'s pair, not the walk's own template's class.** A walk entered
-    /// through a subclass's `render` wrapper is not standing in for that wrapper, and neither is one
-    /// that took the pair from whatever `render_context.template` happens to be.
+    /// **A genuine bound method, not something shaped like one.** `__func__` and `__self__` are
+    /// ordinary attributes: an object carrying the right function and the right receiver without
+    /// being that method answers this test and renders something else — measured, one whose call
+    /// returned `"FAKE"` where stock Django returned the template's own `"x"`. The type of the
+    /// lookup's result is therefore checked first, against `types.MethodType`, which cannot be
+    /// subclassed, so an exact test is the whole question.
     ///
-    /// **Refusal is the answer when it cannot be given.** No pair read at entry, or a name that does
-    /// not resolve to a bound method, declines. Declining is a lost optimisation, never a different
-    /// string.
+    /// **Against [`Stock`]'s pair, not the walk's own template's class.** A walk entered through a
+    /// subclass's `render` wrapper is not standing in for that wrapper, and neither is one that
+    /// took the pair from whatever `render_context.template` happens to be — measured, one pair of
+    /// brackets where Django writes two. And against the pair as *[`stock`] captured it* rather
+    /// than as the class spells it now, so that a rebind of either name declines instead of being
+    /// followed.
+    ///
+    /// **Refusal is the answer when it cannot be given.** No pair read at entry, or a name that
+    /// does not resolve to a bound method of the right function on this object, declines.
+    /// Declining is a lost optimisation, never a different string.
     fn renders_the_plan_in_place(&self, target: &Bound<'py, PyAny>) -> PyResult<bool> {
-        let Some((render_fn, plan_fn)) = &self.bypassed else {
+        let Some(stock) = self.bypassed else {
             return Ok(false);
         };
-        for (name, stock) in [("render", render_fn), ("_render", plan_fn)] {
+        let method_type = stock.method_type.bind(self.py);
+        for (name, implementation) in [("render", &stock.render), ("_render", &stock.plan)] {
             let Ok(bound) = target.getattr(name) else {
                 return Ok(false);
             };
+            if !bound.get_type().is(method_type) {
+                return Ok(false);
+            }
             let (Ok(func), Ok(this)) = (bound.getattr("__func__"), bound.getattr("__self__"))
             else {
                 return Ok(false);
             };
-            if !func.is(stock.bind(self.py)) || !this.is(target) {
+            if !func.is(implementation.bind(self.py)) || !this.is(target) {
                 return Ok(false);
             }
         }
@@ -4042,11 +4088,11 @@ fn render_plan(
         } else {
             None
         },
-        // The two functions an included target is claimed to still render through, read from this
-        // package's own `Template` — see [`stock_pair`]. Read per walk and not once per process,
-        // so a rebind of either name between two renders is honoured; `None` if either cannot be
-        // read, which declines every include for this render and nothing else.
-        bypassed: stock_pair(py),
+        // The two functions an included target is claimed to still render through, from
+        // [`Stock`] — read once per process, so a rebind of either name is declined rather than
+        // followed. `None` if `_stock.py` could not be read, which declines every include for this
+        // render and nothing else.
+        bypassed: stock(py),
     };
     walk.run(&plan.slots, 0)?;
     if let Some(census) = walk.census.take() {
@@ -4097,30 +4143,42 @@ fn render_value_in_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 /// `SafeString("")` 0.072 µs, and on a walked template it is paid once per render.
 static SAFE_STRING: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 
-/// This package's own `Template`, cached once — the class whose `render` and `_render` an include
-/// slot stands in for.
+/// What an include slot reproduces, read from Python **once per process**.
 ///
-/// **Not the class of the template that started the walk**, which is what
-/// [`Walk::renders_the_plan_in_place`] used to compare against and why it was wrong: a walk entered
-/// through a subclass whose `render` wraps `super().render(...)` stands in for `Template.render`,
-/// and claiming an include of that same subclass skips the wrapper — one pair of brackets where
-/// Django writes two. The stock class is the only implementation the slot reproduces, so it is the
-/// only one a target may be compared against.
+/// `render` and `_render` are the implementations the walk stands in for: an include target may be
+/// claimed only while those two names still resolve to these two objects. See
+/// [`Walk::renders_the_plan_in_place`].
 ///
-/// The class is cached because it cannot be replaced; its two attributes are read again per walk,
-/// so a rebind of either between two renders is honoured.
-static STOCK_TEMPLATE: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+/// **Captured in Python, at import, because only Python can answer "what did the class say
+/// first".** Reading `Template.render` again per walk follows a rebind rather than noticing it — a
+/// template whose class has had `render` replaced by a wrapper that adds brackets rendered `[x]`
+/// through this slot where stock Django renders `[[x]]`, and a per-walk read of the class attribute
+/// agreed with the wrapper. `engine/_stock.py` holds the import-time pair; `rust.py` imports it, so
+/// it is captured when the backend is, which is the earliest moment the engine exists at all.
+///
+/// `method_type` is `types.MethodType`, checked by identity because it cannot be subclassed: see
+/// [`Walk::renders_the_plan_in_place`].
+struct Stock {
+    render: Py<PyAny>,
+    plan: Py<PyAny>,
+    method_type: Py<PyAny>,
+}
 
-/// [`STOCK_TEMPLATE`]'s `render` and `_render`, or `None` if either cannot be read — which leaves
-/// every include of this walk declining, an optimisation lost and nothing else.
-fn stock_pair(py: Python<'_>) -> Option<(Py<PyAny>, Py<PyAny>)> {
-    let Ok(template) = STOCK_TEMPLATE.import(py, "django_rust_templates.engine.base", "Template")
-    else {
-        return None;
-    };
-    let render_fn = template.getattr("render").ok()?;
-    let plan_fn = template.getattr("_render").ok()?;
-    Some((render_fn.unbind(), plan_fn.unbind()))
+/// [`Stock`], or `None` if `engine/_stock.py` cannot be read — which leaves every include of this
+/// process declining, an optimisation lost and nothing else.
+static STOCK: PyOnceLock<Stock> = PyOnceLock::new();
+
+fn stock(py: Python<'_>) -> Option<&'static Stock> {
+    STOCK
+        .get_or_try_init(py, || -> PyResult<Stock> {
+            let module = py.import("django_rust_templates.engine._stock")?;
+            Ok(Stock {
+                render: module.getattr("RENDER")?.unbind(),
+                plan: module.getattr("PLAN")?.unbind(),
+                method_type: module.getattr("METHOD_TYPE")?.unbind(),
+            })
+        })
+        .ok()
 }
 
 /// The four `Rc`s `PyTarget` shares, hoisted out of the render loop.
