@@ -201,6 +201,7 @@ base.py:1202	django/template/base.py	1202	-	kwargs[key] = parser.compile_filter(
 base.py:1203-1206	django/template/base.py	1203	1206	-	-
 django/template/context.py:5	django/template/context.py	5	-	_builtin_context_processors = ("django.template.context_processors.csrf",)	-
 context.py:88-91	django/template/context.py	88	91	raise KeyError(key)	-
+context.py:210-221	django/template/context.py	210	221	def push_state(self, template, isolated_context=True):	-
 defaultfilters.py:14	django/template/defaultfilters.py	14	-	-	-
 defaultfilters.py:38-52	django/template/defaultfilters.py	38	52	def stringfilter(func):	return _dec
 defaultfilters.py:44-48	django/template/defaultfilters.py	44	48	first = str(first)	-

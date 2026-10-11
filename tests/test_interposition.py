@@ -31,6 +31,7 @@ import tempfile
 import unittest
 
 from django_rust_templates.engine import Context, Engine, Template
+from django_rust_templates.engine.context import RenderContext
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: The vendored Django the gate runs against. Only `IncludeRecursionTests` needs
@@ -4816,12 +4817,101 @@ class IncludeCleanupTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self._render("{% include which %}")
 
+    class PopsOnce(Context):
+        """``Context.pop``'s own body, then a failure — the first time only.
+
+        One shot because the *outer* ``Template.render`` pops the same stack again on
+        its way out, and a second failure there would be the one the caller sees
+        instead. This row is about the two failures the *include* is holding.
+        """
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.failed = False
+
+        def pop(self):
+            super().pop()
+            if not self.failed:
+                self.failed = True
+                raise RuntimeError("context pop")
+
+    class PopsRenderOnce(RenderContext):
+        """Same, one layer in: ``RenderContext.pop`` is the *inner* failure."""
+
+        def __init__(self):
+            super().__init__()
+            self.failed = False
+
+        def pop(self):
+            super().pop()
+            if not self.failed:
+                self.failed = True
+                raise ValueError("render pop")
+
+    def _render_both_pops(self, source):
+        engine = Engine(
+            loaders=[
+                ("django_rust_templates.engine.loaders.locmem.Loader", {"a.html": "x"}),
+            ],
+        )
+        context = self.PopsOnce({"which": "a.html"})
+        context.render_context = self.PopsRenderOnce()
+        return engine.from_string(source).render(context)
+
+    def test_the_outer_cleanup_failure_is_the_one_that_leaves(self):
+        """Two cleanups raise, and the **later** one is what Django propagates.
+
+        ``push_state``'s ``finally`` writes ``template`` back and then pops the render
+        context (``context.py:210-221``); that whole block is inside
+        ``IncludeNode.render``'s ``with context.push(**values)``, whose ``__exit__``
+        runs ``context.pop()`` afterwards (``loader_tags.py:210-211``). A ``finally``
+        that raises replaces the exception travelling through it, so the *outer*
+        ``context.pop`` — this row's ``RuntimeError`` — is the one the caller sees, and
+        the inner ``ValueError`` becomes its ``__context__``. Reporting the first
+        failure instead reports the wrong exception.
+
+        Both rows are the same shape and differ only in which engine owns the unwinding:
+        a literal name is the slot's, a bare one is ``IncludeNode.render``'s.
+        """
+        for source in ['{% include "a.html" %}', "{% include which %}"]:
+            with self.subTest(source=source):
+                with self.assertRaises(RuntimeError) as caught:
+                    self._render_both_pops(source)
+                self.assertIsInstance(caught.exception.__context__, ValueError)
+
 
 class _Loud(Template):
     """A target class whose ``render`` never reaches ``Template.render``."""
 
     def render(self, context):
         return "LOUD"
+
+
+class _Brackets(Template):
+    """A class whose ``render`` wraps the one a slot stands in for.
+
+    ``Template.render``'s own body is still underneath it, so a walk entered through
+    this class is *not* standing in for this class's ``render`` — it is standing in for
+    ``Template.render``. A slot that compares a target against the class the walk was
+    entered through claims a target just like the one it is already inside, and skips
+    the wrapper.
+    """
+
+    def render(self, context):
+        return "[" + super().render(context) + "]"
+
+
+class _Hook(Template):
+    """A class whose instances answer ``render`` from somewhere no dictionary holds.
+
+    The class resolves both names to the ones a slot stands in for and the instance
+    dict is empty, so a look at either says yes. The instance's own lookup says no.
+    """
+
+    def __getattribute__(self, name):
+        if name == "render":
+            return lambda context: "HOOK"
+        return super().__getattribute__(name)
 
 
 class IncludeProtocolTests(unittest.TestCase):
@@ -4920,6 +5010,47 @@ class IncludeProtocolTests(unittest.TestCase):
 
         output, handled, delegated = self._render()
         self.assertEqual(output, "LOUD")
+        self.assertIn("IncludeNode", delegated)
+        self.assertNotIn("IncludeNode", handled)
+
+    def test_a_subclass_wrapping_render_wins_over_its_own_walk(self):
+        """The row the pair *on the walk's class* could not see: the target's class and
+        the class that started the walk are the same one.
+
+        ``_Brackets.render`` reaches ``Template.render``, so a walk entered through it
+        is standing in for ``Template.render`` and not for the wrapper ``_Brackets``
+        defines. Taking the pair off ``render_context.template``'s class instead says the
+        matches — they are the same class — and renders it with the wrapper skipped:
+        one bracket pair where Django writes two, on the outer *and* the inner.
+
+        The control is the first render, which is the same two objects before either is
+        relabelled, and the census is asserted beside the string because the two halves
+        fail differently — a slot that renders ``[x]`` has still *claimed* the node.
+        """
+        self.assertEqual(self._render()[0], "x")
+        target = self._cached_target()
+        self.template.__class__ = _Brackets
+        target.__class__ = _Brackets
+
+        output, handled, delegated = self._render()
+        self.assertEqual(output, "[[x]]")
+        self.assertIn("IncludeNode", delegated)
+        self.assertNotIn("IncludeNode", handled)
+
+    def test_a_class_saying_nothing_is_not_a_class_saying_no(self):
+        """An instance whose ``render`` comes from neither the class nor the dict.
+
+        ``_Hook`` resolves both names to the ones this slot stands in for and holds
+        nothing in the instance dict, so both of those questions answer yes. Only the
+        lookup Python itself performs asks the question that has the right answer, and
+        a slot that reads the answer off the class claims this target and returns the
+        template's own source with no error anywhere.
+        """
+        self.assertEqual(self._render()[0], "x")
+        self._cached_target().__class__ = _Hook
+
+        output, handled, delegated = self._render()
+        self.assertEqual(output, "HOOK")
         self.assertIn("IncludeNode", delegated)
         self.assertNotIn("IncludeNode", handled)
 

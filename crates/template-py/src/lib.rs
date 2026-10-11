@@ -2470,64 +2470,117 @@ impl<'py> ContextLayers<'py> {
             pushed_render_context: false,
             done: false,
         };
+        // The first step has nothing under it, so a failure here needs no unwind and `?` is enough.
+        // Everything after it unwinds before returning, because `Drop` cannot report what it finds.
         layers.context.call_method0("push")?;
         layers.pushed_context = true;
-        layers.saved_template = Some(layers.render_context.getattr("template")?);
-        layers.render_context.setattr("template", template)?;
-        layers.render_context.call_method0("push")?;
+        // `pushed_render_context` is the flag for the *whole* `push_state` block, and it stays false
+        // until `push` returns: if any of the three steps below raises, the generator never reached
+        // its `finally`, so Python writes nothing back and pops nothing — it leaves
+        // `render_context.template` where it lies. Only the outer `context.pop()` runs.
+        let mut failed = None;
+        match layers.render_context.getattr("template") {
+            Err(error) => failed = Some(error),
+            Ok(saved) => {
+                layers.saved_template = Some(saved);
+                if let Err(error) = layers.render_context.setattr("template", template) {
+                    failed = Some(error);
+                } else if let Err(error) = layers.render_context.call_method0("push") {
+                    failed = Some(error);
+                }
+            }
+        }
+        if let Some(error) = failed {
+            return Err(layers.abandon(error));
+        }
         layers.pushed_render_context = true;
         Ok(layers)
     }
 
-    /// Unwind the layers the way the two `finally` blocks do, reporting the first failure.
-    ///
-    /// A `finally` that raises **replaces** whatever exception was travelling through it, so the
-    /// caller runs this before unwrapping the render's own result: a cleanup error wins over a render
-    /// error, exactly as it would in Python.
-    fn finish(mut self) -> PyResult<()> {
+    /// Unwind after a failed push, letting the unwinding error replace the one that caused it — the
+    /// rule [`pop_all`](Self::pop_all) applies, and the reason this exists instead of a `?`.
+    fn abandon(mut self, error: PyErr) -> PyErr {
         self.done = true;
-        self.pop_all()
+        // A second reference to the same exception, not a copy of it: the unwinding error that
+        // supersedes this one chains onto *this* exception, and `error` itself is the fallback when
+        // nothing fails on the way out.
+        let in_flight = error.clone_ref(self.context.py());
+        self.pop_all(Some(in_flight)).err().unwrap_or(error)
     }
 
-    /// Every layer still on, in Python's order, continuing past a failure so none is left behind.
-    ///
-    /// Continuing matters because the three steps touch two stacks and a later render reads both. The
-    /// first failure is the one reported, for the reason above: it is the exception Python would have
+    /// Unwind the layers the way the two `finally` blocks do, and report what Python would have
     /// propagated.
-    fn pop_all(&mut self) -> PyResult<()> {
-        fn record(first: &mut Option<PyErr>, error: PyErr) {
-            if first.is_none() {
-                *first = Some(error);
-            }
-        }
-        let mut first: Option<PyErr> = None;
-        if let Some(saved) = self.saved_template.take() {
-            if let Err(error) = self.render_context.setattr("template", saved) {
-                record(&mut first, error);
-            }
-        }
+    ///
+    /// **The last failure wins, not the first.** `push_state`'s `finally` writes `template` back and
+    /// *then* pops the render context — so a write that raises skips the pop — and that whole block
+    /// sits inside `IncludeNode.render`'s `with context.push(**values)`, whose `__exit__` runs
+    /// `context.pop()` afterwards regardless. A `finally` that raises **replaces** the exception
+    /// travelling through it, so the outer `context.pop()` is the one the caller sees and the inner
+    /// failure becomes its `__context__`. Reporting the first would report the wrong exception.
+    ///
+    /// Every step runs so that no layer is left behind: the two blocks are separate `finally`s and
+    /// the later one runs even when the earlier one raised.
+    ///
+    /// `render` is the render's own outcome, which is still travelling when these blocks run — a
+    /// failure there is the first thing a cleanup failure supersedes, exactly as it would be in
+    /// Python. It is left alone (and returned by the caller) when no cleanup fails.
+    fn finish(mut self, render: Option<&PyErr>) -> PyResult<()> {
+        self.done = true;
+        let render = render.map(|error| error.clone_ref(self.context.py()));
+        self.pop_all(render)
+    }
+
+    /// Run both `finally` blocks in order, starting from `last` — the failure already in flight — and
+    /// returning whichever failure is in flight when they are done.
+    fn pop_all(&mut self, last: Option<PyErr>) -> PyResult<()> {
+        let py = self.context.py();
+        let mut last = last;
         if std::mem::take(&mut self.pushed_render_context) {
-            if let Err(error) = self.render_context.call_method0("pop") {
-                record(&mut first, error);
+            if let Some(saved) = self.saved_template.take() {
+                match self.render_context.setattr("template", saved) {
+                    Err(error) => supersede(&mut last, error, py),
+                    Ok(()) => {
+                        if let Err(error) = self.render_context.call_method0("pop") {
+                            supersede(&mut last, error, py);
+                        }
+                    }
+                }
             }
         }
         if std::mem::take(&mut self.pushed_context) {
             if let Err(error) = self.context.call_method0("pop") {
-                record(&mut first, error);
+                supersede(&mut last, error, py);
             }
         }
-        match first {
+        match last {
             Some(error) => Err(error),
             None => Ok(()),
         }
     }
 }
 
+/// Report `error` as the failure that leaves, chaining the one it replaced onto it as
+/// `__context__` — a `finally` that raises does not erase the exception travelling through it, it
+/// makes that exception the new one's context (CPython's `_PyErr_SetObject`). Dropping the replaced
+/// error instead would lose it from every traceback that reports the survivor.
+fn supersede(last: &mut Option<PyErr>, error: PyErr, py: Python<'_>) {
+    if let Some(previous) = last.take() {
+        error.set_context(py, Some(previous));
+    }
+    *last = Some(error);
+}
+
 impl Drop for ContextLayers<'_> {
+    /// The net, not the path: [`push`](ContextLayers::push) and [`finish`](ContextLayers::finish)
+    /// both unwind before they return, so nothing reachable today leaves layers for this to find.
+    ///
+    /// It stays because the alternative to a net is leaking a layer into a `Context` a later render
+    /// reads, and because a `?` added between them would find this rather than a compiler error. It
+    /// cannot report what it finds — the error is already leaving by another route — so anything
+    /// that *must* report goes through [`finish`](ContextLayers::finish).
     fn drop(&mut self) {
         if !self.done {
-            // The error is already leaving by another route and `Drop` cannot add to it.
-            let _ = self.pop_all();
+            let _ = self.pop_all(None);
         }
     }
 }
@@ -3329,18 +3382,11 @@ struct Walk<'py> {
     /// is holding, the ordinal `NodeList.render`'s `"".join` would name for it.
     nodes: usize,
     census: Option<Census>,
-    /// `render` and `_render`, resolved once on the template this walk was entered for — the two
-    /// functions an included target must still answer to. `None` when the walk has no template to
-    /// read them off, in which case every include declines. See
-    /// [`Walk::renders_the_plan_in_place`], which is the only thing standing between an include and
-    /// rendering a target whose `render` is not the method the slot is standing in for.
+    /// `render` and `_render` as [`stock_pair`] reads them — the two functions an included
+    /// target must still answer to. `None` when they could not be read, in which case every include
+    /// declines. See [`Walk::renders_the_plan_in_place`], which is the only thing standing between
+    /// an include and rendering a target whose `render` is not what the slot is standing in for.
     bypassed: Option<(Py<PyAny>, Py<PyAny>)>,
-    /// The last target class [`Walk::renders_the_plan_in_place`] ruled on, and its verdict.
-    ///
-    /// A walk's includes resolve to one class in every corpus there is — 73 of the 73 on
-    /// `real-world/complex` — so this turns the two class-attribute lookups into one pointer compare
-    /// per include. The class is held, not borrowed, so an entry cannot outlive its class.
-    include_protocol: Option<(Py<PyType>, bool)>,
 }
 
 impl<'py> Walk<'py> {
@@ -3735,7 +3781,7 @@ impl<'py> Walk<'py> {
         // `with context.push(...): return template.render(context)` (`loader_tags.py:210-211`) — and a
         // `finally` that raises **replaces** the exception travelling through it, so this is `?`
         // before `inner` is unwrapped rather than after.
-        layers.finish()?;
+        layers.finish(inner.as_ref().err())?;
         self.push_python(inner?)?;
         Ok(true)
     }
@@ -3749,45 +3795,39 @@ impl<'py> Walk<'py> {
     /// target with `render` replaced renders the replacement through stock Django and its own
     /// template through this slot.
     ///
-    /// **Two questions, because Python's lookup asks two.** The *type*, resolving both names and
-    /// comparing them with the pair [`render_plan`] took from the template that started this walk —
-    /// which is the implementation being bypassed, and the only definition of it there is. Then the
-    /// *instance dict*, which shadows the type for both names, plain functions being non-data
-    /// descriptors. The type answer is remembered for the walk, the instance answer cannot be.
+    /// **Ask the object, not its class.** `target.render` *is* Python's lookup, so it is the only
+    /// question that sees everything a look at the class cannot: a class-level `__getattribute__`, a
+    /// data descriptor somewhere in the MRO, an instance that patched the name, a `functools.partial`
+    /// or a plain callable. A method answers with a bound method, whose `__func__` is the function
+    /// behind it and whose `__self__` is the object it was bound to; anything else answers without
+    /// one and declines here — as does a bound method of the right function bound to the *wrong*
+    /// object. That pair of reads replaces the type resolution and the `__dict__` check between
+    /// them, because it asks about both at once.
     ///
-    /// **Refusal is the answer to both when it cannot be given.** No `__dict__` is no way to see a
-    /// patch; a walk with no `bypassed` pair is a walk that cannot say what it is standing in for.
-    /// Declining here is a lost optimisation, never a different string.
-    fn renders_the_plan_in_place(&mut self, target: &Bound<'py, PyAny>) -> PyResult<bool> {
+    /// **Against [`stock_pair`]'s pair, not the walk's own template's class.** A walk entered
+    /// through a subclass's `render` wrapper is not standing in for that wrapper, and neither is one
+    /// that took the pair from whatever `render_context.template` happens to be.
+    ///
+    /// **Refusal is the answer when it cannot be given.** No pair read at entry, or a name that does
+    /// not resolve to a bound method, declines. Declining is a lost optimisation, never a different
+    /// string.
+    fn renders_the_plan_in_place(&self, target: &Bound<'py, PyAny>) -> PyResult<bool> {
         let Some((render_fn, plan_fn)) = &self.bypassed else {
             return Ok(false);
         };
-        let ty = target.get_type();
-        let mut known = None;
-        if let Some((class, verdict)) = &self.include_protocol {
-            if class.bind(self.py).is(&ty) {
-                known = Some(*verdict);
+        for (name, stock) in [("render", render_fn), ("_render", plan_fn)] {
+            let Ok(bound) = target.getattr(name) else {
+                return Ok(false);
+            };
+            let (Ok(func), Ok(this)) = (bound.getattr("__func__"), bound.getattr("__self__"))
+            else {
+                return Ok(false);
+            };
+            if !func.is(stock.bind(self.py)) || !this.is(target) {
+                return Ok(false);
             }
         }
-        let clean = match known {
-            Some(verdict) => verdict,
-            None => {
-                let verdict = ty.getattr("render")?.is(render_fn.bind(self.py))
-                    && ty.getattr("_render")?.is(plan_fn.bind(self.py));
-                self.include_protocol = Some((ty.unbind(), verdict));
-                verdict
-            }
-        };
-        if !clean {
-            return Ok(false);
-        }
-        let Ok(instance) = target.getattr("__dict__") else {
-            return Ok(false);
-        };
-        Ok(match instance.cast::<PyDict>() {
-            Ok(instance) => !instance.contains("render")? && !instance.contains("_render")?,
-            Err(_) => false,
-        })
+        Ok(true)
     }
 
     /// A `{% for %}` the walk runs itself, in `ForNode.render`'s order (`engine/defaulttags.py:193-258`).
@@ -4002,24 +4042,11 @@ fn render_plan(
         } else {
             None
         },
-        // The template being rendered, which `Template.render`'s and `ExtendsNode.render`'s
-        // `push_state` put here before `_render` — so this is the object whose `render` and `_render`
-        // the walk stands in for, and not whatever `context.template` happens to be otherwise. A
-        // caller that got here without one leaves both `None` and every include declines, which is
-        // the right answer for a walk that cannot say what it is standing in for.
-        bypassed: {
-            let started = context.getattr("render_context")?.getattr("template")?;
-            if started.is_none() {
-                None
-            } else {
-                let class = started.get_type();
-                Some((
-                    class.getattr("render")?.unbind(),
-                    class.getattr("_render")?.unbind(),
-                ))
-            }
-        },
-        include_protocol: None,
+        // The two functions an included target is claimed to still render through, read from this
+        // package's own `Template` — see [`stock_pair`]. Read per walk and not once per process,
+        // so a rebind of either name between two renders is honoured; `None` if either cannot be
+        // read, which declines every include for this render and nothing else.
+        bypassed: stock_pair(py),
     };
     walk.run(&plan.slots, 0)?;
     if let Some(census) = walk.census.take() {
@@ -4069,6 +4096,32 @@ fn render_value_in_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 /// list uses. **And it is 0.48 µs against 0.07:** measured, 7×300 000, `mark_safe("")` 0.484 µs against
 /// `SafeString("")` 0.072 µs, and on a walked template it is paid once per render.
 static SAFE_STRING: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+/// This package's own `Template`, cached once — the class whose `render` and `_render` an include
+/// slot stands in for.
+///
+/// **Not the class of the template that started the walk**, which is what
+/// [`Walk::renders_the_plan_in_place`] used to compare against and why it was wrong: a walk entered
+/// through a subclass whose `render` wraps `super().render(...)` stands in for `Template.render`,
+/// and claiming an include of that same subclass skips the wrapper — one pair of brackets where
+/// Django writes two. The stock class is the only implementation the slot reproduces, so it is the
+/// only one a target may be compared against.
+///
+/// The class is cached because it cannot be replaced; its two attributes are read again per walk,
+/// so a rebind of either between two renders is honoured.
+static STOCK_TEMPLATE: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+/// [`STOCK_TEMPLATE`]'s `render` and `_render`, or `None` if either cannot be read — which leaves
+/// every include of this walk declining, an optimisation lost and nothing else.
+fn stock_pair(py: Python<'_>) -> Option<(Py<PyAny>, Py<PyAny>)> {
+    let Ok(template) = STOCK_TEMPLATE.import(py, "django_rust_templates.engine.base", "Template")
+    else {
+        return None;
+    };
+    let render_fn = template.getattr("render").ok()?;
+    let plan_fn = template.getattr("_render").ok()?;
+    Some((render_fn.unbind(), plan_fn.unbind()))
+}
 
 /// The four `Rc`s `PyTarget` shares, hoisted out of the render loop.
 ///
@@ -4402,7 +4455,6 @@ mod walk_depth {
             // This walk has no template, so it has no `render` to stand in for and every include
             // declines — which is what `render_plan` does for the same reason.
             bypassed: None,
-            include_protocol: None,
         };
         walk.run(slots, 0)
     }
