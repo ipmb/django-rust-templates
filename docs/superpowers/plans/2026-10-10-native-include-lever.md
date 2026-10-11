@@ -100,6 +100,17 @@ templates at 202 us against 72 includes at 422 us — a real 220 us on `real-wor
 That is four of the five rows above; `micro/extends` and `micro/loop-text` are not this plan
 (see Non-goals).
 
+**Measured, and the estimate was 2.5x optimistic.** `2.28 us` per include, not `0.9`:
+
+    real-world/complex  rust 408.6us  inlined 244.5us  machinery 164.1us over 72 includes (2.28us each)
+                        jinja2 343.3us  django 855.0us
+
+So `complex` went 476 -> 409 and not to ~170, and the row is still behind jinja2. The residual
+is `resolve_include`'s six Python attribute reads per include — `self.template.resolve`,
+`getattr(template, "render", None)`, the cache dict, `select_template`, the empty
+`context.push(**values)` — which is the plan's declared non-goal: the slot removed the *render*
+machinery, and the resolution step is the Python object graph the spec's S1 is for.
+
 ## Review Focus
 
 The five things this plan can get wrong that no test it writes will name by itself. Rows 1
@@ -142,7 +153,7 @@ and 2 are the two round 1 found, and they are the two that would have shipped.
 **Interfaces:**
 - Consumes: `NodeDesc`/`AttrValue::FilterExpr`/`FilterExprDesc` (`crates/template-core/src/parser/desc.rs:255,289`),
   and the already-built `IncludeNode` descriptor (`crates/template-core/src/parser/tags/include.rs:113`).
-- Produces: `Act::Include(Box<IncludePlan>)`, `IncludePlan::name`, `INCLUDE_NESTING_CAP`.
+- Produces: `Act::Include(Box<IncludePlan>)`, `IncludePlan::name`, `MAX_WALK_FRAMES`.
 
 **The descriptor is the whole detection rule.** `tags/include.rs` already ran
 `construct_relative_path` on `bits[1]` *before* `compile_filter`, so by the time we see the
@@ -452,50 +463,54 @@ Three pieces, because there are three ways to get here.
 
 - [ ] The child runs at `depth + 1`, not 0, so the walk's own `MAX_WALK_DEPTH` counts include
   nesting the same way it counts `{% for %}` nesting — one counter, as Python has one.
-- [ ] Add a **thread-local live-include count**, which `render_plan` does not reset, and
-  decline past `INCLUDE_NESTING_CAP`:
+- [x] Add a **thread-local frame count over both recursions** — native includes *and* walks —
+  and decline past `MAX_WALK_FRAMES`:
 
 ```rust
-/// The number of native `{% include %}` frames that may be live at once, *across re-entrant
-/// walks* (finding 2).
-///
-/// `run`'s `depth` is a parameter and a delegated node hands the render back to Python, which
-/// starts a fresh `Walk` at zero — so a template that both includes itself and delegates can
-/// reset the budget every few levels, and the only thing left bounding the Rust stack is the
-/// stack. This counter is not a parameter and is not reset: once it is exhausted every
-/// descendant include declines too, Python accumulates frames, and CPython's own limit raises
-/// `RecursionError` exactly as Django's does.
-///
-/// Chosen from the stack test in step 8, not from arithmetic: at `MAX_WALK_DEPTH`-style frame
-/// sizes 128 levels is tens of kilobytes, which is safe on a thread with a 512 KiB stack.
-const INCLUDE_NESTING_CAP: usize = 128;
+/// How deep this crate may recurse into itself — native includes and walks together, *across
+/// re-entrant walks*, on one thread.
+const MAX_WALK_FRAMES: usize = 64;
 
 thread_local! {
-    static LIVE_INCLUDES: Cell<usize> = const { Cell::new(0) };
+    static LIVE_FRAMES: Cell<usize> = const { Cell::new(0) };
 }
 
-/// One live native include frame, released on every path out including an unwind.
-struct LiveInclude;
+/// One live frame of Rust recursion — a walk (`render_plan`) or a native include
+/// (`Walk::run_include`) — released on every path out including an unwind.
+struct WalkFrame;
 
-impl LiveInclude {
+impl WalkFrame {
     fn enter() -> Option<Self> {
-        LIVE_INCLUDES.with(|n| {
-            if n.get() >= INCLUDE_NESTING_CAP {
+        LIVE_FRAMES.with(|n| {
+            if n.get() >= MAX_WALK_FRAMES {
                 None
             } else {
                 n.set(n.get() + 1);
-                Some(LiveInclude)
+                Some(WalkFrame)
             }
         })
     }
 }
 
-impl Drop for LiveInclude {
+impl Drop for WalkFrame {
     fn drop(&mut self) {
-        LIVE_INCLUDES.with(|n| n.set(n.get() - 1));
+        LIVE_FRAMES.with(|n| n.set(n.get() - 1));
     }
 }
 ```
+
+**Corrected after the build, and this is the correction that matters.** The first version counted
+only includes, at 128, and it does not hold: a *declined* include hands the render back to Python,
+which re-enters `render_plan`, and that walk nests inside the frame of the one that declined it. So
+the include cap bounds one recursion and leaves the other unbounded, and the two responses must
+both exist — `run_include` declining is not enough without `render_plan` declining too. `render_plan`
+therefore returns `Option<Py<PyAny>>`, `None` meaning "walk declined", and both `Template._render`
+and `NodeList._render_with_plan` fall through to the Python path on it.
+
+`64`, not `128`, and measured: a self-include given a worker thread of **96 KiB on CPython 3.12.9**
+and **128 KiB on 3.14.4** now raises `RecursionError`, where with the include cap alone it died
+with `SIGBUS` on 3.12 at 512 KiB, 2 MiB and 768 KiB and survived only at 8 MiB. Neither floor is
+this crate's: below them the *pure-Python* path dies too.
 
 - [ ] **Step 8: Render it (finding 4)**
 
@@ -529,7 +544,7 @@ Add the arm to `Walk::run`, and the method:
         else {
             return Ok(false);
         };
-        let Some(_live) = LiveInclude::enter() else {
+        let Some(_frame) = WalkFrame::enter() else {
             return Ok(false);
         };
         let layers = ContextLayers::push(&self.context, &target)?;

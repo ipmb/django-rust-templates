@@ -182,10 +182,15 @@ class Template:
         # plan the Rust side declined. Both cases are the Python path below,
         # unchanged — a declined plan is a lost optimisation, never a different
         # answer. `_native.render_plan` returns the same `SafeString`
-        # `NodeList.render` does.
+        # `NodeList.render` does, or `None` when the walk would nest Rust deeper
+        # than its frame budget allows; that budget exists because CPython's
+        # recursion limit does not protect the Rust stack, so the tail of a
+        # deeply nested render finishes here, in Python, where it does.
         plan = self._native_plan
         if plan is not None:
-            return _native.render_plan(plan, context)
+            rendered = _native.render_plan(plan, context)
+            if rendered is not None:
+                return rendered
         return self.nodelist.render(context)
 
     def render(self, context):
@@ -1241,11 +1246,15 @@ class NodeList(list):
         which is what the call did before the walk existed.  A body whose nodes
         and descriptors disagree gets no plan at all (`plan_list` returns `None`
         on the first class mismatch), so a block this pass misreads is a lost
-        optimisation, never a different string.
+        optimisation, never a different string.  And a `None` back from
+        `_native.render_plan` — the Rust frame budget, exhausted by a block body
+        nested inside blocks — arrives at the same two lines.
         """
         plan = self._native_plan
         if plan is not None:
-            return _native.render_plan(plan, context)
+            rendered = _native.render_plan(plan, context)
+            if rendered is not None:
+                return rendered
         return self.render(context)
 
 

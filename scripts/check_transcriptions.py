@@ -66,35 +66,35 @@ COMPARED_PATH = {
     # the module *is* a transcription, and this one is deliberately not.
     "base.py": [
         (118, 121, "Origin.__init__"),
-        (335, 342, "PartialTemplate.__init__"),
-        (393, 415, "Token.__init__"),
-        (424, 437, "Token.split_contents"),
-        (441, 443, "Lexer.__init__"),
-        (452, 464, "Lexer.tokenize"),
-        (466, 498, "Lexer.create_token"),
-        (536, 558, "Parser.__init__"),
-        (563, 625, "Parser.parse"),
-        (627, 632, "Parser.skip_past"),
-        (634, 651, "Parser.extend_nodelist"),
-        (653, 664, "Parser.error"),
-        (666, 682, "Parser.invalid_block_tag"),
-        (693, 694, "Parser.next_token"),
-        (696, 697, "Parser.prepend_token"),
-        (699, 700, "Parser.delete_first_token"),
-        (702, 704, "Parser.add_library"),
-        (706, 710, "Parser.compile_filter"),
-        (712, 716, "Parser.find_filter"),
-        (773, 817, "FilterExpression.__init__"),
-        (938, 955, "FilterExpression.args_check"),
-        (987, 1038, "Variable.__init__"),
-        (1040, 1056, "Variable.resolve"),
-        (1161, 1173, "Node.get_nodes_by_type"),
-        (1199, 1200, "NodeList.render"),
-        (1202, 1207, "NodeList.get_nodes_by_type"),
-        (1255, 1256, "TextNode.__init__"),
-        (1264, 1271, "TextNode.render_annotated"),
-        (1342, 1343, "VariableNode.__init__"),
-        (1363, 1407, "token_kwargs"),
+        (340, 347, "PartialTemplate.__init__"),
+        (398, 420, "Token.__init__"),
+        (429, 442, "Token.split_contents"),
+        (446, 448, "Lexer.__init__"),
+        (457, 469, "Lexer.tokenize"),
+        (471, 503, "Lexer.create_token"),
+        (541, 563, "Parser.__init__"),
+        (568, 630, "Parser.parse"),
+        (632, 637, "Parser.skip_past"),
+        (639, 656, "Parser.extend_nodelist"),
+        (658, 669, "Parser.error"),
+        (671, 687, "Parser.invalid_block_tag"),
+        (698, 699, "Parser.next_token"),
+        (701, 702, "Parser.prepend_token"),
+        (704, 705, "Parser.delete_first_token"),
+        (707, 709, "Parser.add_library"),
+        (711, 715, "Parser.compile_filter"),
+        (717, 721, "Parser.find_filter"),
+        (778, 822, "FilterExpression.__init__"),
+        (943, 960, "FilterExpression.args_check"),
+        (992, 1043, "Variable.__init__"),
+        (1045, 1061, "Variable.resolve"),
+        (1166, 1178, "Node.get_nodes_by_type"),
+        (1204, 1205, "NodeList.render"),
+        (1207, 1212, "NodeList.get_nodes_by_type"),
+        (1264, 1265, "TextNode.__init__"),
+        (1273, 1280, "TextNode.render_annotated"),
+        (1351, 1352, "VariableNode.__init__"),
+        (1372, 1416, "token_kwargs"),
     ],
     # 8 functions, spans 56-214, same instrument and pin relation as `base.py`.
     # `smartif` builds its operator classes inside `infix()`/`prefix()`, binding them
@@ -360,11 +360,13 @@ DECLARED = {
             # `_render`, not `NodeList.render`, because the latter is on the compared
             # path, and every `Template.render` funnels through `_render`.
             (
-                (178, 188),
+                (178, 193),
                 None,
                 "plan = self._native_plan\n"
                 "if plan is not None:\n"
-                "return _native.render_plan(plan, context)",
+                "rendered = _native.render_plan(plan, context)\n"
+                "if rendered is not None:\n"
+                "return rendered",
             ),
             # The plan slot on the body `NodeList`, a class attribute for `Template`'s
             # reason. It lives on the `NodeList` because the node that renders a body
@@ -373,7 +375,7 @@ DECLARED = {
             # the base template's block, a second body carrying its own plan. Clause (5)
             # wants the note.
             (
-                (1181, 1198),
+                (1186, 1203),
                 None,
                 "_native_plan = None",
             ),
@@ -384,12 +386,14 @@ DECLARED = {
             # for one line via `TRANSFORMS`. The fallback is upstream's own
             # `self.render(context)`, so a declined plan loses optimisation, never bytes.
             (
-                (1208, 1249),
+                (1213, 1258),
                 None,
                 "def _render_with_plan(self, context):\n"
                 "plan = self._native_plan\n"
                 "if plan is not None:\n"
-                "return _native.render_plan(plan, context)\n"
+                "rendered = _native.render_plan(plan, context)\n"
+                "if rendered is not None:\n"
+                "return rendered\n"
                 "return self.render(context)",
             ),
             # `FilterExpression.__slots__` gains the cache name, one line for one line
@@ -398,7 +402,7 @@ DECLARED = {
             # compared-path span, which forces the lazy fill below rather than an
             # `__init__` assignment.
             (
-                (771, 771),
+                (776, 776),
                 (737, 737),
                 '__slots__ = ("token", "filters", "var", "is_var", "_rust_names")',
             ),
@@ -411,12 +415,12 @@ DECLARED = {
             # safe only because the parity rows build a `Parser` directly and never go
             # through `compile_nodelist`.
             (
-                (208, 222),
+                (213, 227),
                 (185, 196),
                 "from django_rust_templates.render import parse_template",
             ),
             (
-                (225, 235),
+                (230, 240),
                 (199, 201),
                 "parsed = parse_template(self.source, self.engine, self.origin)\n"
                 "self.extra_data = parsed.extra_data\n"
@@ -433,7 +437,7 @@ DECLARED = {
             # pays a truth test and nothing else; unguarded, the filter-free
             # `real-world/large` row measured 2900µs → 3114/3469µs.
             (
-                (837, 867),
+                (842, 872),
                 None,
                 "if self.filters:\n"
                 "try:\n"
@@ -460,7 +464,7 @@ DECLARED = {
             # notices an arm that delegated and also ran the four steps, or one keyed by
             # name rather than handle.
             (
-                (875, 925),
+                (880, 930),
                 None,
                 "from django_rust_templates.host import (\n"
                 "effective_autoescape,\n"
@@ -491,7 +495,7 @@ DECLARED = {
             # exception semantics into `crates/template-py/src/lib.rs::outcome_to_py` —
             # the diff cannot show, because a body replaced by a call is one hunk.
             (
-                (1073, 1119),
+                (1078, 1124),
                 (957, 1028),
                 'return _native.resolve_lookups(self.lookups, context)',
             ),
@@ -505,7 +509,7 @@ DECLARED = {
             # refusal: PyO3 hands a Python `str` over as `&str` only when UTF-8
             # encodable, so without it a lone surrogate that renders today would raise.
             (
-                (1280, 1328),
+                (1289, 1337),
                 None,
                 "if context.autoescape and type(value) is str:\n"
                 "escaped = _native.html_escape(value)\n"
@@ -529,7 +533,7 @@ DECLARED = {
             # clause (4)'s reach by measurement; `tests/test_loop_read_guard.py` is its
             # control.
             (
-                (1408, 1443),
+                (1417, 1452),
                 None,
                 "BASE_CONTEXT_GETITEM = BaseContext.__getitem__",
             ),

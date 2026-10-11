@@ -25,12 +25,19 @@ loader rows and Task 8's case-sensitivity rows both need the same construction.
 """
 
 import pathlib
+import subprocess
+import sys
 import tempfile
 import unittest
 
-from django_rust_templates.engine import Context, Engine
+from django_rust_templates.engine import Context, Engine, Template
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
+#: The vendored Django the gate runs against. Only `IncludeRecursionTests` needs
+#: it, and it needs it as a path rather than as an import: the thing it measures
+#: is a child process's exit status, and the child cannot inherit this one's
+#: `sys.path` under `-I`.
+DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 
 #: The engine's own directory. Rows here assert on the **file** a module resolved
 #: to, and until the M18 rewiring they read that path off the shim
@@ -473,7 +480,7 @@ class InterpositionTests(unittest.TestCase):
         # with 89, and 1407-289 = 1207-89 = 1118, the same number a third time.
         #
         # **They arrive as the twelfth and thirteenth entries of the list this row
-        # asserts, and the nine matched lines at ours 1199-1207 are why the pair
+        # asserts, and the nine matched lines at ours 1204-1212 are why the pair
         # reads as adjacent here.** That list is the **differing** opcodes —
         # `[op for op in matcher.get_opcodes() if op[0] != "equal"]`, fifteen of
         # the thirty `difflib` returns for this pair of files — and every
@@ -4563,6 +4570,487 @@ class DefaultTagsInterpositionTests(unittest.TestCase):
             "AB",
             "Rust's own `if` does not render as `AB`, so the row above would not "
             "have discriminated a name-keyed arm from an identity-keyed one",
+        )
+
+
+class IncludeSlotTests(unittest.TestCase):
+    """A literal ``{% include %}`` reaches the walk's own slot, and no other shape does.
+
+    **The census, not the output.** A delegated ``IncludeNode`` renders Django's
+    bytes too, so only the column the node lands in separates the two. ``handled``
+    and ``delegated`` are ``(class_name, count)`` lists and every assertion here is
+    membership, so no count is pinned.
+    """
+
+    TEMPLATES = {"a.html": "x"}
+
+    def census_of(self, source, data=None, templates=None):
+        from django_rust_templates import _native
+        from django_rust_templates.engine import Engine
+        from django_rust_templates.render import render_string
+
+        engine = Engine(
+            loaders=[
+                (
+                    "django_rust_templates.engine.loaders.locmem.Loader",
+                    self.TEMPLATES if templates is None else templates,
+                ),
+            ],
+        )
+        _native.census_start()
+        error = None
+        try:
+            render_string(source, data or {}, engine)
+        except Exception as exc:  # noqa: BLE001 -- `{% include 123 %}` raises on stock too
+            error = exc
+        finally:
+            # In the `finally` for the reason the loop rows give: the census is a
+            # process-global, and three of the five rows below raise before their
+            # render returns.
+            handled, delegated, _, _, _ = _native.census_take()
+        return dict(handled), dict(delegated), error
+
+    def test_a_literal_include_stops_going_back_to_python(self):
+        """The one thing that makes the fast path exist at all."""
+        handled, delegated, error = self.census_of('{% include "a.html" %}')
+        self.assertIsNone(error)
+        self.assertIn(
+            "IncludeNode",
+            handled,
+            "a literal `{% include %}` was not planned, so `IncludeNode.render` "
+            "rendered it and the five microseconds are still there",
+        )
+        self.assertNotIn("IncludeNode", delegated)
+
+    def test_a_quoted_numeric_name_is_a_literal_like_any_other(self):
+        """``Variable('"123"')`` tries ``int()`` on the quoted text, fails, and
+        unescapes, so the literal is the *string* ``"123"`` — a name, and the slot
+        takes it."""
+        handled, delegated, error = self.census_of(
+            '{% include "123" %}',
+            templates={"123": "x"},
+        )
+        self.assertIsNone(error)
+        self.assertIn("IncludeNode", handled)
+        self.assertNotIn("IncludeNode", delegated)
+
+    def test_every_other_include_shape_still_delegates(self):
+        """Each is a shape whose resolution touches the context, or that the slot
+        does not reproduce, so it must not claim it. All three render, so the
+        census shows the column the node landed in."""
+        for source in [
+            "{% include template_name %}",  # a bare name: resolved per render
+            '{% include "a.html" with b=1 %}',  # extra_context non-empty
+            '{% include "a.html" only %}',  # isolated_context
+        ]:
+            with self.subTest(source=source):
+                handled, delegated, error = self.census_of(
+                    source,
+                    {"template_name": "a.html"},
+                )
+                self.assertIsNone(error)
+                self.assertIn("IncludeNode", delegated, source)
+                self.assertNotIn("IncludeNode", handled, source)
+
+    def test_a_literal_that_is_not_a_name_is_refused(self):
+        """The two literals the predicate must not read as template names, and the
+        row the census can only half-see.
+
+        ``{% include 123 %}`` is an ``Int`` literal and ``{% include "" %}`` the
+        empty ``SafeStr``. **Neither can be asserted in `delegated`**: both raise
+        inside ``IncludeNode.render`` on stock Django, and ``Walk::delegate``
+        bumps the census *after* ``render_annotated`` returns, so a raising
+        delegate is counted in neither column. The claim therefore has to be the
+        other half — a slot that had claimed either shape would have rendered it
+        and put ``IncludeNode`` in ``handled``.
+
+        The ``TypeError`` is the second half of the discriminator, not a parity
+        assertion: it is ``tuple(123)``, and a slot that took the shape would
+        instead reach ``select_template(("123",))`` and raise
+        ``TemplateDoesNotExist``. The type is ``TwoPathParityTests``'.
+        """
+        handled, _, error = self.census_of("{% include 123 %}", {"template_name": "a.html"})
+        self.assertIsInstance(error, TypeError)
+        self.assertNotIn("IncludeNode", handled)
+
+        handled, _, error = self.census_of('{% include "" %}', {"template_name": "a.html"})
+        self.assertIsNotNone(error)
+        self.assertNotIn("IncludeNode", handled)
+
+    def test_the_shared_include_budget_runs_out_and_the_tail_delegates(self):
+        """The frame budget is visible in the census, and this is the row that shows it.
+
+        A chain of single-include templates deeper than the budget, each include a
+        constant name so every one of them *would* be claimed. The first few levels
+        are the walk's; the rest are ``IncludeNode.render``'s — so the same class
+        name lands in **both** columns, and that pair is the observation.
+
+        Two mutations, both caught here. Without a budget every level is claimed and
+        ``delegated`` is empty. With the *includes* counted but not the walks, the
+        tail is claimed too — each delegation starts a walk at depth zero — and that
+        is the one that is not merely a moved column: it is unbounded Rust recursion,
+        which on 3.12 is a ``SIGBUS`` rather than an exception. ``delegated`` holding
+        ``IncludeNode`` is therefore a stack property, not a bookkeeping one.
+
+        Membership and no counts, for the reason the class gives. The output is
+        asserted as well, because a walk that stopped claiming *and* started
+        skipping would also move the column.
+        """
+        from django_rust_templates.render import render_string
+
+        depth = 160
+        templates = {f"t{i}.html": f'{{% include "t{i + 1}.html" %}}' for i in range(depth - 1)}
+        templates[f"t{depth - 1}.html"] = "x"
+
+        handled, delegated, error = self.census_of(
+            '{% include "t0.html" %}',
+            templates=templates,
+        )
+        self.assertIsNone(error)
+        self.assertIn("IncludeNode", handled, "no include was claimed at all")
+        self.assertIn(
+            "IncludeNode",
+            delegated,
+            f"{depth} nested includes never exhausted the budget, so nothing "
+            f"bounded the walk but the stack",
+        )
+        from django_rust_templates.engine import Engine
+
+        engine = Engine(
+            loaders=[
+                ("django_rust_templates.engine.loaders.locmem.Loader", templates),
+            ],
+        )
+        self.assertEqual(render_string('{% include "t0.html" %}', {}, engine), "x")
+
+
+class IncludeLayerBalanceTests(unittest.TestCase):
+    """The two context layers an include pushes are popped on every path out.
+
+    Depth, not identity: ``context.push()`` appends a dict and ``pop`` removes it,
+    so the length is the whole observable difference between a balanced render and
+    a leaked one.
+    """
+
+    SOURCE = '{% include "a.html" %}'
+
+    def _engine(self, templates):
+        from django_rust_templates.engine import Engine
+
+        return Engine(
+            loaders=[
+                ("django_rust_templates.engine.loaders.locmem.Loader", templates),
+            ],
+        )
+
+    def _depths(self, context):
+        return len(context.dicts), len(context.render_context.dicts)
+
+    def test_a_rendered_include_leaves_the_context_as_it_found_it(self):
+        from django_rust_templates.engine import Context
+
+        engine = self._engine({"a.html": "{{ x }}"})
+        template = engine.from_string(self.SOURCE)
+        context = Context({"x": "v"})
+        before = self._depths(context)
+        self.assertEqual(template.render(context), "v")
+        self.assertEqual(self._depths(context), before)
+
+    def test_a_raising_include_leaves_the_context_as_it_found_it(self):
+        """The error path is the one a ``?`` between the pushes would leak.
+
+        Rendered twice, because a leak that pushes twice and pops once shows on
+        the second render and not the first — and the first is where a
+        single-render row would stop looking.
+        """
+        from django.template import TemplateDoesNotExist
+
+        from django_rust_templates.engine import Context
+
+        engine = self._engine({"a.html": '{% include "missing.html" %}'})
+        template = engine.from_string(self.SOURCE)
+        context = Context({})
+        before = self._depths(context)
+        for _ in range(2):
+            with self.assertRaises(TemplateDoesNotExist):
+                template.render(context)
+            self.assertEqual(self._depths(context), before)
+
+
+class IncludeCleanupTests(unittest.TestCase):
+    """A ``pop`` that raises is the include's error, on both paths.
+
+    ``with context.push(**values): return template.render(context)`` has a
+    ``finally`` in it (``loader_tags.py:210-211``), and a ``finally`` that raises
+    *replaces* the exception travelling through it. `Drop` cannot return an error,
+    so a slot that left the unwinding to `Drop` reported the include as though the
+    template had returned — measured, this shape rendered ``x`` through the slot and
+    raised through the delegated path.
+
+    The control is the second row: a bare-name include is a shape the slot never
+    claims, so it renders through ``IncludeNode.render`` and the ``with`` statement
+    it owns. Both rows have to raise the same exception for the slot to be right.
+    """
+
+    class Pops(Context):
+        """``Context.pop``'s own body, plus a failure — anything can raise here."""
+
+        def pop(self):
+            super().pop()
+            raise RuntimeError("pop failed")
+
+    def _render(self, source):
+        engine = Engine(
+            loaders=[
+                ("django_rust_templates.engine.loaders.locmem.Loader", {"a.html": "x"}),
+            ],
+        )
+        context = self.Pops({"which": "a.html"})
+        return engine.from_string(source).render(context)
+
+    def test_a_raising_pop_reaches_the_caller_from_the_slot(self):
+        with self.assertRaises(RuntimeError):
+            self._render('{% include "a.html" %}')
+
+    def test_a_raising_pop_reaches_the_caller_from_stock_djangos_path(self):
+        with self.assertRaises(RuntimeError):
+            self._render("{% include which %}")
+
+
+class _Loud(Template):
+    """A target class whose ``render`` never reaches ``Template.render``."""
+
+    def render(self, context):
+        return "LOUD"
+
+
+class IncludeProtocolTests(unittest.TestCase):
+    """A cached target that no longer renders through this slot's ``render`` is left to Python.
+
+    ``_native_plan`` says a plan was built for the target's *class*; it says nothing
+    about the object in front of it. Both shapes below carry a plan and both answer
+    ``render`` differently, and ``IncludeNode.render`` ends in
+    ``template.render(context)`` (``loader_tags.py:210-211``) — so the answer is what Django
+    returns, and a slot that rendered the plan instead would return the template's own
+    source with no error anywhere.
+
+    **The target is patched in the include cache, because that is where the two paths
+    meet.** ``IncludeNode.render`` reads that cache before ``select_template``
+    (``loader_tags.py:197-201``) and so does the slot, so one render puts the target
+    there and every render after it is handed the same object by both. **That first
+    render is the control** — same template, same node, same cache entry, and the only
+    thing that differs between it and the line under it is the answer ``render`` gives.
+
+    The census is asserted beside the string because the two questions fail differently:
+    a build missing the instance half still returns the right string on the delegated
+    path, and only the column says the slot claimed a node it should not have.
+    """
+
+    SOURCE = '{% include "a.html" %}'
+    NAME = "a.html"
+    TEMPLATES = {"a.html": "x"}
+
+    def setUp(self):
+        self.engine = Engine(
+            loaders=[
+                ("django_rust_templates.engine.loaders.locmem.Loader", self.TEMPLATES),
+            ],
+        )
+        self.context = Context({})
+        self.template = self.engine.from_string(self.SOURCE)
+
+    def _render(self):
+        """One render, as ``(output, handled, delegated)``.
+
+        ``delegated`` is the half that says the node went back to Python for
+        ``IncludeNode.render`` to make the call itself.
+        """
+        from django_rust_templates import _native
+
+        _native.census_start()
+        try:
+            output = self.template.render(self.context)
+        finally:
+            handled, delegated, _, _, _ = _native.census_take()
+        return output, dict(handled), dict(delegated)
+
+    def _cached_target(self):
+        """The object the include cache is holding for this row's one include.
+
+        ``render_context.dicts[0]`` is Django's own base layer and carries the render's
+        other bookkeeping besides — three constants, on this build — so the entry is
+        found by shape: the one keyed by a node whose value maps a name tuple.
+        """
+        for value in self.context.render_context.dicts[0].values():
+            if isinstance(value, dict) and (self.NAME,) in value:
+                return value[(self.NAME,)]
+        raise AssertionError(f"no cached include for {self.NAME!r} after a render")
+
+    def test_an_untouched_cached_target_is_still_claimed(self):
+        """The control for the two rows below: nothing about the cache declines."""
+        output, handled, delegated = self._render()
+        self.assertEqual(output, "x")
+        self.assertIn("IncludeNode", handled)
+        self.assertNotIn("IncludeNode", delegated)
+
+        # The second render finds the target in the cache instead of selecting it
+        # again, and claims it just the same — so the cache is not the difference.
+        output, handled, delegated = self._render()
+        self.assertEqual(output, "x")
+        self.assertIn("IncludeNode", handled)
+        self.assertNotIn("IncludeNode", delegated)
+
+    def test_a_patched_render_wins_over_the_plan(self):
+        """The instance dict shadows the type for both names — a plain function is a
+        non-data descriptor, so this is the lookup the slot would have skipped."""
+        self.assertEqual(self._render()[0], "x")
+        self._cached_target().render = lambda context: "OVERRIDE"
+
+        output, handled, delegated = self._render()
+        self.assertEqual(output, "OVERRIDE")
+        self.assertIn("IncludeNode", delegated)
+        self.assertNotIn("IncludeNode", handled)
+
+    def test_an_overriding_subclass_wins_over_the_plan(self):
+        """Same, one level out: the class resolves ``render`` to something that is not
+        the function this slot stands in for. The class is checked before the plan is
+        read, so this declines with the target's own plan still on it."""
+        self.assertEqual(self._render()[0], "x")
+        self._cached_target().__class__ = _Loud
+
+        output, handled, delegated = self._render()
+        self.assertEqual(output, "LOUD")
+        self.assertIn("IncludeNode", delegated)
+        self.assertNotIn("IncludeNode", handled)
+
+
+class IncludeRecursionTests(unittest.TestCase):
+    """A runaway include raises ``RecursionError``, and a finite deep chain still renders.
+
+    **Both halves, because either one alone is satisfied by a wrong answer.** A build
+    that had lost the frame budget dies on the small worker rather than reporting, so
+    this is a subprocess — the failure it guards is a ``SIGSEGV``, which an in-process
+    row would turn into a dead test run. And a build that had replaced the budget with
+    a blanket refusal raises on the finite chain, which Django renders in full. The
+    pair is what says the budget declines *per frame* and never *per render*.
+
+    **The small worker is the point of the row.** On the main thread's 8 MiB both
+    halves hold under almost any design; 512 KiB — four times the larger floor below —
+    is where Rust recursion that did not fit would show.
+
+    What this row cannot see is *where* a refusal happened, which is
+    ``IncludeSlotTests.test_the_shared_include_budget_runs_out_and_the_tail_delegates``
+    and its census.
+
+    **The floors, bisected on this crate's own shape.** A self-include given a worker
+    thread of 96 KiB on CPython 3.12.9 and 128 KiB on 3.14.4 raises ``RecursionError``
+    rather than dying. Below them the *pure-Python* path dies too, so they are
+    CPython's floor as much as this crate's. Good to a few KiB: a thread's usable stack
+    is page-rounded and carries a guard page.
+    """
+
+    DEPTH = 200
+
+    SCRIPT = """
+import sys
+import threading
+
+sys.path.insert(0, {root!r})
+sys.path.insert(0, {checkout!r})
+from scripts.filter_probe import ensure_settings
+
+ensure_settings()
+from django_rust_templates.engine import Context, Engine
+
+LOADER = "django_rust_templates.engine.loaders.locmem.Loader"
+SELF = '{{% include "self.html" %}}'
+DEPTH = {depth}
+
+
+def engine(templates):
+    return Engine(loaders=[(LOADER, templates)])
+
+
+def render_runaway():
+    try:
+        engine({{"self.html": SELF}}).from_string(SELF).render(Context({{}}))
+    except RecursionError:
+        return None
+    return "no exception at all"
+
+
+CHAIN = {{}}
+for i in range(DEPTH - 1):
+    CHAIN["t" + str(i) + ".html"] = '{{% include "t' + str(i + 1) + '.html" %}}'
+CHAIN["t" + str(DEPTH - 1) + ".html"] = "x"
+
+
+def render_finite():
+    return engine(CHAIN).from_string('{{% include "t0.html" %}}').render(Context({{}}))
+
+
+expected = {{"runaway": None, "finite": "x"}}
+results = {{}}
+
+
+def record(name, render):
+    results[name] = render()
+
+
+record("runaway/main", render_runaway)
+record("finite/main", render_finite)
+
+outcome = []
+
+
+def worker():
+    try:
+        record("runaway/worker", render_runaway)
+        record("finite/worker", render_finite)
+    except BaseException as exc:
+        outcome.append(repr(exc))
+
+
+# The smallest stack a worker is likely to be given. Restored, because it is
+# process-global.
+previous = threading.stack_size(512 * 1024)
+thread = threading.Thread(target=worker)
+thread.start()
+thread.join()
+threading.stack_size(previous)
+
+if outcome:
+    raise SystemExit("the worker thread itself failed: %s" % (outcome[0],))
+
+wrong = {{k: v for k, v in results.items() if v != expected[k.split("/")[0]]}}
+if not wrong:
+    raise SystemExit(0)
+raise SystemExit("an include run did not do what Django's does: %r" % (results,))
+"""
+
+    def test_a_runaway_include_raises_where_a_finite_one_still_renders(self):
+        done = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                self.SCRIPT.format(
+                    root=str(PROJECT_ROOT),
+                    checkout=str(DJANGO_CHECKOUT),
+                    depth=self.DEPTH,
+                ),
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            done.returncode,
+            0,
+            f"a self-include did not raise `RecursionError`, or a {self.DEPTH}-deep "
+            f"chain did not render, on the main thread and on a 512 KiB worker "
+            f"(exit {done.returncode}; -11 is SIGSEGV, -10 is SIGBUS, and any other "
+            f"code is the message below):\n{done.stdout}\n{done.stderr}",
         )
 
 

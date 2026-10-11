@@ -2190,7 +2190,7 @@ fn resolve_components(
 // produces no plan at all and the template renders on the Python path unchanged, so a declined plan is a set
 // difference the census shows, never a render that quietly differs.
 // Four removals it makes against Django's render path, each measured: one sink (one `String`, one
-// `SafeString` wrapper, as `NodeList.render` does at `engine/base.py:1199-1200`); a native loop frame
+// `SafeString` wrapper, as `NodeList.render` does at `engine/base.py:1204-1205`); a native loop frame
 // (`ForNode.render`'s per-iteration `forloop` dict and loop-variable store measure ~0.11 and ~0.06 µs against
 // a 0.222 fitted slope, and a body this walk renders cannot observe either); hoisted render-invariant work
 // (`autoescape` and the escape function read once per render); and the escape fast path
@@ -2204,6 +2204,7 @@ use std::sync::Mutex;
 const VARIABLE_NODE: &str = "VariableNode";
 const FOR_NODE: &str = "ForNode";
 const IF_NODE: &str = "IfNode";
+const INCLUDE_NODE: &str = "IncludeNode";
 /// The one class whose body the walk reaches on its own hook rather than as a planned slot:
 /// `BlockNode.render` renders the body nodelist through `NodeList._render_with_plan`, so the plan goes
 /// on the nodelist — see [`plan_block_bodies`].
@@ -2293,6 +2294,8 @@ enum Act {
     If(Box<IfPlan>),
     /// A `{% for %}` the walk owns end to end.
     For(Box<ForPlan>),
+    /// An `{% include %}` the walk resolves and renders itself.
+    Include(Box<IncludePlan>),
     /// A node the walk does not render. `render_annotated` is called on it, which keeps Django's culprit
     /// protocol in one place.
     Delegate,
@@ -2332,6 +2335,272 @@ struct ForPlan {
     /// `PyString::new` and not `PyString::intern` — the name comes from the template, and the
     /// interpreter's intern table is permanent.
     loopvar: Py<PyString>,
+}
+
+/// A `{% include %}` with a constant name, no `with` bindings and no `only`.
+///
+/// **The name is all it holds.** Where the *template* is remembered is Django's business and stays
+/// Django's: `IncludeNode.render` caches it in `render_context.dicts[0]` keyed by the node
+/// (`loader_tags.py:197-201`), so its lifetime is the `Context`'s. A copy here would outlive a loader
+/// reset and answer with a template the engine no longer serves.
+struct IncludePlan {
+    /// Read off the descriptor, not the node: `tags/include.rs` ran `construct_relative_path` before
+    /// compiling the filter, so a relative name is already its final target.
+    name: String,
+}
+
+/// The template name of an `{% include %}` the slot may render itself, or `None`.
+///
+/// `None` for every shape whose resolution touches the context, which is every shape the slot does
+/// not reproduce exactly.
+fn constant_include_name(desc: &NodeDesc) -> Option<&str> {
+    if !matches!(
+        find_attr(desc, "isolated_context"),
+        Some(AttrValue::Bool(false))
+    ) {
+        return None;
+    }
+    if !matches!(find_attr(desc, "extra_context"), Some(AttrValue::Map(m)) if m.is_empty()) {
+        return None;
+    }
+    let Some(AttrValue::FilterExpr(expr)) = find_attr(desc, "template") else {
+        return None;
+    };
+    if !expr.filters.is_empty() {
+        return None;
+    }
+    // `is_var` false is Django's `isinstance(var_obj, Variable)` being false.
+    let (lookup, value) = &expr.var;
+    if *lookup {
+        return None;
+    }
+    let AttrValue::Variable(var) = value else {
+        return None;
+    };
+    // `_("x")` translates at render time, and Django's `is_var` is false only when `lookups` is
+    // falsy — `is_none()` and not `is_empty()`, so a hand-built descriptor with an empty list is
+    // refused rather than trusted.
+    if var.translate || var.lookups.is_some() {
+        return None;
+    }
+    match var.literal.as_ref()? {
+        // `SafeStr` and not `Str`: `parse_variable` wraps `unescape_string_literal`'s output in
+        // `AttrValue::SafeStr` because Django wraps it in `mark_safe`
+        // (`template-core/src/parser/variable.rs:70`). Matching on `Str` here compiles and never
+        // fires.
+        //
+        // An empty literal is `"" or ()` (`loader_tags.py:187`), i.e. `select_template(())` and not
+        // `("",)`.
+        AttrValue::SafeStr(name) if !name.is_empty() => Some(name),
+        _ => None,
+    }
+}
+
+/// `IncludeNode.render`'s lookup, run against the `Context`'s own cache and nothing else.
+///
+/// The `setdefault` / `get` / store are Django's four lines. Writing the *store* is what makes
+/// declining cheap: a target with no plan is found by the next render's `get` instead of being
+/// selected a second time on the Python path.
+///
+/// A `TemplateDoesNotExist` out of `select_template` propagates: that is the exception Django raises
+/// there, and the node's own `render_annotated` would have raised the same one.
+fn resolve_include<'py>(
+    py: Python<'py>,
+    context: &Bound<'py, PyAny>,
+    node: &Bound<'py, PyAny>,
+    plan: &IncludePlan,
+) -> PyResult<Bound<'py, PyAny>> {
+    let name = PyTuple::new(py, [plan.name.as_str()])?;
+    let render_context = context.getattr("render_context")?;
+    let cache = render_context
+        .getattr("dicts")?
+        .get_item(0)?
+        .call_method1("setdefault", (node, PyDict::new(py)))?;
+    // `cache.get(name)`, not `cache[name]`: `cache` is a `Bound<PyAny>`, whose `get_item` is
+    // `__getitem__` and raises `KeyError` on the first render of any include.
+    let cached = cache.call_method1("get", (&name,))?;
+    if !cached.is_none() {
+        return Ok(cached);
+    }
+    let template = context
+        .getattr("template")?
+        .getattr("engine")?
+        .call_method1("select_template", (&name,))?;
+    cache.set_item(&name, &template)?;
+    Ok(template)
+}
+
+/// The context layers `IncludeNode.render` and `Template.render` push, and the two ways they come off.
+///
+/// Rust's `?` runs no `finally`, so three pushes set one after another and popped inline leak every
+/// layer after the first that raised — into a `Context` a later render then reads. Each flag says
+/// whether that layer is *on*, so an unwind part-way through `push` still pops exactly what it
+/// pushed.
+///
+/// **The ordinary path is [`finish`](Self::finish), which is fallible, and `Drop` is the emergency.**
+/// A `finally` in Python can raise anything — `context.pop()` is a `Context` subclass's method, and
+/// measured, one that raises `RuntimeError` does it here — and a `Drop` cannot return that error, so
+/// leaving the pop to `Drop` would swallow it and render this include as though the template had
+/// returned. `finish` reports it, [`pop_all`](Self::pop_all) having finished the unwinding first so
+/// no layer is left behind.
+struct ContextLayers<'py> {
+    context: Bound<'py, PyAny>,
+    render_context: Bound<'py, PyAny>,
+    saved_template: Option<Bound<'py, PyAny>>,
+    pushed_context: bool,
+    pushed_render_context: bool,
+    /// Whether [`finish`](Self::finish) already unwound — `Drop` then has nothing to do.
+    done: bool,
+}
+
+impl<'py> ContextLayers<'py> {
+    /// `with context.push(**values)` — `values` is empty, [`constant_include_name`] refused every
+    /// `with`, and the layer is pushed anyway because `Context.__setitem__` writes to `dicts[-1]`.
+    ///
+    /// Then `Template.render`'s `with context.render_context.push_state(self)`, whose own order is
+    /// `template` first and `push` second (`base.py:168-176`). `bind_template` is *not* called:
+    /// `context.template` is not `None` inside a walk, and the caller checked.
+    fn push(context: &Bound<'py, PyAny>, template: &Bound<'py, PyAny>) -> PyResult<Self> {
+        let render_context = context.getattr("render_context")?;
+        let mut layers = Self {
+            context: context.clone(),
+            render_context,
+            saved_template: None,
+            pushed_context: false,
+            pushed_render_context: false,
+            done: false,
+        };
+        layers.context.call_method0("push")?;
+        layers.pushed_context = true;
+        layers.saved_template = Some(layers.render_context.getattr("template")?);
+        layers.render_context.setattr("template", template)?;
+        layers.render_context.call_method0("push")?;
+        layers.pushed_render_context = true;
+        Ok(layers)
+    }
+
+    /// Unwind the layers the way the two `finally` blocks do, reporting the first failure.
+    ///
+    /// A `finally` that raises **replaces** whatever exception was travelling through it, so the
+    /// caller runs this before unwrapping the render's own result: a cleanup error wins over a render
+    /// error, exactly as it would in Python.
+    fn finish(mut self) -> PyResult<()> {
+        self.done = true;
+        self.pop_all()
+    }
+
+    /// Every layer still on, in Python's order, continuing past a failure so none is left behind.
+    ///
+    /// Continuing matters because the three steps touch two stacks and a later render reads both. The
+    /// first failure is the one reported, for the reason above: it is the exception Python would have
+    /// propagated.
+    fn pop_all(&mut self) -> PyResult<()> {
+        fn record(first: &mut Option<PyErr>, error: PyErr) {
+            if first.is_none() {
+                *first = Some(error);
+            }
+        }
+        let mut first: Option<PyErr> = None;
+        if let Some(saved) = self.saved_template.take() {
+            if let Err(error) = self.render_context.setattr("template", saved) {
+                record(&mut first, error);
+            }
+        }
+        if std::mem::take(&mut self.pushed_render_context) {
+            if let Err(error) = self.render_context.call_method0("pop") {
+                record(&mut first, error);
+            }
+        }
+        if std::mem::take(&mut self.pushed_context) {
+            if let Err(error) = self.context.call_method0("pop") {
+                record(&mut first, error);
+            }
+        }
+        match first {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+}
+
+impl Drop for ContextLayers<'_> {
+    fn drop(&mut self) {
+        if !self.done {
+            // The error is already leaving by another route and `Drop` cannot add to it.
+            let _ = self.pop_all();
+        }
+    }
+}
+
+/// How deep this crate may recurse into itself — native includes and walks together, *across
+/// re-entrant walks*, on one thread.
+///
+/// **Not a limit on the template, and not a limit Django has.** It is there because Rust stack is not
+/// something CPython's recursion limit protects: on 3.12 that limit counts Python frames and knows
+/// nothing of the C stack underneath them, so deep Rust recursion is a `SIGBUS` and the process is
+/// gone. Django, which recurses only through Python, raises `RecursionError` instead. Every frame
+/// this counter refuses is a frame that runs in Python instead, where Django's own limit applies and
+/// a runaway template raises exactly what it raises under Django.
+///
+/// **Refusing is per-frame and never per-render, so the ceiling costs no compatibility.** A finite
+/// chain deeper than the budget renders in full — the head natively, the tail on Python — and the
+/// census in
+/// `IncludeSlotTests.test_the_shared_include_budget_runs_out_and_the_tail_delegates` is the row that
+/// shows both halves. Nothing about the output depends on which side of the budget a level landed.
+///
+/// **The number is what fits the smallest thread this walk can meet, and it was bisected rather than
+/// reasoned.** The Rust frames are the whole cost that is ours to bound; the Python frames are
+/// CPython's, and they are the half Django runs alone. A self-include given a worker thread of
+/// **96 KiB on CPython 3.12.9** and **128 KiB on 3.14.4** reaches CPython's recursion limit and
+/// raises `RecursionError` — what Django raises — rather than dying. Below those the process dies on
+/// the *pure-Python* path too, with no `WalkFrame` in the frame, so that is the floor beneath this
+/// crate's rather than a floor of it. The bisection is `IncludeRecursionTests`' own shape and is
+/// good to a few KiB: a thread's usable stack is page-rounded and carries a guard page, and
+/// `stack_size` rounds again.
+///
+/// The main thread's 8 MiB is sixty times the larger floor, and every render in this repo's corpus
+/// runs on it. The suite holds 512 KiB — four times that floor — as the smallest a caller is
+/// promised.
+const MAX_WALK_FRAMES: usize = 64;
+
+thread_local! {
+    static LIVE_FRAMES: Cell<usize> = const { Cell::new(0) };
+}
+
+/// One live frame of Rust recursion — a walk ([`render_plan`]) or a native include
+/// ([`Walk::run_include`]) — released on every path out including an unwind.
+///
+/// **One counter for both, because both are the same stack.** A native include recurses inside the
+/// walk that took it; a *declined* include hands back to Python, which re-enters `render_plan` and so
+/// nests a whole new walk inside the frame of the old one's `delegate`. Counting only the includes
+/// bounds the first recursion and leaves the second unbounded — a crash, not a wrong answer.
+/// Measured on CPython 3.12.9, where the recursion limit counts Python frames and knows nothing of
+/// the C stack underneath: with the include cap alone, a self-include died with `SIGBUS` on worker
+/// threads of 128 KiB through 2 MiB, and survived only at 8 MiB. With both counted it raises
+/// `RecursionError` from 96 KiB up. Counting both leaves two responses — decline the include,
+/// decline the walk — as the only two things that can happen at the budget, and each one unwinds
+/// Rust and puts Python back in charge of the depth.
+///
+/// See [`MAX_WALK_FRAMES`] for the number and what it is measured against.
+struct WalkFrame;
+
+impl WalkFrame {
+    fn enter() -> Option<Self> {
+        LIVE_FRAMES.with(|n| {
+            if n.get() >= MAX_WALK_FRAMES {
+                None
+            } else {
+                n.set(n.get() + 1);
+                Some(WalkFrame)
+            }
+        })
+    }
+}
+
+impl Drop for WalkFrame {
+    fn drop(&mut self) {
+        LIVE_FRAMES.with(|n| n.set(n.get() - 1));
+    }
 }
 
 /// Which nodes the walk rendered and which it handed back, over every render since [`census_start`].
@@ -2812,6 +3081,13 @@ fn plan_slot(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResu
             Some(plan) => Act::If(Box::new(plan)),
             None => Act::Delegate,
         }
+    } else if class_name == INCLUDE_NODE {
+        match constant_include_name(desc) {
+            Some(name) => Act::Include(Box::new(IncludePlan {
+                name: name.to_owned(),
+            })),
+            None => Act::Delegate,
+        }
     } else {
         Act::Delegate
     };
@@ -3008,7 +3284,7 @@ enum Absorbed {
     /// Falsy: `obj = string_if_invalid` and the chain runs on it (`base.py:800`).
     Continue(Py<PyAny>),
     /// `VariableNode.render`'s `UnicodeDecodeError` arm: the node renders `""` and
-    /// `render_value_in_context` never runs (`engine/base.py:1351-1354`).
+    /// `render_value_in_context` never runs (`engine/base.py:1360-1363`).
     Nothing,
 }
 
@@ -3053,6 +3329,18 @@ struct Walk<'py> {
     /// is holding, the ordinal `NodeList.render`'s `"".join` would name for it.
     nodes: usize,
     census: Option<Census>,
+    /// `render` and `_render`, resolved once on the template this walk was entered for — the two
+    /// functions an included target must still answer to. `None` when the walk has no template to
+    /// read them off, in which case every include declines. See
+    /// [`Walk::renders_the_plan_in_place`], which is the only thing standing between an include and
+    /// rendering a target whose `render` is not the method the slot is standing in for.
+    bypassed: Option<(Py<PyAny>, Py<PyAny>)>,
+    /// The last target class [`Walk::renders_the_plan_in_place`] ruled on, and its verdict.
+    ///
+    /// A walk's includes resolve to one class in every corpus there is — 73 of the 73 on
+    /// `real-world/complex` — so this turns the two class-attribute lookups into one pointer compare
+    /// per include. The class is held, not borrowed, so an entry cannot outlive its class.
+    include_protocol: Option<(Py<PyType>, bool)>,
 }
 
 impl<'py> Walk<'py> {
@@ -3089,6 +3377,11 @@ impl<'py> Walk<'py> {
                 },
                 Act::For(plan) => match self.run_for(plan, depth + 1) {
                     Ok(()) => census_bump(&mut self.census, &slot.class_name, false),
+                    Err(error) => return Err(self.culprit(slot, error)),
+                },
+                Act::Include(plan) => match self.run_include(slot, plan, depth) {
+                    Ok(true) => census_bump(&mut self.census, &slot.class_name, false),
+                    Ok(false) => self.delegate(slot)?,
                     Err(error) => return Err(self.culprit(slot, error)),
                 },
             }
@@ -3339,7 +3632,7 @@ impl<'py> Walk<'py> {
     /// `FilterSeamRefusalTests.test_a_string_the_seam_cannot_hold_renders_as_django_renders_it` renders
     /// through `{{ x|upper }}` — is a `str` CPython carries and no `String` can. So the first piece that will
     /// not fit **spills** the accumulator into Python's; the slow path ends in `"".join`, as `NodeList.render`
-    /// does (`engine/base.py:1199-1200`).
+    /// does (`engine/base.py:1204-1205`).
     /// A **`str` that will not fit** goes into the spill; a piece that is **not a `str` at all** is a value
     /// Django dies on: the `join` raises `TypeError`, and this raises from the same call rather than
     /// re-writing its message. The list is padded with empty strings so the offending piece sits at its
@@ -3372,6 +3665,129 @@ impl<'py> Walk<'py> {
         }
         self.nodes += 1;
         Ok(())
+    }
+
+    /// Render one `{% include %}` natively, or answer `false` so the caller delegates.
+    ///
+    /// The sequence is `IncludeNode.render`'s for the shape [`constant_include_name`] accepted, then
+    /// `Template.render`'s non-binding branch (`base.py:168-176`).
+    ///
+    /// Every refusal past this point is `Ok(false)` and not an error. An optimisation must not turn a
+    /// shape it does not understand into a compile error, and the node renders on the Python path
+    /// unchanged — except a `TemplateDoesNotExist`, which propagates because Python raises the same
+    /// one.
+    fn run_include(&mut self, slot: &Slot, plan: &IncludePlan, depth: usize) -> PyResult<bool> {
+        let py = self.py;
+        // `context.template` is never `None` inside a walk: `_render` is reached only through
+        // `Template.render` and through `ExtendsNode`'s `_render`, both inside a binding. Checked
+        // rather than assumed — the other branch would need `bind_template`, which sets
+        // `context.template_name` too.
+        if self.context.getattr("template")?.is_none() {
+            return Ok(false);
+        }
+        let target = resolve_include(py, &self.context, slot.node.bind(py), plan)?;
+        if !self.renders_the_plan_in_place(&target)? {
+            return Ok(false);
+        }
+        // A template with no plan is any template compiled while the walk was off, and an attribute
+        // that is not a `NativePlan` is a template another engine built. Both render on the Python
+        // path. `AttributeError` is the only lookup failure that means one of those two things;
+        // anything else is the object's own exception and belongs to the caller.
+        let held = match target.getattr("_native_plan") {
+            Ok(held) => held,
+            Err(error) if error.is_instance_of::<PyAttributeError>(py) => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let Ok(child) = held.extract::<Py<NativePlan>>() else {
+            return Ok(false);
+        };
+        let Some(_frame) = WalkFrame::enter() else {
+            return Ok(false);
+        };
+        let layers = ContextLayers::push(&self.context, &target)?;
+
+        // The included template's output is `SafeString("".join(...))` of *its own* nodelist, so it is
+        // one element of the parent's list and the ordinal a non-`str` piece is reported at is its
+        // index in that inner list. Hence a frame of its own, swapped in and out.
+        let outer_out = std::mem::take(&mut self.out);
+        let outer_spill = self.spill.take();
+        let outer_nodes = std::mem::replace(&mut self.nodes, 0);
+
+        let child = child.bind(py);
+        let child = child.borrow();
+        let rendered = self.run(&child.slots, depth + 1);
+
+        let inner_out = std::mem::replace(&mut self.out, outer_out);
+        let inner_spill = self.spill.take();
+        self.spill = outer_spill;
+        self.nodes = outer_nodes;
+
+        // A plain `str`, not a `SafeString`: `push_python` reads the piece's *characters*, and an
+        // include's output is already escaped by the time it is joined. Wrapping it here would only
+        // ask `SafeString` to re-wrap a string it did not produce.
+        let inner = rendered.and_then(|()| match inner_spill {
+            None => Ok(PyString::new(py, &inner_out).into_any().unbind()),
+            Some(pieces) => Ok(PyString::new(py, "")
+                .call_method1("join", (PyList::new(py, pieces)?,))?
+                .unbind()),
+        });
+        // The two `finally` blocks run before the piece is appended and before the error leaves —
+        // `with context.push(...): return template.render(context)` (`loader_tags.py:210-211`) — and a
+        // `finally` that raises **replaces** the exception travelling through it, so this is `?`
+        // before `inner` is unwrapped rather than after.
+        layers.finish()?;
+        self.push_python(inner?)?;
+        Ok(true)
+    }
+
+    /// Whether `target` still renders through the `render` and `_render` this slot stands in for.
+    ///
+    /// `_native_plan` says a plan was built for the target's class. It does not say the object still
+    /// renders through it: `IncludeNode.render` ends in `template.render(context)`
+    /// (`loader_tags.py:210-211`), and a subclass overriding either name — or an instance that patched
+    /// one — has an answer of its own that rendering the plan here would skip. Measured: a cached
+    /// target with `render` replaced renders the replacement through stock Django and its own
+    /// template through this slot.
+    ///
+    /// **Two questions, because Python's lookup asks two.** The *type*, resolving both names and
+    /// comparing them with the pair [`render_plan`] took from the template that started this walk —
+    /// which is the implementation being bypassed, and the only definition of it there is. Then the
+    /// *instance dict*, which shadows the type for both names, plain functions being non-data
+    /// descriptors. The type answer is remembered for the walk, the instance answer cannot be.
+    ///
+    /// **Refusal is the answer to both when it cannot be given.** No `__dict__` is no way to see a
+    /// patch; a walk with no `bypassed` pair is a walk that cannot say what it is standing in for.
+    /// Declining here is a lost optimisation, never a different string.
+    fn renders_the_plan_in_place(&mut self, target: &Bound<'py, PyAny>) -> PyResult<bool> {
+        let Some((render_fn, plan_fn)) = &self.bypassed else {
+            return Ok(false);
+        };
+        let ty = target.get_type();
+        let mut known = None;
+        if let Some((class, verdict)) = &self.include_protocol {
+            if class.bind(self.py).is(&ty) {
+                known = Some(*verdict);
+            }
+        }
+        let clean = match known {
+            Some(verdict) => verdict,
+            None => {
+                let verdict = ty.getattr("render")?.is(render_fn.bind(self.py))
+                    && ty.getattr("_render")?.is(plan_fn.bind(self.py));
+                self.include_protocol = Some((ty.unbind(), verdict));
+                verdict
+            }
+        };
+        if !clean {
+            return Ok(false);
+        }
+        let Ok(instance) = target.getattr("__dict__") else {
+            return Ok(false);
+        };
+        Ok(match instance.cast::<PyDict>() {
+            Ok(instance) => !instance.contains("render")? && !instance.contains("_render")?,
+            Err(_) => false,
+        })
     }
 
     /// A `{% for %}` the walk runs itself, in `ForNode.render`'s order (`engine/defaulttags.py:193-258`).
@@ -3519,7 +3935,7 @@ fn is_variable_does_not_exist(py: Python<'_>, error: &PyErr) -> PyResult<bool> {
 /// falling-through arm is the common one — and it is why `{{ missing|default:"x" }}` is `"x"`. Collapsing
 /// the two would make the default `""` skip `default`.
 ///
-/// The `UnicodeDecodeError` arm is not `resolve`'s but `VariableNode.render`'s (`engine/base.py:1351-1354`):
+/// The `UnicodeDecodeError` arm is not `resolve`'s but `VariableNode.render`'s (`engine/base.py:1360-1363`):
 /// resolving a variable directly resolves *past* both handlers, so both are taken here.
 fn absorb_emit(
     py: Python<'_>,
@@ -3554,9 +3970,22 @@ fn absorb_emit(
     Ok(Absorbed::Final(invalid.clone().unbind()))
 }
 
-/// Walk a plan and return the rendered `SafeString`.
+/// Walk a plan and return the rendered `SafeString`, or `None` if the walk would nest Rust deeper
+/// than [`MAX_WALK_FRAMES`] allows.
+///
+/// The `None` is the caller's cue to render the nodelist the ordinary way. A caller that ignores it
+/// is rendering nothing at all, so `Template._render` and `NodeList._render_with_plan` both read it,
+/// and every other reason a walk cannot run is already folded in here: a walk that declines is a
+/// render that never started.
 #[pyfunction]
-fn render_plan(py: Python<'_>, plan: &NativePlan, context: Py<PyAny>) -> PyResult<Py<PyAny>> {
+fn render_plan(
+    py: Python<'_>,
+    plan: &NativePlan,
+    context: Py<PyAny>,
+) -> PyResult<Option<Py<PyAny>>> {
+    let Some(_frame) = WalkFrame::enter() else {
+        return Ok(None);
+    };
     let context = context.bind(py);
     let mut walk = Walk {
         py,
@@ -3573,13 +4002,31 @@ fn render_plan(py: Python<'_>, plan: &NativePlan, context: Py<PyAny>) -> PyResul
         } else {
             None
         },
+        // The template being rendered, which `Template.render`'s and `ExtendsNode.render`'s
+        // `push_state` put here before `_render` — so this is the object whose `render` and `_render`
+        // the walk stands in for, and not whatever `context.template` happens to be otherwise. A
+        // caller that got here without one leaves both `None` and every include declines, which is
+        // the right answer for a walk that cannot say what it is standing in for.
+        bypassed: {
+            let started = context.getattr("render_context")?.getattr("template")?;
+            if started.is_none() {
+                None
+            } else {
+                let class = started.get_type();
+                Some((
+                    class.getattr("render")?.unbind(),
+                    class.getattr("_render")?.unbind(),
+                ))
+            }
+        },
+        include_protocol: None,
     };
     walk.run(&plan.slots, 0)?;
     if let Some(census) = walk.census.take() {
         census_merge(&mut CENSUS.lock().unwrap(), census);
     }
     // `SafeString` of a whole `str`, or of `"".join(pieces)` where the walk had to spill —
-    // `NodeList.render`'s own expression (`engine/base.py:1199-1200`). `SafeString` and not `mark_safe`,
+    // `NodeList.render`'s own expression (`engine/base.py:1204-1205`). `SafeString` and not `mark_safe`,
     // for the reasons on [`SAFE_STRING`].
     let out: Py<PyAny> = match walk.spill.take() {
         None => PyString::new(py, &walk.out).into_any().unbind(),
@@ -3587,10 +4034,12 @@ fn render_plan(py: Python<'_>, plan: &NativePlan, context: Py<PyAny>) -> PyResul
             .call_method1("join", (PyList::new(py, pieces)?,))?
             .unbind(),
     };
-    Ok(SAFE_STRING
-        .import(py, "django.utils.safestring", "SafeString")?
-        .call1((out,))?
-        .unbind())
+    Ok(Some(
+        SAFE_STRING
+            .import(py, "django.utils.safestring", "SafeString")?
+            .call1((out,))?
+            .unbind(),
+    ))
 }
 
 /// `django_rust_templates.engine.base.render_value_in_context`, cached once.
@@ -3950,6 +4399,10 @@ mod walk_depth {
             spill: None,
             nodes: 0,
             census: None,
+            // This walk has no template, so it has no `render` to stand in for and every include
+            // declines — which is what `render_plan` does for the same reason.
+            bypassed: None,
+            include_protocol: None,
         };
         walk.run(slots, 0)
     }

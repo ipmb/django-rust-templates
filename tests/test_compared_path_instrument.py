@@ -220,9 +220,11 @@ class DescriptorCountingTests(unittest.TestCase):
         # final 27, all three of its pieces sitting above this `def` too (the
         # `_native_plan` class attribute, the `_render` arm, and
         # `compile_nodelist`'s assignment) — so it moved by **+78** in all.
+        # The include slice adds the last 5, `_render`'s own arm and the `None` it
+        # returns on, which sit above this `def` as well — **+83** in all.
         # The figure is re-measured from `definitions`, not shifted by
         # arithmetic; the decomposition is a reading aid beside it.
-        self.assertEqual(base_defs["FilterExpression.args_check"], (938, 955))
+        self.assertEqual(base_defs["FilterExpression.args_check"], (943, 960))
         # 136, not 134: M16's module-level `_native` import is one line above
         # this `def`, and `args_check` on the line above is unmoved because the
         # line it gained there is cancelled by the one `resolve` lost. The second

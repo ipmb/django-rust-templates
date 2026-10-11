@@ -175,7 +175,7 @@ pub struct FilterEntry {
 /// **One table, not two, and that is measured rather than assumed.** The Python
 /// seam is `names.get(func)` — the per-expression name table built from
 /// `django_own_filters()` — keyed on the **function object**
-/// (`python/django_rust_templates/engine/base.py:889`), so a library filter's handle
+/// (`python/django_rust_templates/engine/base.py:894`), so a library filter's handle
 /// is in the map only once `{% load %}` registered it. A second Rust filter table
 /// would be a routing distinction the seam does not make. The nine are appended *in
 /// place*, so the ascending order [`MEASURED_NAMES`] pins is one order over the whole

@@ -17,6 +17,7 @@ crates/template-core/src/parser/tags/mod.rs:216	crates/template-core/src/parser/
 crates/template-core/src/parser/tags/url.rs:83	crates/template-core/src/parser/tags/url.rs	83	-	AttrValue::Map(kwargs)	-
 crates/template-core/src/parser/tags/with.rs:82	crates/template-core/src/parser/tags/with.rs	82	-	AttrValue::Map(extra_context)	-
 template-core/src/parser/variable.rs:42-45	crates/template-core/src/parser/variable.rs	42	45	-	-
+template-core/src/parser/variable.rs:70	crates/template-core/src/parser/variable.rs	70	-	-	-
 crates/template-py/src/filters.rs:58-60	crates/template-py/src/filters.rs	58	60	MARK_SAFE.import(py, "django.utils.safestring", "mark_safe")	-
 crates/template-py/src/filters.rs:246-255	crates/template-py/src/filters.rs	246	255	*self.raised.borrow_mut() = Some(err);	-
 crates/template-py/src/filters.rs:821	crates/template-py/src/filters.rs	821	-	self.utility_text_checked("strip_tags"	-
@@ -38,6 +39,7 @@ base.py:109-110	django/template/base.py	109	110	def __str__(self):	return self.m
 base.py:151-152	django/template/base.py	151	152	if origin is None:	origin = Origin(UNKNOWN_SOURCE)
 base.py:151-154	django/template/base.py	151	154	Origin(UNKNOWN_SOURCE)	-
 base.py:154	django/template/base.py	154	-	self.origin = origin	-
+base.py:168-176	django/template/base.py	168	176	-	-
 base.py:183-186	django/template/base.py	183	186	lexer = DebugLexer(self.source)	-
 django/template/base.py:198	django/template/base.py	198	-	-	-
 base.py:198-200	django/template/base.py	198	200	parser.parse()	-
@@ -505,7 +507,10 @@ loader_tags.py:87	django/template/loader_tags.py	87	-	-	-
 loader_tags.py:94	django/template/loader_tags.py	94	-	self.blocks = {n.name: n	-
 loader_tags.py:118	django/template/loader_tags.py	118	-	parent = self.parent_name.resolve(context)	-
 loader_tags.py:121	django/template/loader_tags.py	121	-	self.parent_name.var	-
+loader_tags.py:187	django/template/loader_tags.py	187	-	-	-
 loader_tags.py:197	django/template/loader_tags.py	197	-	cache = context.render_context.dicts[0].setdefault(self, {})	-
+loader_tags.py:197-201	django/template/loader_tags.py	197	201	render_context.dicts[0]	-
+loader_tags.py:210-211	django/template/loader_tags.py	210	211	-	-
 loader_tags.py:215	django/template/loader_tags.py	215	-	def do_block(parser, token):	-
 loader_tags.py:219-220	django/template/loader_tags.py	219	220	# token.split_contents() isn't useful here because this tag doesn't accept	# variable as arguments.
 loader_tags.py:221-241	django/template/loader_tags.py	221	241	bits = token.contents.split()	parser.invalid_block_tag(endblock, "endblock", acceptable_endblocks)
@@ -757,12 +762,12 @@ django_rust_templates/engine/__init__.py:26	python/django_rust_templates/engine/
 engine/base.py:61	python/django_rust_templates/engine/base.py	61	-	from .context import BaseContext	-
 engine/base.py:819-832	python/django_rust_templates/engine/base.py	819	832	except VariableDoesNotExist:	-
 engine/base.py:868-874	python/django_rust_templates/engine/base.py	868	874	for func, args in self.filters:	-
-python/django_rust_templates/engine/base.py:889	python/django_rust_templates/engine/base.py	889	-	names.get(func)	-
+python/django_rust_templates/engine/base.py:894	python/django_rust_templates/engine/base.py	894	-	names.get(func)	-
 engine/base.py:1135-1164	python/django_rust_templates/engine/base.py	1135	1164	def render_annotated(self, context):	-
-engine/base.py:1199-1200	python/django_rust_templates/engine/base.py	1199	1200	return SafeString("".join([node.render_annotated(context) for node in self]))	-
+engine/base.py:1204-1205	python/django_rust_templates/engine/base.py	1204	1205	return SafeString("".join([node.render_annotated(context) for node in self]))	-
 engine/base.py:1288-1296	python/django_rust_templates/engine/base.py	1288	1296	-	-
-engine/base.py:1351-1354	python/django_rust_templates/engine/base.py	1351	1354	except UnicodeDecodeError:	-
-python/django_rust_templates/engine/base.py:1356	python/django_rust_templates/engine/base.py	1356	-	render_value_in_context(output, context)	-
+engine/base.py:1360-1363	python/django_rust_templates/engine/base.py	1360	1363	except UnicodeDecodeError:	-
+python/django_rust_templates/engine/base.py:1365	python/django_rust_templates/engine/base.py	1365	-	render_value_in_context(output, context)	-
 python/django_rust_templates/engine/context.py:69	python/django_rust_templates/engine/context.py	69	-	def __setitem__(self, key, value):	-
 engine/defaulttags.py:193-258	python/django_rust_templates/engine/defaulttags.py	193	258	-	-
 engine/defaulttags.py:194-198	python/django_rust_templates/engine/defaulttags.py	194	198	with context.push():	-
