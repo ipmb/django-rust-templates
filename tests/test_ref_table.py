@@ -58,7 +58,6 @@ its slot as a fifth element.
 # token-overwriting cases a parsed template cannot produce. Task 7 landed the
 # other filler — `IfConditionRefTests` below parses a real `{% if %}`.
 
-import importlib.util
 import sys
 import unittest
 from pathlib import Path
@@ -79,13 +78,15 @@ from django_rust_templates.engine.engine import Engine  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
 
-_MATERIALISER_SPEC = importlib.util.spec_from_file_location(
-    "django_rust_templates.engine.parser",
-    PROJECT_ROOT / "python" / "django_rust_templates" / "engine" / "parser.py",
-)
-materialiser = importlib.util.module_from_spec(_MATERIALISER_SPEC)
-sys.modules[_MATERIALISER_SPEC.name] = materialiser
-_MATERIALISER_SPEC.loader.exec_module(materialiser)
+# **An ordinary import.** This file loads it by path in every earlier draft, and the
+# justification was that importing the `engine` package executes `engine/__init__.py`,
+# which the shim served as `django.template` and which then failed for want of
+# `engine`. Two lines above, this same file imports `django_rust_templates.engine.base`
+# and `.engine` by name — so the route it was avoiding is the route it already takes.
+# The by-path load cost a **second** `parser` object in `sys.modules` under the ordinary
+# name, which is the copy `render.materialiser()` may cache; see
+# `test_materialiser_parity.py`'s import comment.
+from django_rust_templates.engine import parser as materialiser  # noqa: E402
 
 
 def parser():

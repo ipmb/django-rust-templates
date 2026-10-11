@@ -4,16 +4,29 @@ These run against Django's real modules (``.django`` on ``sys.path``, no shim),
 because the whole point is that the objects produced are Django's — the same
 classes ``isinstance``, ``get_nodes_by_type`` and ``ExtendsNode.render`` test for.
 
-The materialiser is loaded from its file rather than imported as
-``django_rust_templates.engine.parser``: ``engine/__init__.py`` is the shim's
-``django.template`` and imports its own siblings (``from .engine import
-Engine`` …), so importing the ``engine`` *package* by its ordinary name executes
-that file and fails for want of ``engine``. Loading the module directly is how
-this test reaches the materialiser without installing the shim, which is what
-keeps the node classes Django's own.
+**The materialiser is an ordinary import, and it used to be loaded from its file
+for a reason that is gone.** The file-path route was there because this package
+once substituted itself for ``django.template`` on ``sys.meta_path``, so
+importing the ``engine`` *package* by its ordinary name executed a file that
+Django's own siblings then collided with. The package no longer impersonates
+Django — see ``django_rust_templates/__init__.py``, "does not impersonate
+Django's" — and the two spellings now denote one module, so the by-path load was
+buying nothing while *costing* something: ``module_from_spec`` +
+``sys.modules[name] = …`` installs a **second** ``parser`` object, and
+``render.materialiser()`` caches whichever one it finds first. Anything
+patching one of them measures nothing while reporting a number. There is one
+``parser`` module; import it.
+
+**This file carried that load and was the first of five to give it up.** Four others
+had the same vestigial route and the same obsolete citation — ``test_filter_expr_parity``,
+``test_parser_parity``, ``test_variable_parity`` and ``test_ref_table`` — and leaving
+them in place would have kept the hazard this docstring describes, since any one of
+them re-installs the second module object that ``render.materialiser()`` may cache.
+All five are ordinary imports now. Measured after the whole suite has run:
+``render.materialiser()`` *is* this module, and ``sys.modules`` holds the object it held
+at import.
 """
 
-import importlib.util
 import re
 import sys
 import unittest
@@ -49,14 +62,7 @@ from django.utils.functional import Promise  # noqa: E402
 from django.utils.safestring import SafeString  # noqa: E402
 
 from django_rust_templates import _native  # noqa: E402
-
-_MATERIALISER_SPEC = importlib.util.spec_from_file_location(
-    "django_rust_templates.engine.parser",
-    PROJECT_ROOT / "python" / "django_rust_templates" / "engine" / "parser.py",
-)
-materialiser = importlib.util.module_from_spec(_MATERIALISER_SPEC)
-sys.modules[_MATERIALISER_SPEC.name] = materialiser
-_MATERIALISER_SPEC.loader.exec_module(materialiser)
+from django_rust_templates.engine import parser as materialiser  # noqa: E402
 
 TEXT = ("TextNode", (("s", "hi"),), (), (0, "hi", 1, (0, 2)))
 
@@ -139,8 +145,7 @@ class MaterialiseTests(unittest.TestCase):
                 # a missing attribute.
                 self.token_at_construction = getattr(self, "token", None)
 
-        materialiser.NODE_CLASSES["SpyNode"] = SpyNode
-        self.addCleanup(materialiser.NODE_CLASSES.pop, "SpyNode")
+        self._register("SpyNode", SpyNode)
 
         desc = ("SpyNode", (), (("nodelist", ([text_desc("in")], False)),), (2, "spy", 1, None))
         node = materialiser.materialise_node(desc)
@@ -174,8 +179,51 @@ class MaterialiseTests(unittest.TestCase):
         self.assertFalse(materialiser.materialise(([text_desc("y")], False)).contains_nontext)
 
     def _register(self, name, cls):
+        """Register a node class, and put the registry back **exactly** as it was.
+
+        **A save and restore, not a set-then-pop.** `NODE_CLASSES` is the process's
+        registry, and since this file stopped loading `parser.py` by path it is the
+        one the engine walks — see the module docstring. `addCleanup(NODE_CLASSES.pop,
+        name)` is only safe while no real entry can carry the name; if one did, the
+        pop would delete the registry's own binding rather than restore it, and the
+        damage would surface in whatever test ran *next*.
+        """
+        had = name in materialiser.NODE_CLASSES
+        previous = materialiser.NODE_CLASSES.get(name)
+
+        def restore():
+            if had:
+                materialiser.NODE_CLASSES[name] = previous
+            else:
+                materialiser.NODE_CLASSES.pop(name, None)
+
         materialiser.NODE_CLASSES[name] = cls
-        self.addCleanup(materialiser.NODE_CLASSES.pop, name)
+        self.addCleanup(restore)
+
+    def test_registering_a_node_class_restores_the_registry_exactly(self):
+        """Both directions: a name that was absent, and a name that was taken.
+
+        **The second is the one that matters, and an earlier draft failed it.** The
+        cleanup was `addCleanup(NODE_CLASSES.pop, name)`, which restores absence and
+        nothing else — so registering over an existing entry deleted the entry instead
+        of putting it back, and the loss surfaced in whatever test ran next. That is
+        only reachable because this file's `parser` is now the process's own module
+        rather than a private copy.
+        """
+        self.assertNotIn("RestoredNode", materialiser.NODE_CLASSES)
+        self._register("RestoredNode", type("RestoredNode", (Node,), {}))
+        self.assertIn("RestoredNode", materialiser.NODE_CLASSES)
+        # `addCleanup` runs most-recent-first, so this fires the restore registered
+        # by `_register` without ending the test.
+        self.doCleanups()
+        self.assertNotIn("RestoredNode", materialiser.NODE_CLASSES)
+
+        original = materialiser.NODE_CLASSES.get("TextNode")
+        self.assertIsNotNone(original, "the registry has no TextNode to displace")
+        self._register("TextNode", type("TextNode", (Node,), {}))
+        self.assertIsNot(materialiser.NODE_CLASSES["TextNode"], original)
+        self.doCleanups()
+        self.assertIs(materialiser.NODE_CLASSES["TextNode"], original)
 
     def test_a_ref_is_resolved_through_the_callback(self):
         class RefNode(Node):

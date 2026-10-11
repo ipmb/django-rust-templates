@@ -558,30 +558,46 @@ class AnchorManifestTests(unittest.TestCase):
         justification is stronger than the plans' and would be lost if the two
         were collapsed into one assertion.
 
-        Every file under `.review/` is dated by construction — measured: all 17
-        are `round-N`, `mN-summary`, `mN-dispatch`, `mN-brief`, `mN-seams` or
-        `mN-recon`, and no filename lacks a milestone or round. The extra reason
-        is that a review record quotes our anchors *verbatim*: this round's
-        finding on engine/parser.py:716 carried the wrong number
+        The extra reason is that a review record quotes our anchors *verbatim*:
+        this round's finding on engine/parser.py:716 carried the wrong number
         smartif.py:166-172 inside it, so scanning here fails the build on the
         reviewer's accurate quotation of our own defect.
+
+        **The undated set and `REVIEW_KEEPERS` are pinned equal**, in both
+        directions. A live document landing here reddens on the first assertion
+        instead of being silently excluded; a keeper whose file has moved away
+        reddens on the second, so the entry cannot outlive the reason for it.
         """
         self.assertNotIn(".review", anchor_manifest.TREE_ROOTS)
         self.assertIn(".review/", anchor_manifest.NOT_SCANNED_BECAUSE)
         every = sorted(p.name for p in (PROJECT_ROOT / ".review").glob("*") if p.is_file())
-        stray = [
+        undated = [
             name
             for name in every
             if not (
                 anchor_manifest._DATED_REVIEW_RE.search(name)
             )
         ]
+        stray = [name for name in undated if name not in anchor_manifest.REVIEW_KEEPERS]
         self.assertEqual(
             stray,
             [],
             "a file in .review/ is not dated by its name, so the exclusion may "
             "now be hiding a live document: give it a home outside .review/ or "
             "scan it",
+        )
+        # The keepers that are *present* must be exactly the undated files, so
+        # neither side can drift into the other. Intersecting with `every` is what
+        # lets this hold in a checkout where `.review/` has not been populated:
+        # the directory is untracked, so a fresh clone has no files and no undated
+        # ones, and an assertion that demanded the keeper's file would fail there
+        # for a reason that is not a defect.
+        self.assertEqual(
+            set(anchor_manifest.REVIEW_KEEPERS) & set(every),
+            set(undated),
+            "the keeper list and the undated files have drifted apart: a kept "
+            "file is missing from the list, or the list names a file that is "
+            "not there",
         )
 
 

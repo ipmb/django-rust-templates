@@ -15,8 +15,8 @@ attached under a name nothing walks).
 Two things here are not the obvious spelling and both were measured against the
 pinned tree rather than assumed:
 
-* the materialiser is loaded **from its file**, not imported as
-  `django_rust_templates.engine.parser`. See the note below.
+* the materialiser is imported as `django_rust_templates.engine.parser`, and it
+  used to be loaded from its file instead. See the note below.
 * Django's parser is given `builtins=Engine().template_builtins`. A bare
   `Parser(tokens)` registers *nothing* (`base.py:518-519`: `builtins=None`
   becomes `[]`), so it raises `Invalid block tag` on `{% csrf_token %}` and
@@ -27,7 +27,6 @@ pinned tree rather than assumed:
   is the form that resolves. This is the same trap Task 6 hit.
 """
 
-import importlib.util
 import inspect
 import random
 import re
@@ -87,20 +86,18 @@ from tests.parser_corpus import (  # noqa: E402
     random_template,
 )
 
-# Loaded from its file rather than imported, for the reason spelled out in
-# `tests/test_materialise.py`: `engine/__init__.py` is the shim's
-# `django.template` and imports its own siblings (`from .engine import Engine`
-# …), so importing the `engine` *package* by its ordinary name executes that file
-# and fails for want of `engine`. Loading the module directly is how this test
-# reaches the materialiser without installing the shim, which is what keeps the
-# node classes Django's own.
-_MATERIALISER_SPEC = importlib.util.spec_from_file_location(
-    "django_rust_templates.engine.parser",
-    PROJECT_ROOT / "python" / "django_rust_templates" / "engine" / "parser.py",
-)
-materialise_module = importlib.util.module_from_spec(_MATERIALISER_SPEC)
-sys.modules[_MATERIALISER_SPEC.name] = materialise_module
-_MATERIALISER_SPEC.loader.exec_module(materialise_module)
+# **An ordinary import, and it used to be a by-path load for a reason that is gone.**
+# The load was justified by `engine/__init__.py` being the shim's `django.template`,
+# whose own `from .engine import Engine` then failed for want of `engine`. There is
+# no shim: `engine/__init__.py` says in as many words that its name "is not
+# `django.template`", and this file imports `django_rust_templates.engine.base` and
+# `.engine` by name a few lines above, which executes that very file. The by-path
+# route bought nothing and cost a **second** `parser` object in `sys.modules` under
+# the ordinary name — the copy `render.materialiser()` may cache, so a test patching
+# one module's `materialise` would measure nothing while reporting a number. See
+# `test_materialiser_parity.py`'s import comment.
+from django_rust_templates.engine import parser as materialise_module  # noqa: E402
+
 materialise = materialise_module.materialise
 
 # Kept for symmetry with Task 6's module, where the same tuple describes a wire

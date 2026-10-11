@@ -338,10 +338,7 @@ def materialise_node(desc, origin=None, resolve_ref=None, register_ref=None, par
         # and no __dict__ for setting new attributes` (measured), which names
         # neither the descriptor, the slot, nor the parse it came from.
         if node is None:
-            raise LookupError(
-                f"the {HOST_NODE} descriptor's {ref!r} is an empty "
-                "reference-table slot"
-            )
+            raise _empty_slot_error(f"the {HOST_NODE} descriptor's {ref!r}")
         node.token = _decode_token(token) if token is not None else None
         node.origin = origin
         return node
@@ -349,9 +346,7 @@ def materialise_node(desc, origin=None, resolve_ref=None, register_ref=None, par
     try:
         cls = NODE_CLASSES[class_name]
     except KeyError:
-        raise LookupError(
-            f"no materialiser for node class {class_name!r}; add it to NODE_CLASSES"
-        ) from None
+        _unknown_node_class(class_name)
 
     # `{% cycle … as c %}` and every later `{% cycle c %}` are one node in Django:
     # `do_cycle` returns the *identical* object the second time
@@ -727,9 +722,7 @@ def _decode_value(value, resolve_ref=None, parser=None, child_lists=None):
         return value
     if isinstance(value, _native.NodeRef):
         if resolve_ref is None:
-            raise LookupError(
-                f"{value!r} needs a resolve_ref callback; none was passed to materialise"
-            )
+            raise _missing_resolver_error(repr(value))
         return resolve_ref(value.index)
     if isinstance(value, _native.NodeSlot):
         # `AttrValue::NodeSlot` as an attribute *value*: the object at that slot.
@@ -744,12 +737,10 @@ def _decode_value(value, resolve_ref=None, parser=None, child_lists=None):
         # `None` would fail later and elsewhere — inside `render`, as
         # `None.reset(context)`.
         if resolve_ref is None:
-            raise LookupError(
-                f"{value!r} needs a resolve_ref callback; none was passed to materialise"
-            )
+            raise _missing_resolver_error(repr(value))
         found = resolve_ref(value.index)
         if found is None:
-            raise LookupError(f"{value!r} is an empty reference-table slot")
+            raise _empty_slot_error(repr(value))
         return found
     if isinstance(value, _native.NodeListRef):
         # `AttrValue::NodeListRef`: a position in the *enclosing* node's own
@@ -757,17 +748,11 @@ def _decode_value(value, resolve_ref=None, parser=None, child_lists=None):
         # rather than an `int` because an integer attribute is also an `int` on
         # the wire, and the failure mode would be a node holding a wrong nodelist.
         if child_lists is None:
-            raise LookupError(
-                f"{value!r} needs the enclosing node's nodelists; "
-                "none were passed to _decode_value"
-            )
+            raise _missing_child_lists_error(repr(value))
         try:
             return child_lists[value.index]
         except IndexError:
-            raise LookupError(
-                f"{value!r} is out of range: the enclosing node has "
-                f"{len(child_lists)} nodelist(s)"
-            ) from None
+            raise _nodelist_ref_out_of_range_error(repr(value), len(child_lists))
     if isinstance(value, _native.SafeStr):
         return mark_safe(value.text)
     if isinstance(value, _native.Tokens):
@@ -897,3 +882,96 @@ def _decode_condition(condition, resolve_ref=None):
         else _decode_condition(condition.second, resolve_ref)
     )
     return node
+
+
+# Whether `_native.compile_template` builds the tree with the Rust walk in
+# `crates/template-py/src/materialise.rs` instead of `materialise` above.
+#
+# **At the end of the file, and that is load-bearing.** `scripts/anchors.txt`
+# carries anchors into this file by line number, so a name inserted near the top
+# moves every one of them; appending a name below every anchor moves none.
+#
+# Read by Rust as a **bool or nothing**: a missing attribute reads `False`, so a
+# Rust tree newer than the Python module beside it does not fail a compile — but
+# a value that is *present and not a bool* raises, because that is a bug in this
+# file rather than a version skew.
+#
+# **On by default since S1.** Kept rather than deleted because it is the A/B seam
+# `scripts/compile_profile.py` measures through: with it off the walk is the
+# Python one, and the two numbers are one subtraction apart. Deleting it would
+# make the parity harness unprovable and the next change unmeasurable.
+USE_NATIVE_MATERIALISER = True
+
+
+def _unknown_node_class(class_name):
+    """Raise the registry error, from the one place that spells it.
+
+    `materialise_node` raises this message and the Rust walk raises the same
+    condition; the string lives here so that a test which asserts it asserts one
+    string rather than two that agree today.
+
+    **`from None` is load-bearing.** The caller is `materialise_node`'s
+    `except KeyError` arm, so a bare `raise` here would chain the `KeyError` as
+    `__context__` and print it under the `LookupError` — which is not what the
+    inline version did. `raise … from None` sets `__suppress_context__` wherever it
+    is raised, so the *message* and the *suppression* come out exactly as the inline
+    version's did; measured on both spellings, `__context__` is the `KeyError` and
+    `__suppress_context__` is True.
+
+    **The traceback is not identical, and this frame is the difference.**
+    Extracted, the helper adds `_unknown_node_class` to the end of the frame list —
+    `['<module>', 'materialise_node', '_unknown_node_class']` where the inline
+    version gave `['<module>', 'materialise_node']`. That is the price of spelling
+    the message once. The exception type, the message and the chaining are what the
+    contract is about and all three are unchanged; nothing asserts a frame list.
+    """
+    raise LookupError(
+        f"no materialiser for node class {class_name!r}; add it to NODE_CLASSES"
+    ) from None
+
+
+def _missing_resolver_error(rendered):
+    """The one spelling of the no-resolver `LookupError`."""
+    raise LookupError(
+        f"{rendered} needs a resolve_ref callback; none was passed to materialise"
+    )
+
+
+def _empty_slot_error(rendered):
+    """The one spelling of the empty-slot `LookupError`.
+
+    `rendered` is a whole phrase rather than a `NodeSlot` repr, because the host
+    arm reaches this too and its message must keep saying *which* descriptor
+    failed.
+    """
+    raise LookupError(f"{rendered} is an empty reference-table slot")
+
+
+def _missing_child_lists_error(rendered):
+    """The one spelling of the no-enclosing-node `LookupError`.
+
+    This one names `_decode_value` and not `materialise`, unlike the others, and
+    the difference is a fact rather than an oversight: the path is reached when
+    the decoder is called directly with no enclosing node. The Rust walk cannot
+    reach it — `attr_to_py` is only ever handed the enclosing node's children —
+    so no `AttrValue` arm calls it.
+    """
+    raise LookupError(
+        f"{rendered} needs the enclosing node's nodelists; "
+        "none were passed to _decode_value"
+    )
+
+
+def _nodelist_ref_out_of_range_error(rendered, count):
+    """The one spelling of the out-of-range `LookupError`.
+
+    `from None` is *inside* here, not at the call site, and that is the whole
+    point of the helper raising rather than returning. The only call site sits in
+    an `except IndexError:`, so a `raise _nodelist_ref_out_of_range_error(...) from
+    None` there never runs — the helper raises first — and the `IndexError` stays
+    on as `__context__`, so the user is shown `list index out of range` under a
+    message that already says what went wrong.
+    """
+    raise LookupError(
+        f"{rendered} is out of range: the enclosing node has {count} nodelist(s)"
+    ) from None

@@ -41,6 +41,13 @@ source "$HERE/env.sh"
 PY_LIBDIR="$("$VIRTUAL_ENV/bin/python" -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))')"
 export DYLD_FALLBACK_LIBRARY_PATH="${PY_LIBDIR}${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
 export LD_LIBRARY_PATH="${PY_LIBDIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# The fourth thing, and the reason is the same as the first: `Python::initialize`
+# starts a *fresh* interpreter, which knows nothing of this venv, so `django`'s own
+# imports fail at `asgiref` before any test runs. The path comes from the venv's
+# own `site` module rather than a spelled-out `python3.14`, so a Python upgrade
+# moves it.
+PY_SITE="$("$VIRTUAL_ENV/bin/python" -c 'import site; print(site.getsitepackages()[0])')"
+export PYTHONPATH="${PY_SITE}${PYTHONPATH:+:$PYTHONPATH}"
 export RUST_MIN_STACK=8388608
 
 exec cargo test -p template-py --no-default-features --quiet "$@"

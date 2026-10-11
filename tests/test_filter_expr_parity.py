@@ -25,7 +25,6 @@ Three things this file is arranged around, all of them deliberate:
   `("lazy", …)` is that case named rather than skipped.
 """
 
-import importlib.util
 import inspect
 import sys
 import unittest
@@ -45,17 +44,13 @@ from django.utils.functional import Promise  # noqa: E402
 from django_rust_templates import _native  # noqa: E402
 from tests.parity_target import assert_target_is_not_rust_owned  # noqa: E402
 
-# Loaded from its file for the reason `tests/test_materialise.py` spells out:
-# `engine/__init__.py` is the shim's `django.template` and imports its own
-# siblings, so importing the `engine` *package* by name executes that file and
-# fails for want of `engine`.
-_MATERIALISER_SPEC = importlib.util.spec_from_file_location(
-    "django_rust_templates.engine.parser",
-    PROJECT_ROOT / "python" / "django_rust_templates" / "engine" / "parser.py",
-)
-materialiser = importlib.util.module_from_spec(_MATERIALISER_SPEC)
-sys.modules[_MATERIALISER_SPEC.name] = materialiser
-_MATERIALISER_SPEC.loader.exec_module(materialiser)
+# An ordinary import, and it used to be a by-path load for a reason that is gone:
+# the package no longer substitutes itself for `django.template`, so there is one
+# `parser` module and two spellings of it would install a *second* — which
+# `render.materialiser()` may or may not cache, making anything that patches one
+# of them measure nothing while reporting a number. See `test_materialise.py`'s
+# module docstring.
+from django_rust_templates.engine import parser as materialiser  # noqa: E402
 
 
 def _parser():

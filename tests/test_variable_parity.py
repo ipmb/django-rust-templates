@@ -20,7 +20,6 @@ Two things here are deliberate and both were measured rather than assumed:
   than left out of the corpus, so a reader can see it is a decision.
 """
 
-import importlib.util
 import inspect
 import sys
 import unittest
@@ -56,17 +55,15 @@ Variable = load_pinned("base.py").Variable
 
 from django_rust_templates import _native  # noqa: E402
 
-# Loaded from its file for the reason `tests/test_materialise.py` spells out:
-# `engine/__init__.py` is the shim's `django.template` and imports its own
-# siblings, so importing the `engine` *package* by name executes that file and
-# fails for want of `engine`.
-_MATERIALISER_SPEC = importlib.util.spec_from_file_location(
-    "django_rust_templates.engine.parser",
-    PROJECT_ROOT / "python" / "django_rust_templates" / "engine" / "parser.py",
-)
-materialiser = importlib.util.module_from_spec(_MATERIALISER_SPEC)
-sys.modules[_MATERIALISER_SPEC.name] = materialiser
-_MATERIALISER_SPEC.loader.exec_module(materialiser)
+# **An ordinary import, and the by-path load it replaces was justified by a shim
+# that no longer exists.** The old comment said `engine/__init__.py` was the shim's
+# `django.template`, so importing the `engine` package "by name" failed for want of
+# `engine`. `engine/__init__.py` now says its name "is not `django.template`", and
+# `tests/pinned_module.py` above imports `base.py` out of that same package — the
+# route works. The by-path load cost a **second** `parser` object in `sys.modules`
+# under the ordinary name, which is the copy `render.materialiser()` may cache; see
+# `test_materialiser_parity.py`'s import comment.
+from django_rust_templates.engine import parser as materialiser  # noqa: E402
 
 # The corpus. Generated from the grammar's own alphabet would be better than
 # hand-picked, and Task 5 does that for `filter_re`; here the space is small

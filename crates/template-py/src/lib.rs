@@ -5070,7 +5070,16 @@ fn compile_template(
         Ok(desc_tree) => desc_tree,
         Err(error) => return Err(parse_error(py, &error)?),
     };
-    let desc = with_ref_table(py, nodelist_desc_to_py(py, &desc_tree)?, &host)?;
+    // A **bool or nothing**: a missing attribute reads `False`, so a Rust tree
+    // newer than the Python module beside it does not fail a compile. A value
+    // that is present and not a bool raises, because that is a bug in the Python
+    // half rather than a version skew — `unwrap_or(false)` would have swallowed
+    // it along with every other error `getattr` can raise.
+    let native: bool = match tree.getattr("USE_NATIVE_MATERIALISER") {
+        Ok(flag) => flag.extract()?,
+        Err(error) if error.is_instance_of::<PyAttributeError>(py) => false,
+        Err(error) => return Err(error),
+    };
     // The table is the render's own, and it is handed to `materialise` **with**
     // the descriptor rather than being left for the shell to find: this is the
     // hole §Review Focus 3 names. Before this, a `Ref` in the tree reached
@@ -5081,20 +5090,44 @@ fn compile_template(
     let refs = host.ref_list(py)?;
     let resolve_ref = refs.bind(py).getattr("__getitem__")?;
     let register_ref = refs.bind(py).getattr("__setitem__")?;
-    let desc = with_ref_table(py, desc, &host)?;
+    // The wire and its wrapper tuple are built **only** on the Python path.
+    // `nodelist_desc_to_py` and `with_ref_table` are part of what S1 removes, and
+    // a line that built them "just in case" would leave them measurable while
+    // the walk they feed never runs.
+    let desc = if native {
+        // Unread on this path — the native walk takes `desc_tree` itself — and
+        // `None` rather than a wire, so that a line which *did* build one would
+        // show up as work the native branch does.
+        py.None()
+    } else {
+        with_ref_table(py, nodelist_desc_to_py(py, &desc_tree)?, &host)?
+    };
     // Bound once, because it is handed to two calls below: `materialise` puts it
     // on every node, and `template_for` puts it on the `Template`. **They must
     // be the same object**, which is what the paragraph above says and what this
     // line exists to make true — the annotation comparison in
     // `Node.render_annotated` is between the two.
     let origin = origin.unwrap_or_else(|| py.None().into_bound(py));
-    let nodelist = tree.getattr("materialise")?.call1((
-        desc,
-        &origin,
-        resolve_ref,
-        register_ref,
-        parser.bind(py),
-    ))?;
+    let nodelist = if native {
+        materialise::materialise_native(
+            py,
+            tree,
+            &desc_tree,
+            &origin,
+            &resolve_ref,
+            &register_ref,
+            parser.bind(py),
+        )?
+        .into_bound(py)
+    } else {
+        tree.getattr("materialise")?.call1((
+            desc,
+            &origin,
+            resolve_ref,
+            register_ref,
+            parser.bind(py),
+        ))?
+    };
     // The render plan, built here because `compile_template` is the one place
     // that holds the descriptor tree *and* the `NodeList` built from it. It is
     // **optional by construction**: `plan_list` returns `None` the moment the
@@ -5340,3 +5373,8 @@ mod walk_depth {
         });
     }
 }
+
+// Declared here rather than at the top of the file **on purpose**: every anchor
+// into `lib.rs` in `scripts/anchors.txt` is a line number, and a `mod` above them
+// moves all of them. Rust does not care where a `mod` is declared.
+mod materialise;

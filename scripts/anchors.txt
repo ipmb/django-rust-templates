@@ -9,6 +9,7 @@ crates/template-core/src/filters/linebreaks.rs:130	crates/template-core/src/filt
 crates/template-core/src/filters/slugify.rs:99	crates/template-core/src/filters/slugify.rs	99	-	pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {	-
 crates/template-core/src/filters/wordwrap.rs:73	crates/template-core/src/filters/wordwrap.rs	73	-	unwrap_or(Value::None)	-
 crates/template-core/src/parser/error.rs:292-293	crates/template-core/src/parser/error.rs	292	293	str.replace	-
+template-core/src/parser/filter_expr.rs:250	crates/template-core/src/parser/filter_expr.rs	250	-	-	-
 crates/template-core/src/parser/mod.rs:361	crates/template-core/src/parser/mod.rs	361	-	NodeDesc::new("VariableNode")	-
 parser/mod.rs:394-400	crates/template-core/src/parser/mod.rs	394	400	prepend_token	-
 crates/template-core/src/parser/mod.rs:418	crates/template-core/src/parser/mod.rs	418	-	-	-
@@ -28,6 +29,7 @@ crates/template-py/src/filters.rs:958	crates/template-py/src/filters.rs	958	-	ut
 crates/template-py/src/filters.rs:1833-1841	crates/template-py/src/filters.rs	1833	1841	match args.len()	-
 crates/template-py/src/filters.rs:1903-1906	crates/template-py/src/filters.rs	1903	1906	host.take_raised()	-
 crates/template-py/src/lib.rs:852	crates/template-py/src/lib.rs	852	-	fn if_condition_to_py	-
+crates/template-py/src/lib.rs:1104	crates/template-py/src/lib.rs	1104	-	-	-
 crates/template-py/src/lib.rs:1289	crates/template-py/src/lib.rs	1289	-	fn python_host_error(py: Python<'_>, error: &PyErr) -> Error {	-
 crates/template-py/src/lib.rs:1490	crates/template-py/src/lib.rs	1490	-	.map_err(|error| python_host_error(py, &error))?;	-
 crates/template-py/src/lib.rs:1612	crates/template-py/src/lib.rs	1612	-	.map_err(|error| python_host_error(host.py(), &error))?;	-
@@ -113,6 +115,7 @@ base.py:755	django/template/base.py	755	-	var_obj = Variable(constant).resolve({
 base.py:763	django/template/base.py	763	-	var_obj = Variable(var)	-
 base.py:766-770	django/template/base.py	766	770	args = []	args.append((True, Variable(var_arg)))
 base.py:768	django/template/base.py	768	-	args.append((False, Variable(constant_arg).resolve({})))	-
+base.py:768-781	django/template/base.py	768	781	-	-
 base.py:770	django/template/base.py	770	-	args.append((True, Variable(var_arg)))	-
 base.py:771	django/template/base.py	771	-	-	-
 base.py:771-772	django/template/base.py	771	772	-	-
@@ -562,6 +565,7 @@ loader_tags.py:360	django/template/loader_tags.py	360	-	namemap = options.get("w
 loader_tags.py:361-365	django/template/loader_tags.py	361	365	allow_recursion=True,	-
 smartif.py:22-26	django/template/smartif.py	22	26	-	-
 smartif.py:40-42	django/template/smartif.py	40	42	def __repr__(self):	return "(" + " ".join(out) + ")"
+smartif.py:45-92	django/template/smartif.py	45	92	-	-
 smartif.py:51	django/template/smartif.py	51	-	class Operator(TokenBase):	-
 smartif.py:54-56	django/template/smartif.py	54	56	self.first = left	self.second = parser.expression(bp)
 smartif.py:55-56	django/template/smartif.py	55	56	self.first = left	self.second = parser.expression(bp)
@@ -569,6 +573,7 @@ smartif.py:78	django/template/smartif.py	78	-	class Operator(TokenBase):	-
 smartif.py:81-83	django/template/smartif.py	81	83	self.first = parser.expression(bp)	self.second = None
 smartif.py:83	django/template/smartif.py	83	-	self.second = None	-
 smartif.py:115-116	django/template/smartif.py	115	116	-	-
+smartif.py:139-140	django/template/smartif.py	139	140	-	-
 smartif.py:140	django/template/smartif.py	140	-	return self.value	-
 smartif.py:142-143	django/template/smartif.py	142	143	def __repr__(self):	return "(%s %r)" % (self.id, self.value)
 smartif.py:149-150	django/template/smartif.py	149	150	-	-
@@ -826,11 +831,22 @@ engine/defaulttags.py:337	python/django_rust_templates/engine/defaulttags.py	337
 engine/defaulttags.py:919-920	python/django_rust_templates/engine/defaulttags.py	919	920	self.value.resolve(context, ignore_failures=True)	-
 engine/engine.py:7	python/django_rust_templates/engine/engine.py	7	-	from .base import Template	-
 python/django_rust_templates/engine/parser.py:285	python/django_rust_templates/engine/parser.py	285	-	-	-
+python/django_rust_templates/engine/parser.py:347	python/django_rust_templates/engine/parser.py	347	-	-	-
+python/django_rust_templates/engine/parser.py:372	python/django_rust_templates/engine/parser.py	372	-	-	-
+python/django_rust_templates/engine/parser.py:394	python/django_rust_templates/engine/parser.py	394	-	-	-
+python/django_rust_templates/engine/parser.py:448	python/django_rust_templates/engine/parser.py	448	-	-	-
 python/django_rust_templates/engine/parser.py:568	python/django_rust_templates/engine/parser.py	568	-	-	-
+python/django_rust_templates/engine/parser.py:610	python/django_rust_templates/engine/parser.py	610	-	-	-
+python/django_rust_templates/engine/parser.py:757	python/django_rust_templates/engine/parser.py	757	-	-	-
+python/django_rust_templates/engine/parser.py:819	python/django_rust_templates/engine/parser.py	819	-	-	-
+python/django_rust_templates/engine/parser.py:928	python/django_rust_templates/engine/parser.py	928	-	-	-
+python/django_rust_templates/engine/parser.py:935	python/django_rust_templates/engine/parser.py	935	-	-	-
+python/django_rust_templates/engine/parser.py:960	python/django_rust_templates/engine/parser.py	960	-	-	-
 python/django_rust_templates/host.py:35	python/django_rust_templates/host.py	35	-	-	-
 python/django_rust_templates/host.py:422	python/django_rust_templates/host.py	422	-	-	-
 python/django_rust_templates/host.py:746	python/django_rust_templates/host.py	746	-	self.last_error = error	-
 python/django_rust_templates/host.py:849	python/django_rust_templates/host.py	849	-	self.last_error = error	-
+python/django_rust_templates/render.py:345	python/django_rust_templates/render.py	345	-	engine.template_builtins	-
 tests/parity_target.py:63	tests/parity_target.py	63	-	def assert_target_is_not_rust_owned(testcase, target, module_name):	-
 tests/parity_target.py:177	tests/parity_target.py	177	-	So this is the replacement Python side	-
 filter_tests/test_dictsort.py:93	tests/template_tests/filter_tests/test_dictsort.py	93	-	self.assertEqual(dictsort(data, 0), expected)	-
@@ -858,6 +874,7 @@ tests.py:148-155	tests/template_tests/tests.py	148	155	def test_compile_tag_extr
 .django/tests/template_tests/tests.py:148-155	tests/template_tests/tests.py	148	155	-	-
 tests/template_tests/tests.py:231-243	tests/template_tests/tests.py	231	243	def test_callable_uses_deferred_annotations(self):	self.assertEqual(template.render(Context({"obj": MyObject()})), "")
 tests/test_host_tags.py:36-44	tests/test_host_tags.py	36	44	PROJECT_ROOT = Path(__file__).resolve().parent.parent	sys.path.insert(0, str(_path))
+tests/test_materialise.py:464	tests/test_materialise.py	464	-	test_a_nodelist_ref_resolves_because_children_are_built_first	-
 test_render_parity.py:615	tests/test_render_parity.py	615	-	def test_a_silent_variable_failure_is_substituted(self):	-
 test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
 .django/tests/timezones/tests.py:1051-1071	tests/timezones/tests.py	1051	1071	test_localtime_filters_do_not_raise_exceptions	-

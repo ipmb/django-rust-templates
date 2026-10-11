@@ -292,7 +292,22 @@ NOT_SCANNED_BECAUSE = {
         "directory would fail the build on the reviewer's accurate quotation of "
         "our own defect, and the only way to make it green is to falsify the "
         "finding. Every file here is dated by construction (round-N, "
-        "mN-summary/dispatch/brief/seams/recon); none is a live document."
+        "mN-summary/dispatch/brief/seams/recon) or named in REVIEW_KEEPERS; "
+        "none is a live document."
+    ),
+}
+
+# Files in `.review/` that are not our records, so there is no round to date
+# them by. **Named individually rather than pattern-matched**: a `*.md` rule wide
+# enough to admit an upstream document is also wide enough to admit the next
+# draft, which is the tripwire disarmed. The test asserts this mapping is
+# *exactly* the undated set, so an entry left behind after its file moves is a
+# failure, not dead permission.
+REVIEW_KEEPERS = {
+    "minijinja.md": (
+        "An upstream reference kept beside the work that cites it. Its "
+        "`path:line` spans are minijinja's, not this checkout's, so there is "
+        "nothing here for this scanner to resolve."
     ),
 }
 

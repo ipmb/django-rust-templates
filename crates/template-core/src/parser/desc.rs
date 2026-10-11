@@ -129,7 +129,13 @@ pub enum AttrValue {
     /// only a `{{ … }}` node is a `FilterExpression` attribute at all.
     FilterExpr(Box<FilterExprDesc>),
     /// A list of values — `IfNode.conditions_nodelists`, `ForNode.loopvars`,
-    /// `FilterExpression`'s filter arguments.
+    /// `CycleNode.cyclevars`, `IfChangedNode._varlist`, `FirstOfNode.variables`,
+    /// `CacheNode.vary_on`, `URLNode.args`.
+    ///
+    /// **Not `FilterExpression`'s filter arguments**, which this comment named
+    /// until an S1 review caught it: those are a `Vec<FilterVar>` inside
+    /// [`FilterExprDesc`], never a node attribute, and a reader who took the old
+    /// wording for the shape would look for the container in the wrong place.
     ///
     /// A nodelist inside one is [`AttrValue::NodeListRef`], never inlined; see
     /// that variant.
