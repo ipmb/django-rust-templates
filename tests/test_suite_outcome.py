@@ -1,16 +1,14 @@
 """The acceptance run's own outcome, as a refusal.
 
-`.review/m15-recon.md` §3.1 measured the hole: `check.sh:138-139` reads the
-suite's exit status and discards the transcript, so `Ran 1547 tests … OK
-(skipped=6)` — §2's central claim — is enforced by nobody. `check_suite_counts.py`
-says the same of itself: it checks that a *prose* count names its run, not that
-the number is right.
+The hole it closes: the gate reads the suite's exit status and discards the
+transcript, so `Ran 1547 tests … OK (skipped=6)` — §2's central claim — was
+enforced by nobody. A second guard once checked that a *prose* count names its
+run; it went with the prose it read, and this is the half that reads the run.
 
 This file drives the gate with **fabricated transcripts**, which is where an
 instrument's conditions belong: a literal the gate's parser is exercised on, so
 a reworded Django summary fails here and not in production. The subject — the
-real set of six — is asserted against `DECLARED_SKIPS` in the gate itself and
-tied to §2's prose by `test_the_declared_skips_are_the_ones_section_2_names`.
+real set of six — is asserted against `DECLARED_SKIPS` in the gate itself.
 """
 
 import unittest
@@ -143,37 +141,3 @@ class RefusalTests(unittest.TestCase):
         )
         self.assertEqual(outcome(two_line).skips, ["template_tests.test_doc.DocTests.test_x"])
 
-
-class SubjectTests(unittest.TestCase):
-    """The tie to the document §2's clause is named for.
-
-    §3's ten names were parseable because §3 writes them as a backticked list;
-    §2:35-45 composes its six out of a class name plus parenthesised method
-    names, and never spells a fully-qualified one. So the literal lives on the
-    instrument (`DECLARED_SKIPS`) and the *tie* is this: every component name
-    appears in the frame. Weaker than §3's equality, and honest about it —
-    `test_the_declared_skips_are_the_ones_section_2_names` fails if §2 drops a
-    name or `DECLARED_SKIPS` grows one.
-    """
-
-    def test_the_declared_skips_are_the_ones_section_2_names(self):
-        from tests.milestone_ownership import between, spec_section
-
-        frame = between(spec_section("2"), "The 6 permitted skips are:", "Any *new* skip")
-        for dotted in DECLARED_SKIPS:
-            class_name, method = dotted.rsplit(".", 2)[-2:]
-            with self.subTest(dotted=dotted):
-                self.assertIn(class_name, frame)
-                # Not backticked: §2:42 writes the loader's one as a single
-                # dotted literal, while §2:36-41 backticks the other five
-                # methods individually. Requiring the ticks would fail on the
-                # document rather than on the set, which is the wrong direction
-                # for this row.
-                self.assertIn(method, frame)
-
-    def test_the_frame_reader_refuses_a_moved_anchor(self):
-        """The control for the row above: a reworded anchor must raise."""
-        from tests.milestone_ownership import between
-
-        with self.assertRaises(AssertionError):
-            between("a FRAME b", "gone ", " b")

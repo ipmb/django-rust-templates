@@ -256,27 +256,24 @@ SHORTHAND_RE = re.compile(r"`:(\d+)(?:-(\d+))?`")
 # **excluded by an explicit rule, not by a glob that looks like an oversight** —
 # see `NOT_SCANNED_BECAUSE`.
 #
-# `docs/superpowers/specs/` is **in**, and that is a correction: it was excluded
-# by omission until it was measured. The two exclusions below are both "this file
-# is a dated record"; the spec is the opposite — it is §2's acceptance reference
-# and outlives every plan, so neither reason reaches it, and `NOT_SCANNED_BECAUSE`
-# said nothing about it.
+# `docs/superpowers/specs/` was a fourth root and **is no longer one**: the three
+# design specs under it have been deleted, and a root naming a directory that does
+# not exist is a rule nobody can act on. What it was worth while it was there is
+# kept here, because it is the argument against leaving a root out by omission
+# again. It was excluded by omission until it was measured, and the widening found
+# **29 of its 39 distinct anchors had no manifest entry** — every one a claim that
+# nothing re-measured. Two of the 29 were *wrong numbers*, not merely unchecked
+# ones: `parser/mod.rs:336` named the `else` branch of a registry dispatch for a
+# check that is at `:435` (a line number correct against an M2-era tree and cited
+# as live), and `base.py:948-1000` stopped twelve lines short of the end of
+# `_resolve_lookup`, which the sentence beside it describes in full.
 #
-# What the widening found, measured as `ANCHOR_RE` occurrences/distinct at the
-# commit that added the root: the spec **42/39**, `docs/superpowers/plans/`
-# **415/297**, `.review/` **550/384**. 830 of those distinct anchors are outside
-# the gate and are counted here rather than quietly dropped; the spec's 39 are
-# not. **29 of the spec's 39 had no manifest entry** — every one of them a claim
-# nothing re-measured, which is the hole the omission left. Two of the 29 were
-# *wrong numbers*, not merely unchecked ones: `parser/mod.rs:336` named the
-# `else` branch of a registry dispatch for a check that is at `:435` (a line
-# number correct against an M2-era tree and cited as live), and
-# `base.py:948-1000` stopped twelve lines short of the end of `_resolve_lookup`,
-# which the sentence beside it describes in full. Both numbers are corrected in
-# the spec by the commit that added this root. The other 27 resolved and matched.
-# Three of the spec's anchors were bare `:N` shorthands; they are now named, so
-# the spec is shorthand-free and `--frozen` covers it.
-TREE_ROOTS = ["crates", "python", "tests", "docs/superpowers/specs"]
+# Dropping the root left 74 manifest rows that nothing cites, 66 of them cited
+# only by those specs; `--prune` is what removed them, and the 8 others it removed
+# were already dead. `prune` prints each dropped row with its snippet, because
+# that snippet is the only copy of the claim the row was making — so the deletion
+# diff is the place to read them, not a count.
+TREE_ROOTS = ["crates", "python", "tests"]
 NOT_SCANNED_BECAUSE = {
     "docs/superpowers/plans/": (
         "A dated plan is a record of what was believed on a date and carries "

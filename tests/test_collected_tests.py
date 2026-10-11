@@ -1,4 +1,4 @@
-"""The unit suite's own collection, pinned as a number.
+"""What the unit suite's discovery pattern can drop without saying so.
 
 ``scripts/check.sh`` discovers with ``-p 'test_*.py'``. That pattern is a claim
 about the tree that nothing checked — and M10 Task 2 is what it cost.
@@ -9,11 +9,12 @@ the file sitting in the tree, and ``ShadowingTests`` went on asserting that the
 table existed and had rows: a guard checking that a guard exists, while the
 content it was guarding never ran.
 
-It was found by the unit count not moving — 323 where 330 was expected. That is
-the detector, and this module is it written as a row instead of as a number in a
-message. Same shape as the meter's pinned count in
-``tests/milestone_ownership.py``: the number moves in the commit that changes it,
-so the commit has to say by how much and why.
+It was found by the unit count not moving — 323 where 330 was expected. The
+detector then was a number carried in a message and pinned here; it is gone,
+because a total has to be bumped by hand in every commit that adds a row, and a
+bump that is always made is a bump nobody reads. The rows below ask the same
+question of the *shape* of the tree instead, which needs no maintenance because
+it is a property that either holds or does not.
 
 What a count sees that a sweep over file names cannot:
 
@@ -23,9 +24,10 @@ What a count sees that a sweep over file names cannot:
   into whatever its files are called — ``tests/differential/`` is that shape, and
   is currently data-only.
 
-None of those are visible to ``grep`` over names and all of them are visible
-here. The pin is not a substitute for reading the tree; it is the thing that
-tells you the tree changed underneath you.
+None of those are visible to ``grep`` over names. The two rows below catch the
+second and the third directly, by name. The first — a module that is collected
+and whose rows all skip at runtime — is caught by nobody now, which is the
+generality the count had and these rows do not.
 """
 
 import unittest
@@ -33,10 +35,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# The count `scripts/check.sh`'s discovery produces. Update it in the same commit
-# as the change that moves it, and only after asking whether the *delta* is the
-# one you intended — a jump of four where you expected seven is what this row is
-# for.
+# Provenance, one entry per commit that moved the count. The count is no longer
+# pinned, so the arithmetic below is a historical record rather than something
+# to update: what each entry is worth now is its list of rows, not its delta.
 #
 # 370 → 371 is M11 Task 1's registry-escape row in
 # `tests/test_compared_path_instrument.py`; 371 → 374 is the same task's
@@ -799,10 +800,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # interpreter**, before anything renders, and expects `REBOUND`. `1` is the failure
 # reading, and it is what the unsound spelling prints.
 #
-# Counts at close: 532 collected, proxy and discovery agreeing.
-#
-# 532 → 536 is **+4**, and it is the adversarial round's findings on that same
-# lever, all four of them measured against **stock Django 6.0.9** rather than
+# The adversarial round's four findings sit on that same lever, and all four were
+# measured against **stock Django 6.0.9** rather than
 # reasoned about. Two are wrong renders the transcription produced and Django did
 # not. A layer whose `__contains__` shortens `dicts` is not an uncertain case:
 # `list_reverseiterator` re-reads the list's length, so Django's `for` ends and its
@@ -827,39 +826,43 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # in that file imports `django_rust_templates.engine` first, which is the very
 # statement a reorder would move.
 #
-# Counts at close: 536 collected, proxy and discovery agreeing.
-PINNED = 536
+# The second round's rows sit on that same lever. `root_item`'s
+# condition 2 was an *attribute* read of `__getitem__`, and `obj[key]` does not
+# dispatch through the attribute — it dispatches through the class's subscript
+# slot, which CPython fills from the first MRO dictionary entry named
+# `__getitem__`. The two disagree on three measured fixtures: a metaclass
+# `__getattribute__` that answers the pin over a real subclass override, a
+# metaclass `__getattr__` that fabricates the name where no entry exists, and a
+# class-dict descriptor whose `__get__` answers the class with the pin and the
+# instance with something else. Each was a wrong render against **stock Django
+# 6.0.9**, and the third needs no metaclass at all, which is what leaves the
+# one-line repair (*bail unless the metaclass is exactly* `type`) short.
+#
+# The fourth row is the other direction, and it is the one that says the entry
+# lookup is only half the licence: Django's *decision* is the attribute read, so a
+# metaclass that refuses the name must keep both engines on the attribute arm even
+# when the slot would have run the pin — measured, ours and stock both `''`. That
+# decision is transcribed separately, in `PyTarget::has_getitem`. The fifth row is
+# a cost row rather than a correctness row: a context whose metaclass is exotic but
+# which never touches `__getitem__` is still transcribed, 0 entries into the pin,
+# so the guard does not over-bail.
 
 
-def collected() -> unittest.TestSuite:
-    """The suite ``check.sh`` runs, discovered the way ``check.sh`` runs it."""
-    return unittest.TestLoader().discover(
-        start_dir=str(PROJECT_ROOT / "tests"),
-        pattern="test_*.py",
-        top_level_dir=str(PROJECT_ROOT),
-    )
+class DiscoveryHoldsNoHiddenRows(unittest.TestCase):
+    """The rows a count of the suite cannot see.
 
-
-class CollectionIsPinned(unittest.TestCase):
-    def test_the_collected_count_is_the_pinned_one(self):
-        found = collected().countTestCases()
-        self.assertEqual(
-            found,
-            PINNED,
-            f"discovery found {found} tests, the pin says {PINNED}. If the delta "
-            "is smaller than the rows you added, a module's name is not "
-            "matching `-p 'test_*.py'` and its rows are running for nobody — "
-            "which is exactly what `check.sh --fast` cannot tell you, because "
-            "it prints `all checks passed` either way.",
-        )
+    There was a pinned count here, and its whole value was that a module whose
+    name does not match `-p 'test_*.py'` takes its rows out of the run silently.
+    It cost a bump on every added row, and it named the symptom rather than the
+    file. These two rows ask the same question directly.
+    """
 
     def test_no_module_the_pattern_misses_holds_test_rows(self):
-        """The count above is the detector; this is the diagnosis.
+        """A module the pattern skips runs its rows for nobody.
 
-        A count tells you something is wrong and not what. This walks the same
-        directory for modules the pattern skips and fails if one of them defines
-        a ``TestCase`` — turning "the number is off by seven" into the name of
-        the file whose rows nobody runs.
+        Walks the same directory the loader walks and fails on a file the
+        pattern misses that defines a ``TestCase``, naming it — so the answer is
+        the file whose rows nobody runs rather than a number that is off.
         """
         import ast
 
@@ -882,13 +885,10 @@ class CollectionIsPinned(unittest.TestCase):
         )
 
     def test_every_test_directory_is_a_package(self):
-        """The shape the count *cannot* see, and the reason this row exists.
+        """``discover`` recurses only into importable packages, and says nothing.
 
-        ``discover`` recurses only into directories that are importable packages.
         A ``tests/subdir/test_thing.py`` with no ``tests/subdir/__init__.py`` is
-        therefore collected by nothing — and, unlike the top-level case above,
-        **the pinned count does not move when it happens**, so the detector is
-        blind to it by construction. `tests/differential/` has that shape today
+        collected by nothing at all. `tests/differential/` has that shape today
         and is data-only, which is fine; the row fires the moment one of its
         files grows a ``TestCase``.
         """

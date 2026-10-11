@@ -231,6 +231,59 @@ def django_exception(error, host=None):
     return converted
 
 
+class _DeferredTokenParser(Parser):
+    """Django's `Parser`, with the token list lexed on first read instead of now.
+
+    Nothing on the Rust path reads `parser.tokens`. Rust lexes the source itself,
+    and the token stream it hands a host tag is built from *that* lexer and
+    written over `parser.tokens` by `ShellHost.call_tag` before the tag's compile
+    function can look at it; a template with no host tag never reads the
+    attribute at all. So an eager `Lexer(source).tokenize()` in `parser_for`
+    produced a list that was either replaced before its first reader or never
+    read — while costing, measured on `real-world/large`, 214 µs of the 218 µs
+    `parser_for` takes.
+
+    **The tokens are still produced, and are the same ones.** The callers that
+    parse *with* this parser rather than with Rust — `test_render_parity`'s
+    `django_render` is the in-tree one, and the `DebugLexer` arm above exists for
+    it — read `parser.tokens` and get exactly what an eager build would have
+    given them. Handing them an empty list would have broken precisely those and
+    nothing else; deferring keeps them and drops the cost.
+
+    `tokens` is left **absent from the instance** rather than deferred behind a
+    property. `parse` and `skip_past` test `while self.tokens:` once per token, so
+    a property would put a Python-level call in that loop; `__getattr__` is
+    consulted only when ordinary lookup misses, so the first read lexes and
+    stores, and every read after it is an ordinary instance attribute load. That
+    is also why `call_tag`'s `parser.tokens = [...]` needs nothing from this
+    class — it writes the instance attribute that `__getattr__` then never sees.
+
+    `list(reversed(...))` is `Parser.__init__`'s own normalisation (`base.py:504-505`),
+    repeated here so the deferred list is the one the inherited constructor would
+    have built rather than merely an equal one.
+    """
+
+    def __init__(self, source, engine, **kwargs):
+        # Before `super().__init__`, because `__getattr__` can be entered during
+        # it — `add_library` runs per builtin — and would otherwise recurse
+        # looking for these two.
+        self._source = source
+        self._lexer = DebugLexer if engine.debug else Lexer
+        super().__init__((), **kwargs)
+        # `Parser.__init__` sets `tokens`; removing it is what arms
+        # `__getattr__`. Nothing has read it in between.
+        del self.tokens
+
+    def __getattr__(self, name):
+        # Only ever reached for `tokens`: every other name this instance can miss
+        # is a real `AttributeError`, and swallowing one would turn a typo in a
+        # caller into a template parse of the wrong source.
+        if name != "tokens":
+            raise AttributeError(name)
+        self.tokens = list(reversed(self._lexer(self._source).tokenize()))
+        return self.tokens
+
+
 def parser_for(source, engine=None, origin=UNKNOWN_ORIGIN):
     """Django's own `Parser`, built the way Django builds one.
 
@@ -275,12 +328,20 @@ def parser_for(source, engine=None, origin=UNKNOWN_ORIGIN):
     (measured — a `{% for %}` node at ``(9, 25)``), so this parser's tokens are
     read only for `find_filter` and `extra_data` there. It bites exactly the
     callers that parse *with* it, which are the parity harnesses.
+
+    **The tokens are therefore deferred, not built.** `_DeferredTokenParser`
+    lexes on the first read of `parser.tokens` rather than here, which is the
+    only thing that changed: the list a caller sees is the one an eager build
+    would have produced, in the same order. Measured on `real-world/large`,
+    lexing is 214 µs of this function's 218 µs — building the `Parser` is 0.93 µs
+    — so on the Rust path the eager lex was buying nothing and costing about 10%
+    of the compile.
     """
     if engine is None:
         engine = Engine()
-    lexer = DebugLexer(source) if engine.debug else Lexer(source)
-    return Parser(
-        lexer.tokenize(),
+    return _DeferredTokenParser(
+        source,
+        engine,
         builtins=engine.template_builtins,
         libraries=engine.template_libraries,
         origin=origin,

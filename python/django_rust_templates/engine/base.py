@@ -1412,8 +1412,8 @@ def token_kwargs(bits, parser, support_legacy=False):
 #
 # `PyTarget::get_item` in `crates/template-py/src/lib.rs` reimplements that
 # method's upward search — the `reversed(self.dicts)` walk, membership before
-# subscription — and enters it only while `type(context).__getitem__` *is* the
-# function bound below. So this line has to be the function as it stood **before
+# subscription — and enters it only while the class's subscript entry, the
+# `__getitem__` `obj[key]` runs, **is** this function as it stood **before
 # any code outside this package could rebind it**, and where it sits is the whole
 # of that claim. Capture the same attribute lazily, on the Rust side, and a
 # process that rebinds `BaseContext.__getitem__` before its first render pins the

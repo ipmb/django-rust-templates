@@ -5,11 +5,27 @@
 subscription, ``KeyError`` when no layer holds the key — so that a root lookup
 stops entering Python. §5.5's third cost lever. The transcription runs only while
 
-    ``type(context).__getitem__ is BASE_CONTEXT_GETITEM``
+    ``_PyType_Lookup(type(context), "__getitem__") is BASE_CONTEXT_GETITEM``
 
 holds, evaluated on **every** read, and the question this file answers is the one
 that licence turns on: is ``BASE_CONTEXT_GETITEM`` the function the class
 *actually runs*, or merely a function that was equal to it at some point?
+
+**Which lookup that is, is the second review round's finding.** The comparison
+used to read ``type(context).__getitem__`` as an *attribute*, and an attribute
+read is not the lookup ``obj[key]`` performs: the subscript slot resolves the name
+with ``_PyType_Lookup`` (CPython's ``typeobject.c``: the generic
+``slot_mp_subscript`` → ``vectorcall_method`` → ``lookup_method_ex``), which
+consults neither the metaclass nor a descriptor's ``__get__``. So three fixtures
+can pass the attribute read while ``obj[key]`` answers elsewhere or not at all: a
+metaclass ``__getattribute__`` that returns the pin over a subclass's real
+override; a metaclass ``__getattr__`` that fabricates the name for a class whose
+MRO has none, making ``obj[key]`` a ``TypeError``; and a class-dict entry that is
+a custom descriptor, which answers ``__get__(None, cls)`` for the attribute read
+while the slot binds ``__get__(obj, cls)``. All three are wrong renders, all three
+are measured, and ``RootReadSlotEntryTests`` is the three rows — each a fixture
+built to catch the old spelling, and each failing on the artifact before this
+guard.
 
 Both halves are needed and they are the two halves of one claim
 --------------------------------------------------------------
@@ -118,15 +134,34 @@ def counted(source, context, function=ORIGINAL):
     return out, len(entered)
 
 
-class RootReadPinTests(unittest.TestCase):
-    """The right-hand side of the guard is the class attribute, not a lookalike."""
+def mro_entry(cls):
+    """``cls``'s ``__getitem__`` as the *slot* would find it: the first entry in
+    the MRO dictionaries, read raw.
 
-    def test_the_pin_is_the_function_the_class_binds(self):
+    ``base.__dict__`` is the type's dictionary (a ``mappingproxy``): reading a key
+    out of it runs no descriptor and asks no metaclass, which is what makes it the
+    same lookup the guard asks through ``_PyType_Lookup``. ``getattr(cls,
+    "__getitem__")`` is *not* that lookup — ``RootReadSlotEntryTests`` is the three
+    fixtures that separate them — so a row about the guard must not spell it the
+    second way.
+    """
+    for base in cls.__mro__:
+        if "__getitem__" in base.__dict__:
+            return base.__dict__["__getitem__"]
+    return None
+
+
+class RootReadPinTests(unittest.TestCase):
+    """The right-hand side of the guard is the class's subscript entry, not a
+    lookalike."""
+
+    def test_the_pin_is_the_entry_the_slot_would_run(self):
         self.assertIs(
+            mro_entry(BaseContext),
             PIN,
-            BaseContext.__getitem__,
-            "BASE_CONTEXT_GETITEM is not the function BaseContext runs, so the "
-            "guard licenses the transcription against something else",
+            "BASE_CONTEXT_GETITEM is not the function BaseContext's subscript slot "
+            "resolves, so the guard licenses the transcription against something "
+            "else",
         )
 
     def test_every_class_that_reaches_the_walk_shares_that_one_function(self):
@@ -139,8 +174,8 @@ class RootReadPinTests(unittest.TestCase):
         reads per use and would send it to the fallback. This row is here so that
         the day one of them starts overriding is a red row rather than a silent
         narrowing of what the transcription covers."""
-        self.assertIs(Context.__getitem__, PIN)
-        self.assertIs(RequestContext.__getitem__, PIN)
+        self.assertIs(mro_entry(Context), PIN)
+        self.assertIs(mro_entry(RequestContext), PIN)
 
     def test_the_module_binds_the_pin_when_it_is_imported(self):
         """The static half of the soundness claim, and the cheap one: the binding
@@ -405,6 +440,250 @@ class RootReadTranscriptionTests(unittest.TestCase):
         ours_log = []
         self.assertEqual(read("{{ nope }}", build(ours_log)), "")
         self.assertEqual(ours_log, reference_log)
+
+
+class RootReadSlotEntryTests(unittest.TestCase):
+    """Fixtures on which the *attribute* read and the subscript *slot* disagree —
+    and the slot is right, because the slot is what runs.
+
+    What the first three rows have in common: ``getattr(type(context),
+    "__getitem__") is BASE_CONTEXT_GETITEM`` is ``True``, so an attribute-based
+    guard licenses the transcription (0 entries into ``BaseContext.__getitem__``)
+    and answers out of the context's own layer — which is the transcription's
+    answer — while the class's ``obj[key]`` answers something else. Measured on
+    the artifact *before* this guard, sha ``caf15897``, stock Django 6.0.9 in the
+    right-hand column and ours beside it:
+
+    ==== ============== ========
+    form ours, pre-fix   stock
+    ==== ============== ========
+    A    ``FROM_DICTS`` ``SNEAKY``
+    B    ``FROM_FAKE``  ``''``
+    C    ``FROM_DICTS`` ``SNEAKY``
+    D    ``''``         ``''``
+    ==== ============== ========
+
+    D is in the table for the opposite reason: it is the row that did *not* break,
+    and it is what says the entry lookup answers only half the question. Django's
+    decision is the attribute read, taken before any subscription, so a metaclass
+    that refuses the name keeps both engines on the attribute arm — a guard that
+    asked the slot and nothing else would print ``FROM_DICTS`` where Django prints
+    ``''``. That half is transcribed in its own place, ``PyTarget::has_getitem``.
+
+    Every row compares our render with that same stock render, which is the
+    reference the other classes here use.
+
+    Three rows and not one because the two lookups come apart three ways — a
+    metaclass that lies with ``__getattribute__``, a metaclass that fabricates
+    with ``__getattr__`` (so ``obj[key]`` raises), and a class-dict descriptor
+    whose ``__get__`` answers the class and the instance differently — and because
+    the third needs no metaclass at all, which is what rules out the fix that
+    would have been one line: *bail unless the metaclass is exactly* ``type``.
+    The last row is the other side of that: a context whose metaclass is exotic
+    but which leaves ``__getitem__`` alone is still correct to transcribe, and it
+    must not be bailed on.
+    """
+
+    SOURCE = "{{ a }}"
+
+    @staticmethod
+    def stock_pin():
+        """Stock Django's own ``BaseContext.__getitem__``, found the same way the
+        guard finds ours — which also checks that this file's reader is a reader
+        of Django's classes and not of ours."""
+        from django.template.context import BaseContext as StockBaseContext
+
+        return mro_entry(StockBaseContext)
+
+    @staticmethod
+    def stock_render(source, context):
+        from django.template import Engine as StockEngine
+
+        return StockEngine().from_string(source).render(context)
+
+    def test_a_metaclass_getattribute_that_lies_about_getitem(self):
+        """Form A. The class has a real override; the metaclass hides it from the
+        attribute read and shows the pin instead.
+
+        The trap is asserted rather than assumed: ``type(context).__getitem__``
+        *is* the pin, and the entry the slot resolves is the class's own function.
+        The row's evidence is the value Django answers and the count on that own
+        function — it is entered, so the walk fell back to the subscription
+        instead of transcribing."""
+
+        def lying(pin, base, answer):
+            class Meta(type):
+                def __getattribute__(cls, name):
+                    if name == "__getitem__":
+                        return pin
+                    return super().__getattribute__(name)
+
+            class Sneaky(base, metaclass=Meta):
+                def __getitem__(self, key):
+                    return answer
+
+            return Sneaky, Sneaky.__dict__["__getitem__"]
+
+        from django.template import Context as StockContext
+
+        our_class, our_own = lying(PIN, Context, "SNEAKY")
+        stock_class, _ = lying(self.stock_pin(), StockContext, "SNEAKY")
+        self.assertIs(our_class.__getitem__, PIN, "the fixture is not a trap")
+        self.assertIs(mro_entry(our_class), our_own, "the fixture's MRO entry moved")
+
+        out, own_entered = counted(self.SOURCE, our_class({"a": "FROM_DICTS"}),
+                                   function=our_own)
+        self.assertGreater(
+            own_entered,
+            0,
+            "the class's own __getitem__ never ran, so the walk answered without "
+            "subscripting",
+        )
+        self.assertEqual(out, "SNEAKY")
+        self.assertEqual(out, self.stock_render(self.SOURCE,
+                                                stock_class({"a": "FROM_DICTS"})))
+
+    def test_a_metaclass_getattr_that_fabricates_getitem(self):
+        """Form B. No ``__getitem__`` anywhere in the MRO — the metaclass makes
+        the *name* exist, so ``obj[key]`` is a ``TypeError``.
+
+        Django's ``_resolve_lookup`` tests the subscript at `base.py:963` and
+        catches the ``TypeError`` at `base.py:968`, raising
+        ``VariableDoesNotExist``, which renders ``''``. Our bail lands in the same
+        place, which is the whole point: a bail is not a special case, it is
+        Django's own method."""
+        from django.template.context import RenderContext as StockRenderContext
+
+        from django_rust_templates.engine.context import RenderContext as OurRenderContext
+
+        def fabricating(pin, render_context_cls):
+            class Meta(type):
+                def __getattr__(cls, name):
+                    if name == "__getitem__":
+                        return pin
+                    raise AttributeError(name)
+
+            class Fabricated(metaclass=Meta):
+                pass
+
+            def build(template):
+                context = Fabricated()
+                context.render_context = render_context_cls()
+                context.template = template
+                context.template_name = template.name
+                context.autoescape = True
+                context.dicts = [{"a": "FROM_FAKE"}]
+                context.use_l10n = False
+                context.use_tz = False
+                return context
+
+            return Fabricated, build
+
+        our_class, our_build = fabricating(PIN, OurRenderContext)
+        stock_class, stock_build = fabricating(self.stock_pin(), StockRenderContext)
+        self.assertIs(our_class.__getitem__, PIN, "the fixture is not a trap")
+        self.assertIsNone(mro_entry(our_class), "the fixture's MRO gained an entry")
+        with self.assertRaises(TypeError):
+            our_class()["a"]
+
+        our_template = ENGINE.from_string(self.SOURCE)
+        from django.template import Engine as StockEngine
+
+        stock_template = StockEngine().from_string(self.SOURCE)
+        expected = self.stock_render(self.SOURCE, stock_build(stock_template))
+        self.assertEqual(expected, "", "the fixture is not a wrong-answer trap")
+        self.assertEqual(our_template.render(our_build(our_template)), expected)
+
+    def test_a_class_dict_descriptor_that_answers_the_class_differently(self):
+        """Form C, and the row that rules out bailing on a metaclass.
+
+        ``__getitem__`` is a custom descriptor in the class's own dictionary: no
+        metaclass is involved and ``type(context) is type``. The attribute read
+        runs ``__get__(None, cls)`` — the pin — while the slot binds
+        ``__get__(obj, cls)``, which is a different answer. Both reads are honest
+        and they still disagree, so *which lookup* is asked is the whole fix."""
+        from django.template import Context as StockContext
+
+        def describing(pin, base, answer):
+            class Descriptor:
+                def __get__(self, obj, owner=None):
+                    if obj is None:
+                        return pin
+                    return lambda key: answer
+
+            class Described(base):
+                __getitem__ = Descriptor()
+
+            return Described
+
+        our_class = describing(PIN, Context, "SNEAKY")
+        stock_class = describing(self.stock_pin(), StockContext, "SNEAKY")
+        self.assertIs(our_class.__getitem__, PIN, "the fixture is not a trap")
+        self.assertIsNot(mro_entry(our_class), PIN, "the MRO entry is not a trap")
+
+        out = read(self.SOURCE, our_class({"a": "FROM_DICTS"}))
+        self.assertEqual(out, "SNEAKY")
+        self.assertEqual(out, self.stock_render(self.SOURCE,
+                                               stock_class({"a": "FROM_DICTS"})))
+
+    def test_a_metaclass_that_refuses_the_name_is_honoured(self):
+        """Form D, and the reason the entry lookup is *not* the whole licence.
+
+        Django's decision is the **attribute** read — ``hasattr(type(current),
+        "__getitem__")`` at `base.py:963` — and it happens
+        before any subscription, so a metaclass that *refuses* that name sends
+        Django down the attribute arm even though ``obj[key]`` would have run the
+        pin: the MRO entry here **is** the pin, and the guard's condition 2 holds.
+
+        Measured on both artifacts, ``''`` for ours and ``''`` for stock, which is
+        the assertion below. The decision is transcribed in its own place
+        (``PyTarget::has_getitem``, from that same line), and this row is what says
+        the two halves stay separate: the entry lookup answers *"will the pin be
+        what runs"*, and that question is only asked once Django has already said
+        it will subscript."""
+        from django.template import Context as StockContext
+
+        def refusing(base):
+            class Meta(type):
+                def __getattribute__(cls, name):
+                    if name == "__getitem__":
+                        raise AttributeError(name)
+                    return super().__getattribute__(name)
+
+            class Refusing(base, metaclass=Meta):
+                pass
+
+            return Refusing
+
+        our_class = refusing(Context)
+        stock_class = refusing(StockContext)
+        self.assertIs(mro_entry(our_class), PIN, "the fixture's MRO entry moved")
+        self.assertFalse(hasattr(our_class, "__getitem__"), "the fixture is not a trap")
+
+        out = read(self.SOURCE, our_class({"a": "FROM_DICTS"}))
+        self.assertEqual(out, "")
+        self.assertEqual(out, self.stock_render(self.SOURCE,
+                                               stock_class({"a": "FROM_DICTS"})))
+
+    def test_a_context_with_an_unrelated_metaclass_still_transcribes(self):
+        """The other direction, and the reason the fix is *not* the one-line
+        metaclass check: a class whose metaclass is not ``type`` but which never
+        touches ``__getitem__`` has the pin as its MRO entry, so ``obj[key]`` runs
+        the pin and transcribing is exactly right. Measured: 0 entries into the
+        pin. A guard that bailed on any metaclass would print 1 here, and the
+        *value* would be unchanged — so the count is the assertion, and it is a
+        cost row rather than a correctness row."""
+
+        class Meta(type):
+            def __repr__(cls):
+                return "<Metaclass that leaves __getitem__ alone>"
+
+        class Metered(Context, metaclass=Meta):
+            pass
+
+        out, entered = counted(self.SOURCE, Metered({"a": "FROM_DICTS"}))
+        self.assertEqual(out, "FROM_DICTS")
+        self.assertEqual(entered, 0, "the walk bailed on a harmless metaclass")
 
 
 class PinSoundnessProcessTests(unittest.TestCase):

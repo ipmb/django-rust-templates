@@ -2125,10 +2125,14 @@ impl PyTarget {
     ///
     /// 1. this target **is** the context object (`is`: the root of a `resolve` is
     ///    the object the walk was handed, so this is exactly "we are at the root"),
-    /// 2. `type(context).__getitem__` **is** `BASE_CONTEXT_GETITEM`, read here on
-    ///    every use and never cached — `Context.__getitem__` can be rebound while
-    ///    a body runs, and `engine/base.py` binds that name at import time and
-    ///    argues why that is the only moment it can be trusted,
+    /// 2. the class's **subscript entry** — the `__getitem__` `obj[key]` would
+    ///    run — **is** `BASE_CONTEXT_GETITEM`, asked through `_PyType_Lookup`,
+    ///    which is the lookup CPython's own subscript slot performs, and read
+    ///    here on every use and never cached — `Context.__getitem__` can be
+    ///    rebound while a body runs, and `engine/base.py` binds that name at
+    ///    import time and argues why that is the only moment it can be trusted.
+    ///    Read as an *attribute* this condition is not sound, which is what the
+    ///    second adversarial round found: see `subscript_entry_is_pin`,
     /// 3. `context.dicts` is **exactly** a `list` — `PyList_CheckExact`, because
     ///    `reversed()` dispatches to `list.__reversed__` and a subclass may
     ///    override it, and
@@ -2172,12 +2176,31 @@ impl PyTarget {
         if !value.is(self.context.bind(py)) {
             return Ok(None);
         }
-        let Ok(current) = value.get_type().getattr(intern!(py, "__getitem__")) else {
-            return Ok(None);
-        };
-        if !current.is(base_context_getitem(py)?) {
+        if !subscript_entry_is_pin(&value.get_type(), base_context_getitem(py)?) {
             return Ok(None);
         }
+        // Read-then-bail, and this read is the one a bail cannot avoid: `dicts`
+        // is asked for here, before the bail is decided — conditions 3 and 4 are
+        // both about it — and Django's own `__getitem__` asks for it again when
+        // the caller runs it. Measured, with an instance `__getattribute__`
+        // counting the name, over four routes (`plain`, a non-`dict` layer, a
+        // `tuple` `dicts`, a `list` subclass) and two templates (a hit and a
+        // miss): ours reads it **2** times on each of the three bail routes to
+        // Django's **1**, and **1** to **1** on the route that transcribes. A
+        // `__getattribute__` with side effects can therefore tell the two engines
+        // apart on this route; the alternative is to decide without inspecting,
+        // which is not available.
+        //
+        // The *class* read no longer differs, and that is this guard's doing:
+        // `_PyType_Lookup` is not an attribute read, so the metaclass sees only
+        // the single `__getitem__` ask Django's own guard makes — measured 2 to 1
+        // before this change, 1 to 1 after. That single ask is `has_getitem`
+        // (`impl LookupTarget for PyTarget`, from `base.py:963`), and it is where
+        // Django's *decision* lives: a metaclass that **refuses** the name puts
+        // both engines on the attribute arm, whether or not the slot would have
+        // run the pin. This condition is the other half — given the decision was
+        // to subscript, will the pin be what runs — and the two halves together
+        // are the licence.
         let Ok(dicts) = value.getattr(intern!(py, "dicts")) else {
             return Ok(None);
         };
@@ -2504,6 +2527,83 @@ fn base_context_getitem(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
         "django_rust_templates.engine.base",
         "BASE_CONTEXT_GETITEM",
     )
+}
+
+// `_PyType_Lookup`: the walk of a type's MRO dictionaries that CPython's own
+// subscript slot performs, and the question this guard is entitled to ask.
+//
+// Declared here rather than reached through `pyo3::ffi` because `pyo3-ffi` 0.29.3
+// skips it as private — its `cpython/object.rs` says "skipped private
+// _PyType_Lookup" — while CPython declares it `PyAPI_FUNC` on the non-limited API
+// (`Include/cpython/object.h:292`) and the interpreter exports it (`nm -gU
+// libpython3.14.dylib` → `__PyType_Lookup`). This crate is not built for the
+// stable ABI (`crates/template-py/Cargo.toml` has no `abi3` feature), so the
+// symbol resolves against the interpreter at import, exactly as every `Py*` name
+// in this crate does.
+//
+// It is the only `unsafe` in `template-py`: one symbol, called with a type
+// pointer and an **interned** name — the lookup's cache keys on the name's
+// identity, so a fresh string would miss it and fall through to the same walk,
+// correct but slower — whose *borrowed* result is compared by pointer and
+// dropped in the next statement, so nothing can run between the lookup and the
+// comparison to free it. It sets no exception: `_PyType_Lookup` is `typeobject.c:5964`,
+// whose own comment at 5962-5963 reads "This returns a borrowed reference, and doesn't
+// set an exception!"; the walk under it clears the only error it can hit (5704-5707).
+extern "C" {
+    fn _PyType_Lookup(
+        type_: *mut pyo3::ffi::PyTypeObject,
+        name: *mut pyo3::ffi::PyObject,
+    ) -> *mut pyo3::ffi::PyObject;
+}
+
+/// Is the function `obj[key]` would run the one `pin` names?
+///
+/// `PyObject_GetItem` on an object whose class defines a Python-level
+/// `__getitem__` dispatches through the `mp_subscript` slot, and CPython fills
+/// that slot — for an entry that is not a wrapper descriptor, which a Python
+/// function never is — with the generic wrapper `slot_mp_subscript`
+/// (`typeobject.c:10096`, from the table row `MPSLOT(__getitem__, mp_subscript,
+/// …)` at `typeobject.c:11110`; the decision is `update_one_slot`'s final `else {
+/// use_generic = 1; … }`). That wrapper resolves the name with `_PyType_Lookup`:
+/// `vectorcall_method` (`typeobject.c:3016`) → `lookup_method` (2939) → `lookup_method_ex`,
+/// whose first statement is `_PyType_LookupStackRefAndVersion(Py_TYPE(self), attr,
+/// out)` (`typeobject.c:2901`), and a plain function found there is called
+/// **unbound**, as `func(obj, key)`.
+///
+/// So this is not a second opinion about that dispatch, it *is* that dispatch's
+/// own lookup — and reading the name as an attribute instead is what the second
+/// adversarial round broke, three ways:
+///
+/// * a metaclass `__getattribute__` can answer `__getitem__` with the pin while
+///   the MRO entry is a subclass's override — measured, ours answered
+///   `'FROM_DICTS'` where Django answers `'SNEAKY'`;
+/// * a metaclass `__getattr__` can fabricate the name for a class whose MRO has
+///   none, so `obj[key]` is a `TypeError` — measured, ours answered
+///   `'FROM_FAKE'` where Django's `_resolve_lookup` catches the failure and
+///   raises `VariableDoesNotExist`, rendering `''`;
+/// * a class-dict entry that is a custom descriptor answers `__get__(None, cls)`
+///   for the attribute read while the slot binds `__get__(obj, cls)` — measured,
+///   ours answered `'FROM_DICTS'` where Django answers `'SNEAKY'`.
+///
+/// `_PyType_Lookup` consults neither the metaclass nor a descriptor's
+/// `__get__`, so none of the three can steer it, and a class with no entry
+/// anywhere in its MRO answers `NULL` here — which is where Django's own method
+/// lands as well, so form B's bail is the same answer, merely slower.
+/// `tests/test_loop_read_guard.py` is the control; all three rows fail on the
+/// artifact before this guard, for the reason quoted above.
+fn subscript_entry_is_pin(class: &Bound<'_, PyType>, pin: &Bound<'_, PyAny>) -> bool {
+    // SAFETY: `class` is a live type pointer, the name is the interpreter's own
+    // interned `"__getitem__"`, and `_PyType_Lookup` returns a *borrowed*
+    // reference to an entry the type's dictionaries already hold — compared on
+    // the next line, with no Python code running in between to free it, and no
+    // exception set on either answer.
+    let entry = unsafe {
+        _PyType_Lookup(
+            class.as_type_ptr(),
+            intern!(class.py(), "__getitem__").as_ptr(),
+        )
+    };
+    !entry.is_null() && entry == pin.as_ptr()
 }
 
 /// Django's `VariableDoesNotExist`, cached for the same reason.

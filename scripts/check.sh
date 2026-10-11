@@ -137,14 +137,6 @@ step "the vendored suite is generated, not edited"
 # Fast path: it reads text — 215 files and the checkout — and compiles nothing.
 "$PROJECT_ROOT/.venv/bin/python" -I "$HERE/gen_django_suite.py" --check
 
-step "suite counts carry their provenance"
-# Every milestone is accepted on a *count*, and a count is the easiest claim to
-# make vacuously: measured, running `.django/tests/runtests.py` directly produces a
-# result byte-identical to stock Django's and still reports OK. The guard requires
-# every `Ran N tests` in our prose to sit near something naming the run that
-# produced it. On the fast path because it reads text and nothing else.
-"$PROJECT_ROOT/.venv/bin/python" -I "$HERE/check_suite_counts.py"
-
 step "transcriptions differ from upstream only where declared"
 # A `# TRANSCRIBED:` file is a claim about the pinned tree, and the suite cannot
 # falsify it: measured, `engine/base.py` as a verbatim copy and `engine/base.py`

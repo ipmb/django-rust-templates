@@ -25,21 +25,17 @@ against the **filesystem**, one row down, which is membership and has teeth.
 import unittest
 
 from tests.milestone_ownership import (
-    INTERPOSED,
     NOT_THE_ENGINE,
     OWNERS,
     SCOPES,
     TARGET,
     TEMPLATETAGS,
-    between,
     claimed,
     django_modules,
     dotted_suffix,
     interposed,
     our_modules,
     shadowing_files,
-    spec_milestones,
-    spec_not_the_engine,
     unshimmed,
 )
 
@@ -243,84 +239,6 @@ class OwnershipTableTests(unittest.TestCase):
                 self.assertIn(local, django_modules(scope))
                 self.assertNotIn(f"{scope}.{local}", unshimmed(scope))
 
-    def test_the_specs_declaration_is_the_tables(self):
-        """§3 declares the eleven, and this table declines the eleven it declares.
-
-        Neither bucket was tied to **§3** until M14's Task 1b, and the gap has a
-        direction that matters: the count is
-        `django_modules - our_modules - NOT_THE_ENGINE`, so growing the subtrahend
-        empties it *exactly as transcribing does* — a module moved out of the
-        engine by editing this table and the reason beside it (which is what the
-        discipline asks for) would leave every row in the tree green while §3
-        still said ten, and the empty count would be indistinguishable from the
-        engine being complete. This is the shape
-        `test_every_owner_is_a_milestone_the_spec_defines` already has one
-        section over, applied to the other table.
-
-        **`utils` is that failure arriving**, one architectural rewiring later
-        rather than one careless edit later, and the row is what forced §3 and
-        the table to move together: the name was in `INTERPOSED[M10]` and its file
-        was deleted in `03038e6`, and until both documents were corrected this row
-        read eleven against ten.
-        """
-        declared = spec_not_the_engine()
-        # The reader's own guard, the way the §10.3 reader has one: a frame that
-        # stopped matching would otherwise reach `assertEqual` as an empty set,
-        # and an empty set against a non-empty frozenset is a failure that says
-        # "the spec drifted" when the instrument is what moved. Measured, in this
-        # rewiring: it fired on the closing anchor and named it.
-        self.assertGreaterEqual(len(declared), 11, sorted(declared))
-        self.assertEqual(
-            declared,
-            set(NOT_THE_ENGINE),
-            f"§3's enumeration and `NOT_THE_ENGINE` disagree, and the reader "
-            f"found {sorted(declared)} in the frame — if those look like the "
-            "right eleven the table moved, and if they do not the frame did",
-        )
-
-    def test_the_frame_reader_refuses_a_moved_anchor(self):
-        """The control for the row above: a reworded frame raises, not answers.
-
-        `between` exists because `partition` cannot fail. Without its checks a
-        moved anchor returns the tail of §3 as the frame, and the row above then
-        answers with a *wrong set* — a failure that reads as the spec drifting
-        when the instrument moved. Driven on a literal rather than on §3, so the
-        control is over the function the row actually depends on, and it is the
-        one arm of that function a green run never reaches.
-
-        This is not hypothetical here: moving §3's closing anchor is exactly what
-        the `utils` correction did, and the refusal above is what said so.
-        """
-        self.assertEqual(between("a FRAME b", "a ", " b"), "FRAME")
-        for start, end in (("gone ", " b"), ("a ", " gone")):
-            with self.subTest(start=start, end=end):
-                with self.assertRaises(AssertionError):
-                    between("a FRAME b", start, end)
-
-    def test_every_attribution_is_a_milestone_the_spec_defines(self):
-        """The labels are read from §10.3 rather than restated here.
-
-        A second list of milestone names would agree with itself, so a typo
-        (`M9` for `M13`) would be invisible. `spec_milestones()` parses the
-        spec's own table, which makes the label a claim about that document.
-
-        **Which of the two tables carries the label decides which cell is read,
-        and reading the wrong one is silent.** `INTERPOSED` is keyed by label and
-        `OWNERS` by name, so `INTERPOSED`'s *keys* are the labels and its values
-        are the modules — a version of this row that took `INTERPOSED[label]` would
-        be asserting that a list of module names appears in §10.3's table. Only
-        the keys are read here, and the module names are covered by the partition
-        row and the filesystem row instead. Driven: renaming M13's key to `M99`
-        fails it.
-        """
-        defined = spec_milestones()
-        self.assertGreaterEqual(len(defined), 15, sorted(defined))
-        for label in sorted(INTERPOSED):
-            with self.subTest(label=label):
-                self.assertIn(label, defined)
-        for name, label in sorted(OWNERS.items()):
-            with self.subTest(name=name):
-                self.assertIn(label, defined, f"{name} is owned by {label!r}")
 
 
 if __name__ == "__main__":
