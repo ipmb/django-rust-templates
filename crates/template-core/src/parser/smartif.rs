@@ -1,89 +1,40 @@
-//! `django.template.smartif`: the `{% if %}` expression parser.
+//! `django.template.smartif`: the `{% if %}` expression parser. Rust owns the
+//! parse and builds the tree; Python evaluates it (`eval` is not ported).
 //!
-//! A direct port of Django's top-down parser (`smartif.py`, 215 lines at
-//! 6.0.9). Rust owns the parse and Python owns the tree that renders, so this
-//! module builds the parse tree and detects syntax errors. **M5 wired the
-//! consumer**: `tags/if.rs` drives [`IfParser::template`], walks the arena into
-//! [`IfConditionDesc`] with [`IfParser::condition`], and the materialiser turns
-//! that back into real `smartif` nodes. The one caller Django has,
-//! `TemplateIfParser` (`defaulttags.py:921`), differs from the base `IfParser`
-//! in exactly two ways, both measured against the pinned tree and both pinned
-//! by tests here:
+//! `TemplateIfParser` (`defaulttags.py:921`) differs from the base `IfParser` in
+//! exactly two ways, both pinned by tests here:
 //!
-//! - `error_class`: the base parser raises `ValueError`, the subclass raises
-//!   `TemplateSyntaxError` (`smartif.py:157`, `defaulttags.py:922`);
-//! - `create_var`/`display`: the base parser wraps the raw token and displays
-//!   its `repr`, while the subclass compiles the token and displays it raw —
-//!   so the subclass runs `compile_filter` during `__init__` and can fail
-//!   before `parse` is reached.
-//!
-//! `nud`/`led` and the operator table are ported. `eval` — the boolean
-//! semantics — is **not**, and this is the last place the split is visible:
-//! Python evaluates the tree, because that is where Django's `lambda`s live and
-//! because `TemplateLiteral.eval` calls `FilterExpression.resolve` with
-//! `ignore_failures=True`. The port builds shape; Python keeps meaning.
+//! - `error_class` is `TemplateSyntaxError`, not `ValueError` (`smartif.py:157`,
+//!   `defaulttags.py:922`);
+//! - `create_var`/`display`: the subclass compiles the token in `__init__` and
+//!   displays it raw, so it can fail before `parse`; the base wraps the raw token
+//!   and displays its `repr`.
 
 use crate::parser::desc::{IfConditionDesc, NodeRef};
 use crate::parser::error::Error;
 use crate::parser::tags::py_repr_str;
 
-/// An index into an [`IfParser`]'s arena.
-///
-/// Django's nodes point at each other directly (`operator.first = left`); Rust
-/// cannot, so a node is addressed by index into the arena the parser owns.
+/// An index into an [`IfParser`]'s arena — Django's nodes point at each other
+/// directly (`operator.first = left`); Rust addresses them by index instead.
 pub type NodeId = usize;
 
-/// The arena index of the `EndToken` sentinel.
-///
-/// Django's `EndToken` is a module-level singleton (`EndToken = EndToken()`,
-/// `smartif.py:153`) and `parse` compares against it with `is`.
+/// The arena index of the `EndToken` sentinel — Django's is a module-level
+/// singleton (`EndToken = EndToken()`, `smartif.py:153`) that `parse` compares
+/// against with `is`.
 pub const END: NodeId = 0;
 
 /// The depth `expression` may nest before it refuses.
 ///
-/// Django has **no** explicit bound, and — this is the part that took a review
-/// round to state properly — Django's bound is not a constant that could be
-/// matched even in principle. Measured against the pinned tree, with a guard
-/// whose whole purpose is to fire before the native stack does:
+/// Django has no explicit bound: at `sys.getrecursionlimit() == 1000`, 498 nested
+/// `not`s raise `RecursionError`, and the number moves with the limit and call depth.
+/// Only *prefix* nesting recurses (~two CPython frames per `not`); infix is a loop.
 ///
-/// ```text
-///   200 nots  parsed        400 nots  parsed        498 nots  parsed
-///   600 nots  RecursionError            sys.getrecursionlimit() == 1000
-/// ```
+/// Rust has no interpreter limit, so an unbounded hostile template overflows the
+/// native stack, which aborts rather than raising; with the guard off, 4000 `not`s
+/// abort a debug build while 2000 parse. 1000 is a chosen margin, not a derived
+/// bound, and it accepts 600–1000 nests stock Django rejects.
 ///
-/// So "Django refuses at ~498" is one interpreter, at one recursion limit, at
-/// one enclosing call depth, and `sys.setrecursionlimit(10000)` moves it while
-/// nothing here moves. 1000 `and`s parse on both sides because infix parsing is
-/// a loop; only *prefix* nesting recurses (about two CPython frames per `not`).
-///
-/// Rust has no interpreter recursion limit, so without a guard a hostile
-/// template overflows the native stack — which aborts the process rather than
-/// raising, and so cannot be caught. That abort was **observed**, not assumed,
-/// by disabling the guard: in a debug `cargo test` build 1010 and 2000 `not`s
-/// parse and 4000 aborts with `fatal runtime error: stack overflow` / SIGABRT
-/// before the test can report anything, so the native limit in that build sits
-/// between 2000 and 4000 frames and 1000 leaves a factor of two to four clear.
-/// The frame cost is not a constant either — it moves with the build, the
-/// thread's stack size and the enclosing call depth — so 1000 is a chosen
-/// margin, not a derived bound.
-///
-/// **The direction is the wrong one for a drop-in replacement, and saying
-/// otherwise would be a comfort rather than a fact.** This engine accepts
-/// 600–1000 nested `not`s that stock Django rejects, so a template authored
-/// against this engine can fail on Django — the opposite of the failure a
-/// drop-in should produce. An earlier revision of this comment called that "the
-/// safe direction" on the grounds that a permissive engine renders what Django
-/// could not; that is true of the engine and false of the *template*, which is
-/// what a user carries between the two. The honest mitigation is that no
-/// realistic template comes near either bound, not that the behaviour matches.
-///
-/// The value and the message are deliberately not Django's. The one half that
-/// *could* agree is the exception **type** — Django surfaces a `RecursionError`
-/// where this raises `IfError`'s class — and it is left alone here rather than
-/// changed at close-out: no suite test and no corpus reaches either side of the
-/// boundary, so an unpinned type change would trade a documented divergence for
-/// an undocumented one. It is carried in §10.4 for the milestone that builds the
-/// differential corpus (§9), where it can be pinned rather than asserted.
+/// The value and message are deliberately not Django's.
 pub const MAX_NESTING_DEPTH: usize = 1000;
 
 /// Which Python exception a `smartif` parse failure becomes.
@@ -130,10 +81,9 @@ pub enum Operator {
 }
 
 impl Operator {
-    /// `OPERATORS[key]` — `translate_token`'s lookup, `None` on the `KeyError`
-    /// that Django then turns into `create_var`. (`translate_token` also
-    /// catches `TypeError`, for an unhashable token; a `String` token cannot
-    /// raise it, so that arm is unrepresentable here.)
+    /// `OPERATORS[key]` — `translate_token`'s lookup; `None` is the `KeyError`
+    /// Django turns into `create_var`. (`translate_token` also catches
+    /// `TypeError`, for an unhashable token; a `String` token cannot raise it.)
     pub fn from_key(key: &str) -> Option<Self> {
         Some(match key {
             "or" => Self::Or,
@@ -190,10 +140,8 @@ impl Operator {
         }
     }
 
-    /// Whether this operator was made by `prefix` (`not`) rather than `infix`.
-    ///
-    /// `not` is the only prefix operator in `OPERATORS`; its `nud` is its own
-    /// and its `led` is `TokenBase.led`. Every other operator is the reverse.
+    /// Whether this operator came from `prefix` (`not`) rather than `infix` —
+    /// `not` is the only prefix operator in `OPERATORS`.
     pub fn is_prefix(self) -> bool {
         self == Self::Not
     }
@@ -202,21 +150,20 @@ impl Operator {
 /// `smartif.Literal.value` / `defaulttags.TemplateLiteral.value`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiteralValue {
-    /// `IfParser.create_var` is `Literal(value)`, with `value` the raw token;
-    /// `eval` returns it unchanged (`smartif.py:140`, `smartif.py:214-215`).
+    /// `IfParser.create_var` is `Literal(value)`, the raw token, which `eval`
+    /// returns unchanged (`smartif.py:140`, `smartif.py:214-215`).
     Raw(String),
     /// `TemplateIfParser.create_var` is
-    /// `TemplateLiteral(self.template_parser.compile_filter(value), value)`.
-    /// The compiled `FilterExpression` is host-owned, so it crosses as a
-    /// [`NodeRef`] handle. `defaulttags.py:928-929`.
+    /// `TemplateLiteral(compile_filter(value), value)`; the compiled
+    /// `FilterExpression` is host-owned, so it crosses as a [`NodeRef`].
+    /// `defaulttags.py:928-929`.
     Compiled(NodeRef),
 }
 
 /// `smartif.Literal` / `defaulttags.TemplateLiteral`.
 ///
-/// `display` is pre-rendered because the base class's `display()` is Python's
-/// `repr(self.value)` and the subclass's is `self.text`; deriving it from
-/// `value` would lose the difference between them.
+/// `display` is pre-rendered because the base `display()` is `repr(self.value)`
+/// and the subclass's is `self.text`; deriving one from `value` loses the other.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Literal {
     pub value: LiteralValue,
@@ -225,10 +172,8 @@ pub struct Literal {
 }
 
 /// `smartif.TokenBase`: a translated token, and after `parse` a tree node.
-///
-/// Django has one class hierarchy for both — `translate` makes a token, `nud`
-/// and `led` mutate it into a tree node, and `parse` returns the root — so this
-/// one struct is both, with `first`/`second` addressing the arena.
+/// Django uses one class for both, so one struct here; `first`/`second` address
+/// the arena.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TokenBase {
     pub kind: IfToken,
@@ -256,20 +201,12 @@ enum Tag {
     End,
 }
 
-/// The `parser` a `TemplateIfParser` is built with.
+/// The `parser` a `TemplateIfParser` is built with: `create_var` calls
+/// `self.template_parser.compile_filter(value)` and stores the result.
 ///
-/// `TemplateIfParser.create_var` calls `self.template_parser.compile_filter(
-/// value)` and stores the result. The result is a host-owned
-/// `FilterExpression`, which `template-core` cannot hold, so it crosses as the
-/// [`NodeRef`] handle `desc.rs` reserves.
-///
-/// **M5 wired the real implementation**: `if.rs` passes an adapter over
-/// [`Host::compile_filter`](crate::parser::host::Host::compile_filter), so the
-/// `FilterExpression` is Django's own object built by Django's own
-/// `Parser.compile_filter`. M3 shipped the trait with test stand-ins only,
-/// because nothing called `smartif` then; those stand-ins are still here and
-/// still used by this module's own tests, which are about the parser rather
-/// than about the host.
+/// The result is a host-owned `FilterExpression`, so it crosses as the [`NodeRef`]
+/// handle `desc.rs` reserves; `if.rs` adapts [`Host::compile_filter`] so Django's
+/// own object is built.
 pub trait CompileFilter {
     /// `Parser.compile_filter(token)`.
     fn compile_filter(&self, token: &str) -> Result<NodeRef, Error>;
@@ -295,10 +232,8 @@ pub struct IfParser {
 impl IfParser {
     /// `smartif.IfParser(tokens)` — `error_class = ValueError`.
     ///
-    /// Infallible because the base `create_var` cannot fail: it is
-    /// `Literal(value)`. The proposed contract had `Literal.__init__` calling
-    /// `compile_filter`; the pinned source does not, and only
-    /// `TemplateIfParser.create_var` does.
+    /// Infallible: the base `create_var` is `Literal(value)` and cannot fail;
+    /// only `TemplateIfParser.create_var` calls `compile_filter`.
     pub fn new(tokens: Vec<String>) -> Self {
         let mut arena = vec![end_node()];
         let mut ids = Vec::new();
@@ -319,8 +254,7 @@ impl IfParser {
     /// `defaulttags.TemplateIfParser(parser, tokens)` — `error_class =
     /// TemplateSyntaxError`.
     ///
-    /// Fallible because `compile_filter` runs during `__init__` (Django's
-    /// `translate` -> `create_var`) and can raise.
+    /// Fallible because `compile_filter` runs during `__init__` and can raise.
     pub fn template(compiler: &dyn CompileFilter, tokens: Vec<String>) -> Result<Self, Error> {
         let mut arena = vec![end_node()];
         let mut ids = Vec::new();
@@ -379,17 +313,13 @@ impl IfParser {
 
     /// The condition rooted at `root`, as the plain data `{% if %}` crosses.
     ///
-    /// Called once per branch by `do_if`, after [`Self::parse`] has succeeded — so
-    /// every child an operator names is present, and the two `expect`s below are
-    /// statements about `nud`/`led` rather than hopes. `nud` gives a prefix
-    /// operator a `first` and explicitly `None` for `second` (`smartif.py:81-83`);
-    /// `led` gives an infix operator both (`smartif.py:55-56`). A `TokenBase.led`
-    /// or `TokenBase.nud` fall-through never returns, so nothing else reaches
-    /// here.
+    /// Called by `do_if` only after [`Self::parse`] succeeded, so every child an
+    /// operator names is present: `nud` gives a prefix operator a `first` and an
+    /// explicit `None` `second` (`smartif.py:81-83`), while `led` gives an infix
+    /// operator both (`smartif.py:55-56`).
     ///
     /// The literals are `Compiled` because `IfParser::template` is the only
-    /// constructor `do_if` uses — the base parser's `Raw` literals belong to
-    /// `smartif.IfParser`, which no tag builds.
+    /// constructor `do_if` uses.
     pub fn condition(&self, root: NodeId) -> IfConditionDesc {
         let node = &self.arena[root];
         match &node.kind {
@@ -435,23 +365,11 @@ impl IfParser {
 
     /// `IfParser.expression(rbp=0)`.
     ///
-    /// The counter is incremented and decremented **here and only here**, with
-    /// the fallible work in [`Self::expression_body`] so that the two are
-    /// structurally paired. The first version decremented on the guard path and
-    /// the success path but not on either `?` — four exits, two decrements — so
-    /// a parse that failed inside `nud` or `led` left the counter inflated.
-    /// Nothing recovered from an `IfError` within one parser, so it was
-    /// unobservable through `parse`; `the_nesting_counter_returns_to_zero_after_a_failed_parse`
-    /// now reads the field directly and pins it. Keeping the body a separate
-    /// method rather than an inner closure is what makes "no `?` in this
-    /// function" checkable by eye.
-    ///
-    /// **Do not merge the two back into one function.** The split is not a
-    /// stylistic preference: the invariant lives in the *shape* — one method
-    /// that increments, one unconditional decrement, and fallible work only in a
-    /// callee — while the test only pins today's behaviour. Folding the body
-    /// back in lets the next `?` added there leak the counter again, and it
-    /// would do so without touching a single test, so no red build would say so.
+    /// The nesting counter is incremented and decremented **here and only here**,
+    /// with the fallible work in [`Self::expression_body`], so that the two are
+    /// structurally paired. **Do not merge the two back into one function**: a `?`
+    /// added in the body would leak the counter on every failure path, and no test
+    /// would redden.
     fn expression(&mut self, rbp: u8) -> Result<NodeId, IfError> {
         self.depth += 1;
         let result = if self.depth > MAX_NESTING_DEPTH {
@@ -504,9 +422,9 @@ impl IfParser {
 
     /// `infix.Operator.led` / `TokenBase.led`.
     ///
-    /// Only the first two arms are reachable from `expression`: the loop guard
-    /// is `rbp < lbp(current)`, and a literal and `EndToken` both have
-    /// `lbp == 0`. The other two mirror `TokenBase.led` for completeness.
+    /// Only the first two arms are reachable from `expression`: its loop guard is
+    /// `rbp < lbp(current)`, and a literal and `EndToken` both have `lbp == 0`. The
+    /// other two mirror `TokenBase.led` for completeness.
     fn led(&mut self, t: NodeId, left: NodeId) -> Result<NodeId, IfError> {
         match self.tag(t) {
             Tag::Op(op) if !op.is_prefix() => {
@@ -543,8 +461,8 @@ impl IfParser {
         match &self.arena[id].kind {
             IfToken::Operator(op) => op.key().to_string(),
             IfToken::Literal(lit) => lit.display.clone(),
-            // `EndToken.display()` is `TokenBase.display()` -> `self.id`, which
-            // is `None`. `parse` checks identity against `END` first, so this is
+            // `EndToken.display()` is `TokenBase.display()` -> `self.id`, which is
+            // `None`. `parse` checks identity against `END` first, so this is
             // unreachable; it mirrors `"%s" % None`.
             IfToken::End => "None".to_string(),
         }
@@ -638,10 +556,8 @@ mod tests {
 
     /// A lenient `compile_filter`: every token compiles to the same handle.
     ///
-    /// Lenient on purpose — the Rust tests stand in for Django's real
-    /// `compile_filter`, and Django's rejects tokens like `+` during
-    /// `__init__`. The template-parser rows below use tokens Django's accepts,
-    /// so the stand-in is faithful for those rows.
+    /// Django's real one rejects tokens like `+` during `__init__`; the
+    /// template-parser rows below use tokens it accepts, so this stays faithful.
     struct FixedCompiler;
 
     impl CompileFilter for FixedCompiler {
@@ -668,8 +584,8 @@ mod tests {
 
     #[test]
     fn operator_table_matches_the_pinned_tree() {
-        // Every key of `smartif.OPERATORS` at 6.0.9, its binding power, and
-        // whether it came from `prefix` (`not`) or `infix` (the other 12).
+        // Every key of `smartif.OPERATORS` at 6.0.9: binding power, and prefix
+        // (`not`) vs `infix` (the other 12).
         let table: [(Operator, &str, u8, bool); 13] = [
             (Operator::Or, "or", 6, false),
             (Operator::And, "and", 7, false),
@@ -783,7 +699,7 @@ mod tests {
 
     #[test]
     fn parse_errors_match_the_pinned_trees_messages() {
-        // The full measured table for the base `IfParser`. Strings are
+        // The full measured error table for the base `IfParser`. Strings are
         // Django's, verbatim, including the doubled quotes in `Unused ''x''`.
         let cases: [ErrorCase; 12] = [
             (&[], "Unexpected end of expression in if tag."),
@@ -820,9 +736,8 @@ mod tests {
 
     #[test]
     fn a_single_empty_string_token_is_a_literal_not_the_end_token() {
-        // A *constructed* `[""]` is one `Literal("")`; only the empty list is
-        // the `EndToken` case. Django: `repr(IfParser([""]).parse())` is
-        // `(literal '')`.
+        // A *constructed* `[""]` is one `Literal("")`; only the empty list is the
+        // `EndToken` case (`repr(IfParser([""]).parse())` is `(literal '')`).
         let mut parser = IfParser::new(tokens(&[""]));
         let root = parser.parse().expect("parses");
         assert_eq!(repr(&parser, root), "(literal '')");
@@ -830,9 +745,8 @@ mod tests {
 
     #[test]
     fn error_class_differs_between_the_two_entry_points_but_the_message_does_not() {
-        // The point of the task. Each case's message interpolates no `Literal`
-        // display, so the two classes agree on the message and only the class
-        // differs.
+        // Each case's message interpolates no `Literal` display, so the messages
+        // agree between the two parsers and only the class differs.
         let cases: [&[&str]; 4] = [&[], &["not"], &["1", "and"], &["or", "1"]];
         for case in cases {
             let base = parse_base(case).expect_err("base fails");
@@ -849,22 +763,22 @@ mod tests {
 
     #[test]
     fn the_leftover_literal_display_differs_between_the_two_parsers() {
-        // The second difference, and why `Literal` stores `display`: the base
-        // `Literal.display()` is `repr(value)`, the subclass's is `self.text`.
+        // The base `Literal.display()` is `repr(value)`, the subclass's is
+        // `self.text` — the second difference between the parsers.
         let base = parse_base(&["foo", "bar"]).expect_err("base fails");
         assert_eq!(base.message, "Unused ''bar'' at end of if expression.");
 
-        // `FixedCompiler` accepts `bar`, and Django's real `compile_filter`
-        // accepts `bar` too (a valid variable), so this row is faithful.
+        // `FixedCompiler` accepts `bar`, and Django's real `compile_filter` accepts
+        // `bar` too (a valid variable), so this row is faithful.
         let template = parse_template(&["foo", "bar"]).expect_err("template fails");
         assert_eq!(template.message, "Unused 'bar' at end of if expression.");
     }
 
     #[test]
     fn the_template_parser_compiles_every_literal_during_construction() {
-        // `TemplateIfParser.__init__` runs `create_var` for every non-operator
-        // token, and `create_var` is where `compile_filter` lives — so a bad
-        // filter chain fails before `parse`, not during it.
+        // `TemplateIfParser.__init__` runs `create_var` for every non-operator token,
+        // which is where `compile_filter` lives — so a bad filter chain fails before
+        // `parse`, not during it.
         let error = IfParser::template(&RefusingCompiler, tokens(&["foo"]))
             .err()
             .expect("compile_filter refuses");
@@ -873,8 +787,7 @@ mod tests {
             ErrorKind::Syntax("Invalid filter: 'foo'".to_string()),
         );
 
-        // A successful compile stores the handle, and `display` keeps the raw
-        // token rather than its repr.
+        // A successful compile stores the handle; `display` keeps the raw token.
         let parser = IfParser::template(&FixedCompiler, tokens(&["foo"]))
             .expect("FixedCompiler compiles every token");
         assert_eq!(
@@ -888,9 +801,8 @@ mod tests {
 
     #[test]
     fn long_infix_chains_are_iterative() {
-        // `expression`'s loop consumes infix operators, so depth does not grow
-        // with the chain. Django parses 100 000 `and`s (measured); this uses
-        // 10 000, still far past `MAX_NESTING_DEPTH`.
+        // `expression`'s loop consumes infix operators, so depth does not grow with
+        // the chain. Django parses 100 000 `and`s (measured); this uses 10 000.
         let mut case: Vec<String> = Vec::new();
         for _ in 0..10_000 {
             case.push("a".to_string());
@@ -909,23 +821,19 @@ mod tests {
 
     #[test]
     fn the_nesting_counter_returns_to_zero_after_a_failed_parse() {
-        // The counter is private, so this test reaches for the field rather
-        // than driving `parse` — which is the only way to see the defect at
-        // all. It is reachable from here because a `#[cfg(test)] mod tests` is
-        // a child of this module.
+        // The counter is private, so this reaches for the field rather than driving
+        // `parse`; it is reachable because `mod tests` is a child of this module.
         //
-        // `["not"]` fails inside `nud`: the prefix operator calls `expression`
-        // again, and *that* call's `nud` on the `EndToken` is the error. So the
-        // counter is two when the error unwinds. Before `expression` was split
-        // from its body, both frames returned through `?` without decrementing
-        // and this read 2; every one of the four exits now leaves it at 0.
+        // `["not"]` fails inside `nud`: the prefix operator calls `expression` again,
+        // and *that* call's `nud` on the `EndToken` is the error, so the counter is two
+        // when the error unwinds.
         let mut parser = IfParser::new(tokens(&["not"]));
         assert!(parser.parse().is_err(), "a lone `not` has no operand");
         assert_eq!(parser.depth, 0, "a failed parse leaked nesting depth");
 
-        // A chain that fails at the *top* level, after several successful
-        // inner parses, is the other shape: `nud` succeeded each time and the
-        // error comes from `led` seeing no infix operator after a literal.
+        // A chain that fails at the *top* level, after several successful inner
+        // parses: `nud` succeeded each time and the error comes from `led` seeing no
+        // infix operator after a literal.
         let mut parser = IfParser::new(tokens(&["not", "not", "not", "x", "y"]));
         assert!(
             parser.parse().is_err(),
@@ -933,8 +841,7 @@ mod tests {
         );
         assert_eq!(parser.depth, 0, "a failed parse leaked nesting depth");
 
-        // And the refusal path, which the first version *did* decrement: depth
-        // is back to 0 after the guard fires, not left at the limit.
+        // The refusal path: depth is back to 0 after the guard fires.
         let mut deep: Vec<String> = vec!["not".to_string(); MAX_NESTING_DEPTH + 10];
         deep.push("x".to_string());
         let mut parser = IfParser::new(deep);
@@ -945,19 +852,16 @@ mod tests {
     #[test]
     fn deep_prefix_nesting_is_refused_instead_of_overflowing_the_stack() {
         // Django has no explicit bound (497 `not`s parse, 498 raises
-        // RecursionError). Rust's limit is the native stack, and crossing it is
-        // an abort, not an error, so `expression` refuses past
-        // `MAX_NESTING_DEPTH` instead.
+        // `RecursionError`); Rust's limit is the native stack, whose crossing is an
+        // abort rather than an error, so `expression` refuses past `MAX_NESTING_DEPTH`.
         let mut small: Vec<String> = vec!["not".to_string(); 10];
         small.push("x".to_string());
         assert!(IfParser::new(small).parse().is_ok());
 
-        // Both sizes are far past the native limit for this recursion, which
-        // was measured by disabling the guard: `MAX_NESTING_DEPTH + 10` and
-        // 4000 `not`s both abort the process with `fatal runtime error: stack
-        // overflow`, while 2000 parses. The 100 000 case is 25x past that
-        // abort point and still returns the guard's own error, which is what
-        // shows the guard — not the input size — is what fires.
+        // Both sizes are past the native limit for this recursion, measured by
+        // disabling the guard: 2000 `not`s parse, 4000 abort with `fatal runtime
+        // error: stack overflow`. The 100 000 case is 25x past that and still returns
+        // the guard's own error, which shows the guard — not the input size — fires.
         for depth in [MAX_NESTING_DEPTH + 10, 100_000] {
             let mut deep: Vec<String> = vec!["not".to_string(); depth];
             deep.push("x".to_string());
@@ -973,8 +877,8 @@ mod tests {
 
     #[test]
     fn a_literal_and_the_end_token_have_binding_power_zero() {
-        // `Literal.lbp = 0` and `EndToken.lbp = 0`, which is why the
-        // `expression` loop stops on them and `led` never sees either.
+        // `Literal.lbp = 0` and `EndToken.lbp = 0`: the `expression` loop stops on
+        // them, and `led` never sees either.
         let parser = IfParser::new(tokens(&["foo"]));
         assert_eq!(parser.lbp(parser.tokens[0]), 0);
         assert_eq!(parser.lbp(END), 0);
@@ -984,18 +888,16 @@ mod tests {
     #[test]
     #[should_panic(expected = "IfParser::template compiles every literal it builds")]
     fn condition_refuses_a_literal_the_base_parser_built() {
-        // The executed half of [`IfParser::condition`]'s `unreachable!`. That
-        // invariant is "`IfParser::template` is the only constructor `do_if`
-        // uses", and a comment cannot enforce it: `IfParser::new` is `pub` on
-        // the same type, so a second production caller would compile and
-        // panic at run time instead. Pinned here so the assumption is a
-        // *decision* — this test reddens the moment `new` stops being
+        // The executed half of [`IfParser::condition`]'s `unreachable!`, whose
+        // invariant — "`IfParser::template` is the only constructor `do_if` uses" — a
+        // comment cannot enforce: `IfParser::new` is `pub` on the same type, so a
+        // second production caller would compile and panic at run time. Pinned so the
+        // assumption stays a *decision*; this reddens the moment `new` stops being
         // test-only, or the arm stops panicking.
         //
-        // Measured: `IfParser::new` has no caller outside this file's tests.
-        // `Raw` literals exist because the base `smartif.IfParser` keeps the
-        // token as text (`create_var` is the *subclass*'s override), and the
-        // base parser is Django's own dead code outside this module.
+        // Measured: `IfParser::new` has no caller outside this file's tests. `Raw`
+        // literals exist because the base `smartif.IfParser` keeps the token as text,
+        // and that base parser is Django's own dead code outside this module.
         let mut parser = IfParser::new(tokens(&["foo"]));
         let root = parser.parse().expect("the base parser accepts one literal");
         let _ = parser.condition(root);

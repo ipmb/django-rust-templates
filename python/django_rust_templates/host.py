@@ -1,32 +1,19 @@
 """The shell's half of the host seam: the parser Django's own tag code needs.
 
 Rust owns the token cursor; **the host owns parser state** — `tags`, `filters`,
-`libraries`, `extra_data`, and whatever a user tag sets on the parser. The
-division is what §5.2's `ParserHandle` describes, realised the smaller of the two
-ways it can be: rather than a Rust handle proxying into a shared `Parser`, one
-real `django.template.base.Parser` is kept for the whole parse, and Rust hands it
-the tokens it may consume. `Parser.parse` already leaves the end tag on the stack
-for `delete_first_token` (`base.py:564-569`), so a callback that does
-``nodelist = parser.parse((end_name,)); parser.delete_first_token()`` — which is
-`Library.simple_block_tag` (`library.py:211-212`) and `tag_27584.badtag`
-(`tag_27584.py:8-9`) verbatim — runs unmodified.
+`libraries`, `extra_data`, and whatever a user tag sets on the parser. One real
+`django.template.base.Parser` is kept for the whole parse and Rust hands it the
+tokens it may consume. `Parser.parse` already leaves the end tag on the stack for
+`delete_first_token` (`base.py:564-569`), so `Library.simple_block_tag`'s
+``nodelist = parser.parse((end_name,)); parser.delete_first_token()``
+(`library.py:211-212`) runs unmodified.
 
-**A `has_tag` that answered `command in parser.tags` would break every built-in.**
-Every one of Django's built-ins is in that dict, so Rust would be told to compile
-nothing and the host would run Django's `do_for` etc. The identity clause below is
-the whole of the discrimination: a name is the host's to compile when its entry is
-*not* the callable Django itself registered for it. Until M7 an exception list of
-three names sat in front of that clause; M7 deleted it, and the deletion is what
-makes the clause whole rather than the last of three rules — a name in Rust's
-registry reaches it and is declined, and the two built-ins Rust still does not own
-(`load`, `querystring`) are answered by the registry's absence one clause earlier,
-neither by a list.
-
-Measured on the pinned tree before the identity clause was written down, since it
-is the one fact the whole predicate rests on: with
-``p = Parser(tokens, builtins=Engine().template_builtins)``,
-``p.tags["comment"] is defaulttags.register.tags["comment"]`` is ``True``; after
-``p.add_library(lib)`` for a library registering ``comment`` it is ``False``.
+**A `has_tag` that answered `command in parser.tags` would break every built-in**,
+since every built-in is in that dict: Rust would be told to compile nothing and the
+host would run Django's `do_for` etc. The discrimination is whether the entry *is*
+the callable Django itself registered. Measured on the pinned tree:
+``p.tags["comment"] is defaulttags.register.tags["comment"]`` is ``True``, and
+``False`` after ``p.add_library(lib)`` for a library registering ``comment``.
 """
 
 from __future__ import annotations
@@ -59,35 +46,17 @@ _LIBRARY_TAG_MODULES = (
 def _library_tag_tables():
     """The five libraries' `register.tags`, imported **lazily**.
 
-    **The deferral used to be load-bearing and is now order, not identity.** Until
-    the engine stopped substituting itself for ``django.template``, executing one
-    of these modules early captured Django's ``TokenType`` and Django's ``Node`` —
-    a stale-universe copy that made every comparison and every ``isinstance``
-    across the seam false, and that the substitution refused outright. There is one
-    universe now: ``django/templatetags/i18n.py:5`` is ``from
-    django.template.base import TokenType, render_value_in_context``, and in this
-    package the name it reaches is ``django_rust_templates.engine.base``'s — the
-    same object the parser compares against, at every point in the process.
+    The deferral is order, not identity: ``host`` is imported from inside
+    ``engine/base.py``, so executing five library modules while ``base`` is on the
+    stack is a cycle this file does not have to take.
 
-    What is left is that ``host`` is imported from inside ``engine/base.py``, so
-    executing five library modules while ``base`` is on the stack is a cycle this
-    file does not have to take. Measured: it does not cycle today, in the order
-    these imports are written. Kept as a deferral because it costs one already-paid
-    ``sys.modules`` lookup per table per call (see [`_library_module`]), and because
-    the alternative is a property of `base.py`'s import graph that someone editing
-    `base.py` would have to re-derive.
-
-    **The read is still fresh per call; only ``importlib``'s machinery is
-    skipped.** Both tables are read on the hot path — `django_own_tags` once per
-    tag, `django_own_filters` once per filter *application* — and
-    ``importlib.import_module`` costs **0.275 us** against **0.046 us** for the
-    ``sys.modules`` lookup it ends in, a **6x** difference (`scripts/bench.py
-    --count`'s census names the call sites; both figures are re-run by
-    `.review/m16-measurements/m16_measure_library_tables.py`, which prints them
-    with the tree it read). ``sys.modules.get`` returns the module that is
-    *currently* registered, exactly as ``import_module`` would, so a re-executed
-    library is still seen — that is the identity property `django_own_filters`
-    depends on — and only the first call pays the import.
+    **The read is still fresh per call; only ``importlib``'s machinery is skipped.**
+    ``sys.modules.get`` returns the module *currently* registered, exactly as
+    ``import_module`` would, so a re-executed library is still seen — the identity
+    property `django_own_filters` depends on. Measured: **0.275 us** for
+    ``importlib.import_module`` against **0.046 us** for the ``sys.modules`` lookup
+    it ends in, a **6x** difference (re-run by
+    `.review/m16-measurements/m16_measure_library_tables.py`).
     """
     return tuple(_library_module(name).register.tags for name in _LIBRARY_TAG_MODULES)
 
@@ -95,12 +64,10 @@ def _library_tag_tables():
 def _library_module(name):
     """The library module named ``name``, importing it if this is the first ask.
 
-    A `sys.modules` lookup rather than ``importlib.import_module``: the latter is
-    ~6x slower (0.275 us vs 0.046 us, re-run by
-    `.review/m16-measurements/m16_measure_library_tables.py`) and reaches the same object, since
-    the import system has already put it in ``sys.modules`` on every call but the
-    first. The lazy-import property is kept by the ``None`` branch, so the
-    deferral [`_library_tag_tables`] documents still holds.
+    A `sys.modules` lookup rather than ``importlib.import_module``: ~6x slower
+    (0.275 us vs 0.046 us) and the same object, since the import system has already
+    registered it on every call but the first. The ``None`` branch is what keeps the
+    import lazy, so the deferral [`_library_tag_tables`] documents still holds.
     """
 
     module = sys.modules.get(name)
@@ -112,12 +79,9 @@ def _library_module(name):
 def _library_filter_tables():
     """The same five libraries' `register.filters`, imported the same lazy way.
 
-    The filter half of [`_library_tag_tables`], with the same deferral and the same
-    reason it survives — order, not identity. `cache` and `static` register no
-    filters (measured, `register.filters` is empty in both), so this tuple
-    contributes nine callables; they are listed anyway because the *module set* is
-    the five libraries whose tags the Rust registry ports, and a sixth library's
-    filters should not have to remember to be added in two places.
+    `cache` and `static` register no filters (measured, `register.filters` is empty
+    in both), so this tuple contributes nine callables; the *module set* is shared
+    with [`_library_tag_tables`] so a sixth library need not be added in two places.
     """
     return tuple(
         _library_module(name).register.filters for name in _LIBRARY_TAG_MODULES
@@ -126,10 +90,8 @@ def _library_filter_tables():
 
 _DJANGO_OWN_TAGS = None
 
-# The registry objects the merge above was built from, in merge order. Kept for
-# `django_own_filters`' reason one table over: `None` alone cannot tell "not
-# built yet" from "built from a registry that is no longer in force", and the
-# second is the case where the escape silently resolves the wrong way.
+# The registry objects `django_own_tags` was built from, in merge order: ``None``
+# alone cannot tell "not built yet" from "built from a registry no longer in force".
 _DJANGO_OWN_TAGS_SOURCE = None
 
 
@@ -138,23 +100,11 @@ def django_own_tags():
 
     The predicate's question is *"is this callable the one Rust implements?"*,
     and the only configuration-independent answer names the modules Rust ports:
-    `django.template.defaulttags`, `django.template.loader_tags`, and — from M12,
-    whether or not they are interposed yet — the five `django.templatetags`
-    libraries. Cached at first use against the registry objects it was built
-    from, so neither a `{% load %}` nor a caller mutating a `register` mid-parse
-    can move it, and a *replaced* registry is rebuilt rather than served stale.
-
-    **The five libraries are a precondition, not a tidy-up, and the reason is
-    measured.** `has_tag` answers a Rust-owned name with
-    `func is not self._django_tags.get(command)`, so for a library tag this table
-    is the *other side of the comparison*: with the library's callable absent,
-    `get` is `None`, `func is not None` is True, and the escape sends the tag to
-    the host. Before Tasks 3-6 that is what we want — but it is also what
-    *porting a name first* would silently keep, because widening Rust's registry
-    does not touch this clause at all. Rust's new `do_trans` would never run and
-    every row would stay green, which is the trap ``.review/m12-recon.md`` §3
-    measured. So the order is widen-then-port: this table covers a library
-    *before* Rust's registry claims any of its names.
+    `django.template.defaulttags`, `django.template.loader_tags`, and the five
+    `django.templatetags` libraries. Cached at first use against the registry
+    objects it was built from, so neither a `{% load %}` nor a caller mutating a
+    `register` mid-parse can move it, and a *replaced* registry is rebuilt rather
+    than served stale.
 
     **Libraries merge *first*, defaulttags and loader_tags last, and that order
     is the safety property rather than a preference.** `update` gives the last
@@ -162,76 +112,23 @@ def django_own_tags():
     callable for the 27 built-ins. Were a library to register `if`, a
     libraries-last merge would make this table's `if` the library's — so a
     `{% load %}`ed rebind of `if` would compare *equal* to it, `has_tag` would
-    answer "Rust's", and Rust's `do_if` would compile over the caller's tag.
-    Merging the libraries first makes that hypothetical collision resolve to
-    Django's callable and leaves the clause correct for every Rust-owned name.
-    The collision does not exist at 6.0.9 — measured, the five registries and
-    the two share no name — so both halves are held by
-    `LibraryTagPredicateTests`: the measurement, and the order that keeps the
-    hazard from being a silent one if a future pin introduces it.
+    answer "Rust's", and Rust's `do_if` would compile over the caller's tag. The
+    collision does not exist at 6.0.9 — measured, the five registries and the two
+    share no name — and `LibraryTagPredicateTests` holds both halves.
 
-    **This replaced a snapshot of `parser.tags`, and the reason is measured.**
-    The snapshot was taken at `ShellHost` construction, which is *after*
-    `Parser.__init__` merged the engine's `builtins` — so it captured whatever
-    the caller configured, not Django's own table. A caller whose
-    `OPTIONS["builtins"]` registers a library providing `for` then got the
-    opposite of the intent: `parser.tags["for"] is snapshot["for"]` was True, so
-    `has_tag` said "Rust's" and Rust's `do_for` ran while the caller's tag was
-    silently ignored. Measured against `.django` @ 6.0.9, and the inversion was
-    the *stated reason* for the snapshot: the docstring justified it by a
-    misattribution the snapshot itself causes and the defaulttags comparison
-    does not — `mine is not defaulttags.do_for` routes to the host, correctly.
-
-    Not reachable through the 1547 today (the only `builtins` use in
-    `template_tests` is a *filter* library in `test_parser.py`), but
-    `OPTIONS["builtins"]` is public, documented Django and M9 ships it.
-
-    **M7 widened this to two modules, and it is the second one that matters.**
-    A predicate that read only `defaulttags` answered "not mine" for
-    `block`/`extends`/`include`, because those three are `loader_tags`' — so
-    until M7 an exception list in front of the clause refused them by name. The
-    measured facts that retire the list: `loader_tags.register.tags`'s keys are
-    exactly `['block', 'extends', 'include']`, disjoint from `defaulttags`';
-    and the three arrive in `parser.tags` at all only because
-    `Engine.default_builtins` (`engine.py:14-18`) lists
-    `django.template.loader_tags` third and `add_library` (`base.py:668-670`)
-    merges it in. So for all three the clause reads `None` against a `func` that
-    is not `None` — `func is not None` is True — and declines them as Rust's.
-
-    The list was not merely redundant, it was **wrong in the direction that does
-    not fail loudly**: it was consulted *before* identity, so a `{% load %}`ed
-    library registering `block` lost (measured: the parser's `block` *is* the
-    loaded callable, and `has_tag` returned `False`).
-
-    **Rust's registry is a subset of this table, never equal to it, and this
-    paragraph said "exactly the union" until M12 measured it.** Measured against
-    `.django` @ 6.0.9: the union of `defaulttags`' and `loader_tags`' tables is
-    **27** names, Rust's registry is **25** — it was 23 when M12 measured it, and
-    M13's two tasks moved `partial` and `partialdef` into it — and `rust - django`
-    is `[]`. The five libraries' 18 names are the *other* direction of the same
-    inequality — in this table and not in Rust's registry at all, until Tasks 3-6
-    port them. Containment is the only direction that has to hold, because the
-    clause below compares against this table — and a Rust-owned name missing from
-    it would put `None` on the right of an `is not`, so the escape resolves the
-    wrong way and the host compiles a tag Rust owns, silently, with the suite
-    green.
+    **Rust's registry is a subset of this table, never equal to it.** Measured
+    against `.django` @ 6.0.9: the union of `defaulttags`' and `loader_tags`'
+    tables is **27** names and Rust's registry is **25**, with `rust - django`
+    empty; the five libraries' 18 names are in this table and not in Rust's.
+    Containment is the only direction that has to hold, because the clause below
+    compares against this table — a Rust-owned name missing from it would put
+    `None` on the right of an `is not`, so the escape resolves the wrong way and
+    the host compiles a tag Rust owns, silently, with the suite green.
+    `TagPredicateCoverageTests` in `tests/test_interposition.py` holds it.
 
     The two names here that Rust does not own — `load` and `querystring` — never
-    reach that comparison: Rust's registry has no `do_load`/`do_querystring`, so
-    there is no Rust body to prefer and `has_tag`'s early return answers before
-    this table is consulted at all. **Until M13's Task 4 the sentence here named
-    four**, adding `partial` and `partialdef`, which were then keys with stub
-    bodies and were subtracted by `_rust_owned` rather than by the registry. Both
-    are Rust's now, so the exception list the subtraction built has shrunk to the
-    pair whose absence is structural.
-
-    The old sentence was wrong in both halves and had been for five milestones,
-    and it was wrong in the direction that **hides** this: read as an equality,
-    widening this table looks self-maintaining, so adding a library's tag names
-    to Rust's registry appears to require widening it, when nothing forces that
-    — the tag then stays Django's with every row green.
-    `TagPredicateCoverageTests` in `tests/test_interposition.py` holds the
-    containment now, and was added with this correction.
+    reach that comparison: Rust has no `do_load`/`do_querystring`, so `has_tag`'s
+    early return answers before this table is consulted at all.
     """
     global _DJANGO_OWN_TAGS, _DJANGO_OWN_TAGS_SOURCE
     sources = (
@@ -256,87 +153,49 @@ def django_own_tags():
 
 _DJANGO_OWN_FILTERS = None
 
-# The registry objects the map above was built from, in merge order. Kept because
-# ``None`` alone cannot tell "not built yet" from "built against a registry that is
-# no longer the one in force", and the second is the failure this milestone exists
-# to end.
+# The registry objects the map above was built from, in merge order: ``None`` alone
+# cannot tell "not built yet" from "built against a registry no longer in force".
 _DJANGO_OWN_FILTERS_SOURCE = None
 
 
 def django_own_filters():
     """The filter callables Rust ports, keyed by **handle** — the registry inverted.
 
-    The tag predicate answers "is this callable the one Rust implements?" with a
-    name in hand, because `has_tag(command)` is handed one. `FilterExpression`
-    is not: `engine/parser.py` stores the `find_filter` *handle* rather than a
-    name, deliberately — the name is what a `{% load %}` rebinds — so the tuple
-    `resolve` walks holds a callable and nothing to look it up by. The map is
-    therefore the registries inverted, and the inversion is faithful because it
-    is **injective**: measured against `.django` @ 6.0.9, the merged table is **66**
-    names over **66** *distinct* handles — the 57 built-ins plus the five
-    libraries' 9 — so no name is lost and no two collide. (The measurement is a
-    row, not a comment — a Django release that aliased two names to one function
-    would otherwise pick a winner silently, and Rust would run the wrong body for
-    one of them.)
+    `FilterExpression` holds the `find_filter` *handle*, not a name (the name is
+    what a `{% load %}` rebinds), so nothing is available to look a callable up by.
+    The inversion is faithful because it is **injective**: measured against
+    `.django` @ 6.0.9, 66 names over 66 *distinct* handles, so no name is lost and
+    no two collide. That measurement is a row, not a comment — an aliased pair
+    would otherwise pick a winner silently and Rust would run the wrong body.
 
     **Six registries merge, libraries first and `defaultfilters` last, and that
-    order is the safety property rather than a preference.** Same rule and same
-    reason as `django_own_tags`: `update` gives the last writer the name, and what
-    this table must never lose is `defaultfilters`' *own* callable for the 57
-    built-ins — were a library to register `lower`, a libraries-last merge would
-    make this table's `lower` the library's, so a `{% load %}`ed rebind of `lower`
-    would compare *equal* to it and Rust's body would run over the caller's
-    library function. Merging the libraries first resolves that hypothetical
-    collision to `defaultfilters`' callable and leaves the clause correct. The
-    collision does not exist at 6.0.9 — measured, the six registries share no name
-    — so both halves are held by `tests/test_interposition.py`: the measurement,
-    and the order that keeps the hazard from being a silent one if a future pin
-    introduces it.
+    order is the safety property rather than a preference** — the same rule as
+    `django_own_tags`, for the same reason. `update` gives the last writer the
+    name, and this table must never lose `defaultfilters`' own callable for the 57
+    built-ins: were a library to register `lower`, a libraries-last merge would put
+    the library's object under that name, and Rust would run its body over the
+    caller's function. The collision does not exist at 6.0.9 — the six registries
+    share no name — and `tests/test_interposition.py` holds both halves.
 
-    **Widened by M12 Task 7, and the widening is the whole of the routing.** Before
-    it, a `language_name` handle was absent from this map, so `resolve` fell through
-    to the Python loop and called the *transcribed* body — correct behaviour, and
-    indistinguishable from routing, which is why the nine Rust bodies landed with
-    the map widened in the same commit rather than the one after.
-
-    **Handle identity, not name identity, is the same decision as the tags',
-    restated for the table that has no names.** Two cases the name-keyed form
-    could not express, both of them correct here:
-
-    * A `{% load %}`ed library rebinding `lower` — `add_library` is
-      `self.filters.update(lib.filters)` (`base.py:670`) — puts a *different*
-      object in `parser.filters`, which is absent from this map, so the
-      library's callable runs. That is Review Focus 1, and it is why the arm
-      cannot be decided by name.
-    * A library registering a name *for a built-in's own object*
-      (`lib.add_filter("shout", lower)`) is *present*, so Rust runs. That is also
-      correct: the library asked for the function Rust ports, and Rust's `lower`
-      is a faithful implementation of it. A name-keyed arm would have had to
-      guess which of the two names to pass Rust.
-
-    Read once, at first use, and cached: the sources are `Library` registries,
-    which `{% load %}` does not touch (`add_library` merges into the *parser*),
-    so a frozen copy and a live read differ only if something mutates one of the
-    six `register`s itself — the case `django_own_tags`'s import-time freeze
-    guards against for the same reason. Reading it per filter instead would
-    rebuild the 66-entry dict on every filter of every rendered variable.
+    **Handle identity, not name identity, is the tags' decision restated for the
+    table that has no names.** A `{% load %}`ed library rebinding `lower`
+    (`add_library` is `self.filters.update(lib.filters)`, `base.py:670`) puts a
+    *different* object in `parser.filters`, absent from this map, so the library's
+    callable runs. A library registering a name *for a built-in's own object*
+    (`lib.add_filter("shout", lower)`) is *present*, so Rust runs — also correct,
+    since the library asked for the function Rust implements. A name-keyed arm
+    could express neither.
 
     **Cached against the registry *objects*, not against ``None``.** A cache keyed
     on emptiness answers "already built" for a map built from registries that no
     longer exist, and the consequence is silent and total: re-executing
-    `defaultfilters` (or one of the five libraries) — a reload, or the
-    scratch-universe instrumentation M11's measurement scripts build — replaces
-    that `register.filters` with fresh handles, every one of which is absent from
-    the stale map, so every filter from that table falls through to the Python loop
-    and **every test stays green**. That is precisely the state M11 exists to end,
-    arriving through the guard rather than around it, so the identity of *all six*
-    sources is part of the cache key — the same length-and-identity check
-    [`django_own_tags`] uses.
-
-    Both halves are pinned as rows in
-    `tests/test_interposition.py::FilterRoutingTests`: the map names a handle from
-    a registry object it has not seen before, and the ordinary call does not
-    rebuild.
+    `defaultfilters` (or a library) replaces `register.filters` with fresh handles,
+    all absent from the stale map, so every filter falls through to the Python loop
+    and **every test stays green**. The identity of all six sources is therefore
+    part of the cache key, as in [`django_own_tags`]. Read once, at first use: the
+    sources are `Library` registries, which `{% load %}` does not touch, so a
+    per-filter read would only rebuild the 66-entry dict on every filter.
+    `FilterRoutingTests` in `tests/test_interposition.py` pins both halves.
     """
     global _DJANGO_OWN_FILTERS, _DJANGO_OWN_FILTERS_SOURCE
     sources = (*_library_filter_tables(), _defaultfilters.register.filters)
@@ -358,56 +217,29 @@ def django_own_filters():
 def django_own_filter_names(filters):
     """Rust's name for each handle in ``filters``, ``None`` where the handle is not ours.
 
-    The render arm's answer, computed **once per expression** instead of once per
-    filter *application*. ``FilterExpression`` holds the handles Django's
-    ``find_filter`` returned, frozen when the template was compiled, and the
-    question above — "is this callable the one Rust implements?" — is a property
-    of the handle alone, so an expression has exactly one answer and was paying
-    for it on every call.
+    Computed **once per expression** rather than once per filter *application*.
+    The handles are frozen at compile time and the question is a property of the
+    handle alone, so an expression has one answer; asking per application cost
+    1.074 us a call — 69.8 us of ``real-world/normal``'s 620.8 us render, 23.4% of
+    ``micro/filter``'s 5.34 us (best of 7 x 20000, CPython 3.14.4, release ``.so``).
 
-    **Measured at M19, and the numbers are why the shape changed.** Best of
-    7 x 20000, interpreter 3.14.4, the release ``.so``:
-    ``django_own_filters()`` is **1.074 us** a call,
-    and the arm asked it per application — 65 times for ``real-world/normal``,
-    which is **69.8 us of a 620.8 us render (11.2%)**, 131.5 us of
-    ``real-world/complex``'s 1323.7 (9.9%), and 23.4% of ``micro/filter``'s
-    5.34 us. Asking once per expression leaves one call per expression, paid
-    where the handles are bound.
-
-    **What is given up is a *re*-reading, and the window it opens is one the
-    reading could not have closed.** ``django_own_filters()`` itself is
-    unchanged: it still tracks the six registry objects it was built from and
-    still rebuilds when one is replaced, which is its own row
-    (`tests/test_interposition.py::FilterRoutingTests::test_the_builtin_filter_map_tracks_the_registry_it_was_built_from`).
-    What is dropped is a second opinion *after* this expression's handles were
-    bound. A replacement landing in that window does not change the answer's
-    *kind* — the arm still runs on a handle, never on a name, so a ``{% load %}``ed
-    rebind still puts a different object in ``filters`` and still takes the
-    Python loop — it changes only which of two bodies runs for the *same* handle:
-    the Rust one, or the transcribed Python one that
-    ``tests/test_filter_parity.py`` and ``scripts/differential.py`` exist to hold
-    byte-identical to it. Before this change the same window routed the frozen
-    handle the other way — absent from the rebuilt map, so the Python loop — which
-    is the same pair of bodies with the choice made the other way round.
+    ``django_own_filters()`` itself is unchanged, so what is dropped is a *re*-read
+    after this expression's handles were bound. A replacement landing in that
+    window changes only which of two bodies runs for the *same* handle — the Rust
+    one, or the transcribed Python one ``tests/test_filter_parity.py`` holds
+    byte-identical to it — never the answer's kind, which still runs on a handle
+    and never a name.
 
     **Filled lazily, on first ``resolve``, and that is not a style choice.** The
-    two construction routes do not share a constructor. ``FilterExpression.__init__``
-    (``base.py``) is on the parity harness's **compared path**
-    (``check_transcriptions.COMPARED_PATH``), so a line added there would be a
-    declared difference inside a function the harness executes — the comparison
-    would be Rust against Rust — while ``resolve`` is deliberately not on it, which
-    is also where the routing arm itself lives. The other route, the descriptor materialiser
-    (``engine/parser.py``), builds its object with ``__new__`` and never calls
-    ``__init__`` at all. One fill site, in ``resolve``, covers both; the cost is one
-    ``AttributeError`` per expression, paid where the handles are bound — **and
-    only for an expression that has a filter.** The caller guards the fill with
-    ``if self.filters:``, and that is a measurement: the bench's ``parse`` mode
-    compiles a fresh template every iteration, so a one-off cost is not one-off
-    there. Measured before the guard, ``real-world/large`` — the row with no
-    filters in it at all — went 2900 us to 3114/3469 us while its ``render`` row
-    did not move, which is the signature of a per-compile cost. See the region's
-    note in ``scripts/check_transcriptions.py`` for the whole of it, including the
-    one row that is still slower: a *single*-filter expression in ``parse`` mode.
+    descriptor materialiser (``engine/parser.py``) builds its object with
+    ``__new__`` and never calls ``__init__``, and ``FilterExpression.__init__`` is
+    on the parity harness's **compared path** (``check_transcriptions.COMPARED_PATH``),
+    where an added line would be a declared difference inside an executed function.
+    ``resolve`` is not on it, and one fill site there covers both routes. The
+    caller guards with ``if self.filters:`` because the fill costs one
+    ``AttributeError`` per expression: measured before the guard,
+    ``real-world/large`` — which has no filters — went 2900 us to 3114/3469 us in
+    ``parse`` mode while its ``render`` row did not move.
     """
     if not filters:
         return {}
@@ -418,32 +250,21 @@ def django_own_filter_names(filters):
 def effective_autoescape(context, func):
     """The ``bool`` ``_native.filter`` must be handed for ``func``, upstream's laziness kept.
 
-    The same rule as ``effective_use_tz`` and for the same reason, on upstream's
-    *other* guarded branch: ``context.autoescape`` is read only inside
-    ``if getattr(func, "needs_autoescape", False):`` (``base.py:812-815``), so
-    every filter whose flag is unset must be handed a value without ``context``
-    being touched at all.
+    The rule is `effective_use_tz`'s, on upstream's other guarded branch:
+    ``context.autoescape`` is read only inside
+    ``if getattr(func, "needs_autoescape", False):`` (``base.py:812-815``), so a
+    filter whose flag is unset must be handed a value without touching
+    ``context``. Django's own suite calls `resolve` with a plain ``dict``
+    (``.django/tests/template_tests/test_parser.py:207``), legal precisely because
+    upstream never reaches into ``context`` there; reading it for all 57 turned
+    that row into ``AttributeError: 'dict' object has no attribute 'autoescape'``
+    while the other 1546 stayed green.
 
-    **Measured, and it is the acceptance suite that found it.** `resolve` is
-    called with a plain ``dict`` by Django's own tests —
-    ``.django/tests/template_tests/test_parser.py:207`` is
-    ``FilterExpression(f"0|default:{num}", p).resolve({})`` — which is legal
-    precisely because upstream's loop never reaches into ``context`` for a filter
-    that sets neither flag. Reading ``context.autoescape`` for all 57 turned that
-    one row into ``AttributeError: 'dict' object has no attribute 'autoescape'``
-    while the other 1546 stayed green, so nothing smaller than the real suite
-    would have shown it.
-
-    The value for the fifty filters that do not read it is ``False``, which is
-    not a guess: ``FilterCall::autoescape`` is documented in
-    ``crates/template-core/src/filters/host.rs:44-46`` as "the ``autoescape`` in
-    force, which the seven ``needs_autoescape`` filters" read, and the seven are
-    the only Rust bodies that mention it (``join``, ``linebreaks``,
-    ``linebreaksbr``, ``linenumbers``, ``unordered_list``, ``urlize``,
-    ``urlizetrunc``).
-
-    The ``getattr`` default is upstream's own, so a library filter registered
-    without the flag behaves here as it does there.
+    ``False`` for the filters that do not read it, which is not a guess:
+    ``FilterCall::autoescape`` (``crates/template-core/src/filters/host.rs:33-35``)
+    is read by exactly the seven ``needs_autoescape`` bodies. The ``getattr``
+    default is upstream's own, so a library filter registered without the flag
+    behaves here as it does there.
     """
     if getattr(func, "needs_autoescape", False):
         return context.autoescape
@@ -457,32 +278,28 @@ def effective_use_tz(context, func):
     matters: ``None`` means "ask ``settings.USE_TZ``". Upstream's
     ``template_localtime`` (``django/utils/timezone.py:146-161``) is where that
     fallback happens — ``settings.USE_TZ if use_tz is None else use_tz`` — and
-    ``_native.filter``'s ``use_tz`` is a ``bool``, so the fallback has to happen
-    before the FFI. Collapsing ``None`` to ``False`` instead is **not** the same
-    value: with ``settings.USE_TZ`` true and the context's ``use_tz`` unset,
-    upstream localizes and ``False`` would not.
+    ``_native.filter``'s ``use_tz`` is a ``bool``, so it must happen before the
+    FFI. Collapsing ``None`` to ``False`` is **not** the same value: with
+    ``settings.USE_TZ`` true and the context's ``use_tz`` unset, upstream
+    localizes and ``False`` would not.
 
-    **The attribute is read only for a filter that asks for it, and the guard
-    comes first for that reason.** Upstream reaches ``template_localtime`` — and
-    so ``context.use_tz`` — only under
+    **The guard comes first because the attribute is read only for a filter that
+    asks for it.** Upstream reaches ``context.use_tz`` only under
     ``if getattr(func, "expects_localtime", False):`` (``base.py:810-811``).
     Writing the test the other way round (``context.use_tz is None and
     getattr(...)``) reads ``context.use_tz`` for all 57 filters, which raises on
-    the ``dict`` context Django's own suite passes; measured, that and the
-    ``autoescape`` read next to it are what failed
-    ``test_filter_numeric_argument_parsing``.
+    the ``dict`` context Django's own suite passes; that and the ``autoescape``
+    read next to it are what failed ``test_filter_numeric_argument_parsing``.
 
     **The read order between the two branches is upstream's and is observable.**
     ``base.py`` tests ``expects_localtime`` before ``needs_autoescape``, so for a
-    ``dict`` context ``{{ x|date }}`` raises ``AttributeError: ... 'use_tz'``
-    while ``{{ x|join }}`` raises ``... 'autoescape'`` — measured on the pinned
-    tree. The arm therefore computes this one *first* and hands the results to
-    the FFI in the FFI's own argument order, rather than writing the two calls
-    as arguments.
+    ``dict`` context ``{{ x|date }}`` raises ``AttributeError: ... 'use_tz'`` while
+    ``{{ x|join }}`` raises ``... 'autoescape'``. The arm therefore computes this
+    one *first* and hands the results to the FFI in the FFI's own argument order.
 
-    For every other filter the value is ``False`` and Rust never reads it:
-    ``FilterCall::use_tz`` is documented in ``filters/host.rs`` as being "for the
-    two ``expects_localtime`` filters", and no other body branches on it.
+    For every other filter the value is ``False`` and Rust never reads it: no
+    body other than the two ``expects_localtime`` filters branches on
+    ``FilterCall::use_tz`` (``filters/host.rs``).
     """
     if not getattr(func, "expects_localtime", False):
         return False
@@ -497,9 +314,8 @@ def _wire_token(token):
     """A Django `Token` as the four-field tuple Rust's `_native.lex` emits.
 
     Same order as `engine/parser.py::_decode_token`: Django's signature is
-    `Token(token_type, contents, position=None, lineno=None)`, so the *wire* is
-    `(token_type, contents, lineno, position)` and the constructor call below
-    reorders it.
+    `Token(token_type, contents, position=None, lineno=None)`, so the wire is
+    `(token_type, contents, lineno, position)` and the constructor calls reorder it.
     """
     return (
         token.token_type.value,
@@ -512,74 +328,35 @@ def _wire_token(token):
 # `_rust_owned` — the names Rust has a real compile function for — computed
 # **once at import** rather than once per parse.
 #
-# It is a module-level constant because nothing in it varies: all three
-# `_native` calls are argument-free reads of compile-time-static Rust tables
-# (`REGISTRY`, `LIBRARY_REGISTRY`), so the set is the same for every `ShellHost`
-# in the process. It used to be built inside `ShellHost.__init__`, which pays it
-# on every compile of every template — measured at M19, the whole expression is
-# **4.86 us**, against a stock-Django compile floor of ~1.45 us. Hoisting it took
-# the empty-template compile from **9.89 us to 4.38 us**, i.e. from 6.8x stock to
-# **3.0x**, with no behavioural change: the tests that read `host._rust_owned`
-# (`tests/test_interposition.py`) still see it, because `__init__` binds
-# `self._rust_owned` to this constant.
-#
-# It is *not* a cache, and it must not become one in the mutable sense: the
-# tables are constants of the built artefact, so there is nothing to invalidate.
-# If a future milestone makes any of the three calls depend on runtime state,
-# this hoist is the line that goes wrong.
+# A module-level constant because nothing in it varies: all three `_native` calls
+# are argument-free reads of compile-time-static Rust tables, so the set is the
+# same for every `ShellHost`. Built in `ShellHost.__init__` it cost **4.86 us** on
+# every compile of every template, against a stock-Django floor of ~1.45 us;
+# hoisting took the empty-template compile from **9.89 us to 4.38 us** (6.8x stock
+# to 3.0x). `__init__` binds `self._rust_owned` to this constant, so the tests
+# that read `host._rust_owned` still see it. It is *not* a cache and must not
+# become one: the tables are constants of the built artefact. If a future
+# milestone makes any of the three calls depend on runtime state, this hoist is
+# the line that goes wrong.
 
-# The names Rust has a real compile function for, which as of M12 is the
-# registry in *two* tables: `builtin_tag_names_including_stubs()` minus
-# `builtin_tag_stub_names()` — the built-ins — unioned with
-# `library_tag_names()`, the `django.templatetags` tags Rust compiles. The first alone is the built-in registry's *keys*,
-# and a stub is a key with a body that raises `Unimplemented`, so taking
-# it whole claimed `partial` and `partialdef` for Rust and the identity
-# clause below then declined them on the host's behalf — measured, that
-# is 245 failures in the 1547, every one of them
-# `'partial' is a built-in tag this engine does not implement yet (M13)`
-# where `template_tests.syntax_tests.test_partials` expected either a
-# render or Django's own syntax error.
+# The built-in half is the registry's keys *minus* the stub names, not the keys
+# whole: a stub is a key with a body that raises `Unimplemented`, so taking the
+# keys as the registry claimed `partial`/`partialdef` for Rust and the identity
+# clause then declined them — measured, 245 of the 1547 failures. The subtraction
+# is the rule the rest of the tree already uses (`tests/test_parser_parity.py`),
+# and it stays written this way rather than collapsing to the keys so that a
+# future half-built entry gets the correct answer by construction. The live stub
+# set is empty; the subtrahend's derivation is pinned one layer down in
+# `crates/template-core/src/parser/registry.rs`.
 #
-# The subtraction is not a new rule, it is the one the rest of the tree
-# already uses: `tests/test_parser_parity.py` derives "implemented" as
-# `set(builtin_tag_names_including_stubs()) -
-# set(builtin_tag_stub_names())`, and `tests/test_tag_inventory.py`
-# pins the stub set. The host was the one place that read the keys as the
-# registry.
-#
-# **The subtraction is a no-op as of M13's Task 4**, because the stub set
-# is empty: every built-in in the table has a real body now. It stays
-# written this way rather than collapsing to the keys, because the
-# derivation is what makes the two agree by construction — a future
-# milestone that adds a half-built entry to the table gets the correct
-# answer from this line without anyone remembering to come back to it.
-# The subtrahend's derivation is pinned in Rust, one layer down:
-# `crates/template-core/src/parser/registry.rs`'s
-# `the_stub_derivation_is_not_a_copy_of_the_table` derives the stubs by
-# *asking each compile function* rather than reading a list, and hands
-# that derivation a fabricated table containing one stub so the row still
-# distinguishes it from a copy — with the live table's stub set empty, the
-# derivation and a hardcoded empty list give the same answer, which is the
-# one thing that row is for.
-# M12 widens this with the `django.templatetags` names Rust has a real
-# body for — `cache`, `static` and the two prefix tags, plus `tz`'s three
-# tag names as of Task 4, `l10n`'s one (`localize`) as of Task 5,
-# `i18n`'s eight as of Task 6a, and `blocktranslate`/`blocktrans` as of
-# Task 6b. That is the full eighteen: `library_tag_names()` is now every
-# name the five libraries register, so the library half of this union is
-# **0 of 18 Python's / eighteen Rust bodies**.
-#
-# **The union and the table are the same set now, and that was not so a
-# commit ago.** `library_tag_loaded` below answers `command in
-# parser.tags`, true for *every* name a loaded library contributes, and
-# the Rust arm it feeds compiles exactly when `LIBRARY_REGISTRY` has a
-# body for the name. Until Task 6b the two disagreed by
-# `blocktranslate`/`blocktrans`, and claiming them would have routed a
-# loaded `{% blocktranslate %}` past `has_tag`'s "the registered callable
-# is still Django's, so the host compiles it" clause into Rust's
-# `Invalid block tag` — a template Django renders, refused by us. Both
-# bodies are here now, so the coarse question and the body question give
-# the same answer for every library name.
+# The library half is the eighteen `django.templatetags` names Rust has bodies
+# for, so `library_tag_names()` is now every name the five libraries register.
+# The union and the table are therefore the same set: `library_tag_loaded` answers
+# `command in parser.tags` — true for every loaded library name — and the Rust arm
+# it feeds compiles exactly when `LIBRARY_REGISTRY` has a body, so a name claimed
+# without a body (as `blocktranslate`/`blocktrans` were) would route a loaded tag
+# past `has_tag` into Rust's `Invalid block tag`, refusing a template Django
+# renders.
 _RUST_OWNED = (
     set(_native.builtin_tag_names_including_stubs())
     - set(_native.builtin_tag_stub_names())
@@ -597,12 +374,9 @@ class ShellHost:
 
     def __init__(self, parser):
         self.parser = parser
-        # The Rust-owned name set is a module-level constant (`_RUST_OWNED`)
-        # because it does not vary per parse; see there for the derivation and
-        # for why the per-parse computation was 4.86 us of every compile. The
-        # instance binding is kept so `has_tag`'s membership test stays an
-        # instance-dict lookup, and so the tests that stage a name into
-        # `host._rust_owned` keep working.
+        # Kept as an instance binding so `has_tag`'s membership test is an
+        # instance-dict lookup, and so tests staging a name into
+        # `host._rust_owned` keep working. See `_RUST_OWNED` for the derivation.
         self._rust_owned = _RUST_OWNED
         self._django_tags = django_own_tags()
         # The exception object `call_tag` last let past, for the shell to
@@ -614,62 +388,48 @@ class ShellHost:
         if func is None:
             return False
         if command not in self._rust_owned:
-            # `load`, `querystring`, and everything a `{% load %}` brought in.
-            # The first two are answered by the registry not containing them —
-            # there is no Rust body to prefer. **This arm carried two more names
-            # until M13's Task 4**, `partial` and `partialdef`, which were keys
-            # with stub bodies and were subtracted by `_rust_owned`; both are
-            # Rust's now, so the only names left here are the ones whose absence
-            # from the table is structural. See `__init__` for why the
-            # registry's keys are not the same question as its implementations.
+            # `load`, `querystring`, and everything a `{% load %}` brought in:
+            # the registry does not contain them, so there is no Rust body to
+            # prefer. See `__init__` for why the registry's keys are not the
+            # same question as its implementations.
             return True
         # Rust's, unless something replaced `defaulttags`' callable for the
         # name — `add_library` is `self.tags.update(lib.tags)`
         # (`base.py:669-670`), so a `{% load %}` wins, and a caller's
-        # `OPTIONS["builtins"]` wins at construction, which is the case the
-        # parser-snapshot predicate got backwards. See `django_own_tags`.
+        # `OPTIONS["builtins"]` wins at construction. See `django_own_tags`.
         return func is not self._django_tags.get(command)
 
     def library_tag_loaded(self, command):
         """Whether the template loaded a library that provides `command`.
 
-        The second half of a two-part answer, and it exists because `has_tag`'s
-        `False` conflates two situations whose correct outcomes are opposite:
+        `has_tag`'s `False` conflates two situations whose correct outcomes are
+        opposite: **no such tag** — nothing registered `command`, so Django raises
+        ``Invalid block tag on line 1: 'static'. Did you forget to register or
+        load this tag?`` and Rust must refuse it too — and **a library tag Rust
+        owns, loaded**: ``{% load static %}`` then ``{% static %}`` leaves
+        ``static.py``'s own callable registered, so `has_tag` compares it equal to
+        `django_own_tags()` and answers `False`, yet Rust must compile this one.
 
-        * **No such tag.** Nothing registered `command`, so Django raises
-          ``Invalid block tag on line 1: 'static'. Did you forget to register
-          or load this tag?`` — and Rust must refuse it too, because a Rust body
-          that ran here would render a template Django rejects.
-        * **A library tag Rust owns, and the template loaded it.**
-          ``{% load static %}`` then ``{% static %}``: the registered callable
-          is still ``static.py``'s own, so `has_tag` compares it equal to
-          `django_own_tags()` and answers `False` — the same `False` as above,
-          but Rust must compile this one.
-
-        ``parser.tags`` is what tells them apart, and it is the *live* parser's:
-        `add_library` merges a loaded library's tags into it
-        (`base.py:668-670`), so the name is present in exactly the second case.
-        Answering from `_library_tag_tables()` instead would say `True` for all
-        18 library names, **0 of which are Python's as of M12 Task 6b** (the
-        library table's 18 minus the eighteen Rust bodies `LIBRARY_REGISTRY` has
-        — the full set, `blocktranslate` and `blocktrans` included since 6b) —
-        see `__init__` for why `_rust_owned` carries the eighteen that have Rust
-        bodies and this method is the coarser question that only the Rust arm may
-        narrow.
+        ``parser.tags`` tells them apart, and it is the *live* parser's:
+        `add_library` merges a loaded library's tags into it (`base.py:668-670`),
+        so the name is present in exactly the second case. Answering from
+        `_library_tag_tables()` instead would say `True` for all 18 library names,
+        none of which are Python's — this is the coarser question that only the
+        Rust arm may narrow.
         """
         return command in self.parser.tags
 
     def call_tag(self, command, token_wire, tokens):
         """Run Django's own compile function for `command`.
 
-        `token_wire` and `tokens` are four-field tuples in the order
-        `_native.lex` uses; `tokens` arrives in parse order and is reversed onto
-        the parser's stack the way `Parser.__init__` does (`base.py:504-505`),
-        and what is left is reversed back. **Replacing the caller's cursor with
-        the result, not counting a delta, is what makes `prepend_token`
-        correct** — Django's `Parser.parse` prepends the end tag it stopped on
-        (`base.py:564-569`) and the tag removes it with `delete_first_token`, and
-        a count would have to know that dance rather than observe it.
+        `token_wire` and `tokens` are four-field tuples in the order `_native.lex`
+        uses; `tokens` arrives in parse order and is reversed onto the parser's
+        stack the way `Parser.__init__` does (`base.py:504-505`), and what is left
+        is reversed back. **Replacing the caller's cursor with the result, not
+        counting a delta, is what makes `prepend_token` correct** — Django's
+        `Parser.parse` prepends the end tag it stopped on (`base.py:564-569`) and
+        the tag removes it with `delete_first_token`, and a count would have to
+        know that dance rather than observe it.
         """
         parser = self.parser
         parser.tokens = [
@@ -684,36 +444,25 @@ class ShellHost:
         # (`crates/template-core/src/parser/mod.rs:52,304,343`), so Django's is
         # empty here — and a host block tag whose body is unclosed reaches
         # `Parser.unclosed_block_tag`, which is `self.command_stack.pop()`
-        # (`base.py:651`) and raises `IndexError: pop from empty list` in place
-        # of Django's message. **Measured** before this was written: `{% wrap %}`
-        # with no `{% endwrap %}` gave `ParseError('pop from empty list')` where
-        # stock Django gives "Unclosed tag on line 1: 'wrap'. Looking for one of:
-        # endwrap." Five assertions in the 1547 depend on that text
-        # (`test_custom.py:418,422`, `test_partials.py:317,373,379`), all
-        # unreachable until M9 routes the suite through this seam.
-        #
-        # One entry is the whole of it: `unclosed_block_tag` pops only the
-        # innermost, which is this tag — Rust's enclosing entries are not
-        # mirrored and are not read. Popped on success only, as Django does: an
-        # exception out of the compile leaves the entry and the parse dies with
-        # it, and the `Parser` is per-parse.
+        # (`base.py:651`) and would raise `IndexError: pop from empty list` in
+        # place of Django's "Unclosed tag on line 1: 'wrap'." message. One entry
+        # is the whole of it: `unclosed_block_tag` pops only the innermost, which
+        # is this tag. Popped on success only, as Django does: an exception out of
+        # the compile leaves the entry and the parse dies with it.
         parser.command_stack.append((command, token))
         try:
             node = parser.tags[command](parser, token)
         except Exception as error:
             # Django's wrapper, at Django's line (`base.py:583-585`):
             # `Parser.parse` catches `Exception` and re-raises through
-            # `Parser.error`, which sets `.token` on the first exception to reach
-            # it and never replaces one already set (`base.py:619-630`).
-            #
-            # Rust drives the outer loop, so that wrapper is not on this call
-            # path and the token has to be picked up here. Two producers, one
-            # clause: a tag that raises directly gets *its own* token attached
-            # (Django attaches the same one, one frame up, so this is a no-op
-            # there), and a failure inside the tag's body arrives already
-            # carrying the **innermost** token, set by the nested `parser.parse`
-            # the tag itself ran. Measured on the pinned tree, the difference is
-            # the whole point:
+            # `Parser.error`, which sets `.token` on the first exception to reach it
+            # and never replaces one already set (`base.py:619-630`). Rust drives
+            # the outer loop, so the token has to be picked up here. A tag that
+            # raises directly gets *its own* token attached (a no-op there, where
+            # Django attaches the same one a frame up), and a failure inside the
+            # tag's body arrives already carrying the **innermost** token set by
+            # the nested `parser.parse` the tag ran. Measured on the pinned tree,
+            # that difference is the whole point:
             #
             #     {% load custom %}{% div %}{% now a b %}{% enddiv %}
             #     → Django blames `now a b`; without the transport below, Rust's
@@ -721,28 +470,23 @@ class ShellHost:
             #
             # `error = parser.error(token, error)` is rebinding rather than
             # wrapping: for an `Exception` — which the clause above guarantees —
-            # `Parser.error` returns the object it was handed, so the bare
-            # `raise` re-raises the same one, traceback intact. `token_wire` is
-            # not Django's attribute; it is this seam's transport, the same
-            # four-field tuple `_native.lex` emits, because the other side may
-            # not name a Django `Token`. Read by `python_host_error` in
+            # `Parser.error` returns the object it was handed, so the bare `raise`
+            # re-raises the same one, traceback intact. `token_wire` is not
+            # Django's attribute; it is this seam's transport, the same four-field
+            # tuple `_native.lex` emits, because the other side may not name a
+            # Django `Token`. Read by `python_host_error` in
             # `crates/template-py/src/lib.rs`.
             error = parser.error(token, error)
             error.token_wire = _wire_token(error.token)
-            # Kept as the **object**, not as its class name, so the shell can
-            # re-raise this exact instance — which is what Django does:
-            # `Parser.parse` re-raises the object it caught
-            # (`base.py:583-585`), so a tag whose body raises `RuntimeError`
-            # leaves the parse as that `RuntimeError` with its `__traceback__`
-            # and its `_culprit_node` attached. Rust can only carry the class's
-            # *name* across the FFI (`ErrorKind::Host`), and rebuilding an
-            # exception from a name and a message would lose both. See
-            # `render.django_exception`, which reads this.
-            #
-            # The parse aborts on the first failure, so the last host call to
-            # raise is the one the parse died on. Overwritten rather than
-            # appended for that reason — a list would invite reading an earlier
-            # entry.
+            # Kept as the **object**, not its class name, so the shell can re-raise
+            # this exact instance — as Django does (`base.py:583-585`), leaving the
+            # `RuntimeError` with its `__traceback__` and `_culprit_node` attached.
+            # Rust can only carry the class's *name* across the FFI
+            # (`ErrorKind::Host`), and rebuilding from a name and a message would
+            # lose both. See `render.django_exception`, which reads this. The parse
+            # aborts on the first failure, so the last host call to raise is the one
+            # it died on; overwritten rather than appended so nothing invites
+            # reading an earlier entry.
             self.last_error = error
             raise
         parser.command_stack.pop()
@@ -752,27 +496,17 @@ class ShellHost:
     def partial_node(self, name):
         """`partial_func`'s second arm (`defaulttags.py:1277-1281`).
 
-        `DeferredSubDict(extra_data, "partials")` is a **live view**, not a copy
-        — the subscript happens at render time — so this method must not resolve
-        `name` and must not read `partials` at all. The failure it would cause is
-        `{% partial p %}{% partialdef p %}…`: that is a template Django renders,
-        and a compile-time lookup raises
-        `Partial 'p' is not defined in the current template.` on it.
+        `DeferredSubDict(extra_data, "partials")` is a **live view**, not a copy —
+        the subscript happens at render time — so this method must not resolve
+        `name` and must not read `partials`. The failure it would cause is
+        `{% partial p %}{% partialdef p %}…`: a template Django renders, on which a
+        compile-time lookup raises
+        `Partial 'p' is not defined in the current template.`
 
-        **`PartialNode` is `defaulttags`'s, not `base`'s.** The plan for this
-        task imported it from `django.template.base` inside the method, with a
-        reason about capturing the module at the wrong moment; the first half of
-        that is simply false — measured, `from django.template.base import
-        PartialNode` is `ImportError: cannot import name 'PartialNode'`, since
-        the class is `defaulttags.py:423` — and the second half is aimed at a
-        risk this module does not have: `_defaulttags` is already bound at module
-        level (`python/django_rust_templates/host.py:35`) and is how `register.tags` is reached, so a *second*,
-        deferred route to the same module would be a difference that reads like a
-        reason. Bound at module level, as every other Django class here is, and
-        for the reason the namespace gives: `django.template.defaulttags` is
-        Django's module and nothing of ours is served under that name, so the
-        binding and the suite's `isinstance` rows name one object by construction
-        rather than by timing.
+        **`PartialNode` is `defaulttags`'s, not `base`'s** (`defaulttags.py:423`),
+        and it is bound at module level like every other Django class here: the
+        binding and the suite's `isinstance` rows then name one object by
+        construction rather than by timing.
         """
         return _defaulttags.PartialNode(
             name, partial_mapping=DeferredSubDict(self.parser.extra_data, "partials")
@@ -783,42 +517,31 @@ class ShellHost:
     ):
         """`partialdef_func`'s tail (`defaulttags.py:1250-1265`), in its order.
 
-        Four things happen here and the order is Django's: the body is
-        materialised, the duplicate check runs against `extra_data["partials"]`
-        **after** the body exists but **before** anything is stored, the
-        `PartialTemplate` is written, and the node is built **over the same
-        nodelist object** (`defaulttags.py:1258` and `defaulttags.py:1265` are the same
-        argument — `PartialDefNode(nodelist)` and `PartialTemplate(nodelist)`
-        hold one object, and a shell that materialised twice would give the
-        inline and deferred render paths different trees).
+        The order is Django's: the body is materialised, the duplicate check runs
+        against `extra_data["partials"]` **after** the body exists but **before**
+        anything is stored, the `PartialTemplate` is written, and the node is built
+        **over the same nodelist object** — `defaulttags.py:1258` and `defaulttags.py:1265` are
+        the same argument, and a shell that materialised twice would give the
+        inline and deferred render paths different trees.
 
-        `inline` is Django's: `partialdef_func` passes `parser.parse(…)`'s
-        `contains_nontext` in as the second positional argument
-        (`defaulttags.py:1265`), so a body of nothing but text registers as an
-        inline partial and one with a node in it does not. It reaches here as a
-        flag rather than as the nodelist's own attribute because the descriptor
-        is what crossed the FFI, and `materialise` is what turns it back into a
-        `NodeList` that carries it.
+        `inline` reaches here as a flag rather than as the nodelist's own attribute
+        because the descriptor is what crossed the FFI (`partialdef_func` passes
+        `parser.parse(…)`'s `contains_nontext` in as the second positional
+        argument, `defaulttags.py:1265`).
 
         The duplicate check is here and not in Rust because its message names
-        `parser.origin.name`, which is Python state. Its **class** is what the
-        caller observes, and that survives the FFI through
-        `python_host_error`'s `py_error_kind`.
+        `parser.origin.name`, which is Python state; its **class** survives the FFI
+        through `python_host_error`'s `py_error_kind`.
 
-        The error dance is `call_tag`'s, and it is required rather than
-        defensive: `render.django_exception` re-raises `self.last_error` **by
-        identity** when its class matches, so unless this method attaches the
-        token and stores the object, the `TemplateSyntaxError` a caller catches
-        is a *rebuilt* one with no `.token` — and `Template.get_exception_info`
-        reads exactly that attribute.
+        The error dance is `call_tag`'s, and required rather than defensive:
+        `render.django_exception` re-raises `self.last_error` **by identity** when
+        its class matches, so without it the `TemplateSyntaxError` a caller catches
+        is a *rebuilt* one with no `.token` — and
+        `Template.get_exception_info` reads exactly that attribute.
 
         `materialiser` is imported here rather than at module level because
         `render` imports `ShellHost` from this module, so a module-level import
-        would be a cycle: `import django_rust_templates.host` would reach
-        `render`, which would find `ShellHost` not yet defined. The other names
-        are module-level, as everywhere else in this file — `PartialTemplate` is
-        `engine.base`'s and `PartialDefNode` is `_defaulttags`'s, both already
-        bound there.
+        would be a cycle.
         """
         from django_rust_templates.render import materialiser
 

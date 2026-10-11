@@ -67,7 +67,7 @@ fn too_large() -> Error {
 /// so its error escapes; the padding is Rust's and counts **code points**.
 pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
     // The literal `None` arrives as `Some(Value::None)` and is `int(None)`, a
-    // `TypeError` the real host raises (`crates/template-py/src/filters.rs:1833-1841`);
+    // `TypeError` the real host raises (`crates/template-py/src/filters.rs:1601-1609`);
     // a missing argument never reaches a body because the parser's arity check
     // fires first, measured `ljust requires 2 arguments, 1 provided`
     // (`base.py:819`).
@@ -274,7 +274,7 @@ mod tests {
 
     /// A `None` argument is `int(None)`, a `TypeError` (measured), and `ljust`
     /// does not catch it. The FFI hands the literal `None` as `Some(Value::None)`
-    /// (`crates/template-py/src/filters.rs:1833-1841`), which this body routes to the
+    /// (`crates/template-py/src/filters.rs:1601-1609`), which this body routes to the
     /// seam as `Value::None`, so the real host raises the class Django's does.
     #[test]
     fn a_none_argument_escapes_as_type_error() {

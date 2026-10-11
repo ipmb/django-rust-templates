@@ -1,123 +1,41 @@
 //! `unordered_list` — `defaultfilters.py:669-737`.
 //!
-//! ```python
-//! @register.filter(is_safe=True, needs_autoescape=True)
-//! def unordered_list(value, autoescape=True):
-//!     if autoescape:
-//!         escaper = conditional_escape
-//!     else:
-//!         def escaper(x):
-//!             return x
+//! The four pieces Rust owns are the ones that are *not* a Python protocol: the
+//! **pairwise walk** (`["a", ["b"], "c"]` becomes `("a", ["b"])`, `("c", None)`),
+//! **`StopIteration`-as-loop-end**, the **two output formats**, and the **recursion**.
 //!
-//!     def walk_items(item_list):
-//!         item_iterator = iter(item_list)
-//!         try:
-//!             item = next(item_iterator)
-//!             while True:
-//!                 try:
-//!                     next_item = next(item_iterator)
-//!                 except StopIteration:
-//!                     yield item, None
-//!                     break
-//!                 if isinstance(next_item, (list, tuple, types.GeneratorType)):
-//!                     try:
-//!                         iter(next_item)
-//!                     except TypeError:
-//!                         pass
-//!                     else:
-//!                         yield item, next_item
-//!                         item = next(item_iterator)
-//!                         continue
-//!                 yield item, None
-//!                 item = next_item
-//!         except StopIteration:
-//!             pass
-//!
-//!     def list_formatter(item_list, tabs=1):
-//!         indent = "\t" * tabs
-//!         output = []
-//!         for item, children in walk_items(item_list):
-//!             sublist = ""
-//!             if children:
-//!                 sublist = "\n%s<ul>\n%s\n%s</ul>\n%s" % (
-//!                     indent,
-//!                     list_formatter(children, tabs + 1),
-//!                     indent,
-//!                     indent,
-//!                 )
-//!             output.append("%s<li>%s%s</li>" % (indent, escaper(item), sublist))
-//!         return "\n".join(output)
-//!
-//!     return mark_safe(list_formatter(value))
-//! ```
-//!
-//! The largest body in the group, and the four pieces Rust owns are the ones that
-//! are *not* a Python protocol: the **pairwise walk** (a list like
-//! `["a", ["b"], "c"]` becomes the pairs `("a", ["b"])` and `("c", None)`),
-//! **`StopIteration`-as-loop-end** (running out of items after a nested child
-//! ends the walk with no pair for a non-existent item), the **two output formats**
-//! (tabs and the `<li>`/`<ul>` shape), and the **recursion**. Everything else is
-//! the host's.
-//!
-//! **The nesting decision is [`FilterHost::as_nested_sequence`], not
-//! `iter_values`**, because `walk_items` asks two questions that must be answered
-//! together: `isinstance(next_item, (list, tuple, types.GeneratorType))` **and**
-//! "does `iter()` succeed". A `dict` iterates but is not in the triple, so the
-//! `isinstance` decides (measured `unordered_list(["a", {"b": 1}])` renders the
-//! dict flat, escaped); a tuple *is* in the triple, so `(["a", ("b", "c")])` nests
-//! (measured). The host returns the nested sequence when it nests and `None` when
-//! it does not, which is also why the **whole value** is
-//! [`FilterHost::iter_values`] (`list(v)`): measured
+//! **The nesting decision is [`FilterHost::as_nested_sequence`], not `iter_values`**,
+//! because `walk_items` asks two questions together: `isinstance(next_item, (list,
+//! tuple, types.GeneratorType))` **and** "does `iter()` succeed". A `dict` iterates but
+//! is not in the triple, so it renders flat (measured); a tuple *is*, so it nests. The
+//! whole value goes through [`FilterHost::iter_values`] (`list(v)`), so
 //! `unordered_list(item_generator())` renders the generator's items.
 //!
-//! **The escaper is `conditional_escape` or the identity**, and it goes through
-//! [`FilterHost::to_str`] either way: `"%s" % escaper(item)` stringifies, so an
-//! object whose `__str__` is not its `repr` renders as its `__str__` (measured
-//! `test_ulitem`), and with autoescape a `SafeString` element is not
-//! double-escaped (`test_unordered_list03`). The output is `mark_safe`d.
+//! **The escaper is `conditional_escape` or the identity**, through
+//! [`FilterHost::to_str`] either way, and the output is `mark_safe`d.
+//! `"%s" % escaper(item)` stringifies, so an object's `__str__` renders, and a
+//! `SafeString` element is not double-escaped.
 //!
-//! Measured rows on the pinned tree:
-//!
-//! ```text
-//! unordered_list(["item 1", "item 2"])          -> "\t<li>item 1</li>\n\t<li>item 2</li>"
-//! unordered_list(["item 1", ["item 1.1"]])      -> "\t<li>item 1\n\t<ul>\n\t\t<li>item 1.1</li>\n\t</ul>\n\t</li>"
-//! unordered_list(["<a>item 1</a>", "item 2"])   -> the escaped form (SafeString)
-//! unordered_list([same], autoescape=False)      -> the raw form
-//! unordered_list(["a", []])                     -> "\t<li>a</li>"        (empty child -> no <ul>)
-//! unordered_list(["a", (x for x in [])])        -> "\t<li>a\n\t<ul>\n\n\t</ul>\n\t</li>"
-//! unordered_list([])                            -> ""                    (SafeString)
-//! unordered_list(5)                             -> TypeError: 'int' object is not iterable (escapes)
-//! ```
-//!
-//! **`if children:` tests the container *object*, and that is not
-//! `!children.is_empty()`.** A generator object is truthy even when it yields
-//! nothing, so a nested **empty** generator builds a `<ul>` around nothing
-//! (measured above) while a nested empty *list* gets no `<ul>` — the same
-//! emptiness, two answers, because the two objects answer `bool()` differently.
-//! A materialised `Vec<Value>` cannot tell them apart, so the host's
-//! [`NestedSequence`] carries `truthy`, evaluated on the original object, and
-//! this body tests that instead of the items' length. The distinction is
-//! reachable: `["a", (y for y in [])]` is a legal template value.
+//! **`if children:` tests the container *object*, not `!children.is_empty()`.** A
+//! nested empty **generator** is truthy and builds an empty `<ul>` (measured), while a
+//! nested empty *list* gets none — so [`NestedSequence`] carries `truthy`, evaluated on
+//! the original object, and this body tests that.
 
 use crate::filters::host::{FilterCall, NestedSequence};
 use crate::filters::value::Value;
 use crate::parser::error::{Error, PyErrorKind};
 
-/// One `walk_items` pair: an item, and the nested sequence that belongs under it
-/// if the next element was one (`None` when it was a plain item).
+/// One `walk_items` pair: an item, and the nested sequence under it, if any (`None`
+/// when the next element was a plain item).
 type WalkPair = (Value, Option<NestedSequence>);
 
-/// `walk_items` — the pairwise walk, in Rust. Each `(item, children)` is an item
-/// followed by the nested sequence that belongs under it, if any.
-///
-/// The walk is a straight port of the generator's `try`/`next()` structure: a
-/// plain `next_item` is yielded with `None` and becomes the new item, a nested
-/// one is yielded with its children and the item *after* it is read next — and
-/// running out of items at any of the three `next()` calls is how the walk ends.
+/// `walk_items` — the pairwise walk. A plain `next_item` is yielded with `None` and
+/// becomes the new item; a nested one is yielded with its children and the item
+/// *after* it is read next; running out of items at any `next()` ends the walk.
 fn walk_items(items: &[Value], call: &FilterCall<'_>) -> Result<Vec<WalkPair>, Error> {
     let mut pairs = Vec::new();
     if items.is_empty() {
-        // `item = next(item_iterator)` raised `StopIteration` immediately.
+        // `next()` raised `StopIteration` immediately.
         return Ok(pairs);
     }
     let mut index = 0usize;
@@ -125,7 +43,7 @@ fn walk_items(items: &[Value], call: &FilterCall<'_>) -> Result<Vec<WalkPair>, E
     index += 1;
     loop {
         if index >= items.len() {
-            // `next_item = next(item_iterator)` raised `StopIteration`.
+            // The next `next()` raised `StopIteration`.
             pairs.push((item, None));
             break;
         }
@@ -135,8 +53,7 @@ fn walk_items(items: &[Value], call: &FilterCall<'_>) -> Result<Vec<WalkPair>, E
             Some(children) => {
                 pairs.push((item, Some(children)));
                 if index >= items.len() {
-                    // `item = next(item_iterator)` raised `StopIteration`: the
-                    // generator ends with no further pair.
+                    // Running out here ends the generator with no further pair.
                     break;
                 }
                 item = items[index].clone();
@@ -151,9 +68,8 @@ fn walk_items(items: &[Value], call: &FilterCall<'_>) -> Result<Vec<WalkPair>, E
     Ok(pairs)
 }
 
-/// The escaper applied to one item, then stringified: `"%s" % escaper(item)`.
-/// With autoescape that is `to_str(conditional_escape(item))`; without, a bare
-/// `to_str(item)` — which is `str(item)`, so an object's own `__str__` is used.
+/// The escaper applied to one item, then stringified: `"%s" % escaper(item)`. With
+/// autoescape, `to_str(conditional_escape(item))`; without, a bare `to_str(item)`.
 fn escape_item(item: &Value, call: &FilterCall<'_>) -> Result<String, Error> {
     if call.autoescape {
         let escaped = call.host.conditional_escape(item)?;
@@ -162,10 +78,10 @@ fn escape_item(item: &Value, call: &FilterCall<'_>) -> Result<String, Error> {
     call.host.to_str(item)
 }
 
-/// `list_formatter` — `tabs` starts at 1 and the recursion adds one per level.
-/// Module-visible so a unit test can assert the Rust-owned output format (and the
-/// recursion) directly, since `run`'s `mark_safe` makes the text unobservable
-/// through a scripted host.
+/// `list_formatter` — `tabs` starts at 1, the recursion adds one per level.
+/// `pub(crate)` so a unit test can assert the Rust-owned output format and recursion
+/// directly, since `run`'s `mark_safe` makes the text unobservable through a scripted
+/// host.
 pub(crate) fn list_formatter(
     items: &[Value],
     tabs: usize,
@@ -176,9 +92,7 @@ pub(crate) fn list_formatter(
     for (item, children) in walk_items(items, call)? {
         let mut sublist = String::new();
         // `if children:` — the **object's** truthiness, which the host evaluated
-        // before materialising. Not `!children.items.is_empty()`: a nested
-        // generator is truthy even when it yields nothing, and Django builds an
-        // empty `<ul>` for it. See [`NestedSequence`].
+        // before materialising. Not `!children.items.is_empty()`: see [`NestedSequence`].
         if let Some(children) = children {
             if children.truthy {
                 let inner = list_formatter(&children.items, tabs + 1, call)?;
@@ -193,13 +107,11 @@ pub(crate) fn list_formatter(
     Ok(output.join("\n"))
 }
 
-/// The `base.py:813` collision: `unordered_list`'s own second parameter is named
+/// The `base.py:813` collision: the filter's own second parameter is named
 /// `autoescape`, and Django's loop passes `autoescape` by keyword **before** the
-/// positional argument, so *any* argument raises before the body is entered.
-///
-/// Measured on the pinned tree over an `int`, `None`, a `str`, a `float`, a
-/// `bool` and a resolved variable: one message, naming the filter's own `def`
-/// name (which for `unordered_list` is also its registered name).
+/// positional argument, so *any* argument raises before the body is entered. Measured
+/// over an `int`, `None`, `str`, `float`, `bool` and a resolved variable: one message,
+/// naming the filter's own `def` name (which is also its registered name).
 fn argument_collision() -> Error {
     Error::filter_host(
         PyErrorKind::TypeError,
@@ -210,16 +122,13 @@ fn argument_collision() -> Error {
 
 /// `unordered_list`'s body: format, then `mark_safe`.
 pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
-    // The argument is unreachable in Django, so it is unreachable here too. It
-    // used to be ignored — the body answered where Django raised, which is the
-    // wrong direction for a drop-in — and the corpus row
-    // `unordered_list/argument` is what pins the refusal.
+    // The argument is unreachable in Django, so it is unreachable here too; the
+    // corpus row `unordered_list/argument` pins the refusal.
     if arg.is_some() {
         return Err(argument_collision());
     }
-    // `list_formatter(value)` -> `walk_items(value)` -> `iter(value)`. A
-    // non-iterable value raises here and, with no `try` around it, escapes
-    // (measured `unordered_list(5)` is a `TypeError`).
+    // A non-iterable value raises here (`unordered_list(5)` is a `TypeError`) and,
+    // with no `try` around it, escapes.
     let items = call.host.iter_values(&value)?;
     let formatted = list_formatter(&items, 1, call)?;
     Ok(call.host.mark_safe(Value::Str(formatted.into())))
@@ -238,9 +147,9 @@ mod tests {
         }
     }
 
-    /// A plain-item host whose `to_str` answers `"ESCAPED"` — distinguishable
-    /// from any item's own text, so a body that rendered the raw `Value` instead
-    /// of the host's stringified escaper would fail every format assertion below.
+    /// A plain-item host whose `to_str` answers `"ESCAPED"`, distinguishable from any
+    /// item's own text, so a body that rendered the raw `Value` instead of the host's
+    /// stringified escaper would fail every format assertion below.
     fn plain_host(text: &str) -> TestFilterHost {
         TestFilterHost {
             as_nested_sequence: Some(None),
@@ -250,8 +159,7 @@ mod tests {
         }
     }
 
-    /// The flat format, measured shape: `\t<li>…</li>` joined by `\n`. Two items,
-    /// one tab. The `"ESCAPED"` text is the escaper's, not the item's.
+    /// The flat format: `\t<li>…</li>` joined by `\n`, two items, one tab.
     #[test]
     fn the_flat_format_is_tab_indented_lis() {
         let h = plain_host("ESCAPED");
@@ -266,8 +174,8 @@ mod tests {
         );
     }
 
-    /// The nested format, measured shape: the child `<ul>` is indented one tab
-    /// deeper and the parent's `</li>` closes after it.
+    /// The nested format: the child `<ul>` is indented one tab deeper and the
+    /// parent's `</li>` closes after it.
     #[test]
     fn a_nested_sequence_recurses_into_a_sublist() {
         let h = TestFilterHost {
@@ -305,13 +213,10 @@ mod tests {
         );
     }
 
-    /// **A nested generator is truthy even when it yields nothing**, because
-    /// Django's `if children:` tests the object — so this is the one case an
-    /// emptiness check on the items cannot express, and the reason
-    /// [`NestedSequence`] carries `truthy` separately. Measured
-    /// `unordered_list(["a", (x for x in [])])` is
-    /// `"\t<li>a\n\t<ul>\n\n\t</ul>\n\t</li>"` — an _empty_ `<ul>`, where the
-    /// empty *list* above gets none.
+    /// **A nested generator is truthy even when it yields nothing**, because Django's
+    /// `if children:` tests the object — the one case an emptiness check on the items
+    /// cannot express, and the reason [`NestedSequence`] carries `truthy` separately.
+    /// Measured: an *empty* `<ul>`, where the empty *list* above gets none.
     #[test]
     fn a_nested_generator_is_truthy_even_when_empty() {
         let h = TestFilterHost {
@@ -330,10 +235,9 @@ mod tests {
         );
     }
 
-    /// The `autoescape=True` escaper is `conditional_escape` **and** `to_str`; the
-    /// `False` one is `to_str` alone. The outputs are identical here (both hosts
-    /// answer the same text), so what distinguishes them is the call pattern:
-    /// `conditional_escape` must be absent when autoescape is off.
+    /// The `True` escaper is `conditional_escape` **and** `to_str`; the `False` one is
+    /// `to_str` alone. The outputs are identical here, so what distinguishes them is
+    /// the call pattern: `conditional_escape` must be absent when autoescape is off.
     #[test]
     fn the_escaper_branches_on_autoescape() {
         let h = plain_host("ESCAPED");
@@ -358,12 +262,9 @@ mod tests {
         h.assert_called("to_str");
     }
 
-    /// **The walk pairs a nested sequence with its parent and skips it as an
-    /// item.** `["a", ["b"], "c"]` is two pairs — `("a", ["b"])` and `("c",
-    /// None)` — and `as_nested_sequence` is consulted once, for the one element
-    /// that is not the last. A body that treated the nested list as a *plain
-    /// item* would call it once too but render three `<li>`s; a body that
-    /// iterated the whole value without pairing would never nest.
+    /// **The walk pairs a nested sequence with its parent and skips it as an item.**
+    /// `["a", ["b"], "c"]` is two pairs, and `as_nested_sequence` is consulted only for
+    /// the one element that is not the last.
     #[test]
     fn the_walk_pairs_a_child_sequence_with_its_parent() {
         let h = TestFilterHost {
@@ -396,9 +297,8 @@ mod tests {
     }
 
     /// **The whole value is `iter_values`, not an index walk.** The generator case
-    /// (`test_unordered_list.py:143`) is why: `run` iterates the value as a whole
-    /// and never indexes it, so the host is asked for `iter_values` and not
-    /// `get_index`.
+    /// (`test_unordered_list.py:143`) is why: `run` iterates the value as a whole, so
+    /// the host is asked for `iter_values` and never for `get_index`.
     #[test]
     fn the_whole_value_is_iterated_and_not_indexed() {
         let h = TestFilterHost {
@@ -423,8 +323,8 @@ mod tests {
         );
     }
 
-    /// The empty list is `""` and is still **marked safe** (measured: a
-    /// `SafeString`), so `mark_safe` runs even when there is nothing to format.
+    /// The empty list is `""` and still **marked safe** (measured), so `mark_safe`
+    /// runs even when there is nothing to format.
     #[test]
     fn the_empty_list_is_the_empty_string_marked_safe() {
         let h = TestFilterHost {
@@ -445,9 +345,9 @@ mod tests {
         );
     }
 
-    /// **A non-iterable value escapes.** `unordered_list(5)` is `TypeError: 'int'
-    /// object is not iterable` (measured) — there is no `try` around
-    /// `list_formatter(value)`, and the value must not reach `mark_safe`.
+    /// **A non-iterable value escapes** (measured `unordered_list(5)` is a `TypeError`):
+    /// there is no `try` around `list_formatter(value)`, and the value must not reach
+    /// `mark_safe`.
     #[test]
     fn a_non_iterable_value_escapes() {
         let h = TestFilterHost {

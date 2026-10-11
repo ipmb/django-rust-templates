@@ -1409,35 +1409,20 @@ def token_kwargs(bits, parser, support_legacy=False):
 
 # ---------------------------------------------------------------------------
 # `BaseContext.__getitem__`, pinned for the Rust walk's root lookup.
-#
-# `PyTarget::get_item` in `crates/template-py/src/lib.rs` reimplements that
-# method's upward search — the `reversed(self.dicts)` walk, membership before
-# subscription — and enters it only while the class's subscript entry, the
-# `__getitem__` `obj[key]` runs, **is** this function as it stood **before
-# any code outside this package could rebind it**, and where it sits is the whole
-# of that claim. Capture the same attribute lazily, on the Rust side, and a
-# process that rebinds `BaseContext.__getitem__` before its first render pins the
-# *replacement*, after which the guard licenses the transcribed body and answers a
-# lookup the class no longer performs — silently, and green everywhere.
-#
-# Reading this name requires importing this module, and **the import order of
-# the package this module is in is what makes that unavoidable** — not this
-# module's own `from .context import BaseContext` 60 lines above, which is
-# *downstream* of the fact. Any route to `BaseContext` executes
-# `django_rust_templates/engine/__init__.py` first, because that is how a
-# submodule is reached, and its first statement is `from .engine import Engine`
-# (`engine/__init__.py:26`) → `from .base import Template` (`engine/engine.py:7`) → this
-# module's body, which is where the binding below happens. A project can
-# therefore only reach `engine/context.py` after the pin exists. Measured, in a
-# fresh interpreter: `import django_rust_templates.engine.context` alone leaves
-# `django_rust_templates.engine.base` in `sys.modules` with this name already
-# bound, and rebinding the class attribute immediately afterwards makes the walk
-# fall back. **The invariant is that first import**, so it is the line to protect
-# and `tests/test_loop_read_guard.py` pins it; the pin cannot be late, and it
-# cannot be early either — the `BaseContext` it reads is bound 60 lines above.
-#
-# **At end of file on purpose.** Every `COMPARED_PATH["base.py"]` span in
-# `scripts/check_transcriptions.py` is a literal line range over this file, and the
-# highest ends at 1407 — `token_kwargs`, this file's last line until this block was
-# appended under it. A binding at 1408 moves no span; one above 1407 re-keys all.
+# `PyTarget::get_item` (`crates/template-py/src/lib.rs`) reimplements that method's
+# upward search — `reversed(self.dicts)`, membership before subscription — and enters
+# it only while the class's subscript entry **is** this function as it stood **before
+# any code outside this package could rebind it**. Reading the name lazily on the Rust
+# side would instead pin a *replacement* for a process that rebinds the attribute
+# before its first render, and the guard would then license the transcribed body while
+# answering a lookup the class no longer performs — silently, and green everywhere.
+# Import order makes the pin unavoidable: any route to `BaseContext` executes
+# `engine/__init__.py` first, whose first statement `from .engine import Engine`
+# (`engine/__init__.py:26`) reaches this module's body, where the binding happens
+# (`engine/engine.py:7`). Measured: `import django_rust_templates.engine.context` alone
+# leaves `...engine.base` in `sys.modules` with this name bound;
+# `tests/test_loop_read_guard.py` pins that first import.
+# **At end of file on purpose**: every `COMPARED_PATH["base.py"]` span in
+# `scripts/check_transcriptions.py` is a literal line range over this file, the highest
+# ending at 1407 — a binding at 1408 moves no span; one above 1407 re-keys all.
 BASE_CONTEXT_GETITEM = BaseContext.__getitem__

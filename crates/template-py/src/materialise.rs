@@ -1,43 +1,29 @@
 //! The native materialiser: build the compatibility tree by walking the IR.
 //!
-//! `parser.materialise` does this in Python by walking a *wire* of nested tuples
-//! and pyclasses. Measured on `real-world/large` (9279 chars, 621 nodes) that
-//! walk is 1153 us of a 1834 us compile — 63% — while the plan built from the
-//! same tree is 26 us. The wire exists only to be decoded.
+//! `parser.materialise` does this in Python by walking a *wire* of nested tuples and
+//! pyclasses; measured on `real-world/large` (9279 chars, 621 nodes) that walk is 1153 us
+//! of a 1834 us compile — 63% — while the plan built from the same tree is 26 us. The
+//! wire exists only to be decoded.
 //!
-//! **Three properties of `materialise_node` are contracts.** Each is the natural
-//! thing to reorder when optimising and the failures are silent, so each is named
-//! here, and each gets a row when the task that could break it lands.
-//!
-//! **Task 3 preserves all three the easy way and pins none of them.** Every node
-//! still goes through `materialise_node`, so the orderings below are inherited from
-//! Python rather than established here; nothing in this file yet reads the registry,
-//! builds a descendant, or attaches a token. What *is* Rust's at Task 3 is the
-//! root-list loop, and that loop had to be written to Python's evaluation order —
-//! see [`materialise_native`], where binding `append` before the build is the
-//! whole content of the first contract at this stage. Tasks 4-7 move the
-//! construction down arm by arm, and that is when the three become this module's
-//! promises rather than Python's.
+//! **Three properties of `materialise_node` are contracts**, each the natural thing to
+//! reorder when optimising and each silent when broken:
 //!
 //! 1. The registry is read **before** the children are built
-//!    (`python/django_rust_templates/engine/parser.py:347` against
-//!    `python/django_rust_templates/engine/parser.py:372`). A factory that rebinds
-//!    `NODE_CLASSES["IfNode"]` while a child is built is observed by that child's
-//!    siblings and *not* by the parent, and an unknown class name raises before any
-//!    child work.
-//! 2. Children are materialised **before** the parent is constructed, and the
-//!    attributes are decoded **after** the children exist. `ExtendsNode.__init__`
-//!    reads the nodelist it is handed, and an `AttrValue::NodeListRef` names a
-//!    position in a list that must already be populated.
-//! 3. `token` and `origin` are attached **after** construction. `__init__` runs
-//!    first and some of them read the subtree.
+//!    (`python/django_rust_templates/engine/parser.py:347` against `…:372`). A factory
+//!    that rebinds `NODE_CLASSES["IfNode"]` while a child is built is observed by that
+//!    child's siblings and *not* by the parent, and an unknown class name raises before
+//!    any child work.
+//! 2. Children are materialised **before** the parent is constructed, and the attributes
+//!    are decoded **after** the children exist. `ExtendsNode.__init__` reads the nodelist
+//!    it is handed, and an `AttrValue::NodeListRef` names a position in a list that must
+//!    already be populated.
+//! 3. `token` and `origin` are attached **after** construction. `__init__` runs first and
+//!    some of them read the subtree.
 //!
-//! **The fallback is the design, not scaffolding.** Every shape this module does
-//! not yet build is handed to the Python decoder for that shape alone. Tasks 4-7
-//! remove fallbacks one group at a time; the host-node arm keeps one permanently,
-//! because it is a rare node whose descriptor validation and error messages are
-//! asserted by tests that should keep reading the strings they were written
-//! against.
+//! **The fallback is the design, not scaffolding**: every shape this module does not yet
+//! build is handed to the Python decoder for that shape alone. The host-node arm keeps one
+//! permanently, because its descriptor validation and error messages are asserted by tests
+//! that should keep reading the strings they were written against.
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
@@ -54,25 +40,20 @@ pub fn materialise_native(
     parser: &Bound<'_, PyAny>,
 ) -> PyResult<Py<PyAny>> {
     let nodelist = tree.getattr("NodeList")?.call0()?;
-    // `contains_nontext` is a *class* attribute on `NodeList`, so leaving it
-    // alone is how it reads False. Only the True transition is written, which is
-    // what makes a second, text-only nodelist read False again.
+    // `contains_nontext` is a *class* attribute on `NodeList`, so leaving it alone is how
+    // it reads False; only the True transition is written, so a second, text-only nodelist
+    // reads False again.
     if desc.contains_nontext {
         nodelist.setattr("contains_nontext", true)?;
     }
     for node in &desc.nodes {
-        // **`append` is bound before the node is built, and that is Python's
-        // evaluation order rather than a micro-optimisation.** `materialise` reads
-        // `nodelist.append(materialise_node(...))`, so `LOAD_METHOD` resolves
-        // `append` first and only then evaluates the argument. A factory that
-        // rebinds `NodeList.append` while it builds a node is therefore **not**
-        // seen by that node's own append, and *is* seen by every later one.
-        //
-        // The obvious spelling — `nodelist.call_method1("append", (built,))` after
-        // the build — uses the replacement for the very append the original was
-        // bound to serve. Measured on a one-node template whose `TextNode` factory
-        // rebinds `NodeList.append`: Python calls the replacement 0 times, the
-        // after-the-build spelling calls it once.
+        // **`append` is bound before the node is built, and that is Python's evaluation
+        // order rather than a micro-optimisation.** `materialise` reads
+        // `nodelist.append(materialise_node(...))`, so `LOAD_METHOD` resolves `append`
+        // first: a factory that rebinds `NodeList.append` while it builds a node is **not**
+        // seen by that node's own append and *is* seen by every later one. Measured on a
+        // one-node template whose `TextNode` factory rebinds it, Python calls the
+        // replacement 0 times, the after-the-build spelling once.
         let append = nodelist.getattr("append")?;
         let built = materialise_one(py, tree, node, origin, resolve_ref, register_ref, parser)?;
         append.call1((built,))?;
@@ -96,33 +77,25 @@ fn materialise_one(
         return fallback_node(py, tree, desc, origin, resolve_ref, register_ref, parser);
     }
 
-    // **Before the children**, which is the review's finding: `materialise_node`
-    // reads the registry at
-    // `python/django_rust_templates/engine/parser.py:347` and builds children at
-    // `python/django_rust_templates/engine/parser.py:372`, so a factory that
-    // rebinds the registry while a child is built is seen by the child's siblings
-    // and not by this parent. Reading it after the children would build a
+    // **Before the children**: `materialise_node` reads the registry at
+    // `python/django_rust_templates/engine/parser.py:347` and builds children at `…:372`,
+    // so a factory that rebinds the registry while a child is built is seen by the child's
+    // siblings and not by this parent. Reading it after the children would build a
     // different tree with the same class names.
     let registry = tree.getattr("NODE_CLASSES")?;
-    // **Subscription on the object, never `PyDict::get_item`.** `NODE_CLASSES` is a
-    // plain dict today, so the two agree on every input the corpus reaches — and they
-    // stop agreeing as soon as it is a dict **subclass** that overrides `__getitem__`:
-    // `PyDict::get_item` reads the concrete dict storage and never calls the override,
-    // while `NODE_CLASSES[class_name]` at
-    // `python/django_rust_templates/engine/parser.py:347` does. Measured with a
-    // subclass answering `"overridden"` for every key: the Python path built the
-    // override's value, a `get_item` walk built the real node, and the two trees
-    // differed in the class of a node with the same name. `get_item` on
-    // `Bound<PyAny>` is `PyObject_GetItem`, which *is* the subscription — so the
-    // registry is never cast down to `PyDict` here.
+    // **Subscription on the object, never `PyDict::get_item`.** The two agree while
+    // `NODE_CLASSES` is a plain dict and stop agreeing as soon as it is a dict **subclass**
+    // overriding `__getitem__`: `PyDict::get_item` reads the concrete storage and never calls
+    // the override, while `NODE_CLASSES[class_name]` (`…:347`) does — measured with a subclass
+    // answering `"overridden"`, the two walks built different trees. `get_item` on
+    // `Bound<PyAny>` is `PyObject_GetItem`, which *is* the subscription.
     let factory = match registry.get_item(desc.class_name.as_str()) {
         Ok(factory) => factory,
-        // **`KeyError` only**, which is exactly what `materialise_node`'s
-        // `except KeyError` catches; anything else a `__getitem__` raises propagates
-        // as itself rather than being rewritten into the registry message.
+        // **`KeyError` only**, what `materialise_node`'s `except KeyError` catches; anything
+        // else a `__getitem__` raises propagates as itself. The message is Python's, so the
+        // error path calls the module rather than spelling it a second time.
         Err(error) if error.is_instance_of::<pyo3::exceptions::PyKeyError>(py) => {
-            // The message belongs to Python — it is asserted by tests that should
-            // keep reading the string they were written against — so the error path
+            // The message belongs to Python — tests read the string — so the error path
             // calls into the module rather than spelling it a second time.
             return Err(loud(
                 tree,
@@ -133,15 +106,11 @@ fn materialise_one(
         Err(error) => return Err(error),
     };
 
-    // `{% cycle a b as c %}` and every later `{% cycle c %}` are one node in
-    // Django: `do_cycle` returns the *identical* object, and `CycleNode.render`
-    // keys `render_context` by it, so two equal-but-distinct nodes would cycle
-    // separately. The table is what makes them one.
-    //
-    // The token is re-attached on the way out, and that is not tidiness — it is
-    // `extend_nodelist` doing `node.token = token` at every append, so the shared
-    // object carries the **last** occurrence's token and every position reads
-    // that one.
+    // `{% cycle a b as c %}` and every later `{% cycle c %}` are one node in Django:
+    // `do_cycle` returns the *identical* object and `CycleNode.render` keys `render_context`
+    // by it, so two equal-but-distinct nodes would cycle separately. The token is re-attached
+    // on the way out because `extend_nodelist` does `node.token = token` at every append, so
+    // the shared object carries the **last** occurrence's token.
     let mut slot_to_fill = None;
     if let Some(slot) = desc.slot {
         let existing = resolve_ref.call1((slot,))?;
@@ -153,10 +122,9 @@ fn materialise_one(
         slot_to_fill = Some(slot);
     }
 
-    // Children first, completely. `ExtendsNode.__init__` walks the nodelist it is
-    // handed, and an `AttrValue::NodeListRef` names a position in `child_lists`
-    // below, so a node built before its children is a node that read an empty
-    // subtree.
+    // Children first, completely: `ExtendsNode.__init__` walks the nodelist it is handed,
+    // and an `AttrValue::NodeListRef` names a position in `child_lists` below, so a node
+    // built before its children read an empty subtree.
     let mut children: Vec<(String, Py<PyAny>)> = Vec::with_capacity(desc.nodelists.len());
     for (name, child) in &desc.nodelists {
         let built = materialise_native(py, tree, child, origin, resolve_ref, register_ref, parser)?;
@@ -166,10 +134,9 @@ fn materialise_one(
 
     let kwargs = PyDict::new(py);
     for (name, node) in &children {
-        // A child nodelist whose **name is empty** is positional only: it is
-        // reachable through a `NodeListRef` and is not passed to `cls`.
-        // `IfNode` is why — its `__init__` takes exactly one parameter,
-        // `conditions_nodelists`, and holds the branch nodelists inside that.
+        // A nodelist whose **name is empty** is positional only: reachable through a
+        // `NodeListRef`, never passed to `cls`. `IfNode` is why — its `__init__` takes one
+        // parameter, `conditions_nodelists`, and holds the branch nodelists inside that.
         if !name.is_empty() {
             kwargs.set_item(name, node)?;
         }
@@ -185,15 +152,13 @@ fn materialise_one(
 
     let node = factory.call((), Some(&kwargs))?;
 
-    // After construction, never before: `__init__` runs first and some of them
-    // read the subtree.
+    // After construction, never before: `__init__` runs first and some read the subtree.
     node.setattr("token", decode_token_or_none(py, tree, desc)?)?;
     node.setattr("origin", origin)?;
     if let Some(slot) = slot_to_fill {
-        // Filled **after** the node exists, which is what makes a second mention
-        // of the same cycle find this one rather than build its own. The slot is
-        // not a constructor argument — `CycleNode.__init__` takes none — so it is
-        // stored here rather than passed to `cls`.
+        // Filled **after** the node exists, which makes a second mention of the same cycle
+        // find this one. The slot is not a constructor argument — `CycleNode.__init__` takes
+        // none — so it is stored here rather than passed to `cls`.
         register_ref.call1((slot, node.clone()))?;
     }
     Ok(node.unbind())
@@ -208,43 +173,34 @@ fn attr_to_py(
     parser: &Bound<'_, PyAny>,
     child_lists: &Bound<'_, PyList>,
 ) -> PyResult<Py<PyAny>> {
-    // `bool` before `int`, and it is not an optimisation: `bool` is an `int`
-    // subclass, and an arm that caught it as an integer would turn
-    // `{% autoescape on %}`'s `setting` into `0`/`1` — which compares equal and
-    // passes any `assertEqual` while being the wrong type.
+    // `bool` before `int`, and not as an optimisation: `bool` **is** an `int` subclass, so an
+    // arm that caught it as an integer would turn `{% autoescape on %}`'s `setting` into
+    // `0`/`1` — comparing equal and passing any `assertEqual` while being the wrong type.
     match value {
         AttrValue::Bool(flag) => Ok((*flag).into_pyobject(py)?.to_owned().into_any().unbind()),
         AttrValue::Int(number) => Ok((*number).into_pyobject(py)?.into_any().unbind()),
         AttrValue::Float(number) => Ok((*number).into_pyobject(py)?.into_any().unbind()),
         AttrValue::Str(text) => Ok(text.as_str().into_pyobject(py)?.into_any().unbind()),
         AttrValue::None => Ok(py.None()),
-        // A `SafeString`, and the subtype is the whole point: a `{% verbatim %}`
-        // body's text must not be escaped when the node finally renders. This is
-        // the same call `_decode_value` makes for the same variant
-        // (`python/django_rust_templates/engine/parser.py:757`), reached without
-        // building the wire object first.
+        // A `SafeString`, and the subtype is the point: a `{% verbatim %}` body's text must
+        // not be escaped when the node renders. The same call `_decode_value` makes for this
+        // variant (`python/django_rust_templates/engine/parser.py:757`).
         AttrValue::SafeStr(text) => call_bridge(tree, Bridge::MarkSafe, (text.as_str(),)),
         AttrValue::BigInt(text) => {
-            // `builtins.int(text)`, **never** `py.eval`. The text is a validated
-            // decimal produced by `pynum::python_int` — an optional ASCII sign
-            // then ASCII digits — so the only thing it can denote is a number.
-            // The tempting `py.eval("int(%s)" % text)` would accept the text as
-            // *code*, which no lint catches; this form cannot, whatever it says.
+            // `builtins.int(text)`, **never** `py.eval`: the text is a validated decimal from
+            // `pynum::python_int` (optional ASCII sign, ASCII digits), so this form cannot
+            // treat it as code the way `eval("int(%s)")` would.
             Ok(py
                 .import("builtins")?
                 .getattr("int")?
                 .call1((text.as_str(),))?
                 .unbind())
         }
-        // Each is loud when its **resolver** is missing, and `NodeSlot` is loud again
-        // when the slot it names is empty. `Ref` is deliberately not: its slot is
-        // filled by the *host*, so `None` there means "the host ran no code" — an
-        // answer, not a failure, and the host arm checks for it itself. That
-        // difference is what `empty_is_loud` carries. Where it does apply, the
-        // loudness is the value: a silent `None` renders an empty string and reports
-        // nothing. The messages come from `parser.py` — one spelling, called from both
-        // walkers — so these arms return the helper's own exception rather than a
-        // `LookupError` built here.
+        // Each handle is loud when its **resolver** is missing, and `NodeSlot` is loud again
+        // when the slot it names is empty. `Ref` deliberately is not: its slot is filled by the
+        // *host*, so `None` there means "the host ran no code", an answer — that difference is
+        // what `empty_is_loud` carries. The messages come from `parser.py`, one spelling called
+        // from both walkers, so these arms return the helper's own exception.
         AttrValue::Ref(handle) => resolve_handle(
             tree,
             resolve_ref,
@@ -252,10 +208,9 @@ fn attr_to_py(
             handle.0,
             false,
         ),
-        // `AttrValue::NodeSlot` holds a `usize` and `NodeRef` a `u64`, so the cast
-        // is here rather than in the helper: a `usize` parameter would silently
-        // truncate a `NodeRef` on a 32-bit target, and the index is handed to
-        // Python either way, where `u64` is the wider and therefore safer spelling.
+        // `AttrValue::NodeSlot` holds a `usize` and `NodeRef` a `u64`, so the cast is here
+        // rather than in the helper: a `usize` parameter would silently truncate a `NodeRef`
+        // on a 32-bit target.
         AttrValue::NodeSlot(index) => resolve_handle(
             tree,
             resolve_ref,
@@ -271,10 +226,9 @@ fn attr_to_py(
                 (format!("<NodeListRef {index}>"), child_lists.len()),
             )),
         },
-        // Containers are built here rather than left to the fallback because the
-        // *container type* is the contract, not the contents: `IfNode.render`
-        // unpacks each pair (`defaulttags.py:323`), and a list would unpack too
-        // while being a different node. `fingerprint` tells the two apart.
+        // Containers are built here because the *container type* is the contract, not the
+        // contents: `IfNode.render` unpacks each pair (`defaulttags.py:323`), and a list would
+        // unpack too while being a different node (`fingerprint` tells the two apart).
         AttrValue::List(items) => {
             let built = items
                 .iter()
@@ -289,18 +243,11 @@ fn attr_to_py(
                 .collect::<PyResult<Vec<_>>>()?;
             Ok(PyTuple::new(py, built)?.into_any().unbind())
         }
-        // `dict(pairs)` and not a list of pairs: `token_kwargs` does
-        // `kwargs[key] = …` (`base.py:1202`), so a repeated key keeps its **first**
-        // position and takes the **last** value. Insertion into a dict reproduces
-        // that; a list of pairs does not.
-        //
-        // **The dedup comes first, and the order is load-bearing.** The Python
-        // path builds the wire `dict` first — `set_item` is where that rule is
-        // applied — and decodes only the surviving values, in first-key order. So
-        // the value a repeated key discards is **never decoded**, and decoding it
-        // here would diverge with teeth: on `{% include 'p.html' with a=1 b=2 a=3 %}`
-        // a helper that raised on the discarded `1` would make this walk fail where
-        // Python succeeds, on a template that renders.
+        // `dict(pairs)`, not a list of pairs: `token_kwargs` does `kwargs[key] = …`
+        // (`base.py:1202`), so a repeated key keeps its **first** position and takes the
+        // **last** value. The dedup must come first: the Python path builds the wire dict
+        // first and decodes only the surviving values, so decoding a discarded value here
+        // could raise on `{% include 'p.html' with a=1 b=2 a=3 %}` where Python succeeds.
         AttrValue::Map(entries) => {
             let mut surviving: Vec<(&String, &AttrValue)> = Vec::with_capacity(entries.len());
             for (key, item) in entries {
@@ -318,17 +265,11 @@ fn attr_to_py(
             }
             Ok(built.into_any().unbind())
         }
-        // The four expression arms keep their Python helpers. What moves is the
-        // *dispatch*: a Rust `match` on a variant replaces an `isinstance` ladder
-        // walked once per attribute, and the ladder's order — which is
-        // load-bearing, since a `FilterExpr` reaching the `list` arm would be
-        // passed through as an object and nothing would report it — becomes a
-        // compile-time property instead of a comment.
-        //
-        // Each builds the **wire** pyclass and then calls the same Python helper
-        // the Python decoder calls, with the same arguments. Building the final
-        // object here instead would mean a second implementation of `smartif` and
-        // of `Variable.__new__`.
+        // The four expression arms keep their Python helpers; what moves is the *dispatch* — a
+        // Rust `match` replaces an `isinstance` ladder walked once per attribute, so the ladder's
+        // load-bearing order becomes a compile-time property. Each builds the **wire** pyclass
+        // and calls the same Python helper with the same arguments; building the final object
+        // here would be a second implementation of `smartif` and `Variable.__new__`.
         AttrValue::FilterExpr(expr) => {
             let wire = crate::filter_expr_desc_to_py(py, expr, None)?;
             call_bridge(
@@ -361,11 +302,10 @@ fn attr_to_py(
 
 /// A reference-table lookup, or the loud error that says why it failed.
 ///
-/// `empty_is_loud` is the whole difference between the two handles, and it is not
-/// a detail: `AttrValue::Ref`'s slot is filled by the **host** during the parse, so
-/// a `None` there is a legitimate "the host ran no code" answer that `HostNode`
-/// checks for itself — while `AttrValue::NodeSlot`'s is filled by **this walk**,
-/// so an empty one is a wire bug. Same table, opposite answers.
+/// `empty_is_loud` is the whole difference between the handles: `AttrValue::Ref`'s slot is
+/// filled by the **host** during the parse, so a `None` there is a legitimate "the host ran
+/// no code" answer, while `AttrValue::NodeSlot`'s is filled by **this walk**, so an empty one
+/// is a wire bug. Same table, opposite answers.
 fn resolve_handle(
     tree: &Bound<'_, PyAny>,
     resolve_ref: &Bound<'_, PyAny>,
@@ -394,126 +334,77 @@ fn decode_token_or_none(
     }
 }
 
-/// Every Python entry point this walk is allowed to call, and the only place
-/// they are named.
+/// Every Python entry point this walk is allowed to call, and the only place they are named.
 ///
-/// **This enum is the census's teeth, and it exists because two earlier attempts
-/// at the same proof had none.** The first read `materialise.rs` as text and
-/// asserted that certain substrings were absent — which a renamed fallback walks
-/// straight past, and which a *comment* can trip: the row rejected the very
-/// implementation Task 7 writes. The second wrapped a hand-written list of names
-/// in `tests/test_materialiser_parity.py` and asserted the called set was a subset
-/// of that list, which is true by construction and cannot see a name that is not
-/// on it. **A bridge cannot be called without a variant here** — `call_bridge` takes
-/// a `Bridge` and nothing else — and Task 8 adds
-/// `the_bridge_list_is_pinned` to `walk_depth`, which asserts the enumerated list's
-/// length, its uniqueness and that every name exists on the module. Adding an eleventh
-/// Python bridge is then a red row in Rust, in the crate that owns the walk.
+/// **This enum is the census's teeth.** A bridge cannot be called without a variant here —
+/// `call_bridge` takes a `Bridge` and nothing else — so a rename or a deletion is loud, where
+/// reading `materialise.rs` as text (a renamed fallback walks past, and a *comment* can trip
+/// it) or wrapping a hand-written name list (a subset assertion is a tautology) is not.
+/// `the_bridge_list_is_pinned` asserts `ALL`'s length, its uniqueness, and that every name
+/// exists on the module. The Python-side census keeps a different claim: **which** bridges the
+/// corpus actually reaches, so one never exercised is visible rather than merely permitted.
 ///
-/// The Python-side census keeps a different claim, and the two are not redundant:
-/// it records **which** bridges the corpus actually reaches, so a bridge that is
-/// never exercised is visible rather than merely permitted.
+/// **`NODE_CLASSES` is read with a bare `getattr` and is not a bridge**, because it is a dict
+/// the walk reads rather than a function it calls. **A variant is declared by the task that
+/// calls it, and not before**: an enumeration written whole needs a blanket
+/// `#[allow(dead_code)]`, and an unreachable variant a reader trusts is worse than none.
 ///
-/// **`NODE_CLASSES` is read with a bare `getattr` and is not a bridge**, because it
-/// is a dict the walk reads rather than a function it calls — there is nothing to
-/// dispatch and nothing to return an exception.
-///
-/// **A variant is declared by the task that calls it, and not before.** This enum
-/// was first written whole — every bridge the finished walk reaches — and that
-/// was wrong twice over. All but two had no constructor in *either*
-/// compilation of the crate, so they needed a blanket `#[allow(dead_code)]` to
-/// survive `-D warnings`; and an enumeration nothing calls establishes no pin, since
-/// it is a list that can be left stale by exactly the edit it exists to catch. An
-/// unreachable variant that a reader trusts is worse than no variant. So the census
-/// is built the same way it is enforced: **one variant per arm, added by the task
-/// that adds the arm**, and Task 8's `the_bridge_list_is_pinned` counts what is
-/// actually there.
-///
-/// **What the finished walk reaches, for a reader of Tasks 4-8**: `materialise_node`
-/// (the host node, permanent), `_materialise_variable` and `_materialise_filter_expression`
-/// (kept whole rather than reimplemented — the *dispatch* is Rust's, what they do once
-/// reached is Python's), `_decode_condition`, `_decode_token` (which has one spelling,
-/// shared with `_native.lex`), `mark_safe` (so a `{% verbatim %}` body does not escape
-/// itself), and the four error helpers `_unknown_node_class`,
-/// `_missing_resolver_error`, `_empty_slot_error` and
-/// `_nodelist_ref_out_of_range_error`, called rather than re-spelled so that a message
-/// existing tests read stays the only copy of itself. That is ten.
-///
-/// **Which task declares which**, so a reader of Tasks 4-8 can check the enum against
-/// this list rather than trusting it: Task 4 adds `DecodeValue`, `DecodeToken`,
-/// `MarkSafe` and `UnknownNodeClass`; Task 5 adds the three reference and arity errors;
-/// Task 6 adds none, because it extends `attr_to_py` and introduces no new call; Task 7
-/// adds `MaterialiseVariable`, `MaterialiseFilterExpression` and `DecodeCondition`, and
-/// **deletes `DecodeValue`** with `fallback_attr`. That is eight declared before Task 7
-/// and ten after, which is the number Task 8's pin asserts.
+/// The finished walk reaches ten: `materialise_node` (the host node, permanent),
+/// `_materialise_variable`, `_materialise_filter_expression` (kept whole rather than
+/// reimplemented — only the dispatch is Rust's), `_decode_condition`, `_decode_token` (one
+/// spelling, shared with `_native.lex`), `mark_safe`, and the four error helpers
+/// `_unknown_node_class`, `_missing_resolver_error`, `_empty_slot_error` and
+/// `_nodelist_ref_out_of_range_error`, called rather than re-spelled so a message existing
+/// tests read stays the only copy of itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Bridge {
-    /// The host node's own object. The only bridge that exists at Task 3, and the
-    /// only node-level one that is permanent: the host node's descriptor validation
-    /// and error messages are asserted by tests that should keep reading the strings
-    /// they were written against.
+    /// The host node's own object. The only node-level bridge that is permanent: its
+    /// descriptor validation and error messages are asserted by tests that should keep
+    /// reading the strings they were written against.
     MaterialiseNode,
     /// `_decode_token`, so a node's `token` is the same `Token` the wire path builds.
     DecodeToken,
-    /// `_materialise_variable` (`python/django_rust_templates/engine/parser.py:394`),
-    /// for an `AttrValue::Variable`. The helper is kept whole rather than
-    /// reimplemented — what it does once reached is Python's; only the dispatch is
-    /// this walk's.
+    /// `_materialise_variable` (`python/django_rust_templates/engine/parser.py:394`), for an
+    /// `AttrValue::Variable`; the helper is kept whole, only the dispatch is this walk's.
     ///
-    /// **The one variant no template dispatches.** A bare `AttrValue::Variable` is not
-    /// a node attribute any parser produces: `variable_of`
-    /// (`template-core/src/parser/filter_expr.rs:250`) is
-    /// its only constructor and it puts the `Variable` inside a `FilterExprDesc`. So
-    /// this arm is here because the `match` is exhaustive and a hand-built descriptor
-    /// can carry it, and its row is `mod malformed`, not a template.
-    ///
-    /// **The helper is reached nonetheless**, by `_materialise_operand`
-    /// (`python/django_rust_templates/engine/parser.py:448`), which `_materialise_filter_expression` calls for every
-    /// operand — so Task 8's census sees this *name* fire and cannot tell the two
-    /// callers apart. That is the census's stated limit and the reason the enum, not
-    /// the census, is what proves the dispatch.
+    /// **The one variant no template dispatches**: `variable_of`
+    /// (`template-core/src/parser/filter_expr.rs:250`) is its only constructor and puts the
+    /// `Variable` inside a `FilterExprDesc`, so the arm exists only because a hand-built
+    /// descriptor can carry it (its row is `mod malformed`). The helper is reached anyway, by
+    /// `_materialise_operand` (`…/parser.py:448`), which `_materialise_filter_expression` calls
+    /// for every operand — so the census sees this *name* fire and cannot tell the two callers
+    /// apart, which is why the enum, not the census, proves the dispatch.
     MaterialiseVariable,
     /// `_materialise_filter_expression`
-    /// (`python/django_rust_templates/engine/parser.py:610`), for an
-    /// `AttrValue::FilterExpr`.
+    /// (`python/django_rust_templates/engine/parser.py:610`), for an `AttrValue::FilterExpr`.
     MaterialiseFilterExpression,
-    /// `_decode_condition` (`python/django_rust_templates/engine/parser.py:819`),
-    /// for an `AttrValue::IfCondition`.
+    /// `_decode_condition` (`python/django_rust_templates/engine/parser.py:819`), for an
+    /// `AttrValue::IfCondition`.
     DecodeCondition,
-    /// `mark_safe`, for an `AttrValue::SafeStr`. A `{% verbatim %}` body that
-    /// arrived as a plain `str` would escape itself at render time.
+    /// `mark_safe`, for an `AttrValue::SafeStr`. A `{% verbatim %}` body that arrived as a
+    /// plain `str` would escape itself at render time.
     MarkSafe,
     /// `_unknown_node_class`, so the registry message has one spelling.
     UnknownNodeClass,
-    /// `_missing_resolver_error` (`python/django_rust_templates/engine/parser.py:928`),
-    /// for a handle with no `resolve_ref` to look it up in.
+    /// `_missing_resolver_error` (`python/django_rust_templates/engine/parser.py:796`), for
+    /// a handle with no `resolve_ref` to look it up in.
     MissingResolverError,
-    /// `_empty_slot_error` (`python/django_rust_templates/engine/parser.py:935`), for
-    /// a `NodeSlot` over a slot this walk never filled.
+    /// `_empty_slot_error` (`python/django_rust_templates/engine/parser.py:803`), for a
+    /// `NodeSlot` over a slot this walk never filled.
     EmptySlotError,
     /// `_nodelist_ref_out_of_range_error`
-    /// (`python/django_rust_templates/engine/parser.py:960`), for an index past the
-    /// end of the enclosing node's own nodelists.
+    /// (`python/django_rust_templates/engine/parser.py:826`), for an index past the end of
+    /// the enclosing node's own nodelists.
     NodelistRefOutOfRangeError,
 }
 
 impl Bridge {
-    /// Every bridge, enumerated, so that `the_bridge_list_is_pinned` can count it.
+    /// Every bridge, enumerated, so `the_bridge_list_is_pinned` can count it.
     ///
-    /// **This constant and the row that reads it are one edit and land together.**
-    /// Enumerated without a reader it needs a blanket `#[allow(dead_code)]` in both
-    /// compilations of this crate, and an allow that wide would hide a genuinely
-    /// unused variant as readily as an unread constant.
-    ///
-    /// **Ten, and the number is meant to change exactly once**, in the commit that
-    /// says so: Task 7 deleted `Bridge::DecodeValue` with `fallback_attr` and added
-    /// three, so it went eight to ten.
-    ///
-    /// **What this list cannot see, stated here rather than in the row's comment
-    /// alone:** it is hand-written and its length derives from nothing, so adding a
-    /// variant to the enum and not to the list is *not* a compile error. What catches
-    /// that is `name()` — exhaustive, so the compiler sends the author to it — and the
-    /// review of that edit. The count is a tripwire, not a proof of completeness.
+    /// **This constant and the row that reads it are one edit.** The list is hand-written and
+    /// its length derives from nothing, so adding a variant to the enum and not to the list is
+    /// *not* a compile error; `name()` becoming non-exhaustive, and the review of that edit, are
+    /// what catch it. The count is a tripwire, not a proof of completeness.
     #[cfg(all(test, not(feature = "extension-module")))]
     pub(crate) const ALL: [Bridge; 10] = [
         Bridge::MaterialiseNode,
@@ -545,12 +436,9 @@ impl Bridge {
     }
 }
 
-/// The walk's only call into the parser module.
-///
-/// Deliberately small. Its value is not that it saves anything — `getattr` per
-/// node is not the cost — but that every Python call in this file goes through one
-/// function that takes a [`Bridge`], so the set of them is a type rather than a
-/// convention.
+/// The walk's only call into the parser module: every Python call in this file goes through
+/// one function taking a [`Bridge`], so the set of them is a type rather than a convention
+/// (the `getattr` per node is not the cost this saves).
 fn call_bridge<'py>(
     tree: &Bound<'py, PyAny>,
     bridge: Bridge,
@@ -561,9 +449,8 @@ fn call_bridge<'py>(
 
 /// Build one node with the Python materialiser, from a wire built for it alone.
 ///
-/// `node_desc_to_py` is the same producer `with_ref_table` uses, so the wire
-/// still has exactly one spelling — this is not a second encoding, it is the
-/// existing one called one node at a time.
+/// `node_desc_to_py` is the same producer `with_ref_table` uses, so the wire keeps exactly one
+/// spelling — this is that encoding called one node at a time, not a second one.
 fn fallback_node(
     py: Python<'_>,
     tree: &Bound<'_, PyAny>,
@@ -583,10 +470,9 @@ fn fallback_node(
 
 /// Call a Python helper that always raises, and hand back what it raised.
 ///
-/// The `Ok` arm is `unreachable!` rather than a silent success: a helper that
-/// returned would mean the message had stopped being one spelling, and a walk
-/// that carried on holding a value where an error was owed is the failure this
-/// whole module exists to avoid.
+/// The `Ok` arm is `unreachable!` rather than a silent success: a helper that returned would
+/// mean the message had stopped being one spelling, and a walk carrying on holding a value
+/// where an error was owed is the failure this module exists to avoid.
 fn loud<'py>(
     tree: &Bound<'py, PyAny>,
     bridge: Bridge,
@@ -602,37 +488,26 @@ fn loud<'py>(
 mod malformed {
     //! The descriptors no template can produce.
     //!
-    //! `{% resetcycle %}{% resetcycle c %}` is refused by Django before a
-    //! descriptor exists, and a `HostNode` carrying a nodelist cannot be built by
-    //! the parser at all. So these arms are reachable only from a *malformed*
-    //! wire, which is exactly the case a Rust walk must be as loud about as the
-    //! Python one — and exactly the case no Python-driven test can reach.
+    //! `{% resetcycle %}{% resetcycle c %}` is refused by Django before a descriptor exists,
+    //! and a `HostNode` carrying a nodelist cannot be built by the parser at all, so these arms
+    //! are reachable only from a *malformed* wire — exactly the case a Rust walk must be as
+    //! loud about as the Python one.
     //!
-    //! **They call `materialise_one` and `attr_to_py`, never the helpers they
-    //! reach.** Driving `resolve_handle` directly would prove that helper's branch
-    //! and say nothing about whether `AttrValue::NodeSlot` dispatches to it with
-    //! `empty_is_loud = true`. Exhaustive matching forces an arm to *exist*; it
-    //! does not force the arm to be *right*. The two arguments that differ between
-    //! the handles — `empty_is_loud`, and which helper is called — are the whole
-    //! content of the arm, so the arm is the thing under test.
-    //!
-    //! **One row here is not about a malformed descriptor and stays anyway.** The
-    //! `AttrValue::Variable` arm is unreachable from a *well-formed* tree as well
-    //! — its only constructor, `variable_of`, puts the `Variable` inside a
-    //! `FilterExprDesc` — so `tests/test_materialiser_parity.py` cannot drive it
-    //! from a template either. It lives here because `tree_module` and its Django
-    //! bootstrap do, and a second copy of that bootstrap in a second module is a
-    //! second thing to keep in step.
+    //! **They call `materialise_one` and `attr_to_py`, never the helpers they reach.** Driving
+    //! `resolve_handle` directly would prove that helper's branch and say nothing about whether
+    //! `AttrValue::NodeSlot` dispatches to it with `empty_is_loud = true`; exhaustive matching
+    //! forces an arm to *exist*, not to be *right*. The `AttrValue::Variable` arm is unreachable
+    //! from a well-formed tree too, and lives here because `tree_module` and its Django bootstrap
+    //! do.
 
     use super::*;
     use template_core::parser::desc::{NodeRef, VariableDesc};
 
     /// The shipped `engine.parser`, which is where the messages live.
     ///
-    /// The interpreter in this test binary has no Django settings configured and
-    /// `python/` is not on its path, so both are set up here. The path insert is
-    /// unconditional and membership-checked; only the settings call is guarded,
-    /// because `settings.configured` says nothing about whether *this*
+    /// The test interpreter has no Django settings configured and `python/` is not on its path,
+    /// so both are set up here. The path insert is unconditional and membership-checked; only the
+    /// settings call is guarded, because `settings.configured` says nothing about whether *this*
     /// interpreter can import `django_rust_templates`.
     fn tree_module(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -725,10 +600,9 @@ mod malformed {
 
     #[test]
     fn a_node_slot_over_an_empty_table_is_loud() {
-        // The **dispatch**, not the helper: `AttrValue::NodeSlot(0)` through
-        // `attr_to_py` with a real resolver returning `None`. `NodeRef` over the
-        // same table is *not* loud — its `empty_is_loud` is `false` — and this row
-        // and the next are what hold those two apart.
+        // The **dispatch**, not the helper: `AttrValue::NodeSlot(0)` through `attr_to_py` with a
+        // real resolver returning `None`. `NodeRef` over the same table is *not* loud — its
+        // `empty_is_loud` is `false` — and this row and the next hold those two apart.
         Python::initialize();
         Python::attach(|py| {
             let tree = tree_module(py).unwrap();
@@ -755,10 +629,9 @@ mod malformed {
 
     #[test]
     fn a_node_ref_over_the_same_empty_table_is_not_loud() {
-        // The control for the row above, and the reason `empty_is_loud` is an
-        // argument rather than a constant: `NodeRef`'s slot is filled by the
-        // *host*, so `None` there is a legitimate "the host ran no code" answer
-        // that the host arm checks for itself.
+        // The control for the row above, and the reason `empty_is_loud` is an argument rather than
+        // a constant: `NodeRef`'s slot is filled by the *host*, so `None` there is a legitimate
+        // "the host ran no code" answer.
         Python::initialize();
         Python::attach(|py| {
             let tree = tree_module(py).unwrap();
@@ -800,21 +673,15 @@ mod malformed {
 
     #[test]
     fn the_bridge_list_is_pinned() {
-        // **The one claim the Python census cannot make for itself.** A census that
-        // wraps a list of names and asserts the calls were a subset of that list is a
-        // tautology: it can only ever see the names it was handed. The set of Python
-        // entry points the walk may call is a *type* instead, and this is the row that
-        // makes a rename or a deletion loud. Adding a variant to the enum and not to
-        // `ALL` is caught by `name()` becoming non-exhaustive and by the review of
-        // that edit, **not** here — `ALL` is hand-written and its length derives from
-        // nothing. `ALL`'s own comment says so.
+        // **The one claim the Python census cannot make for itself.** A census wrapping a list of
+        // names and asserting the calls were a subset is a tautology — it can only see names it was
+        // handed. The set of entry points the walk may call is a *type* instead, and this row makes
+        // a rename or deletion loud (adding a variant to the enum but not to `ALL` is caught by
+        // `name()` becoming non-exhaustive, not here).
         //
-        // **Scoped to the walk, and the scope is stated rather than implied.**
-        // `compile_template` does one `getattr("materialise")` of its own (`lib.rs`)
-        // on the *non-native* arm — that is the A/B branch itself, not a fallback, and
-        // it is the one Python call in this crate that is not a `Bridge`. It is also
-        // the call the switch exists to choose, so it cannot be moved behind the
-        // switch it implements.
+        // **Scoped to the walk.** `compile_template` does one `getattr("materialise")` of its own
+        // (`lib.rs`) on the *non-native* arm — the A/B branch itself, not a fallback, and the one
+        // Python call in this crate that is not a `Bridge`.
         Python::initialize();
         Python::attach(|py| {
             assert_eq!(Bridge::ALL.len(), 10);
@@ -835,33 +702,26 @@ mod malformed {
 
     #[test]
     fn the_variable_arm_is_the_one_no_template_reaches() {
-        // **A row for an arm no template can produce, and the reason it is here.**
-        // `variable_of` (`template-core/src/parser/filter_expr.rs:250`) is the only
-        // constructor of `AttrValue::Variable`, and its three call sites are all
-        // inside `parse_filter_expression`, where the `Variable` becomes a
-        // `FilterVar` — `FilterExprDesc.var`, or one of its `filters[].args`. So the
-        // attribute `attr_to_py` is handed is always the `FilterExpr` around it, and
-        // a template-driven row would be green for the filter-expression arm's
-        // reason. Measured, not assumed: replacing this arm's body with a `panic!`
-        // reddens no row in `scripts/run_unit_tests.sh`.
+        // **A row for an arm no template can produce.** `variable_of`
+        // (`template-core/src/parser/filter_expr.rs:250`) is the only constructor of
+        // `AttrValue::Variable`, and its call sites are all inside `parse_filter_expression`, where
+        // the `Variable` becomes a `FilterVar` — a `FilterExprDesc.var` or one of its
+        // `filters[].args`. So `attr_to_py` is always handed the `FilterExpr` around it, and a
+        // template-driven row would be green for the filter-expression arm's reason (measured:
+        // replacing this arm's body with a `panic!` reddens no row). The arm still has to exist —
+        // the `match` is exhaustive — and still has to be *right*, because a hand-built descriptor
+        // can carry it. What it must not do is re-parse the token in Python: `Variable.__new__`
+        // plus slot assignment is where Rust's parse survives, so the wire object goes over and
+        // the helper fills the slots.
         //
-        // The arm still has to exist, because the `match` is exhaustive, and it
-        // still has to be *right*, because a hand-built descriptor can carry it.
-        // The one thing it must not do is re-parse the token in Python:
-        // `Variable.__new__` plus slot assignment is where Rust's parse survives, so
-        // the wire object goes over and the helper fills the slots.
-        //
-        // **Every field below is one a re-parse of `var` would get wrong**, which is
-        // what makes the row evidence for that rather than for "the object exists".
-        // `lookups` is `("x", "y")` on a `var` of `"a.b"`, and `translate` is true —
-        // `Variable("a.b")` yields `("a", "b")` and `False`.
+        // **Every field below is one a re-parse of `var` would get wrong**: `lookups` is
+        // `("x", "y")` on a `var` of `"a.b"`, and `translate` is true, where `Variable("a.b")`
+        // yields `("a", "b")` and `False`.
         Python::initialize();
         Python::attach(|py| {
             let tree = tree_module(py).unwrap();
-            // The **port's** `Variable` (`django_rust_templates/engine/base.py`),
-            // which is what `parser.py` imports and what
-            // `FilterExpression.is_var` tests against — not
-            // `django.template.base.Variable`.
+            // The **port's** `Variable` (`django_rust_templates/engine/base.py`), which `parser.py`
+            // imports and `FilterExpression.is_var` tests against — not `django.template.base.Variable`.
             let variable_class = py
                 .import("django_rust_templates.engine.base")
                 .unwrap()
@@ -990,11 +850,8 @@ mod malformed {
 
     #[test]
     fn a_slot_is_probed_first_and_the_second_mention_is_the_object_it_found() {
-        // **The arm no row above this one reaches.** Every hand-built descriptor in this
-        // module until now leaves `slot` at `None`, so all of them would stay green if
-        // the slot arm were deleted outright — exactly the "dead code with a
-        // live-looking call site" the plan's Task 5 note warns about. `{% cycle %}`'s
-        // shared identity is the behaviour this pins.
+        // **The arm no row above reaches.** Every hand-built descriptor here leaves
+        // `slot` at `None`, so this is the only row pinning `{% cycle %}`'s shared identity.
         Python::initialize();
         Python::attach(|py| {
             let tree = tree_module(py).unwrap();
@@ -1024,11 +881,9 @@ mod malformed {
 
     #[test]
     fn a_slot_a_nested_build_filled_is_overwritten_by_the_outer_one() {
-        // The order, which is the whole of the arm: the slot is **probed** before the
-        // children are built and **registered** after, so a child that fills the same
-        // slot is overwritten by its parent and the table ends up holding the outer
-        // node. Registering before the children would leave the table holding the
-        // child, and every later mention of the cycle would find the wrong object.
+        // The slot is **probed** before the children are built and **registered**
+        // after, so a child filling the same slot is overwritten by its parent.
+        // Registering before the children would leave the table holding the child.
         Python::initialize();
         Python::attach(|py| {
             let tree = tree_module(py).unwrap();
@@ -1049,12 +904,8 @@ mod malformed {
                 .expect("the outer node builds");
             let built = built.bind(py);
 
-            // **Which node came back, not merely that one did.** If the probe were moved
-            // below child construction the child would register slot 7 first, the outer
-            // probe would then find *the child* and return it — so `table[7]` and the
-            // return value would still be one and the same object, and a pointer
-            // comparison alone would stay green while the walk returned the wrong node.
-            // Naming them is what separates the two.
+            // **Which node came back, not merely that one did.** Moving the probe below
+            // child construction would return the child while a pointer check stayed green.
             let name = |node: &Bound<'_, PyAny>| -> String {
                 node.getattr("name").unwrap().extract().unwrap()
             };

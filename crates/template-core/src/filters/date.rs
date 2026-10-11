@@ -1,119 +1,69 @@
 //! `date` — `defaultfilters.py:783-794`.
 //!
-//! ```python
-//! @register.filter(expects_localtime=True, is_safe=False)
-//! def date(value, arg=None):
-//!     """Format a date according to the given format."""
-//!     if value in (None, ""):
-//!         return ""
-//!     try:
-//!         return formats.date_format(value, arg)
-//!     except AttributeError:
-//!         try:
-//!             return format(value, arg)
-//!         except AttributeError:
-//!             return ""
-//! ```
-//!
-//! **The two branches call two different functions**, and that is why the seam
-//! carries two methods rather than one. Branch 1 is `formats.date_format(value,
-//! arg)`, whose whole body is `dateformat.format(value, get_format(format or
-//! "DATE_FORMAT"))` (`formats.py:147-157`) — the `get_format` resolution is what
-//! [`FilterHost::date_format`] mirrors with its `Option<&str>`. Branch 2 is
-//! `format(value, arg)`, where `format` is `django.utils.dateformat.format`
-//! imported at `defaultfilters.py:14` — the same formatter **without
-//! `get_format`**, so the argument's text is used literally. That is
-//! [`FilterHost::dateformat_format`], and its `&Value` is the wrapped signature
-//! rather than a second spelling: `dateformat.format` `str()`s any object and
-//! splits the text (`dateformat.py:42`), so an absent argument is the text
-//! `"None"` — four live format characters — and a body holding a `&str` would
-//! have to compute `str(None)` itself.
+//! **The two branches call two different functions**, which is why the seam
+//! carries two methods. Branch 1 is `formats.date_format(value, arg)`, whose body
+//! is `dateformat.format(value, get_format(format or "DATE_FORMAT"))`
+//! (`formats.py:147-157`); [`FilterHost::date_format`] mirrors the `get_format`
+//! resolution with its `Option<&str>`. Branch 2 is `format(value, arg)` —
+//! `django.utils.dateformat.format` imported at `defaultfilters.py:14`, the same
+//! formatter **without `get_format`**, so the argument's text is used literally.
+//! That is [`FilterHost::dateformat_format`], and its `&Value` is the wrapped
+//! signature: `dateformat.format` `str()`s any object (`dateformat.py:42`), so an
+//! absent argument is the text `"None"` — four live format characters — and a body
+//! holding a `&str` would have to compute `str(None)` itself.
 //!
 //! **The two differ exactly when `str(arg)` is falsy or names a format setting,
-//! *and* branch 1 raised — a silent wrong answer, not untidiness.** A body that
-//! spelled branch 2 as `date_format(value, Some(text))` would resolve
-//! `get_format("DATE_FORMAT")` to `'N j, Y'` and answer `''` where the source
-//! answers the literal text. The corpus's
-//! `date/branch-two-absent-argument` row is that
-//! class: a value carrying `month`, `year`, `isocalendar()` and `tzname()` but
-//! no `day` fails branch 1 at `j` and answers `'Oct.202610'` from branch 2 fed
-//! the sentinel's text — the only row that pins branch 2 receiving `None`
-//! rather than the resolved default.
+//! *and* branch 1 raised.** A body that spelled branch 2 as
+//! `date_format(value, Some(text))` would resolve `get_format("DATE_FORMAT")` to
+//! `'N j, Y'` and answer `''` where the source answers the literal. The corpus's
+//! `date/branch-two-absent-argument` row is that class, and is the only row pinning
+//! branch 2 receiving `None` rather than the resolved default.
 //!
 //! **`expects_localtime=True` is not this body's.** `run_filter` applies
-//! `localtime(value, use_tz)` before the body (the flag and
-//! `FilterCall::use_tz`), so calling it here would be two calls and two answers.
-//! The corpus's `date/localtime-*` rows are the evidence the flag is carried at
-//! all.
+//! `localtime(value, use_tz)` before the body (the flag and `FilterCall::use_tz`),
+//! so calling it here would be two calls and two answers.
 //!
 //! **The one narrowing is the guard, and it is `==` and not truthiness.**
-//! `value in (None, "")` is Python equality against two sentinels; the seam has
-//! no equality operation, so Rust expresses exactly those two shapes:
+//! `value in (None, "")` is Python equality against two sentinels, so Rust
+//! expresses exactly those two shapes. It is **not** `bool(value)`: measured, `0`,
+//! `False`, `[]`, `{}`, `()` and `0.0` are all falsy and all proceed past the guard,
+//! diverging from a truthiness test as soon as the argument is non-empty
+//! (`x|date:5` over one of them is `'5'`).
+//!
+//! The narrowing is exact unless a value's `__eq__` answers `True` for `None` or
+//! `""` *and* it carries the date-format protocol. No fixture in
+//! `tests/filter_cases.py` is that object today (`DOT_ATTR`, the class defining
+//! `__eq__`, scopes it to `isinstance`), so **gaining an object fixture that
+//! defines `__eq__` is the condition that would reopen this guard**.
+//!
+//! Measured rows through `FilterExpression.resolve` on 6.0.9, `en-us` unless said
+//! otherwise, `d = date(2026, 10, 8)`:
 //!
 //! ```text
-//! fn is_none_or_empty(value: &Value) -> bool {
-//!     matches!(value, Value::None)
-//!         || matches!(value, Value::Str(s) | Value::Safe(s) if s.is_empty())
-//! }
-//! ```
-//!
-//! It is **not** `bool(value)`. Measured on the pinned 6.0.9, `0`, `False`,
-//! `[]`, `{}`, `()` and `0.0` are all falsy and all proceed past the guard, so
-//! they diverge from a truthiness test as soon as the argument is non-empty:
-//!
-//! ```text
-//! x|date:5  with 0 / False / [] / {} / 0.0  -> '5'   <- proceeds; truthiness gives ''
-//! x|date:"" with any of those               -> ''    <- both agree
-//! x|date    with any of those               -> ''    <- both agree (both branches fail later)
-//! ```
-//!
-//! **The residual gap, with its trigger.** The narrowing is exact unless a
-//! value's `__eq__` answers `True` for `None` or `""` *and* the value carries
-//! the date-format protocol — the only way to reach a difference. No fixture in
-//! `tests/filter_cases.py` is that object today (`DOT_ATTR`, the class that
-//! defines `__eq__`, scopes it to `isinstance`), so **if the corpus ever gains
-//! an object fixture defining `__eq__`, this guard is re-checkable** — that is
-//! the condition that would make this paragraph false, and it is written as a
-//! trigger rather than a standing "unreachable".
-//!
-//! Measured rows through `FilterExpression.resolve` on the pinned 6.0.9, `en-us`
-//! unless said otherwise, `d = date(2026, 10, 8)`:
-//!
-//! ```text
-//! x|date                    -> 'Oct. 8, 2026'
-//! x|date:"DATE_FORMAT"      -> 'Oct. 8, 2026'
-//! x|date:""                 -> 'Oct. 8, 2026'
-//! x|date:0                  -> 'Oct. 8, 2026'
-//! x|date:5                  -> '5'          a bare 5 is a var_arg; get_format str()s it
-//! x|date:"x"                -> 'x'
-//! x|date:"Y-m-d"            -> '2026-10-08'
-//! x|date:"jS"               -> '8th'
-//! x|date:"\Y"               -> 'Y'          the backslash escapes the format char
-//! x|date:"H"                -> TypeError: The format for date objects may not contain
-//!                              time-related format specifiers (found 'H').   (escapes)
-//! x|date:"TIME_FORMAT"      -> the same, found 'P'
-//! x|date:True               -> the same, found 'T'
-//! x|date  with "x"/5/None/""/mark_safe("")/0/False/[]/{}  -> ''
+//! x|date / :"DATE_FORMAT" / :"" / :0   -> 'Oct. 8, 2026'
+//! x|date:5                             -> '5'   a bare 5 is a var_arg; get_format str()s it
+//! x|date:"x"                           -> 'x'
+//! x|date:"Y-m-d" / "jS"                -> '2026-10-08' / '8th'
+//! x|date:"\Y"                         -> 'Y'   the backslash escapes the format char
+//! x|date:"H" / "TIME_FORMAT" / True    -> TypeError, found 'H' / 'P' / 'T'  (escapes)
+//! x|date with "x"/5/None/""/mark_safe("")/0/False/[]/{}  -> ''
 //! x|date:"Y"  with datetime(2026, 10, 8, 14, 30, 45)      -> '2026'
-//! x|date:"Y-m-d" with mark_safe("2026-10-08")             -> ''   (a SafeString has no .year)
+//! x|date:"Y-m-d" with mark_safe("2026-10-08")            -> ''   a SafeString has no .year
 //! ```
 //!
-//! `date` catches **only `AttributeError`**; the three `TypeError` rows above
-//! therefore propagate where `time`'s identical `'H'` row answers `''`. The
-//! `x|date:5` `'5'` is `get_format`'s `str(format_type)` (`formats.py:113`): a
-//! non-`str` argument is legal and its text is what the formatter reads.
+//! `date` catches **only `AttributeError`**, so the three `TypeError` rows
+//! propagate where `time`'s identical `'H'` row answers `''`. The `x|date:5` `'5'`
+//! is `get_format`'s `str(format_type)` (`formats.py:113`).
 //!
 //! `is_safe=False` and no `@stringfilter`, so nothing coerces the value and
-//! nothing marks the result: every return is a plain `str`, which is what the
-//! corpus's type comparison expects.
+//! nothing marks the result: every return is a plain `str`.
 
 use crate::filters::host::FilterCall;
 use crate::filters::value::Value;
 use crate::parser::error::{Error, ErrorKind, PyErrorKind};
 
 /// `value in (None, "")` — Python equality against the two sentinels, **not**
-/// `bool(value)`. See the module docs for the measured divergence and the
-/// trigger that would reopen it.
+/// `bool(value)`; see the module docs for the divergence and the reopen trigger.
 fn is_none_or_empty(value: &Value) -> bool {
     matches!(value, Value::None) || matches!(value, Value::Str(s) | Value::Safe(s) if s.is_empty())
 }
@@ -126,11 +76,9 @@ fn is_attribute_error(error: &Error) -> bool {
     )
 }
 
-/// Branch 1's format argument: Django's `get_format(arg or "DATE_FORMAT")` reads
-/// the argument's **truthiness**, not its presence, so `date:0` and `date:""`
-/// select the default key and `date:5` does not. `is_true` precedes `to_str`
-/// because the truthiness is the source's test and the text is only what the
-/// chosen branch needs.
+/// Branch 1's format argument: `get_format(arg or "DATE_FORMAT")` reads the
+/// argument's **truthiness**, not its presence, so `date:0` and `date:""` select
+/// the default key and `date:5` does not. `is_true` precedes `to_str`.
 fn resolved_format(arg: Option<&Value>, call: &FilterCall<'_>) -> Result<Option<String>, Error> {
     match arg {
         Some(arg) if call.host.is_true(arg)? => Ok(Some(call.host.to_str(arg)?)),
@@ -140,8 +88,8 @@ fn resolved_format(arg: Option<&Value>, call: &FilterCall<'_>) -> Result<Option<
 
 /// `date`'s body: guard → branch 1 with the resolved format → on
 /// `AttributeError` branch 2 with the argument's **literal** text → on
-/// `AttributeError` `""`. Any other class escapes, which is what makes the
-/// `TypeError` rows above propagate.
+/// `AttributeError` `""`. Any other class escapes, so the `TypeError` rows
+/// propagate.
 pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
     if is_none_or_empty(&value) {
         return Ok(Value::Str("".into()));
@@ -150,9 +98,9 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
     match call.host.date_format(&value, format.as_deref()) {
         Ok(text) => Ok(Value::Str(text.into())),
         Err(error) if is_attribute_error(&error) => {
-            // `format(value, arg)` — the **raw** formatter, and the original
-            // `arg` rather than the resolved one. An absent argument arrives as
-            // Python's `None`, whose text is `"None"`.
+            // `format(value, arg)` — the **raw** formatter, fed the original `arg`
+            // rather than the resolved one; an absent argument is Python's `None`,
+            // whose text is `"None"`.
             let literal = arg.unwrap_or(Value::None);
             match call.host.dateformat_format(&value, &literal) {
                 Ok(text) => Ok(Value::Str(text.into())),
@@ -218,9 +166,7 @@ mod tests {
     }
 
     /// **The guard is equality and not truthiness.** The two sentinels answer
-    /// `""` **without touching the host at all**; every other falsy value
-    /// proceeds, and `x|date:5` over one of them is `'5'` — a truthiness guard
-    /// gives `''` for all of them.
+    /// `""` **without touching the host**; every other falsy value proceeds.
     #[test]
     fn the_sentinel_guard_is_equality_not_truthiness() {
         for sentinel in [Value::None, Value::Str("".into()), Value::Safe("".into())] {
@@ -248,8 +194,7 @@ mod tests {
     }
 
     /// The argument's **truthiness** is read before its text: `date:0` and
-    /// `date:""` select the default (no `to_str`), and a truthy argument is
-    /// `str()`d.
+    /// `date:""` select the default (no `to_str`), and a truthy argument is `str()`d.
     #[test]
     fn the_argument_truthiness_is_read_before_its_text() {
         let h = TestFilterHost {
@@ -282,9 +227,8 @@ mod tests {
     }
 
     /// **The second branch calls the raw formatter, not `date_format`.** The
-    /// corpus's `date/branch-two-absent-argument` row is the observable that
-    /// separates them;
-    /// this pins that the body reaches the *other* seam method.
+    /// corpus's `date/branch-two-absent-argument` row separates them; this pins
+    /// that the body reaches the *other* seam method.
     #[test]
     fn the_fallback_is_the_raw_formatter_not_date_format() {
         let h = TestFilterHost {
@@ -303,9 +247,8 @@ mod tests {
         );
     }
 
-    /// **Only `AttributeError` reaches the fallback.** The corpus's `date:"H"`
-    /// row raises `TypeError` out of the filter; a body that caught it would
-    /// answer `''` where Django raises.
+    /// **Only `AttributeError` reaches the fallback.** The corpus's `date:"H"` row
+    /// raises `TypeError` out of the filter.
     #[test]
     fn only_attribute_error_reaches_the_fallback() {
         for escaping in [PyErrorKind::TypeError, PyErrorKind::ValueError] {
@@ -342,8 +285,8 @@ mod tests {
         h.assert_called("dateformat_format");
     }
 
-    /// The body needs the seam, so a bare-shell host with no answer refuses
-    /// rather than letting a Rust reimplementation pass by luck.
+    /// The body needs the seam, so a bare-shell host refuses rather than letting a
+    /// Rust reimplementation pass by luck.
     #[test]
     fn it_needs_a_host() {
         let call = FilterCall {

@@ -1,22 +1,7 @@
-//! `token_kwargs`: the keyword arguments at the front of a tag's bits.
-//!
-//! A direct port of `django.template.base.token_kwargs` (`base.py:1163-1207`)
-//! and the module-level `kwarg_re` (`base.py:1160`). Two of Django's behaviours
-//! are load-bearing and are therefore in the public doc comments rather than
-//! only in tests: `bits` is mutated **in place**, and the function **returns
-//! early** on the first argument whose format is invalid instead of raising.
-//!
-//! Nothing calls this at M3. Its three call sites arrive later — `{% with %}`
-//! (`defaulttags.py:1676`, `support_legacy=True`) and `{% include %}`'s `with`
-//! option (`loader_tags.py:347`, `False`) at M5/M7, and `parse_bits`
-//! (`library.py:421`, `False`) for every `simple_tag`/`inclusion_tag` at M6 —
-//! so the tests below drive it directly and that is stated rather than
-//! discovered.
-//!
-//! `kwarg_re` is `pub` and not private to this module because
-//! `{% url %}` (`defaulttags.py:1575`) calls `kwarg_re.match` on each bit
-//! directly instead of going through `token_kwargs`, and is the tree's only
-//! other consumer.
+//! `token_kwargs`: the keyword arguments at the front of a tag's bits, a port of
+//! `django.template.base.token_kwargs` (`base.py:1163-1207`) and `kwarg_re`
+//! (`base.py:1160`). `bits` is mutated **in place**, the function **returns early**
+//! on an invalid argument rather than raising, and `kwarg_re` is `pub` for `{% url %}`.
 
 use std::sync::OnceLock;
 
@@ -28,16 +13,11 @@ use crate::pyregex::PYTHON_WORD_STANDALONE;
 
 /// Django's `kwarg_re`, `_lazy_re_compile(r"(?:(\w+)=)?(.+)")` (`base.py:1160`).
 ///
-/// `\w` is the one token that does not port: Python's is 142,940 code points
-/// (`isalnum() or '_'`), Rust's is 144,667, and the two disagree in both
-/// directions. `PYTHON_WORD_STANDALONE` is the *standalone* spelling of Python's set
-/// (`[\p{L}\p{N}_]`, also 142,940), so the pattern is assembled with `format!`
-/// rather than written literally. Measured against the pinned checkout:
-/// `["\u{00b2}=1"]` keys on `\u{00b2}` and `["a\u{0301}=1"]` does not key at
-/// all; neither follows from Rust's `\w`.
-///
-/// Public because `{% url %}` (`defaulttags.py:1575`) calls `kwarg_re.match`
-/// directly instead of `token_kwargs`, and is the tree's only other consumer.
+/// `\w` does not port directly: Python's is 142,940 code points, Rust's is
+/// 144,667, and they disagree in both directions. The pattern is therefore built
+/// with `format!` around `PYTHON_WORD_STANDALONE`, the *standalone* spelling of
+/// Python's set (`[\p{L}\p{N}_]`). Measured: `"\u{00b2}=1"` keys on `\u{00b2}` and
+/// `"a\u{0301}=1"` does not key at all; neither follows from Rust's `\w`.
 pub fn kwarg_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -48,14 +28,10 @@ pub fn kwarg_re() -> &'static Regex {
 
 /// Python's `kwarg_re.match(s)`.
 ///
-/// Python's `.match` anchors at the start of the string; Rust's
-/// [`Regex::captures`] returns the leftmost match *anywhere*, and
-/// `Regex::captures_at(s, 0)` is not an anchor either — both find a match at
-/// offset 1 in `"\nb=c"` where Python finds none (measured against `regex`
-/// 1.13.1). Every reachable `bit` starts with a non-whitespace character, so
-/// the two agree on all real input; the guard is here because the divergence is
-/// silent, and `token_kwargs(["\nb=c"])` would otherwise key `b` rather than
-/// returning no arguments.
+/// Python's `.match` anchors at the start; Rust's [`Regex::captures`] (and
+/// `captures_at(s, 0)`) find the leftmost match *anywhere*, matching at offset 1 in
+/// `"\nb=c"` where Python finds none. The guard is here because that divergence is
+/// silent and would key `b`.
 fn match_start(s: &str) -> Option<Captures<'_>> {
     kwarg_re()
         .captures(s)
@@ -64,25 +40,14 @@ fn match_start(s: &str) -> Option<Captures<'_>> {
 
 /// Django's `name, value = kwarg_re.match(bit).groups()`, for `{% url %}`.
 ///
-/// `None` is Python's `kwarg_re.match` finding no match at offset 0 — the branch
-/// `{% url %}` turns into `"Malformed arguments to url tag"`
-/// (`defaulttags.py:1575-1577`). Group 1 is the optional key; group 2 is `(.+)`,
-/// which is mandatory, so it is present whenever the pattern matched at all.
+/// `None` is Python's `match` finding nothing at offset 0 — `{% url %}`'s
+/// `"Malformed arguments to url tag"` branch (`defaulttags.py:1575-1577`). Group 1
+/// is the optional key; group 2 is `(.+)`, mandatory whenever the pattern matched.
 ///
-/// **No bit a token produces reaches the `None` arm.** `kwarg_re`'s value group
-/// is `(.+)`, and Python's `.` does not match `\n` without `DOTALL`, so `match`
-/// can fail only for a bit that is empty or starts with `\n`. Every bit
-/// `token.split_contents` yields starts with a quote or a non-whitespace
-/// character (measured on the pinned tree: `smart_split`'s quoted alternative
-/// starts with `'`/`"`, and its bare alternative is `\S+`), so `match` always
-/// succeeds and Django's own "Malformed arguments" branch is dead code in the
-/// pinned tree. The `None` arm is still ported — it is in Django's source and
-/// its message is part of the tag's surface — and `{% url %}`'s test drives
-/// [`match_kwarg`] with a `\n`-leading bit to exercise it, since no template can.
-///
-/// Also note the anchor: `kwarg_re`'s `(.+)` stops at a newline, so a quoted bit
-/// such as `'a\nb'` classifies as value `'a` and the rest is dropped by Django
-/// too. That is why [`match_start`] exists rather than `Regex::captures`.
+/// No bit `token.split_contents` yields reaches the `None` arm — each starts with a
+/// quote or non-whitespace — but the arm is ported (its message is part of the tag's
+/// surface) and the test drives it with a `\n`-leading bit. `(.+)` also stops at a
+/// newline, which is why [`match_start`] exists rather than [`Regex::captures`].
 pub fn match_kwarg(bit: &str) -> Option<(Option<&str>, &str)> {
     let caps = match_start(bit)?;
     let name = caps.get(1).map(|m| m.as_str());
@@ -92,34 +57,27 @@ pub fn match_kwarg(bit: &str) -> Option<(Option<&str>, &str)> {
 }
 
 /// The kwargs pulled from the front of `bits`, in Python dict insertion order.
-///
-/// An alias rather than an inline tuple for two reasons: `clippy::type_complexity`
-/// has bitten this project twice, and the aliased type is what a caller wraps in
-/// `AttrValue::Map` — the same `Vec<(String, AttrValue)>` — so the emptiness
-/// check (`{% with %}`'s "expected at least one variable assignment") stays on
-/// the caller, where Django has it.
+/// An alias to avoid `clippy::type_complexity`; the emptiness check
+/// (`{% with %}`'s "expected at least one variable assignment") stays on the
+/// caller, where Django has it.
 pub type Kwargs = Vec<(String, AttrValue)>;
 
 /// Django's `token_kwargs(bits, parser, support_legacy=False)` (`base.py:1163`).
 ///
-/// Parse token keyword arguments and return them in insertion order. `bits` is
-/// the remainder of a tag's `split_contents`, and valid arguments are **removed
-/// from the front of it in place**, so the caller reads what is left afterwards
-/// — `{% with %}` and `{% include %}` both do, and both raise on what remains.
+/// Valid arguments are **removed from the front of `bits` in place**, so the
+/// caller reads what is left afterwards — `{% with %}` and `{% include %}` both
+/// do, and both raise on what remains.
 ///
-/// `compile_filter` is Django's `parser.compile_filter` (`base.py:1202`), the
-/// one thing `token_kwargs` uses its `parser` argument for. It receives the
-/// whole value string, filter chain and all: `["a=1|add:2"]` hands `"1|add:2"`
-/// over. At M3 the caller passes
-/// `|s| parse_filter_expression(s, host).map(|e| AttrValue::FilterExpr(Box::new(e)))`;
-/// at M6 a loaded custom tag passes the host's compiler. Its error is **not**
-/// caught: because Django deletes the bit before calling, the offending bit is
-/// already gone when the error returns, and the port preserves that order.
+/// `compile_filter` is Django's `parser.compile_filter` (`base.py:1202`) and
+/// receives the whole value string, filter chain and all: `["a=1|add:2"]` hands
+/// `"1|add:2"` over. Its error is **not** caught: Django deletes the bit before
+/// calling, so the offending bit is already gone when the error returns, and the
+/// port preserves that order.
 ///
 /// `support_legacy` selects Django's legacy `1 as foo` form, which names the
-/// variable in the *third* bit and compiles the *first*. There is no
-/// requirement that all remaining bits are keyword arguments: the function
-/// returns as soon as an argument's format is invalid.
+/// variable in the *third* bit and compiles the *first*. There is no requirement
+/// that all remaining bits are keyword arguments: the function returns as soon as
+/// an argument's format is invalid.
 pub fn token_kwargs(
     bits: &mut Vec<String>,
     compile_filter: &mut dyn FnMut(&str) -> Result<AttrValue, Error>,
@@ -129,11 +87,9 @@ pub fn token_kwargs(
         return Ok(Kwargs::new());
     }
 
-    // `kwarg_format = match and match[1]`: an argument is in kwarg form iff the
-    // optional `key=` group participated. Note the two negatives this collapses:
-    // `["a="]` matches but group 1 does not participate, so it is not kwarg
-    // form, and it is not legacy form either — which is why it returns empty and
-    // changes nothing rather than keying `a` on an empty value.
+    // `kwarg_format = match and match[1]`: kwarg form iff the optional `key=`
+    // group participated. `["a="]` matches but group 1 does not, so it is neither
+    // kwarg nor legacy form — it returns empty rather than keying `a` on "".
     let kwarg_format = match_start(&bits[0]).and_then(|caps| caps.get(1)).is_some();
     if !kwarg_format && (!support_legacy || bits.len() < 3 || bits[1] != "as") {
         return Ok(Kwargs::new());
@@ -142,8 +98,7 @@ pub fn token_kwargs(
     let mut kwargs = Kwargs::new();
     while !bits.is_empty() {
         let (key, value) = if kwarg_format {
-            // Django re-matches every iteration: a later bit may not be a kwarg,
-            // and that is how the run stops.
+            // Django re-matches every iteration: a later non-kwarg bit stops the run.
             let Some(caps) = match_start(&bits[0]) else {
                 return Ok(kwargs);
             };
@@ -157,8 +112,7 @@ pub fn token_kwargs(
             bits.remove(0);
             (key, value)
         } else {
-            // Django's `key, value = bits[2], bits[0]`: the name is the THIRD
-            // bit and the value is the FIRST.
+            // Django's `key, value = bits[2], bits[0]`: the name is the THIRD bit, the value the FIRST.
             if bits.len() < 3 || bits[1] != "as" {
                 return Ok(kwargs);
             }
@@ -172,8 +126,7 @@ pub fn token_kwargs(
         kwargs.push((key, compile_filter(&value)?));
 
         // Only the legacy form consumes the `and` between pairs; in kwarg form a
-        // stray `and` terminates the run like any other non-kwarg bit. That is
-        // the only asymmetry between the two branches.
+        // stray `and` terminates the run. That is the branches' only asymmetry.
         if !kwarg_format && !bits.is_empty() {
             if bits[0] != "and" {
                 return Ok(kwargs);
@@ -192,9 +145,8 @@ mod tests {
     use crate::parser::filter_expr::parse_filter_expression;
     use crate::parser::host::NoHost;
 
-    /// A `compile_filter` that records the exact strings it is handed, so the
-    /// contract "the whole value string reaches the compiler" is asserted rather
-    /// than assumed, and returns a placeholder value.
+    /// A `compile_filter` that records the strings it is handed — asserting the
+    /// "whole value string reaches the compiler" contract — and returns a placeholder.
     #[derive(Default)]
     struct Recorder {
         seen: Vec<String>,
@@ -227,14 +179,10 @@ mod tests {
 
     #[test]
     fn the_behaviour_table_matches_django() {
-        // Every row was measured against Django 6.0.9 at `.django/` by calling
-        // `django.template.base.token_kwargs` with a `Parser` built as
-        // `Parser(Lexer("x").tokenize(), builtins=Engine().template_builtins)`,
-        // and re-measured when this task was implemented.
-        // The four rows carrying the risk are `["a="]`, `["=1"]`,
-        // `["a=1", "and", "b=2"]` and `["a=1", "junk"]`; keep them if trimming.
-        // The row type is an alias, not inline: the four-tuple written inline is
-        // a `clippy::type_complexity` failure under `-D warnings`, verified.
+        // The four risk-carrying rows are `["a="]`, `["=1"]`, `["a=1", "and",
+        // "b=2"]` and `["a=1", "junk"]`; keep them if trimming. The row type is an
+        // alias because the inline four-tuple trips `clippy::type_complexity`
+        // under `-D warnings`.
         type Case<'a> = (&'a [&'a str], bool, &'a [&'a str], &'a [&'a str]);
         let cases: &[Case] = &[
             (&[], false, &[], &[]),
@@ -296,10 +244,9 @@ mod tests {
 
     #[test]
     fn the_legacy_form_names_the_third_bit_and_compiles_the_first() {
-        // `key, value = bits[2], bits[0]` — the reversed order is the whole of
-        // the legacy form, and swapping the two would produce a kwarg named
-        // after the value. The table above cannot see it, because every legacy
-        // row there would key the same string either way only if value == key.
+        // `key, value = bits[2], bits[0]`: the reversed order is the whole legacy
+        // form — swapping it would name the kwarg after the value. The table above
+        // cannot see it, because a legacy row keys the same string either way.
         let mut bits: Vec<String> = ["1", "as", "foo"].iter().map(|s| s.to_string()).collect();
         let mut rec = Recorder::default();
         let kwargs = {
@@ -314,8 +261,8 @@ mod tests {
 
     #[test]
     fn the_value_reaches_compile_filter_whole() {
-        // Not the key, not the first filter term — the entire value string, so
-        // that the same `FilterExpression` parser sees it as anywhere else.
+        // Not the key or the first filter term: the whole value string, as the real
+        // `FilterExpression` parser sees it.
         let (_, _, seen) = run(&["a=1|add:2"], false);
         assert_eq!(seen, vec!["1|add:2".to_string()]);
         let (_, _, seen) = run(&["a=xyz"], false);
@@ -327,10 +274,8 @@ mod tests {
 
     #[test]
     fn kwarg_re_is_djangos_pattern_with_the_word_class_expanded() {
-        // The guard Task 2's two spellings rest on: the bracketed form must be
-        // spliced standalone. With the contents form the source would be
-        // `(?:(\p{L}\p{N}_+)=)?(.+)` and `upper` would stop matching; this
-        // assertion is what makes that unspellable rather than merely untested.
+        // The bracketed form must be spliced standalone: the contents form would
+        // source `(?:(\p{L}\p{N}_+)=)?(.+)` and `upper` would stop matching.
         assert_eq!(kwarg_re().as_str(), r"(?:([\p{L}\p{N}_]+)=)?(.+)");
     }
 
@@ -345,8 +290,8 @@ mod tests {
         // Python's `\w` admits U+00B2 (`No`) and rejects U+0301 (`Mn`).
         assert_eq!(group1("\u{00b2}=1"), Some("\u{00b2}".to_string()));
         assert_eq!(group1("a\u{0301}=1"), None);
-        // Rust's `\w` would invert both, and `[a-z]`-style classes would reject
-        // a non-ASCII letter entirely.
+        // Rust's `\w` would invert both, and an `[a-z]`-style class would reject a
+        // non-ASCII letter entirely.
         assert_eq!(group1("\u{03b1}=1"), Some("\u{03b1}".to_string()));
     }
 
@@ -368,9 +313,9 @@ mod tests {
 
     #[test]
     fn a_compiler_error_propagates_and_leaves_the_bit_consumed() {
-        // Django deletes the bit *before* `compile_filter` (`base.py:1194` then
-        // :1202), so the offending bit is gone when the error returns. Measured:
-        // `["a=|", "rest"]` leaves `["rest"]`; `["a=1", "b=|", "rest"]` too.
+        // `base.py:1194` deletes the bit *before* `compile_filter` (:1202), so the
+        // offending bit is gone when the error returns. Measured: `["a=|", "rest"]`
+        // leaves `["rest"]`; `["a=1", "b=|", "rest"]` too.
         let mut bits: Vec<String> = ["a=|", "rest"].iter().map(|s| s.to_string()).collect();
         let mut compile = |value: &str| -> Result<AttrValue, Error> {
             if value == "|" {
@@ -392,11 +337,9 @@ mod tests {
 
     #[test]
     fn values_compile_through_the_real_filter_parser() {
-        // The M3 wiring: the closure every M5 caller passes is
+        // The closure a real caller passes:
         // `|s| parse_filter_expression(s, host).map(|e| AttrValue::FilterExpr(Box::new(e)))`.
-        // Asserted through the filter *name*, so the test does not reach into
-        // Task 3's or Task 5's descriptor internals; full parity is Task 5's
-        // corpus test.
+        // Asserted through the filter name, not the descriptor internals.
         let mut bits: Vec<String> = ["a=1|add:2", "b=x"].iter().map(|s| s.to_string()).collect();
         let mut compile = |value: &str| {
             parse_filter_expression(value, &NoHost).map(|e| AttrValue::FilterExpr(Box::new(e)))

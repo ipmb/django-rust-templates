@@ -1,66 +1,37 @@
 //! `{% cycle %}` — `defaulttags.cycle` (`defaulttags.py:611-701`).
 //!
-//! # Five shapes, and the two-bit `as`
+//! Five shapes, from `args = token.split_contents()` (`defaulttags.py:657`): `len(args) < 2`
+//! refuses (`defaulttags.py:659-660`); `== 2` is a name reference (`defaulttags.py:662-671`); `> 4` with
+//! `args[-3] == "as"` is `… as name silent` (`defaulttags.py:675-685`); `> 4` with
+//! `args[-2] == "as"` is `… as name` (`defaulttags.py:686-688`); otherwise the anonymous form
+//! (`defaulttags.py:697-699`).
 //!
-//! `args = token.split_contents()` (`defaulttags.py:657`), then:
+//! The `len(args) > 4` guard reads as an off-by-one until it fires: `{% cycle a as
+//! b %}` has four bits, so it is the anonymous form — a three-value cycle whose
+//! middle value is the literal filter `as` (a variable named `as`). Measured. `as`
+//! consumes **two** bits, so values are `args[1:-2]` in shapes 3-4 and `args[1:]` in
+//! shape 5; and shape 3's error fires only when `args[-3]` is the `as`, so
+//! `{% cycle "a" "b" c as nope %}` is shape 4 and *succeeds* with the name `nope`.
 //!
-//! 1. `len(args) < 2` → refuse (`defaulttags.py:659-660`).
-//! 2. `len(args) == 2` → a **name reference**: the node the name was bound to,
-//!    or refuse (`defaulttags.py:662-671`).
-//! 3. `len(args) > 4` and `args[-3] == "as"` → `… as name silent` (`defaulttags.py:675-685`).
-//! 4. `len(args) > 4` and `args[-2] == "as"` → `… as name` (`defaulttags.py:686-688`).
-//! 5. otherwise → the anonymous form (`defaulttags.py:697-699`).
+//! **Identity is the point.** `{% cycle a b as c %}` returns a `CycleNode` and
+//! stores *that same object* under the name (`defaulttags.py:693-696`); a later `{% cycle c %}`
+//! returns it again (`defaulttags.py:669-671`). `CycleNode.render` keys `context.render_context`
+//! by the node object (`defaulttags.py:104-114`), so two equal-but-distinct nodes get separate
+//! iterators and the second mention restarts the sequence. The object does not exist
+//! during the parse, so what is stored is a descriptor the materialiser turns into
+//! it: the definition form carries `.slot(idx)` and the same descriptor under
+//! `named_cycle_nodes[name]`, which shape 2 returns with the *same* slot, so
+//! whichever namer materialises first builds the node and the rest find it.
 //!
-//! The `len(args) > 4` guard is load-bearing and reads as an off-by-one until
-//! it fires: `{% cycle a as b %}` has four bits, so it is **shape 5** — a
-//! three-value anonymous cycle whose middle value is the literal filter `as`
-//! (`"as"` compiles as a variable named `as`). Measured on the pinned tree.
+//! Shape 2's early `return` (`defaulttags.py:671`) means `parser._last_cycle_node = node` (`defaulttags.py:700`)
+//! is **not** reached. Measured: with
+//! `{% cycle 'a' 'b' as c %}{% cycle d e as f %}{% cycle c %}{% resetcycle %}`, the
+//! reset targets the `f` definition, not the `c` reference. A port that fell through
+//! to the shared tail would target the last *mention* instead.
 //!
-//! `as` consumes **two** bits, which is why the values are `args[1:-2]` in
-//! shapes 3-4 and `args[1:]` in shape 5. And shape 3's error fires only when
-//! `args[-3]` is the `as`: `{% cycle "a" "b" c as nope %}` is shape 4 and
-//! *succeeds* with the name `nope`, which is the case the plan's draft got
-//! backwards.
-//!
-//! # Identity is the whole point, and it is why this tag needs the table
-//!
-//! `{% cycle a b as c %}` returns a `CycleNode` **and stores that same object**
-//! under the name (`defaulttags.py:693-696`). A later `{% cycle c %}` returns it again
-//! (`defaulttags.py:669-671`) — Django's own comment calls it out ("This returns the exact
-//! same node on each `{% cycle name %}` call"). `CycleNode.render` keys
-//! `context.render_context` by the node object (`defaulttags.py:104-114`), so two
-//! equal-but-distinct nodes get separate `itertools.cycle` iterators and the
-//! second mention restarts the sequence instead of continuing it.
-//!
-//! The object does not exist during the parse, so what the parser stores is a
-//! **descriptor** the materialiser will turn into it: the definition form
-//! carries `.slot(idx)` and `named_cycle_nodes[name] = ` that descriptor, and
-//! shape 2 returns the same descriptor with the *same* slot, which the
-//! materialiser resolves to the object already there — or, if it gets there
-//! first, builds from the echoed arguments (design spec §5.5;
-//! `tests/test_ref_table.py` pins the wire form).
-//!
-//! # Shape 2 returns early, and that is observable
-//!
-//! `defaulttags.py:671` is a `return` inside the `len(args) == 2` branch, so
-//! `parser._last_cycle_node = node` (`defaulttags.py:700`) is **not** reached. Measured:
-//!
-//! ```text
-//! {% cycle 'a' 'b' as c %}{% cycle d e as f %}{% cycle c %}{% resetcycle %}
-//! →  the ResetCycleNode targets the f definition, not the c reference
-//! ```
-//!
-//! A port that fell through to the shared tail would retarget `{% resetcycle %}`
-//! at the last *mention* instead of the last *definition*. Both name the same
-//! object in the common case, which is exactly why the case above is the one
-//! worth writing down.
-//!
-//! # The values are filters
-//!
-//! `[parser.compile_filter(arg) for arg in …]` in both branches
-//! (`defaulttags.py:692`, `defaulttags.py:698`)
-//! — so `{% cycle a b %}` holds two `FilterExpression`s and nothing resolves
-//! them at parse time.
+//! Values are compiled filters — `[parser.compile_filter(arg) for arg in …]` in both
+//! branches (`defaulttags.py:692`, `defaulttags.py:698`) — so `{% cycle a b %}` holds two `FilterExpression`s and
+//! nothing resolves them at parse time.
 
 use crate::parser::desc::{AttrValue, NodeDesc};
 use crate::parser::error::Error;
@@ -78,10 +49,8 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
 
     if args.len() == 2 {
         let name = args[1].clone();
-        // Django tests `hasattr(parser, "_named_cycle_nodes")` first: the dict is
-        // created lazily by the `as` branch below, so "absent" means no `as`
-        // form has run in this template. The map is created by the same branch
-        // that fills it and never emptied, so empty is that case.
+        // Django tests `hasattr(parser, "_named_cycle_nodes")`: the dict is created
+        // by the `as` branch below and never emptied, so empty means no `as` ran.
         if parser.named_cycle_nodes.is_empty() {
             // The quotes are literal in the format string; `%s` adds none.
             return Err(Error::syntax(format!(
@@ -95,27 +64,14 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
             )));
         };
         // **The definition's own descriptor, not a bare slot.** Django returns
-        // `parser._named_cycle_nodes[name]` — the *node object* the definition
-        // built — so a reference is the definition, and modelling it as a slot
-        // alone says "look up what is already there", which is true only if the
-        // definition has been materialised.
-        //
-        // It has not, when the reference is inside a `{% partialdef %}` body and
-        // the definition is outside it: `register_partial_def` materialises the
-        // body *during the parse*, so the slot is empty, and a slot-only
-        // descriptor then has no constructor arguments to build from —
-        // `TypeError: CycleNode.__init__() missing 1 required positional
-        // argument: 'cyclevars'`, on `{% cycle 'a' 'b' as c %}{% partialdef p
-        // %}{% cycle c %}{% endpartialdef %}{% partial p %}`, a template Django
-        // renders. Echoing the arguments makes whichever namer materialises
-        // first the one that builds the node; the rest find it in the table and
-        // return it, so `CycleNode.render`'s render-context key is still one
-        // object and the sequence still advances once.
-        //
-        // Nothing is recompiled here: the values are the definition's already
-        // compiled `AttrValue`s, cloned. The early return
-        // (`defaulttags.py:671`) still does not touch `last_cycle_node` — see
-        // the module docs.
+        // `parser._named_cycle_nodes[name]` — the *node object* the definition built
+        // — so a reference is the definition. A slot-only descriptor is wrong when
+        // the definition has not been materialised: a reference inside a
+        // `{% partialdef %}` body, materialised mid-parse, whose definition is
+        // outside, reaches an empty slot and has no constructor arguments to build
+        // from (`TypeError: CycleNode.__init__() missing ... 'cyclevars'`), where
+        // Django renders. Echoing the arguments makes whichever namer materialises
+        // first build the node; the rest find it in the table and return it.
         return Ok(definition);
     }
 
@@ -139,10 +95,8 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
         }
     }
 
-    // Reserved before the values are compiled. Nothing in `compile_filter`
-    // allocates a slot, so the order is not observable today — but the table's
-    // contract is reserve-before-use, and a value that one day did allocate
-    // would otherwise take this node's index.
+    // Reserved before the values compile: nothing in `compile_filter` allocates a
+    // slot today, but the table's contract is reserve-before-use.
     let slot = parser.alloc_slot();
 
     let node = if as_form {
@@ -153,17 +107,15 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
             .attr("variable_name", AttrValue::Str(name.clone()))
             .attr("silent", AttrValue::Bool(silent))
             .slot(slot);
-        // The descriptor, not the slot: a reference is "this node", and it may
-        // be materialised before this line's node is (see the reference arm).
+        // The descriptor, not the slot: a reference may materialise before this node does.
         parser.named_cycle_nodes.insert(name, node.clone());
         node
     } else {
         let values = compile_values(parser, &args[1..])?;
         NodeDesc::new("CycleNode")
             .attr("cyclevars", AttrValue::List(values))
-            // `CycleNode(values)` (`defaulttags.py:699`) leaves both defaults, emitted rather
-            // than omitted so the materialiser passes `variable_name=None` and
-            // the descriptor shape does not vary by branch.
+            // `CycleNode(values)` (`defaulttags.py:699`) leaves both defaults; emitting them keeps
+            // the descriptor shape identical across branches.
             .attr("variable_name", AttrValue::None)
             .attr("silent", AttrValue::Bool(false))
             .slot(slot)
@@ -214,8 +166,8 @@ mod tests {
 
     #[test]
     fn the_as_form_takes_its_values_before_the_two_bit_as() {
-        // `as` consumes two bits, so `{% cycle 'a' 'b' as c %}` has the values
-        // `['a', 'b']` — not `['a', 'b', 'as']`.
+        // `as` consumes two bits, so `{% cycle 'a' 'b' as c %}` has values `['a', 'b']`,
+        // not `['a', 'b', 'as']`.
         let node = compile("{% cycle 'a' 'b' as c %}");
         assert_eq!(values(&node), vec!["'a'", "'b'"]);
         assert_eq!(
@@ -238,14 +190,13 @@ mod tests {
 
     #[test]
     fn four_bits_is_the_anonymous_form_even_with_an_as_in_it() {
-        // The `len(args) > 4` guard: `{% cycle a as b %}` never enters the `as`
-        // branches, so `as` is one of three compiled values. Measured.
+        // The `len(args) > 4` guard: `{% cycle a as b %}` never enters the `as` branches,
+        // so `as` is one of three compiled values. Measured.
         let node = compile("{% cycle a as b %}");
         assert_eq!(values(&node), vec!["a", "as", "b"]);
         assert_eq!(attr(&node, "variable_name"), &AttrValue::None);
 
-        // And a trailing `as` with no name is a value too (`len(args) == 5`,
-        // `args[-2]` is `c`, not `as`).
+        // A trailing `as` with no name is a value too: `args[-2]` is `c`, not `as`.
         let trailing = compile("{% cycle a b c as %}");
         assert_eq!(values(&trailing), vec!["a", "b", "c", "as"]);
         assert_eq!(attr(&trailing, "variable_name"), &AttrValue::None);
@@ -253,8 +204,7 @@ mod tests {
 
     #[test]
     fn the_name_silent_is_a_name_when_only_one_bit_follows_as() {
-        // `{% cycle a b as silent %}`: `args[-3]` is `b`, so this is shape 4
-        // with the name `silent`, not the silent flag. Measured.
+        // `args[-3]` is `b`, so this is shape 4 with the name `silent`, not the flag.
         let node = compile("{% cycle a b as silent %}");
         assert_eq!(
             attr(&node, "variable_name"),
@@ -265,8 +215,8 @@ mod tests {
 
     #[test]
     fn a_name_reference_reuses_the_slot_and_echoes_the_definitions_arguments() {
-        // Two nodes, so the counting host gives the definition slot 0 and the
-        // reference none of its own — the reference must not reserve.
+        // The counting host gives the definition slot 0 and the reference none of its
+        // own — the reference must not reserve.
         let host = CountingHost::default();
         let nodelist = parse_with("{% cycle 'a' 'b' as c %}{% cycle c %}", &host);
 
@@ -281,15 +231,9 @@ mod tests {
             Some(0),
             "the reference names the definition's slot"
         );
-        // **The arguments, not an empty attribute list.** The row this replaced
-        // asserted `attrs.is_empty()` with the reason "the object already
-        // exists" — and M13 falsified the reason, not the assertion: a
-        // `{% partialdef %}` body is materialised mid-parse, so a reference
-        // inside one whose definition is outside reaches an *empty* slot, and a
-        // descriptor with nothing to build from is a `TypeError` there where
-        // Django renders. Django's map holds the node itself, so a reference
-        // *is* the definition; a descriptor carrying the definition's arguments
-        // is what that looks like one step earlier.
+        // **The arguments, not an empty attribute list:** a `{% partialdef %}` body
+        // materialises mid-parse, so a reference inside one whose definition is outside
+        // reaches an empty slot and must still carry arguments to build from.
         assert_eq!(values(reference), vec!["'a'", "'b'"]);
         assert_eq!(
             attr(reference, "variable_name"),
@@ -300,8 +244,7 @@ mod tests {
 
     #[test]
     fn two_definitions_get_two_slots() {
-        // Under `NoHost` both would be slot 0 and this test could not tell a
-        // correct implementation from one that reused the index.
+        // Under `NoHost` both would be slot 0, hiding a reused index.
         let host = CountingHost::default();
         let nodelist = parse_with("{% cycle a b as c %}{% cycle d e as f %}", &host);
         assert_eq!(nodelist.nodes[0].slot, Some(0));
@@ -318,10 +261,8 @@ mod tests {
 
     #[test]
     fn a_name_reference_does_not_move_last_cycle_node() {
-        // The early return (`defaulttags.py:671`) is observable: after the `{% cycle c %}`
-        // mention, a bare `{% resetcycle %}` still targets the *f* definition.
-        // A port that fell through to `last_cycle_node = node` would target the
-        // last mention instead — the same object here only by luck.
+        // The early return (`defaulttags.py:671`) is observable: after the `{% cycle c %}` mention, a
+        // bare `{% resetcycle %}` still targets the `f` definition, not the last mention.
         let host = CountingHost::default();
         let nodelist = parse_with(
             "{% cycle a b as c %}{% cycle d e as f %}{% cycle c %}{% resetcycle %}",
@@ -342,7 +283,7 @@ mod tests {
 
     #[test]
     fn an_anonymous_cycle_is_still_the_last_cycle_node() {
-        // Shape 5 also sets `_last_cycle_node` (`defaulttags.py:700`), which is what makes
+        // The anonymous form also sets `_last_cycle_node` (`defaulttags.py:700`), making
         // `{% cycle 'a' 'b' %}{% resetcycle %}` legal.
         let host = CountingHost::default();
         let nodelist = parse_with("{% cycle 'a' 'b' %}{% resetcycle %}", &host);
@@ -355,8 +296,7 @@ mod tests {
             failure("{% cycle %}").kind,
             ErrorKind::Syntax("'cycle' tag requires at least two arguments".to_string()),
         );
-        // No `as` form yet, so the registry itself is absent — the first of the
-        // two "unknown name" messages, and the one with no trailing period.
+        // No `as` form yet, so the registry is absent — the message with no trailing period.
         assert_eq!(
             failure("{% cycle foo %}").kind,
             ErrorKind::Syntax("No named cycles in template. 'foo' is not defined".to_string(),),
@@ -376,9 +316,8 @@ mod tests {
 
     #[test]
     fn a_name_in_the_middle_of_the_tail_is_a_value_not_the_silent_error() {
-        // The plan's draft claimed this raised the silent-flag error. Measured:
-        // `args[-3]` is `c`, so `args[-2] == "as"` makes it shape 4 — it
-        // succeeds with the name `nope`, values `['"a"', '"b"', 'c']`.
+        // `args[-3]` is `c`, so `args[-2] == "as"` makes this shape 4: it succeeds with
+        // the name `nope`, not the silent-flag error.
         let node = compile("{% cycle \"a\" \"b\" c as nope %}");
         assert_eq!(values(&node), vec!["\"a\"", "\"b\"", "c"]);
         assert_eq!(

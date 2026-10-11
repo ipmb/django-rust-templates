@@ -147,20 +147,20 @@ def django_exception(error, host=None):
     of being re-derived. Three facts, each checked in the tree:
 
     * `ErrorKind::Host` **carrying a class** is constructed at exactly one
-      place, `python_host_error` (`crates/template-py/src/lib.rs:1289`), and
+      place, `python_host_error` (`crates/template-py/src/lib.rs:950`), and
       every host boundary that can raise a Python exception calls it — `call_tag`
-      (`crates/template-py/src/lib.rs:1490`), `partial_node`
-      (`crates/template-py/src/lib.rs:1612`) and `register_partial_def`
-      (`crates/template-py/src/lib.rs:1687`). ``class_name`` is read straight
+      (`crates/template-py/src/lib.rs:1088`), `partial_node`
+      (`crates/template-py/src/lib.rs:1185`) and `register_partial_def`
+      (`crates/template-py/src/lib.rs:1243`). ``class_name`` is read straight
       off that error, so a class in the wire error always came from a host
       failure;
     * ``last_error`` is assigned on the way out of each host method that raises,
-      `ShellHost.call_tag` (`python/django_rust_templates/host.py:746`) and
+      `ShellHost.call_tag` (`python/django_rust_templates/host.py:490`) and
       `ShellHost.register_partial_def`
-      (`python/django_rust_templates/host.py:849`) — so it names that failure
+      (`python/django_rust_templates/host.py:572`) — so it names that failure
       too;
     * a host error is **terminal**: the parse loop's arm is
-      `Err(error) => Err(error)` (`crates/template-core/src/parser/mod.rs:434-443`) and its caller is
+      `Err(error) => Err(error)` (`crates/template-core/src/parser/mod.rs:366-375`) and its caller is
       `?`, so no host failure is caught and survived, and the failing call
       is necessarily the last one to have touched either field.
 

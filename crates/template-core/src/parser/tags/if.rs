@@ -1,51 +1,29 @@
 //! `{% if %}` — `defaulttags.do_if` (`defaulttags.py:932-1020`).
 //!
-//! The tag is small; what makes it M5's largest is that its condition is a
-//! **parse tree Python has to hold**. `do_if` runs
-//! `TemplateIfParser(parser, bits).parse()` (`defaulttags.py:993`) and `IfNode.render` calls
-//! `condition.eval(context)` on the result (`defaulttags.py:326`), so the arena
-//! `smartif.rs` builds has to cross as shape, and the materialiser rebuilds
-//! real `smartif` nodes from it — see [`IfConditionDesc`].
+//! `do_if` runs `TemplateIfParser(parser, bits).parse()` (`defaulttags.py:993`)
+//! and `IfNode.render` calls `condition.eval(context)` (`defaulttags.py:326`),
+//! so the arena `smartif.rs` builds has to cross as shape and the materialiser
+//! rebuilds real `smartif` nodes from it — see [`IfConditionDesc`].
 //!
-//! # The four-part body, and the one line that is not smartif's
+//! The body: the first condition (`defaulttags.py:993-995`, the only source of
+//! smartif errors), `parser.parse(("elif", "else", "endif"))` + `next_token()`
+//! (`defaulttags.py:996`), a `token.contents.startswith("elif")` loop
+//! (`defaulttags.py:999-1006`), then an optional `else` and the `endif` check
+//! (`defaulttags.py:1007-1018`). **`startswith`**, not `==`: `Parser.parse` stops
+//! on `contents.split()[0] in parse_until`, so `{% elif foo %}` ends the body
+//! with contents `"elif foo"` (`base.py:561-564`).
 //!
-//! 1. `TemplateIfParser(parser, bits).parse()` for the first condition
-//!    (`defaulttags.py:993-995`) — errors here are smartif's, and they are the *only* errors a
-//!    malformed condition can produce.
-//! 2. `parser.parse(("elif", "else", "endif"))`, then `next_token()` (`defaulttags.py:996`).
-//! 3. A `while token.contents.startswith("elif")` loop (`defaulttags.py:999-1006`) — note
-//!    **`startswith`**, not `==`: `Parser.parse` stops on
-//!    `token.contents.split()[0] in parse_until`, so `{% elif foo %}` terminates
-//!    the body and its contents are `"elif foo"` (`base.py:561-564`).
-//! 4. An optional `else`, then the `endif` check (`defaulttags.py:1007-1018`).
-//!
-//! The `endif` check is the only message this file owns, and it is reached by a
-//! construct the plan's draft got wrong. `{% if a %}{% endif %}{% endif %}` does
-//! **not** reach it — the first `endif` terminates the body and the *second* is
-//! then an ordinary unknown top-level tag, reporting `Invalid block tag on line
-//! 1: 'endif'`. What reaches it is a terminator whose contents is *not* exactly
-//! `endif`: measured, `{% if a %}x{% endif foo %}` gives
-//! `Malformed template tag at line 1: "endif foo"`, and so does
-//! `{% if a %}x{% else foo %}y{% endif %}` — which also **silently drops** the
-//! else body, because `token.contents == "else"` is false and the `parse` that
-//! would have read it never runs.
-//!
-//! # The condition is built during the parse, and that is Django's order
+//! Only a terminator whose contents is *not* exactly `endif` reaches this file's
+//! sole message (`{% if a %}x{% endif foo %}`, "Malformed template tag"); a
+//! second `{% endif %}` is an ordinary unknown top-level tag instead.
 //!
 //! `TemplateIfParser.__init__` compiles every operand *before* `parse` runs the
-//! operator algorithm, so a bad filter in a later operand beats an operator
-//! error. Rust reproduces that by construction: [`IfParser::template`] walks
-//! the merged bits in order and calls [`CompileFilter::compile_filter`] for each
-//! non-operator one, and only then does `parse` touch the tree. Measured, the
-//! two agree: `{% if a and and b|nope %}` reports the filter error on both.
+//! operator algorithm, so a later operand's bad filter beats an operator error;
+//! [`IfParser::template`] reproduces that by compiling the merged bits in order.
 //!
-//! # `{% if %}` is the only tag whose node has *positional-only* nodelists
-//!
-//! `IfNode.__init__(self, conditions_nodelists)` (`defaulttags.py:308-309`) takes one
-//! argument and holds the branch bodies *inside* it, so there is no parameter a
-//! branch nodelist could be a keyword for. The descriptor therefore carries N
-//! unnamed nodelists and the branches name them by position
-//! ([`AttrValue::NodeListRef`]), which is the shape `desc.rs` reserved for it.
+//! `IfNode.__init__` takes one argument holding the bodies
+//! (`defaulttags.py:308-309`), so the descriptor carries N unnamed nodelists
+//! located by position ([`AttrValue::NodeListRef`]).
 
 use crate::parser::desc::{AttrValue, IfConditionDesc, NodeDesc, NodeListDesc, NodeRef};
 use crate::parser::error::Error;
@@ -62,8 +40,7 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
     nodelists.push(parser.parse(&["elif", "else", "endif"])?);
     branches.push(branch(first, 0));
 
-    // `parse` puts its terminator back, so this reads it rather than the body's
-    // last token — the same contract `{% for %}` relies on.
+    // `parse` puts its terminator back; this reads it, not the body's last token.
     let mut terminator = parser
         .next_token()
         .expect("parse returns only after prepending its terminator");
@@ -81,9 +58,8 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
     if terminator.contents == "else" {
         let index = nodelists.len();
         nodelists.push(parser.parse(&["endif"])?);
-        // `conditions_nodelists.append((None, nodelist))` (`defaulttags.py:1009`): the `None`
-        // condition is what `IfNode.render` reads as "this is the else", and it
-        // is emitted rather than left out because the tuple is positional.
+        // `conditions_nodelists.append((None, nodelist))` (`defaulttags.py:1009`): the
+        // `None` is what `IfNode.render` reads as "the else", and the tuple is positional.
         branches.push(AttrValue::Tuple(vec![
             AttrValue::None,
             AttrValue::NodeListRef(index),
@@ -102,10 +78,8 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
 
     let mut node = NodeDesc::new("IfNode").attr("conditions_nodelists", AttrValue::List(branches));
     for nodelist in nodelists {
-        // The empty name is `desc.rs`'s "positional only": `materialise_node`
-        // builds every nodelist and passes only the *named* ones to `cls`, so an
-        // unnamed one is reachable through its `NodeListRef` and nowhere else —
-        // which is exactly `IfNode`'s contract.
+        // The empty name is `desc.rs`'s "positional only": `materialise_node` passes
+        // only *named* nodelists to `cls`, so an unnamed one is reachable solely by `NodeListRef`.
         node = node.nodelist("", nodelist);
     }
     Ok(node)
@@ -126,18 +100,14 @@ fn condition(parser: &Parser<'_>, bits: &[String]) -> Result<AttrValue, Error> {
     let compiler = HostCompiler(parser);
     let mut if_parser = IfParser::template(&compiler, bits.to_vec())?;
     let root = if_parser.parse().map_err(|error| condition_error(&error))?;
-    // Named rather than inferred: this is the seam where the arena becomes the
-    // wire, and the type is the whole contract of [`IfConditionDesc`].
+    // Named rather than inferred: the seam where the arena becomes the wire.
     let tree: IfConditionDesc = if_parser.condition(root);
     Ok(AttrValue::IfCondition(Box::new(tree)))
 }
 
-/// The `smartif` seam: `TemplateIfParser.create_var`'s
-/// `self.template_parser.compile_filter(value)`.
-///
-/// An adapter rather than an argument because `IfParser::template` takes
-/// `&dyn CompileFilter` while the seam belongs to the *host* — see
-/// [`Parser::compile_condition_filter`], which is this in one line.
+/// The `smartif` seam: `TemplateIfParser.create_var`'s `compile_filter`. An
+/// adapter because `IfParser::template` takes `&dyn CompileFilter` while the seam
+/// belongs to the host ([`Parser::compile_condition_filter`]).
 struct HostCompiler<'a, 'h>(&'a Parser<'h>);
 
 impl CompileFilter for HostCompiler<'_, '_> {
@@ -146,13 +116,9 @@ impl CompileFilter for HostCompiler<'_, '_> {
     }
 }
 
-/// `IfError` as the engine's error.
-///
-/// The class decides, and `TemplateSyntax` is the only one `do_if` can produce:
-/// it builds `TemplateIfParser`, whose `error_class` is `TemplateSyntaxError`
-/// (`defaulttags.py:922`). `Value` is the base `smartif.IfParser`'s and no tag
-/// constructs one, so it is mapped rather than left `unreachable!` — the mapping
-/// is one line and a panic here would be a trap for a future caller.
+/// `IfError` as the engine's error. `do_if` builds `TemplateIfParser`, whose
+/// `error_class` is `TemplateSyntaxError` (`defaulttags.py:922`), so only
+/// `TemplateSyntax` can occur; `Value` is mapped rather than `unreachable!`.
 fn condition_error(error: &IfError) -> Error {
     match error.class {
         ErrorClass::TemplateSyntax => Error::syntax(error.message.clone()),
@@ -170,10 +136,8 @@ mod tests {
     use crate::parser::tags::support::{attr, compile, failure, parse_with, texts, CountingHost};
 
     /// A host that records every operand it is asked for, and can refuse one.
-    ///
-    /// Neither [`CountingHost`] nor [`NoHost`] can answer the two questions the
-    /// ordering tests ask — *which* tokens reached the host, and *when* the walk
-    /// stopped — because both accept everything silently.
+    /// [`CountingHost`] and [`NoHost`] accept everything silently, so neither can
+    /// say *which* tokens reached the host or *when* the walk stopped.
     #[derive(Default)]
     struct FilterHost {
         unknown: Option<&'static str>,
@@ -217,7 +181,7 @@ mod tests {
         branches
     }
 
-    /// One branch's condition, with the container asserted on the way past.
+    /// One branch's condition, asserting the container on the way past.
     fn condition_of(branch: &AttrValue) -> &AttrValue {
         let AttrValue::Tuple(pair) = branch else {
             panic!("a branch is a Tuple, not a list: {branch:?}");
@@ -248,7 +212,7 @@ mod tests {
         literal_of(tree)
     }
 
-    /// The same, from the tree directly — the borrow a clone would avoid.
+    /// The same, from the tree directly.
     fn literal_of(tree: &IfConditionDesc) -> (&str, NodeRef) {
         let IfConditionDesc::Literal { text, expression } = tree else {
             panic!("expected a literal, got {tree:?}");
@@ -256,8 +220,7 @@ mod tests {
         (text, *expression)
     }
 
-    /// `(key, first, second)` of an operator node, with `second` `None` for a
-    /// prefix operator.
+    /// `(key, first, second)` of an operator node; `second` is `None` for a prefix operator.
     fn operator(tree: &IfConditionDesc) -> (&str, &IfConditionDesc, Option<&IfConditionDesc>) {
         let IfConditionDesc::Operator { key, first, second } = tree else {
             panic!("expected an operator, got {tree:?}");
@@ -287,10 +250,9 @@ mod tests {
 
     #[test]
     fn a_branch_is_a_tuple_and_the_else_condition_is_none() {
-        // The tuple, not a list, is the whole point: `IfNode.render` unpacks
-        // `(condition, nodelist)` (`defaulttags.py:323`) and `describe`'s tuple
-        // arm carries a marker the list arm does not, so a list here would be a
-        // detectable diff on every parity row.
+        // A tuple, not a list: `IfNode.render` unpacks `(condition, nodelist)`
+        // (`defaulttags.py:323`), and `describe`'s tuple arm carries a marker the
+        // list arm does not, so a list would be a detectable diff on every parity row.
         let node = compile("{% if a %}x{% else %}y{% endif %}");
         assert_eq!(node.class_name, "IfNode");
 
@@ -322,9 +284,9 @@ mod tests {
 
     #[test]
     fn elif_branches_come_back_in_source_order_and_each_names_its_own_body() {
-        // The order is load-bearing twice over: `IfNode.render` takes the *first*
-        // truthy condition (`defaulttags.py:323-333`), and the `NodeListRef` index only means
-        // anything if the nodelists were pushed in the same order as the branches.
+        // Order is load-bearing twice: `IfNode.render` takes the *first* truthy
+        // condition (`defaulttags.py:323-333`), and the `NodeListRef` index only
+        // means anything if nodelists were pushed in branch order.
         let node = compile("{% if a %}1{% elif b %}2{% elif c %}3{% else %}4{% endif %}");
         let branches = branches(&node);
         assert_eq!(branches.len(), 4);
@@ -345,11 +307,9 @@ mod tests {
 
     #[test]
     fn the_operators_are_named_and_their_children_are_ordered() {
-        // `{% if a and b or not c %}` is `(a and b) or (not c)`: `or` binds
-        // loosest, `not` is the only prefix operator and its `second` is None.
-        // The shape is asserted structurally rather than through a stringify, so
-        // a port that rebuilt the tree from a re-parse could not pass it by
-        // producing the same rendering.
+        // `or` binds loosest and `not` is the only prefix operator, so its `second`
+        // is None. The shape is asserted structurally, so a tree rebuilt from a
+        // re-parse cannot pass by producing the same rendering.
         let node = compile("{% if a and b or not c %}x{% endif %}");
         let root = tree_of(&node);
 
@@ -373,10 +333,8 @@ mod tests {
 
     #[test]
     fn a_merged_operator_is_one_key_rather_than_two_tokens() {
-        // `IfParser.__init__`'s token loop folds `not in` and `is not` into a
-        // single operator as it walks the list (`smartif.py:159-173`), and
-        // `translate_token` then looks *that* up (`smartif.py:179-185`), so the
-        // key is the two-word one and no operand named `in` exists.
+        // `IfParser.__init__` folds `not in`/`is not` into one operator
+        // (`smartif.py:159-173`), which `translate_token` looks up (`smartif.py:179-185`).
         let node = compile("{% if a not in b %}x{% endif %}");
         let (key, first, second) = operator(tree_of(&node));
         assert_eq!(key, "not in");
@@ -386,12 +344,9 @@ mod tests {
 
     #[test]
     fn the_condition_carries_the_operands_handle_and_not_a_filter_expression() {
-        // The seam: `TemplateIfParser.create_var` calls the *host's*
-        // `compile_filter` (`defaulttags.py:929`), so each operand is a handle
-        // and not an `AttrValue::FilterExpr`. Two operands must be two handles —
-        // which is what makes `CountingHost` and not `NoHost` the right host
-        // here: under `NoHost` every handle is `NodeRef(0)` and "two operands, two
-        // host objects" would be indistinguishable from a single shared one.
+        // `TemplateIfParser.create_var` calls the *host's* `compile_filter`
+        // (`defaulttags.py:929`), so each operand is a handle, not a `FilterExpr`.
+        // `NoHost` gives every handle `NodeRef(0)`, so it cannot tell two operands apart.
         let node = parse_with("{% if a and b %}x{% endif %}", &CountingHost::default())
             .nodes
             .into_iter()
@@ -408,11 +363,8 @@ mod tests {
     #[test]
     fn a_body_error_precedes_the_next_branchs_condition() {
         // `do_if` builds a branch's condition *then* parses its body, per branch
-        // (`defaulttags.py:993-996`, then `defaulttags.py:1001-1004`), so the first body's unknown tag is
-        // reported before the `elif`'s empty condition is ever looked at. The
-        // tempting opposite reading — "conditions are compiled first" — is true
-        // *within* one condition (see the two tests below) and false across
-        // branches, and it is the per-branch loop that decides.
+        // (`defaulttags.py:993-996`, `defaulttags.py:1001-1004`), so the first body's unknown
+        // tag beats the `elif`'s empty condition — "conditions first" holds only within one.
         let error = failure("{% if a %}{% nope %}{% elif %}y{% endif %}");
         assert_eq!(
             error.message(),
@@ -424,10 +376,8 @@ mod tests {
     #[test]
     fn every_operand_is_compiled_before_the_operator_algorithm_runs() {
         // `translate_token` tries `OPERATORS[token]` first and falls through to
-        // `create_var` only for the rest (`smartif.py:179-183`), so the host sees
-        // operands alone, left to right — never an operator. `TemplateIfParser.__init__`
-        // compiles every token before `parse` runs, so the whole sequence is
-        // complete before the tree is built.
+        // `create_var` (`smartif.py:179-183`), so the host sees operands alone, left to
+        // right, and all of them before the tree is built.
         let host = FilterHost::default();
         parse_with("{% if a and b or not c %}x{% endif %}", &host);
         assert_eq!(*host.seen.borrow(), vec!["a", "b", "c"]);
@@ -443,11 +393,8 @@ mod tests {
 
     #[test]
     fn a_bad_operand_beats_the_operator_error_that_would_have_followed() {
-        // Two errors are reachable from `{% if a and and b|nope %}`: the doubled
-        // `and` is one the algorithm raises, and `b|nope` is one `create_var`
-        // raises. Django reports the operand. This is the ordering the design
-        // spec's `compile_filter` seam exists to reproduce, and it is why the
-        // condition cannot be a re-parse of the whole expression in Python.
+        // Both the doubled `and` and `b|nope` are errors, and Django reports the
+        // operand — which is why the condition cannot be a re-parse of the expression.
         let host = FilterHost {
             unknown: Some("b|nope"),
             ..FilterHost::default()
@@ -464,7 +411,7 @@ mod tests {
             "and the refusal stopped the walk at the offending operand",
         );
 
-        // The control: with nothing refused, the operator error is what surfaces.
+        // The control: with nothing refused, the operator error surfaces.
         let error = failure("{% if a and and b %}x{% endif %}");
         assert_eq!(
             error.message(),
@@ -474,12 +421,9 @@ mod tests {
 
     #[test]
     fn malformed_is_the_terminators_own_contents() {
-        // The one message this file owns. Note how it is reached: `Parser.parse`
-        // stops on `token.contents.split()[0] in parse_until`, so `{% endif foo %}`
-        // terminates the body and its contents are `"endif foo"` — the `!=` check
-        // then fires. This is the plan's intended row with the source corrected;
-        // see the module docs for what `{% if a %}{% endif %}{% endif %}` actually
-        // does.
+        // This file's only own message: `Parser.parse` stops on
+        // `contents.split()[0] in parse_until`, so `{% endif foo %}` terminates the body
+        // with contents `"endif foo"` and the `!=` check fires.
         let error = failure("{% if a %}x{% endif foo %}");
         assert_eq!(
             error.kind,
@@ -489,10 +433,8 @@ mod tests {
 
     #[test]
     fn an_else_with_trailing_bits_is_malformed_and_its_body_is_dropped() {
-        // `token.contents == "else"` is false for `"else foo"`, so the `parse`
-        // that would have read the else body never runs and the body is silently
-        // left in the token stream — where the `endif` check then fails on the
-        // *terminator*, not on the body. Measured on the pinned tree.
+        // `contents == "else"` is false for `"else foo"`, so the else body is never
+        // parsed and is silently dropped; the `endif` check then fails on the terminator.
         let error = failure("{% if a %}x{% else foo %}y{% endif %}");
         assert_eq!(
             error.message(),
@@ -502,10 +444,8 @@ mod tests {
 
     #[test]
     fn a_second_endif_is_an_ordinary_unknown_tag() {
-        // The row the plan's draft got wrong, pinned so the correction cannot be
-        // quietly reverted: the first `endif` ends the `{% if %}` and the second
-        // is an unknown top-level tag, so the message is `Parser.parse`'s and not
-        // this file's.
+        // The first `endif` ends the `{% if %}` and the second is an unknown
+        // top-level tag, so the message is `Parser.parse`'s and not this file's.
         let error = failure("{% if a %}{% endif %}{% endif %}");
         assert_eq!(
             error.message(),
@@ -526,8 +466,7 @@ mod tests {
 
     #[test]
     fn an_unclosed_if_names_the_three_terminators_it_wanted() {
-        // Not this file's message either: `Parser.parse` reaches EOF with its
-        // `parse_until` unsatisfied, and it is the one that knows the set.
+        // Not this file's message: `Parser.parse` hits EOF with `parse_until` unsatisfied.
         let error = failure("{% if a %}");
         assert_eq!(
             error.message(),

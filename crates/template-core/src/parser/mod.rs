@@ -1,17 +1,12 @@
 //! Parsing, following `django.template.base.Parser`.
 //!
-//! `parse` is a direct port of Django's loop (`base.py:529-591`). Four details
-//! are easy to lose and each has a test below:
-//!
-//! - tags are dispatched on `token.contents.split()[0]`, the **raw** first word
-//!   — `split_contents` is for a tag's arguments afterwards, and the two
-//!   disagree whenever the first word is quoted (`{% 'a b' %}`, where the raw
-//!   split yields `'a`) or contains U+001C-U+001F;
-//! - reaching `parse_until` **prepends** the terminator and returns, leaving the
-//!   caller to consume it;
-//! - `tokens` is reversed, so `delete_first_token` deletes `tokens[-1]`;
-//! - an error keeps the **innermost** token, because `error()` only sets one
-//!   when there is none.
+//! `parse` is a direct port of Django's loop (`base.py:529-591`). The easy-to-lose details,
+//! each with a test below: tags dispatch on `token.contents.split()[0]`, the **raw** first
+//! word (`split_contents` is for a tag's arguments, and the two disagree on a quoted first
+//! word or on U+001C-U+001F); reaching `parse_until` **prepends** the terminator and returns,
+//! leaving the caller to consume it; `tokens` is reversed, so `delete_first_token` deletes
+//! `tokens[-1]`; an error keeps the **innermost** token, because `error()` only sets one when
+//! there is none.
 
 pub mod desc;
 pub mod error;
@@ -43,91 +38,67 @@ use crate::token::{Token, TokenType};
 
 /// The parser, ported from `django.template.base.Parser`.
 pub struct Parser<'a> {
-    /// Reversed, so the *front* of the stream is the *end* of the vec:
-    /// `next_token` is `pop`, `prepend_token` is `push`, `delete_first_token`
-    /// is `pop`. That is Django's `list(reversed(tokens))`, and it is the reason
-    /// `delete_first_token` deletes `tokens[-1]` (Review Focus item 4).
+    /// Reversed, so the *front* of the stream is the *end* of the vec: `next_token` is `pop`,
+    /// `prepend_token` is `push`, `delete_first_token` is `pop`. That is Django's
+    /// `list(reversed(tokens))`, and why `delete_first_token` deletes `tokens[-1]`.
     tokens: Vec<Token>,
     /// `(command, token)` for every tag currently being compiled, innermost
     /// last. `unclosed_block_tag` pops it to name the tag that was left open.
     command_stack: Vec<(String, Token)>,
     host: &'a dyn Host,
-    /// `parser.origin.template_name` — the **raw** name Django's `Origin` holds,
-    /// not a rendered `repr`.
+    /// `parser.origin.template_name` — the **raw** name Django's `Origin` holds, not a
+    /// rendered `repr`.
     ///
-    /// `{% extends %}` and `{% include %}` read it directly (that is the field's
-    /// shape after M7 Task 2), and `extend_nodelist`'s must-be-first message
-    /// renders a `repr` on demand through [`Parser::py_repr`] because a Python
-    /// `repr` is Python's to produce — the same rule §5.2 already records for
-    /// `LookupError::Missing::current_repr`. Python's `repr` escapes by Unicode
-    /// category and Rust has no categories without a new dependency; guessing
-    /// would put a subtly wrong string in a message the suite compares exactly.
+    /// `{% extends %}` and `{% include %}` read it directly, and `extend_nodelist` renders a
+    /// `repr` on demand through [`Parser::py_repr`], because a Python `repr` is Python's to
+    /// produce (Python escapes by Unicode category, and Rust has no categories without a new
+    /// dependency; guessing would put a subtly wrong string in a message the suite compares
+    /// exactly).
     ///
-    /// `None` stands for the origin a `Template` built without a loader has —
-    /// `Origin(UNKNOWN_SOURCE).template_name` is `None` (A3) — and **not** for
-    /// "no origin object": the Python side always passes a real `Origin`, and
-    /// what reaches Rust is the attribute read from it.
+    /// `None` is the origin a `Template` built without a loader has —
+    /// `Origin(UNKNOWN_SOURCE).template_name` is `None` (A3).
     origin_template_name: Option<String>,
-    /// `parser._last_cycle_node` and `parser._named_cycle_nodes`, which
-    /// `{% cycle %}` sets and `{% resetcycle %}` reads by name or by default.
+    /// `parser._last_cycle_node` and `parser._named_cycle_nodes`, which `{% cycle %}` sets and
+    /// `{% resetcycle %}` reads by name or by default.
     ///
-    /// **Indices into the per-parse reference table, not node objects.** The
-    /// object Django stores here is a materialised `CycleNode`, which does not
-    /// exist during the parse, so what is held is the slot the materialiser will
-    /// fill — the same slot a second `{% cycle c %}` names so that it resolves
-    /// to the first one's node ([`NodeDesc::slot`]).
+    /// **Indices into the per-parse reference table, not node objects**: Django holds a
+    /// materialised `CycleNode`, which does not exist during the parse, so what is held is the
+    /// slot the materialiser will fill — the same slot a second `{% cycle c %}` names so it
+    /// resolves to the first one's node ([`NodeDesc::slot`]).
     ///
-    /// `_named_cycle_nodes` holds the definition's **descriptor** rather than
-    /// the bare slot, and M13 is why: Django's map holds the node itself, and a
-    /// descriptor is the closest thing to "the node" that exists before the
-    /// materialiser runs. A reference that carries only a slot can be resolved
-    /// only if the definition was materialised **first**, and `{% partialdef %}`
-    /// breaks exactly that — a body is materialised mid-parse, so a body whose
-    /// `{% cycle c %}` names a definition *outside* it reached an empty slot and
-    /// had no constructor arguments to build from
-    /// (`TypeError: CycleNode.__init__() missing 1 required positional argument:
-    /// 'cyclevars'` on a template Django renders). Echoing the definition's
-    /// arguments makes the slot's *filler* an arbitrary one of its namers: the
-    /// first to materialise builds the node, the rest find it, and `CycleNode`'s
+    /// `_named_cycle_nodes` holds the definition's **descriptor**, not the bare slot, because a
+    /// reference carrying only a slot can be resolved only if the definition was materialised
+    /// **first** — and `{% partialdef %}` materialises a body mid-parse, so a body whose
+    /// `{% cycle c %}` names an outside definition would reach an empty slot with no
+    /// constructor arguments (a `TypeError` Django does not raise). Echoing the definition's
+    /// arguments makes the slot's filler an arbitrary one of its namers; `CycleNode`'s
     /// render-context key is one object either way.
-    ///
-    /// M5 only ever reads them and finds them empty until `{% cycle %}` lands;
-    /// the fields exist now so that `{% resetcycle %}`'s two error paths are the
-    /// real ones rather than a hard-coded "no cycles".
     last_cycle_node: Option<usize>,
     named_cycle_nodes: HashMap<String, NodeDesc>,
-    /// `parser.__loaded_blocks` — the names of every `{% block %}` compiled in
-    /// this template, in order.
+    /// `parser.__loaded_blocks` — the names of every `{% block %}` compiled in this template,
+    /// in order.
     ///
-    /// Django reaches it with `try/except AttributeError` so that the first
-    /// `do_block` initialises it (`loader_tags.py:233-234`); an empty `Vec` is
-    /// that collapse. Its only reader and only writer are `do_block`, which is
-    /// why it is Rust's under Design B — and it is the field that moved `block`
-    /// out of `registry.rs`'s subtracted list, because the rule there subtracts
-    /// tags whose compile touches parse-lifetime state, and this is that state
-    /// living somewhere a compile function can reach.
+    /// Django reaches it with `try/except AttributeError` so the first `do_block` initialises it
+    /// (`loader_tags.py:233-234`); an empty `Vec` is that collapse. `do_block` is its only reader
+    /// and writer, which is why it is Rust's under Design B, and why `block` is not in
+    /// `registry.rs`'s subtracted list: that rule subtracts tags whose compile touches
+    /// parse-lifetime state.
     ///
-    /// A `{% block %}` compiled by a **host** tag's nested `parser.parse`
-    /// accumulates in Django's own attribute instead; with the pinned suite that
-    /// is one template (`syntax_tests/i18n/test_blocktranslate.py`'s
-    /// `test_with_block`, where `{% blocktranslate %}` refuses the nested block
-    /// anyway). See A5: recorded, not fixed.
+    /// A `{% block %}` compiled by a **host** tag's nested `parser.parse` accumulates in Django's
+    /// own attribute instead; with the pinned suite that is one template
+    /// (`syntax_tests/i18n/test_blocktranslate.py`'s `test_with_block`, where `{% blocktranslate %}`
+    /// refuses the nested block anyway). See A5: recorded, not fixed.
     loaded_blocks: Vec<String>,
 }
 
 impl<'a> Parser<'a> {
     /// `Parser.__init__(tokens, libraries=None, builtins=None, origin=None)`.
     ///
-    /// `libraries`, `builtins`, `tags`, `filters` and `extra_data` are absent on
-    /// purpose:
-    ///
-    /// - `tags`/`filters` are the host's registry. §5.2's re-entrancy contract
-    ///   has the host own it — `{% load %}` (M6) mutates it mid-parse — and a
-    ///   Rust copy would be a second source of truth.
-    /// - `extra_data` must be a real Python `dict` holding Python objects
-    ///   (`{% load %}` stores a library, `{% partialdef %}` a
-    ///   `PartialTemplate` proxy), so a Rust `HashMap` would need converting
-    ///   back on every read. Python's field, arriving with the host.
+    /// `libraries`, `builtins`, `tags`, `filters` and `extra_data` are absent on purpose:
+    /// `tags`/`filters` are the host's registry (a Rust copy would be a second source of truth
+    /// against §5.2's re-entrancy contract, since `{% load %}` mutates it mid-parse), and
+    /// `extra_data` must be a real Python `dict` holding Python objects, so a Rust `HashMap`
+    /// would need converting back on every read.
     pub fn new(tokens: Vec<Token>, host: &'a dyn Host) -> Self {
         let mut tokens = tokens;
         tokens.reverse();
@@ -152,93 +123,78 @@ impl<'a> Parser<'a> {
 
     /// `parser.origin.template_name` (`loader_tags.py:305`).
     ///
-    /// The read half, and the reason the field holds the name rather than a
-    /// rendered `repr`: `{% extends %}` hands this straight to
-    /// `construct_relative_path`, whose messages interpolate it with `%s` and
-    /// whose recursion check compares it — none of which is a `repr`. Only
-    /// `extend_nodelist` wants one, and it asks for one.
+    /// The field holds the name rather than a rendered `repr` because `{% extends %}` hands
+    /// this straight to `construct_relative_path`, whose messages interpolate it with `%s` and
+    /// whose recursion check compares it. Only `extend_nodelist` wants a `repr`, and it asks.
     pub fn origin_template_name(&self) -> Option<&str> {
         self.origin_template_name.as_deref()
     }
 
     /// The `{% block %}` names seen so far, in the order `do_block` recorded them.
     ///
-    /// A method rather than a public field for `alloc_slot`'s reason: the field
-    /// belongs to the parse, and a tag that could assign to it directly could
-    /// also reset it mid-parse.
+    /// A method rather than a public field so a tag cannot assign to — and reset — it mid-parse.
     pub fn loaded_blocks(&self) -> &[String] {
         &self.loaded_blocks
     }
 
     /// `parser.__loaded_blocks.append(block_name)` (`loader_tags.py:232`).
     ///
-    /// The write half. `do_block` calls it **after** the duplicate check, which
-    /// is Django's ordering and is observable: the occurrence that raises is
-    /// never recorded, so the list holds only names whose block compiled.
+    /// `do_block` calls it **after** the duplicate check — Django's ordering, and observable:
+    /// the occurrence that raises is never recorded, so the list holds only names whose block
+    /// compiled.
     pub fn register_block_name(&mut self, name: String) {
         self.loaded_blocks.push(name);
     }
 
     /// Reserve a reference-table slot for the node being compiled.
     ///
-    /// `{% cycle %}` is the caller: it reserves once for a definition form and
-    /// records the index in `named_cycle_nodes`/`last_cycle_node`, so that a
-    /// later `{% cycle c %}` and a `{% resetcycle %}` name the same slot. The
-    /// node itself is built and stored by the materialiser, not here — see
-    /// [`NodeDesc::slot`].
+    /// `{% cycle %}` is the caller: it reserves once for a definition form and records the index
+    /// so a later `{% cycle c %}` and a `{% resetcycle %}` name the same slot. The node is built
+    /// and stored by the materialiser, not here — see [`NodeDesc::slot`].
     ///
-    /// A thin forward to [`Host::alloc_slot`], and it exists because the table is
-    /// the host's while the *tag* is the allocator: the tag holds a `Parser`, and
-    /// `Parser::host` is private so that a tag cannot reach around the seam.
+    /// A thin forward to [`Host::alloc_slot`], because the table is the host's while the *tag* is
+    /// the allocator: `Parser::host` is private so a tag cannot reach around the seam.
     pub fn alloc_slot(&mut self) -> usize {
         self.host.alloc_slot()
     }
 
-    /// `Parser.compile_filter(token)` — `FilterExpression(token, self)`
-    /// (`base.py:676`).
+    /// `Parser.compile_filter(token)` — `FilterExpression(token, self)` (`base.py:676`).
     ///
-    /// One argument, exactly as in the pinned source: there is no
-    /// `ignore_invalid` flag in 6.0.9, so every call site passes a bare string.
-    /// The descriptor is the one the `{{ … }}` arm builds, so a tag's
-    /// `filter_expr` attribute and a `VariableNode`'s attribute are the same
-    /// shape on the wire.
+    /// One argument, exactly as in the pinned source: there is no `ignore_invalid` flag in
+    /// 6.0.9. The descriptor is the one the `{{ … }}` arm builds, so a tag's `filter_expr`
+    /// attribute and a `VariableNode`'s are the same shape on the wire.
     ///
     /// **The error comes back bare, carrying no token.** Django wraps the whole
-    /// `compile_func(self, token)` call in `except Exception as e: raise
-    /// self.error(token, e)` (`base.py:585`), so the token attached to a
-    /// tag's filter failure is the *tag's* — attaching one here would pre-empt
-    /// that and make `error()`'s innermost rule unreachable. The `{{ … }}` arm
-    /// has to call `self.error` itself only because it is not inside that `try`.
+    /// `compile_func(self, token)` call in `except Exception as e: raise self.error(token, e)`
+    /// (`base.py:585`), so the token attached to a tag's filter failure is the *tag's*;
+    /// attaching one here would pre-empt that and make `error()`'s innermost rule unreachable.
+    /// The `{{ … }}` arm calls `self.error` itself only because it is not inside that `try`.
     pub fn compile_filter(&self, source: &str) -> Result<AttrValue, Error> {
         parse_filter_expression(source, self.host)
             .map(|expression| AttrValue::FilterExpr(Box::new(expression)))
     }
 
-    /// One `{% if %}` operand's `FilterExpression`, by handle — a thin forward
-    /// to [`Host::compile_filter`], for `alloc_slot`'s reason: the seam is the
-    /// host's while the *tag* is the caller, and `Parser::host` is private so a
-    /// tag cannot reach around it.
+    /// One `{% if %}` operand's `FilterExpression`, by handle — a thin forward to
+    /// [`Host::compile_filter`] for `alloc_slot`'s reason.
     ///
-    /// **Not the same thing as [`Parser::compile_filter`] above**, which returns
-    /// the `{{ … }}` descriptor. This one returns the *object*, because that is
-    /// what `smartif`'s `LiteralValue::Compiled` holds and what
-    /// `TemplateLiteral.value` must be.
+    /// **Not the same as [`Parser::compile_filter`] above**, which returns the `{{ … }}`
+    /// descriptor: this returns the *object*, because that is what `smartif`'s
+    /// `LiteralValue::Compiled` holds and what `TemplateLiteral.value` must be.
     pub fn compile_condition_filter(&self, token: &str) -> Result<NodeRef, Error> {
         self.host.compile_filter(token)
     }
 
     /// `partial_func`'s `PartialNode` construction, by handle — a thin forward to
-    /// [`Host::partial_node`], for [`Parser::alloc_slot`]'s reason: the mapping
-    /// is a live view over a dict the *host* owns, while the tag is the caller,
-    /// and `Parser::host` is private so a tag cannot reach around the seam.
+    /// [`Host::partial_node`], for `alloc_slot`'s reason: the mapping is a live view over a dict
+    /// the *host* owns.
     pub fn partial_node(&self, name: &str) -> Result<NodeRef, Error> {
         self.host.partial_node(name)
     }
 
-    /// `partialdef_func`'s `extra_data` write and its duplicate check — a thin
-    /// forward to [`Host::register_partial_def`], for the same reason: the body
-    /// is materialised once, by the side that owns the materialiser, and the
-    /// nodelist has to be one object shared with the stored `PartialTemplate`.
+    /// `partialdef_func`'s `extra_data` write and its duplicate check — a thin forward to
+    /// [`Host::register_partial_def`], for the same reason: the body is materialised once, by the
+    /// side that owns the materialiser, and the nodelist must be one object shared with the stored
+    /// `PartialTemplate`.
     #[allow(clippy::too_many_arguments)]
     pub fn register_partial_def(
         &self,
@@ -255,9 +211,9 @@ impl<'a> Parser<'a> {
 
     /// Python's `repr()` of `s`, through the host — see [`Host::repr`].
     ///
-    /// A forward rather than a call to `py_repr_str`, because the shell's
-    /// implementation is Python's own `repr` and `py_repr_str` is only exact on
-    /// ASCII. `{% with %}` is the caller whose argument makes that matter.
+    /// A forward rather than a call to `py_repr_str`, because the shell's implementation is
+    /// Python's own `repr` and `py_repr_str` is only exact on ASCII. `{% with %}` is the caller
+    /// whose argument makes that matter.
     pub fn py_repr(&self, s: &str) -> String {
         self.host.repr(s)
     }
@@ -274,11 +230,10 @@ impl<'a> Parser<'a> {
 
     /// `Parser.delete_first_token` — `del self.tokens[-1]`.
     ///
-    /// Django would raise `IndexError` on an empty list; that cannot happen
-    /// here, because every caller reaches this after `parse(until)` returned,
-    /// which only happens when the terminator was prepended. A real `assert!`
-    /// rather than `debug_assert!`, because `debug_assert!` is compiled out in
-    /// the build this ships in.
+    /// Django would raise `IndexError` on an empty list; that cannot happen here, because every
+    /// caller reaches this after `parse(until)` returned, which only happens when the terminator
+    /// was prepended. A real `assert!` rather than `debug_assert!`, which is compiled out in the
+    /// build this ships in.
     pub fn delete_first_token(&mut self) {
         assert!(
             self.tokens.pop().is_some(),
@@ -288,29 +243,26 @@ impl<'a> Parser<'a> {
 
     /// The tokens from the cursor on, in **parse order**.
     ///
-    /// The internal stack is reversed (`base.py:504-505`, for `pop` from the
-    /// end), so this reverses a copy. It exists for [`Host::call_tag`], which
-    /// hands a host compile function the stream it may consume.
+    /// The internal stack is reversed (`base.py:504-505`, for `pop` from the end), so this
+    /// reverses a copy. Exists for [`Host::call_tag`], which hands a host compile function the
+    /// stream it may consume.
     pub fn remaining_tokens(&self) -> Vec<Token> {
         self.tokens.iter().rev().cloned().collect()
     }
 
     /// Replace the cursor with `tokens`, in parse order.
     ///
-    /// Replacing rather than advancing by a count is what makes a host
-    /// callback's `prepend_token` work without a special case: whatever the host
-    /// leaves behind *is* the stream, and the host is Django's own `Parser`,
-    /// whose stack semantics the reversal already mirrors.
+    /// Replacing rather than advancing by a count is what lets a host callback's `prepend_token`
+    /// work without a special case: whatever the host leaves behind *is* the stream.
     pub fn replace_tokens(&mut self, tokens: Vec<Token>) {
         self.tokens = tokens.into_iter().rev().collect();
     }
 
     /// `Parser.skip_past(endtag)`.
     ///
-    /// Loops until a **block** token whose contents *equal* `endtag` — a
-    /// variable or comment token with the same contents does not terminate it —
-    /// and otherwise reports an unclosed block. `{% comment %}` uses this rather
-    /// than `parse`, so its body is never compiled at all (Review Focus item 9).
+    /// Loops until a **block** token whose contents *equal* `endtag` — a variable or comment
+    /// token with the same contents does not terminate it — and otherwise reports an unclosed
+    /// block. `{% comment %}` uses this rather than `parse`, so its body is never compiled.
     pub fn skip_past(&mut self, endtag: &str) -> Result<(), Error> {
         while let Some(token) = self.next_token() {
             if token.token_type == TokenType::Block && token.contents == endtag {
@@ -342,20 +294,16 @@ impl<'a> Parser<'a> {
                             Error::syntax(format!("Empty variable tag on line {}", token.lineno)),
                         ));
                     }
-                    // `self.compile_filter(token.contents)`, which is
-                    // `FilterExpression(contents, self)`. The filter *names* are
-                    // validated through the host at the point in
-                    // `FilterExpression.__init__`'s loop where Django validates
-                    // them; `VariableNode.__init__`'s parameter is named
-                    // `filter_expression` (`base.py:1139`) and the materialiser
-                    // constructs by keyword, so the name is contract.
+                    // `self.compile_filter(token.contents)`, i.e. `FilterExpression(contents, self)`.
+                    // The filter *names* are validated through the host where Django validates
+                    // them; `VariableNode.__init__`'s parameter is named `filter_expression`
+                    // (`base.py:1139`) and the materialiser constructs by keyword, so the name is
+                    // contract.
                     //
-                    // The error goes through `self.error` because Django wraps
-                    // this call in `except TemplateSyntaxError as e: raise
-                    // self.error(token, e)` (`base.py:549-551`), and a
-                    // filter-check failure is one of those — it is a Python
-                    // exception from `find_filter`. `error()` sets the token only
-                    // when there is none, so the innermost one still wins.
+                    // The error goes through `self.error` because Django wraps this call in
+                    // `except TemplateSyntaxError as e: raise self.error(token, e)`
+                    // (`base.py:549-551`), and a filter-check failure is one of those. `error()`
+                    // sets the token only when there is none, so the innermost one still wins.
                     let expression = parse_filter_expression(&token.contents, self.host)
                         .map_err(|error| self.error(&token, error))?;
                     let node = NodeDesc::new("VariableNode").attr(
@@ -365,19 +313,15 @@ impl<'a> Parser<'a> {
                     self.extend_nodelist(&mut nodelist, node, &token)?;
                 }
                 TokenType::Block => {
-                    // The raw first word, not `split_contents()`: `{% 'a b' %}`
-                    // dispatches on `'a`, and using M1's splitter here would
-                    // dispatch on `'a b'` because smart_split keeps quoted
-                    // phrases whole (Review Focus item 2). Django indexes
-                    // `token.contents.split()[0]` and catches `IndexError` for
-                    // an empty `contents`, which is the `Empty block tag` case
-                    // below — that is `[0]` on an empty list, not the `next(bits)`
-                    // exhaustion `split_contents` is subject to.
+                    // The raw first word, not `split_contents()`: `{% 'a b' %}` dispatches on
+                    // `'a`, and the splitter would dispatch on `'a b'` because smart_split keeps
+                    // quoted phrases whole. Django indexes `token.contents.split()[0]` and catches
+                    // `IndexError` for empty `contents` — that is `[0]` on an empty list, not the
+                    // `next(bits)` exhaustion `split_contents` is subject to.
                     //
-                    // It is Python's `str.split` — so `pyunicode::split`, whose
-                    // table is `str.isspace()` and so includes U+001C-U+001F —
-                    // never `str::split_whitespace`, which would disagree on
-                    // those four code points and so on which tag was found.
+                    // It is Python's `str.split`, so `pyunicode::split`, whose table is
+                    // `str.isspace()` and so includes U+001C-U+001F — never `str::split_whitespace`,
+                    // which would disagree on those four code points and so on which tag was found.
                     let Some(command) = pyunicode::split(&token.contents).first().copied() else {
                         return Err(self.error(
                             &token,
@@ -387,50 +331,33 @@ impl<'a> Parser<'a> {
                     let command = command.to_string();
 
                     if parse_until.contains(&command.as_str()) {
-                        // Put it back and return: the caller consumes it with
-                        // `next_token()`. Consuming it here produces
-                        // `endfor`-shaped nodes or silently drops a tag
-                        // (Review Focus item 3).
+                        // Put it back and return: the caller consumes it with `next_token()`.
+                        // Consuming it here produces `endfor`-shaped nodes or silently drops a tag.
                         self.prepend_token(token);
                         return Ok(nodelist);
                     }
 
                     self.command_stack.push((command.clone(), token.clone()));
 
-                    // The host is consulted first. Django's registry is one dict
-                    // that `add_library` updates in place, so a *later*
-                    // registration shadows an earlier one, and `{% load %}` runs
-                    // after the engine's builtins — a custom library that
-                    // redefines a built-in name wins. The shell must therefore
-                    // **not** register the built-ins Rust implements, or
-                    // host-first would route them to Python and these compile
-                    // functions would never run.
-                    //
-                    // Since M7 that "built-in" is not always `defaulttags`':
-                    // `block`, `extends` and `include` are `loader_tags`', merged
-                    // into the same dict by `Parser.__init__` rather than
-                    // registered there. The host's decision is the same either
-                    // way — it compares the entry against the module table it
-                    // ports, from both modules — and the only thing this side
-                    // sees is `true`/`false`. What the *previous* shape got
-                    // wrong is worth naming here because it lived in Python: an
-                    // exception list for those three names was consulted before
-                    // the comparison, so a `{% load %}`ed library redefining
-                    // `block` lost. Nothing on this side changes for that; the
-                    // host is still asked first, and still has the last word.
+                    // The host is consulted first. Django's registry is one dict that
+                    // `add_library` updates in place, so a *later* registration shadows an earlier
+                    // one, and `{% load %}` runs after the engine's builtins — a custom library
+                    // redefining a built-in name wins. The shell must therefore **not** register the
+                    // built-ins Rust implements, or host-first would route them to Python and these
+                    // compile functions would never run. `block`, `extends` and `include` are
+                    // `loader_tags`' entries, merged into the same dict by `Parser.__init__`; the
+                    // host compares the entry against the modules it ports, and this side only sees
+                    // `true`/`false`.
                     let compiled = if self.host.has_tag(&command) {
-                        // The host compiles it, and it may consume the rest of
-                        // the stream. Both halves cross by value: the host is
-                        // Python's own `Parser` and holds no borrow of this one
-                        // (§5.2), which is what lets `{% load %}` and a
+                        // The host compiles it and may consume the rest of the stream. Both halves
+                        // cross by value: the host is Python's own `Parser` and holds no borrow of
+                        // this one (§5.2), which is what lets `{% load %}` and a
                         // `simple_block_tag`'s nested parse re-enter at all.
                         let remaining = self.remaining_tokens();
-                        // Not `?`: a host error must reach the `map_err` below
-                        // like any other compile error, because Django attaches
-                        // the token in `Parser.parse`'s `except` and the host's
-                        // exception does not carry one. `?` here would return
-                        // before `self.error(&token, …)` ran and the message
-                        // would lose its line and position.
+                        // Not `?`: a host error must reach the `map_err` below like any other
+                        // compile error, because Django attaches the token in `Parser.parse`'s
+                        // `except` and the host's exception carries none. `?` would return before
+                        // `self.error(&token, …)` ran and the message would lose its line.
                         match self.host.call_tag(&command, &token, &remaining) {
                             Ok((desc, left)) => {
                                 self.replace_tokens(left);
@@ -441,13 +368,10 @@ impl<'a> Parser<'a> {
                     } else if let Some(compile) = registry::builtin_tag(&command) {
                         compile(self, &token)
                     } else if let Some(compile) = loaded_library_tag(self.host, &command) {
-                        // A **library** tag — `{% load static %}` then
-                        // `{% static %}`. The host said `false` to `has_tag`
-                        // because the registered function is still Django's own
-                        // and the name is one Rust compiles, so the remaining
-                        // question is whether Rust has a body for it, and that
-                        // one is the registry's (M12). Both questions are inside
-                        // `loaded_library_tag`, whose doc says why the
+                        // A **library** tag — `{% load static %}` then `{% static %}`. The host
+                        // said `false` to `has_tag` because the registered function is still
+                        // Django's own, so the remaining question is whether Rust has a body for
+                        // it. Both questions are inside `loaded_library_tag`, whose doc says why the
                         // conjunction is the shape.
                         compile(self, &token)
                     } else {
@@ -469,18 +393,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// `Parser.error(token, e)` — **returns** the error with the token attached,
-    /// and only if it does not already carry one.
+    /// `Parser.error(token, e)` — **returns** the error with the token attached, and only if it
+    /// does not already carry one.
     ///
-    /// Rust has no `hasattr`, so the "already carries one" test is
-    /// `token.is_none()`. That is exactly equivalent: Django's exceptions never
-    /// define `token` as a class attribute, so before the first `error()` call
-    /// `hasattr` is false and afterwards it is true
-    /// (`TemplateSyntaxError.__init__` sets only `self.msg`).
-    ///
-    /// Django's `if not isinstance(e, Exception)` branch has no counterpart: a
-    /// Rust compile function can only *return* an `Error`, so "a tag raised a
-    /// string" is unrepresentable here.
+    /// Rust has no `hasattr`, so the "already carries one" test is `token.is_none()`. That is
+    /// exactly equivalent: Django's exceptions never define `token` as a class attribute
+    /// (`TemplateSyntaxError.__init__` sets only `self.msg`), so before the first `error()` call
+    /// `hasattr` is false and afterwards true. Django's `if not isinstance(e, Exception)` branch
+    /// has no counterpart: a Rust compile function can only *return* an `Error`, so "a tag raised
+    /// a string" is unrepresentable here.
     pub fn error(&self, token: &Token, error: Error) -> Error {
         Error {
             kind: error.kind,
@@ -511,15 +432,14 @@ impl<'a> Parser<'a> {
 
     /// `Parser.unclosed_block_tag(parse_until)`.
     ///
-    /// Reports the tag that was **left open** — from `command_stack`, not the
-    /// terminator that was being looked for (Review Focus item 6) — and the list
-    /// it was looking for, joined with `", "` rather than `get_text_list`'s
+    /// Reports the tag **left open** — from `command_stack`, not the terminator being looked for
+    /// — and the list it was looking for, joined with `", "` rather than `get_text_list`'s
     /// `" or "`.
     pub fn unclosed_block_tag(&mut self, parse_until: &[&str]) -> Error {
         let Some((command, token)) = self.command_stack.pop() else {
-            // Unreachable from `parse` and `skip_past`: both are only reached
-            // from inside a tag's compile function, and `parse` pushes the
-            // frame before calling it. Django would raise IndexError here.
+            // Unreachable from `parse` and `skip_past`: both are only reached from inside a tag's
+            // compile function, and `parse` pushes the frame before calling it. Django would raise
+            // IndexError here.
             return Error::internal("unclosed_block_tag with an empty command stack");
         };
         let message = format!(
@@ -533,16 +453,13 @@ impl<'a> Parser<'a> {
 
     /// `Parser.extend_nodelist(nodelist, node, token)`.
     ///
-    /// This — not a node's `__init__` — is where a node acquires its position,
-    /// and it runs **after** the node is constructed, so a node whose
-    /// constructor reads its own subtree (`ExtendsNode.__init__` builds
-    /// `self.blocks` via `get_nodes_by_type`) sees children and no token
-    /// (Review Focus item 10).
+    /// This — not a node's `__init__` — is where a node acquires its position, and it runs
+    /// **after** the node is constructed, so a node whose constructor reads its own subtree
+    /// (`ExtendsNode.__init__` builds `self.blocks` via `get_nodes_by_type`) sees children and
+    /// no token.
     ///
-    /// Returns `Result` because Django's must-be-first and command-stack rules
-    /// make an append able to fail; in M2 the failure is unreachable for the
-    /// nine tags (none sets `must_be_first`) and is reached only by Task 3's
-    /// stand-in.
+    /// Returns `Result` because Django's must-be-first and command-stack rules make an append
+    /// able to fail.
     pub fn extend_nodelist(
         &self,
         nodelist: &mut NodeListDesc,
@@ -550,11 +467,9 @@ impl<'a> Parser<'a> {
         token: &Token,
     ) -> Result<(), Error> {
         if node.must_be_first && nodelist.contains_nontext {
-            // Django's test is **truthiness**, not `is None` (`base.py:602-606`):
-            // `if self.origin.template_name:` picks "the template" for an empty
-            // name as well as for `None`. Rust holds `Some("")` for the empty
-            // one, so the arm is explicit — the two encodings differ on exactly
-            // that input, and a `match` on `Option` alone would answer `''`.
+            // Django's test is **truthiness**, not `is None` (`base.py:602-606`): an empty name
+            // picks "the template" as well as `None`. Rust holds `Some("")` for the empty one, so
+            // the arm is explicit — a `match` on `Option` alone would answer `''`.
             let origin = match self.origin_template_name() {
                 Some(name) if !name.is_empty() => self.py_repr(name),
                 _ => "the template".to_string(),
@@ -567,9 +482,8 @@ impl<'a> Parser<'a> {
                 )),
             ));
         }
-        // Django asks `isinstance(node, TextNode)`; the descriptor has the class
-        // *name*, and no class subclasses TextNode (see `TEXT_NODE`), so this is
-        // the same test. Task 7 pins the assumption.
+        // Django asks `isinstance(node, TextNode)`; the descriptor has the class *name*, and no
+        // class subclasses TextNode (see `TEXT_NODE`), so this is the same test.
         if node.class_name != TEXT_NODE {
             nodelist.contains_nontext = true;
         }
@@ -581,58 +495,16 @@ impl<'a> Parser<'a> {
 
 /// The compile function for `command` **as a loaded library tag**, if it is one.
 ///
-/// Two questions, asked in this order, and the conjunction is this function's
-/// reason to exist rather than a convenience:
-///
-/// * the host answers whether the template loaded a library providing
-///   `command` — `ShellHost.library_tag_loaded` is `command in parser.tags`,
-///   which `{% load %}` mutates, and it is `true` for **all 18**
-///   `django.templatetags` names, 0 of which are Python's as of M12 Task 6b;
-/// * the registry answers whether Rust has a body for it ([`registry`]'s
-///   `LIBRARY_REGISTRY` — eighteen names as of M12 Task 6b).
-///
-/// Either question alone routes wrongly. The host's alone compiles any loaded
-/// name whose spelling the registry also carries, whether or not Rust has a
-/// body for it — the shape `blocktranslate` had until M12 Task 6b, when a
-/// loaded `{% blocktranslate %}` had to reach Django's body and the registry
-/// had no arm for it; the
-/// registry's alone compiles `{% static %}` in a template that never wrote
+/// Two questions, in this order, and the conjunction is why this exists: the host answers
+/// whether the template loaded a library providing `command` (`ShellHost.library_tag_loaded`
+/// is `command in parser.tags`, which `{% load %}` mutates), and the registry answers whether
+/// Rust has a body for it ([`registry`]'s `LIBRARY_REGISTRY`). Either alone routes wrongly: the
+/// host's alone compiles any loaded name the registry happens to spell too, whether or not Rust
+/// has a body; the registry's alone compiles `{% static %}` in a template that never wrote
 /// `{% load static %}`, which Django refuses.
 ///
-/// **This replaced a `match` with a third arm, and deleting that arm is a
-/// no-op by construction.** The arm
-/// (`library_tag_loaded(name) && library_tag(name).is_none()` →
-/// `invalid_block_tag`) returned *the same call with the same three arguments*
-/// as the `else` directly below it: `git show b83ec01^` shows
-/// `return Err(self.invalid_block_tag(&token, &command, parse_until))` twice,
-/// differing only by a trailing `;`. Two branches no input can distinguish are
-/// not defence in depth; they are a claim of coverage, and removing one cannot
-/// change what any template does. **Identity is the load-bearing reason here,
-/// and unlike the two below it cannot expire.**
-///
-/// The *measurements* that also bear on the arm are supporting context, and
-/// each is a claim about today's two tables rather than about the deletion:
-///
-/// * replacing the arm's body with `unreachable!()` left the whole gate green —
-///   `cargo test --workspace`, the Python unit suite (408 rows then; this
-///   batch's own two rows are counted after it), the 48-case differential
-///   harness, and Django's 1547;
-/// * the routing that makes it unreachable in production: the shell's
-///   `_rust_owned` takes its library half from `library_tag_names()`, the
-///   *same* table [`registry::library_tag`] reads, so a loaded name Rust owns
-///   always has a body here, while a loaded name Rust does not own makes
-///   `has_tag` return `true` in its second clause
-///   (`command not in self._rust_owned`,
-///   `python/django_rust_templates/host.py`) at the top of the chain, so this
-///   line is never consulted for it. The reviewer confirmed the same routing
-///   from outside: a third-party library registering `if`/`static` sends all
-///   four cases (with and without `OPTIONS["builtins"]`) to the host, and
-///   compiling all **30** names in `_rust_owned` produces **zero**
-///   `Invalid block tag` refusals.
-///
-/// A later reader who falsifies either table should still not conclude the
-/// deletion was unsafe; identity is why. The two inputs that *do* distinguish
-/// the conjunction are rows in this module's tests, one per direction.
+/// The conjunction's two distinguishing inputs are rows in this module's tests, one per
+/// direction.
 fn loaded_library_tag(host: &dyn Host, command: &str) -> Option<CompileFn> {
     if !host.library_tag_loaded(command) {
         return None;
@@ -682,8 +554,8 @@ mod tests {
 
     #[test]
     fn tokens_are_consumed_in_source_order() {
-        // `Parser::new` reverses and `next_token` pops, so the two reversals
-        // must cancel. A single reversal shows up here as the *last* token first.
+        // `Parser::new` reverses and `next_token` pops, so the two reversals must cancel; a
+        // single reversal shows up here as the *last* token first.
         let mut parser = Parser::new(Lexer::new("a{{ x }}b").tokenize(), &NoHost);
         assert_eq!(stream(&mut parser), vec!["a", "x", "b"]);
     }
@@ -699,10 +571,9 @@ mod tests {
 
     #[test]
     fn delete_first_token_deletes_from_the_front_of_the_stream() {
-        // `del self.tokens[-1]` on a reversed vec. The tempting implementation —
-        // `remove(0)` or `drain(..1)` on a forward vec — deletes the wrong end,
-        // and the symptom is a block tag's *second* parse, i.e. the `{% empty %}`
-        // branch of `{% for %}` (Review Focus item 4).
+        // `del self.tokens[-1]` on a reversed vec. The tempting `remove(0)`/`drain(..1)` on a
+        // forward vec deletes the wrong end, and the symptom is a block tag's *second* parse,
+        // i.e. the `{% empty %}` branch of `{% for %}`.
         let mut parser = Parser::new(Lexer::new("a{{ x }}b").tokenize(), &NoHost);
         parser.delete_first_token();
         assert_eq!(stream(&mut parser), vec!["x", "b"]);
@@ -767,10 +638,9 @@ mod tests {
         assert_eq!(error.token.unwrap().contents, "nope");
     }
 
-    /// Parse one tag under a host that reports exactly `loaded` as loaded —
-    /// the shape `ShellHost`'s `library_tag_loaded` has, `command in
-    /// parser.tags`, and the only shape under which the two questions
-    /// [`loaded_library_tag`] conjoins can disagree.
+    /// Parse one tag under a host that reports exactly `loaded` as loaded — the shape
+    /// `ShellHost`'s `library_tag_loaded` has, and the only shape under which
+    /// [`loaded_library_tag`]'s two questions can disagree.
     fn parse_with_loaded(loaded: Vec<&'static str>, source: &str) -> Result<NodeListDesc, Error> {
         let host = crate::parser::tags::support::LoadedLibrariesHost(loaded);
         Parser::new(Lexer::new(source).tokenize(), &host).parse(&[])
@@ -778,13 +648,10 @@ mod tests {
 
     #[test]
     fn a_library_tag_that_was_never_loaded_is_refused() {
-        // One direction of the disagreement, on a production path: `{% static %}`
-        // with no `{% load static %}`, which is the template Django refuses
-        // (`Invalid block tag … Did you forget to register or load this tag?`,
-        // `static.py`'s tag being unreachable without the load). The registry
-        // has a body for the name and the host says the library was not loaded —
-        // the input that tells the conjunction from the registry lookup alone,
-        // which would compile a `StaticNode` for a template stock Django rejects.
+        // One direction of the disagreement, on a production path: `{% static %}` with no
+        // `{% load static %}`, which Django refuses. The registry has a body for the name and the
+        // host says the library was not loaded — the input that tells the conjunction from the
+        // registry lookup alone, which would compile a `StaticNode` Django rejects.
         let error = parse_with_loaded(vec![], r#"{% static "a/b.css" %}"#)
             .expect_err("the library was never loaded");
         assert_eq!(
@@ -799,10 +666,8 @@ mod tests {
 
     #[test]
     fn the_same_tag_compiles_once_the_host_says_the_library_was_loaded() {
-        // The row above is only a row if this one passes: same source, one
-        // answer different, and the outcome flips. Together they are what makes
-        // the conjunction observable instead of asserted — and this is also the
-        // production path M12 Task 3 opened, `{% load static %}{% static %}`.
+        // The row above is only a row if this one passes: same source, one answer different, and
+        // the outcome flips. Together they make the conjunction observable rather than asserted.
         let nodelist = parse_with_loaded(vec!["static"], r#"{% static "a/b.css" %}"#)
             .expect("loaded, and Rust has a body");
         assert_eq!(nodelist.nodes[0].class_name, "StaticNode");
@@ -810,24 +675,15 @@ mod tests {
 
     #[test]
     fn a_loaded_library_tag_rust_has_no_body_for_is_refused_rather_than_panicking() {
-        // The other direction, and the input no production path reaches. The
-        // real instance is `trans` after `{% load i18n %}`: Django compiles it
-        // (`i18n.py`'s `do_trans`) and the real `ShellHost` answers `has_tag`
-        // first — `true`, by its `command not in self._rust_owned` clause — so
-        // [`loaded_library_tag`] is never consulted for it. The fixture is a
-        // **fabricated** name rather than `trans` because `trans` stops being an
-        // instance of this case the moment M12 Task 6 ports it: the row would
-        // then read a compile where it expects a refusal. `unregistered_tag` is
-        // a name no registry holds and no milestone can overtake, and the host's
-        // set is a literal, so the host can claim it was loaded.
+        // The other direction, and the input no production path reaches: the real instance is
+        // `trans` after `{% load i18n %}`, where the real `ShellHost` answers `has_tag` `true`
+        // first, so [`loaded_library_tag`] is never consulted. The fixture is a **fabricated** name
+        // rather than `trans` so that porting `trans` cannot turn this row into a compile where it
+        // expects a refusal; the host's set is a literal, so it can claim the name was loaded.
         //
-        // This row exists because the dispatch's *previous* shape had a branch
-        // for exactly this case and nothing could reach it — see
-        // [`loaded_library_tag`] for the measurement. What it holds is that the
-        // answer, if reached, is the same refusal an unregistered tag gets: not
-        // a panic, and not an `Unimplemented` — which is what a
-        // `library_tag_loaded`-alone gate would have to invent for a name it
-        // claimed and no body answered.
+        // It holds that the answer, if reached, is the same refusal an unregistered tag gets — not
+        // a panic, and not an `Unimplemented`, which a `library_tag_loaded`-alone gate would have to
+        // invent for a name it claimed and no body answered.
         let error = parse_with_loaded(vec!["unregistered_tag"], "{% unregistered_tag %}")
             .expect_err("Rust has no body for it");
         assert_eq!(
@@ -842,16 +698,12 @@ mod tests {
 
     #[test]
     fn a_variable_now_parses_and_the_m3_gap_is_closed() {
-        // M2's arm returned `Unimplemented` here, which the shell turned into a
-        // fallback to Django's own parse. This is the test that had to change
-        // when it stopped: no `Unimplemented` reaches a `{{ … }}` any more, so a
-        // harness scoring our agreement with Django never sees a variable
-        // bucketed as "not built yet".
+        // No `Unimplemented` reaches a `{{ … }}` any more, so a harness scoring our agreement with
+        // Django never sees a variable bucketed as "not built yet".
         let nodelist = parse_ok("{{ x }}");
         assert_eq!(nodelist.nodes[0].class_name, "VariableNode");
-        // `VariableNode.__init__(self, filter_expression)` — the parameter name
-        // is the materialiser's keyword, so it is pinned here rather than left to
-        // the FFI test.
+        // `VariableNode.__init__(self, filter_expression)` — the parameter name is the
+        // materialiser's keyword, so it is pinned here rather than left to the FFI test.
         assert!(matches!(
             nodelist.nodes[0].attrs.as_slice(),
             [(name, AttrValue::FilterExpr(_))] if name == "filter_expression",
@@ -861,8 +713,8 @@ mod tests {
     #[test]
     fn a_variable_that_django_rejects_is_rejected_here_too() {
         // The error travels out of `Parser::parse` rather than only out of
-        // `parse_filter_expression`, and it keeps the token — `error()` attaches
-        // it once, innermost first.
+        // `parse_filter_expression`, and it keeps the token — `error()` attaches it once,
+        // innermost first.
         let error = failure("{{ a+b }}");
         assert_eq!(
             error.kind,
@@ -873,8 +725,7 @@ mod tests {
 
     #[test]
     fn the_token_is_attached_once_and_never_replaced() {
-        // The innermost-token rule at its smallest: `error()` called twice keeps
-        // the first token (Review Focus item 5).
+        // The innermost-token rule at its smallest: `error()` called twice keeps the first token.
         let parser = Parser::new(Vec::new(), &NoHost);
         let outer = Token {
             token_type: TokenType::Block,
@@ -896,9 +747,8 @@ mod tests {
 
     #[test]
     fn skip_past_stops_only_on_a_block_token_with_the_exact_contents() {
-        // A variable token whose contents happen to match must not terminate the
-        // skip, or `{% comment %}{{ endcomment }}{% endcomment %}` would end one
-        // token early.
+        // A variable token whose contents happen to match must not terminate the skip, or
+        // `{% comment %}{{ endcomment }}{% endcomment %}` would end one token early.
         let mut parser = Parser::new(
             Lexer::new("a{{ endcomment }}b{% endcomment %}c").tokenize(),
             &NoHost,
@@ -910,8 +760,8 @@ mod tests {
     #[test]
     fn skip_past_reports_an_unclosed_block_through_the_command_stack() {
         let mut parser = Parser::new(Lexer::new("a").tokenize(), &NoHost);
-        // `skip_past` is only ever called from inside a compile function, so the
-        // stack has the frame the real parser would have pushed.
+        // `skip_past` is only ever called from inside a compile function, so the stack has the
+        // frame the real parser would have pushed.
         parser.command_stack.push((
             "comment".to_string(),
             Token {
@@ -933,10 +783,9 @@ mod tests {
 
     #[test]
     fn dispatch_uses_the_raw_first_word_not_split_contents() {
-        // `token.contents.split()[0]` is the *raw* split, not `split_contents`:
-        // smart_split keeps quoted phrases whole, so dispatching through it
-        // would name `'a b'` here rather than `'a` (Review Focus item 2). The
-        // command is observable in the invalid-tag message, which quotes it.
+        // `token.contents.split()[0]` is the *raw* split, not `split_contents`: smart_split keeps
+        // quoted phrases whole, so dispatching through it would name `'a b'` here rather than `'a`.
+        // The command is observable in the invalid-tag message, which quotes it.
         let error = failure("{% 'a b' %}");
         assert_eq!(
             error.kind,
@@ -950,11 +799,9 @@ mod tests {
 
     #[test]
     fn dispatch_splits_on_pythons_whitespace_table_not_rusts() {
-        // Python's `str.split()` uses `str.isspace()`, which is true for
-        // U+001C-U+001F; Rust's `str::split_whitespace` is not. So the first word
-        // of `ab\u{1c}cd` is `ab` in Python and `ab\u{1c}cd` in Rust, and a
-        // dispatch that used Rust's splitter would name the wrong tag
-        // (Review Focus item 2).
+        // Python's `str.split()` uses `str.isspace()`, which is true for U+001C-U+001F; Rust's
+        // `str::split_whitespace` is not, so the first word of `ab\u{1c}cd` is `ab` in Python and
+        // `ab\u{1c}cd` in Rust — a Rust splitter would name the wrong tag.
         let error = failure("{% ab\u{1c}cd %}");
         assert_eq!(
             error.kind,

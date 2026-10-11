@@ -1,29 +1,11 @@
-//! One module per filter (design spec §10.4).
+//! One module per filter (design spec §10.4), each with an entry in [`REGISTRY`].
 //!
-//! M4 owns all 57 built-in filters (§10.3), so every one of them is a module, an
-//! entry in [`REGISTRY`] and a **stub** until the group task that owns it replaces
-//! the body. A missing registry row would be a filter the engine cannot even name;
-//! a stub is a filter it names and refuses to run, which is what makes the
-//! milestone's progress visible — `every_registry_entry_is_a_stub_at_m4` shrinks as
-//! each group lands, and its failure names what is left.
-//!
-//! **Written once, in full, and never edited by a fan-out agent**, for the reason
-//! `parser::registry` gives: under fan-out each agent owns one `filters/<name>.rs`,
-//! and a registry that grew as they landed would be the single shared file they all
-//! had to edit — exactly the clobbering this layout exists to prevent. An agent
-//! that needs a new `FilterHost` operation stops and reports (§D7); it does not
-//! edit this file either.
-//!
-//! The flags are **measured from `.django` @ 6.0.9**, not inferred from behaviour:
-//! 36 filters carry `is_safe=True`, 19 carry `is_safe=False`, and `cut` and
-//! `escapejs` have **no `is_safe` attribute at all** — `base.py:816` and
-//! `stringfilter`'s wrapper (`defaultfilters.py:48`) both read
-//! `getattr(..., "is_safe", False)`, so absent behaves as false and a `bool` is
-//! the right model for the engine. It is not the right model for a *test*:
-//! `tests/test_filter_inventory.py` asserts the absence separately, because a Rust
-//! `bool` cannot tell the two apart and a reader would otherwise assume Django's
-//! attribute is always present. `do_not_call_in_templates` and `alters_data` are
-//! measured absent on all 57.
+//! The flags are **measured from `.django` @ 6.0.9**: 36 filters carry
+//! `is_safe=True`, 19 `is_safe=False`, and `cut`/`escapejs` have **no `is_safe`
+//! attribute at all** — `getattr(..., "is_safe", False)` (`base.py:816`,
+//! `defaultfilters.py:48`) makes absent behave as false, so a `bool` models the
+//! engine (but not a *test*: `tests/test_filter_inventory.py` asserts the absence).
+//! `do_not_call_in_templates` and `alters_data` are measured absent on all 57.
 
 use crate::parser::error::Error;
 
@@ -31,21 +13,14 @@ pub mod host;
 pub mod value;
 
 /// Shared helpers — code the bodies use but which is not itself a filter. Not
-/// `pub`: nothing outside this module tree calls it, and a filter module reaches
-/// it as `crate::filters::padding::…`.
+/// `pub`: nothing outside this module tree calls it.
 mod padding;
 
-/// The same, for the one pure table more than one group's bodies need: see
-/// [`html_escape`] for why it is not a helper inside `escape.rs`.
+/// The one pure table more than one group's bodies need; see [`html_escape`].
 mod html_escape;
 
-/// …and it is reachable from outside the crate while the *module* stays private,
-/// which is what M19's shell needs and nothing else does.
-///
-/// `pub use` rather than `pub mod`: the doc note above says no agent owns the
-/// table, and a public module path would make `filters::html_escape::html_escape`
-/// a second name for it — a spelling a caller could adopt without the ownership
-/// question being answered. One name, exported where the crate boundary is.
+/// Reachable outside the crate while the *module* stays private. `pub use` rather
+/// than `pub mod` so `filters::html_escape::html_escape` is not a second name for it.
 pub use html_escape::html_escape;
 
 pub mod add;
@@ -119,9 +94,8 @@ pub use host::{
     DecimalParse, DecimalTuple, FilterCall, FilterHost, NoFilterHost, NumberFormatArgs,
     ParsedDecimal,
 };
-// Test-only, and re-exported under the same gate for the same reason it is
-// `#[cfg(test)]` in `host.rs`: a filter module's `mod tests` reaches it, and
-// nothing in a real build should be able to.
+// Test-only, like its `#[cfg(test)]` in `host.rs`: a filter module's `mod tests`
+// reaches it, and nothing in a real build should be able to.
 #[cfg(test)]
 pub use host::TestFilterHost;
 pub use value::{Value, ValueId};
@@ -129,9 +103,7 @@ pub use value::{Value, ValueId};
 /// The three flags Django records per filter, by the names it records them under.
 ///
 /// Four shapes cover all 57 — `NONE` (19), `SAFE` (29), `SAFE_AUTOESCAPE` (7) and
-/// `LOCALTIME` (2) — which is why the constants exist rather than 57 spelled-out
-/// literals: only the 11 filters carrying a second flag are interesting, and a
-/// one-line entry makes which group a filter is in readable at a glance.
+/// `LOCALTIME` (2) — which is why the constants exist rather than 57 literals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FilterFlags {
     pub is_safe: bool,
@@ -170,9 +142,8 @@ impl FilterFlags {
 /// A filter body: the value, its one optional argument, and the seam.
 ///
 /// A plain `fn` pointer rather than `Box<dyn Fn>`, so the registry is a `static`
-/// and so a filter cannot capture anything — Django's filters are functions of
-/// `(value, arg)`, and a closure over surrounding state would be the first filter
-/// whose behaviour a template author cannot see from its call site.
+/// and a filter cannot capture anything — Django's filters are functions of
+/// `(value, arg)`.
 pub type FilterFn = fn(Value, Option<Value>, &FilterCall<'_>) -> Result<Value, Error>;
 
 /// One filter: what it is called, what Django says about it, and what it does.
@@ -186,44 +157,29 @@ pub struct FilterEntry {
     /// file compares those three against the pinned registry, and a fourth field
     /// riding along would make that comparison a statement about us instead.
     ///
-    /// The wrapper is not decoration, and the FFI applies it **once, before the
-    /// body** — which is what Django does: `@stringfilter` rebinds
-    /// `first = str(first)` and calls the body with the coerced value, so a body
-    /// is handed a string whether its caller passed a string or not. It then marks
-    /// the result safe iff the **coerced** value is `SafeData` and the inner
-    /// function's `is_safe` is true — a test that differs from `base.py:816`'s,
-    /// which asks about the value the filter was handed. The two agree on every
-    /// `str` and every `str` subclass, because `str(SafeString)` returns itself,
-    /// and diverge on a lazy `__proxy__`: not `SafeData`, but its `str()` is.
-    /// Measured in §D3 of the plan; the corpus carries the case.
-    ///
-    /// A body that reads the value's *safety* therefore reads the coerced one,
-    /// which is Django's own semantics and what makes `cut` (`defaultfilters.py:445`) writable at
-    /// all — its `safe = isinstance(value, SafeData)` is a question about the
-    /// value the wrapper produced. `stringfilter: true` is the statement that a
-    /// body may branch on that, and that the FFI owes it a coerced `Value` rather
-    /// than the raw one.
+    /// The FFI applies the wrapper **once, before the body**: Django rebinds
+    /// `first = str(first)` and marks the result safe iff the **coerced** value is
+    /// `SafeData` and the inner `is_safe` is true — a test that differs from
+    /// `base.py:816`'s, which asks about the value the filter was handed. The two
+    /// agree on every `str`/`str` subclass and diverge on a lazy `__proxy__`. A body
+    /// that reads the value's *safety* therefore reads the coerced one, which is
+    /// what makes `cut` (`defaultfilters.py:445`) writable at all; `stringfilter:
+    /// true` is the statement that a body may branch on that.
     pub stringfilter: bool,
     pub run: FilterFn,
 }
 
 /// The 57 built-ins plus the nine `django.templatetags` library filters, ascending
-/// by name — **66 entries in one table**, which is the whole Rust-side shape of
-/// M12 Task 7.
+/// by name — **66 entries in one table**.
 ///
-/// **One table, not two, and that is measured rather than assumed** (trap 7).
-/// The tag side has two (`registry.rs::REGISTRY` and `LIBRARY_REGISTRY`) because
-/// a library *tag* is not ours until `{% load %}`ed — `has_tag` compares a name
-/// against Django's callable. Filters have no such question: the Python seam is
-/// `names.get(func)` — the per-expression name table `host.django_own_filter_names`
-/// builds from `django_own_filters()` — keyed on the **function object**
-/// (`python/django_rust_templates/engine/base.py:889`), so a library filter's handle is in the map only once
-/// `{% load %}` registered it — "loaded" is implied by the key being present at
-/// all. A second Rust filter table would be a routing distinction the seam does
-/// not make, and `django_own_filters()` would have to guess which table to search.
-///
-/// The nine are appended *in place*, so the ascending order [`MEASURED_NAMES`]
-/// pins is one order over the whole table rather than two concatenated ones.
+/// **One table, not two, and that is measured rather than assumed.** The Python
+/// seam is `names.get(func)` — the per-expression name table built from
+/// `django_own_filters()` — keyed on the **function object**
+/// (`python/django_rust_templates/engine/base.py:889`), so a library filter's handle
+/// is in the map only once `{% load %}` registered it. A second Rust filter table
+/// would be a routing distinction the seam does not make. The nine are appended *in
+/// place*, so the ascending order [`MEASURED_NAMES`] pins is one order over the whole
+/// table rather than two concatenated ones.
 static REGISTRY: &[FilterEntry] = &[
     FilterEntry {
         name: "add",
@@ -249,11 +205,8 @@ static REGISTRY: &[FilterEntry] = &[
         run: center::run,
         stringfilter: true,
     },
-    // `is_safe` is **absent**, not `False`, on the real filter —
-    // `getattr(f, "is_safe", False)` (`base.py:816`, and the
-    // `stringfilter` wrapper at `defaultfilters.py:48`) makes the
-    // two behave alike. `FilterFlags` cannot spell "absent", and
-    // `tests/test_filter_inventory.py` asserts the difference.
+    // `is_safe` is **absent**, not `False`, on the real filter — see the module
+    // header; `tests/test_filter_inventory.py` asserts the difference.
     FilterEntry {
         name: "cut",
         flags: FilterFlags::NONE,
@@ -302,11 +255,8 @@ static REGISTRY: &[FilterEntry] = &[
         run: escape::run,
         stringfilter: true,
     },
-    // `is_safe` is **absent**, not `False`, on the real filter —
-    // `getattr(f, "is_safe", False)` (`base.py:816`, and the
-    // `stringfilter` wrapper at `defaultfilters.py:48`) makes the
-    // two behave alike. `FilterFlags` cannot spell "absent", and
-    // `tests/test_filter_inventory.py` asserts the difference.
+    // `is_safe` is **absent**, not `False`, on the real filter — see the module
+    // header; `tests/test_filter_inventory.py` asserts the difference.
     FilterEntry {
         name: "escapejs",
         flags: FilterFlags::NONE,
@@ -367,15 +317,10 @@ static REGISTRY: &[FilterEntry] = &[
         run: json_script::run,
         stringfilter: false,
     },
-    // --- the four `i18n` language filters (M12 Task 7) ---------------------
-    // Not built-ins: `register.filter` entries in `django/templatetags/i18n.py`,
-    // and they go into the one registry for trap 7's measured reason — the
-    // Python seam is `django_own_filters().get(func)`, keyed on the **function
-    // object**, so a library filter's handle exists only once `{% load %}`
-    // registered it and "loaded" is already implied by the key being present.
-    // A second Rust table would be a routing decision the tree does not make.
-    // All four are `FilterFlags::NONE` (bare `@register.filter`) and
-    // `stringfilter: false`; `language_bidi` returns a bool, not text.
+    // --- the four `i18n` language filters -------------------------------------
+    // `django/templatetags/i18n.py` registrations, in the one registry for the
+    // reason the module doc gives. All `NONE`, `stringfilter: false`;
+    // `language_bidi` returns a bool, not text.
     FilterEntry {
         name: "language_bidi",
         flags: FilterFlags::NONE,
@@ -436,18 +381,16 @@ static REGISTRY: &[FilterEntry] = &[
         run: ljust::run,
         stringfilter: true,
     },
-    // --- the two `l10n` filters (M12 Task 7) -------------------------------
-    // `l10n.py`'s only two registrations, and both are `is_safe=False`
-    // (`l10n.py:7,15`) — a registration property, not decoration: it is what
-    // keeps `base.py:816` from marking a `SafeString` input's result safe.
+    // --- the two `l10n` filters ---------------------------------------------
+    // `l10n.py`'s only two registrations, both `is_safe=False` (`l10n.py:7,15`):
+    // it is what keeps `base.py:816` from marking a `SafeString` input's result safe.
     FilterEntry {
         name: "localize",
         flags: FilterFlags::NONE,
         run: localize::run,
         stringfilter: false,
     },
-    // The first of the three `tz` names over one transcribed Python body
-    // (`do_timezone`, `tz.py:38-84`); `timezone` and `utc` are the other two.
+    // One of the three `tz` names over the transcribed `do_timezone` (`tz.py:38-84`).
     FilterEntry {
         name: "localtime",
         flags: FilterFlags::NONE,
@@ -551,8 +494,7 @@ static REGISTRY: &[FilterEntry] = &[
         stringfilter: false,
     },
     // The `timezone` name is `tz.py`'s `do_timezone` under a registered alias
-    // (`tz.py:37-38`); its Rust body reaches the same transcribed Python
-    // function `localtime` and `utc` do — `ours/theirs` at the seam.
+    // (`tz.py:37-38`).
     FilterEntry {
         name: "timezone",
         flags: FilterFlags::NONE,
@@ -655,9 +597,8 @@ static REGISTRY: &[FilterEntry] = &[
 
 /// The entry for `name`, if the engine has one.
 ///
-/// A linear scan of 66, for `parser::registry`'s reason: the table is small, the
-/// lookup is per filter call rather than per character, and a `HashMap` behind a
-/// `OnceLock` would add a synchronisation point to buy nothing.
+/// A linear scan of 66: the table is small and the lookup is per filter call, so a
+/// `HashMap` behind a `OnceLock` would add a synchronisation point to buy nothing.
 pub fn filter(name: &str) -> Option<&'static FilterEntry> {
     REGISTRY.iter().find(|entry| entry.name == name)
 }
@@ -667,14 +608,10 @@ pub fn filter_names() -> Vec<&'static str> {
     REGISTRY.iter().map(|entry| entry.name).collect()
 }
 
-/// The filters whose body carries Django's `@stringfilter`, ascending.
-///
-/// The registry field's reader, and the only one: the FFI exposes it so that
-/// `tests/test_filter_inventory.py` can compare it against the 29 names it derives
-/// from the pinned `defaultfilters.py`'s AST. Which filters those are is *Django's*
-/// fact, and this module holds a transcription of it — so something on Django's
-/// side has to be able to disagree with the transcription, and nothing in this
-/// file can.
+/// The filters whose body carries Django's `@stringfilter`. The registry field's
+/// only reader: the FFI exposes it so `tests/test_filter_inventory.py` can compare it
+/// against the 29 names it derives from the pinned `defaultfilters.py`'s AST, because
+/// nothing in this file can disagree with its own transcription.
 pub fn stringfilter_names() -> Vec<&'static str> {
     REGISTRY
         .iter()
@@ -688,22 +625,13 @@ mod tests {
     use super::*;
     use crate::parser::error::ErrorKind;
 
-    /// The **57 built-in** names, spelled out rather than counted — the M4 set,
-    /// unchanged by M12 Task 7.
+    /// The **57 built-in** names, spelled out.
     ///
-    /// Counted would be shorter and worse: the set is what a later milestone
-    /// compares against Django's own registry, and a test that only knows the
-    /// length cannot name the filter that went missing. Comparing to a sorted
-    /// literal also pins the "ascending by name" claim, so there is no separate
-    /// ordering test to drift from this one.
-    ///
-    /// **M12 Task 7 did not widen this list, and that is the measurement.** The
-    /// nine library filters are a *second* measured set ([`LIBRARY_NAMES`]); the
-    /// two are kept apart because they come from two registries — this one from
-    /// `django.template.defaultfilters`' 57 entries, that one from the five
-    /// `django.templatetags` libraries — and a reader diffs each against its own
-    /// source. The registry they both live in is asserted below as their ordered
-    /// union.
+    /// Spelled out, not counted: the set is what a later milestone diffs against
+    /// Django's own registry, and a length cannot name the filter that went missing.
+    /// The nine library filters are a separate measured set ([`LIBRARY_NAMES`]) from
+    /// a separate registry (the five `django.templatetags` libraries); the registry
+    /// they both live in is asserted below as their ordered union.
     const MEASURED_NAMES: [&str; 57] = [
         "add",
         "addslashes",
@@ -764,22 +692,20 @@ mod tests {
         "yesno",
     ];
 
-    /// The **nine library filter names**, spelled out — M12 Task 7's whole set.
+    /// The **nine library filter names**, spelled out.
     ///
-    /// Measured, not read off the census: the five pinned `django.templatetags`
-    /// libraries register exactly these nine `register.filter` entries —
-    /// `i18n.py`'s four `language_*` (`i18n.py:292-310`), `l10n.py`'s two
-    /// (`l10n.py:7,15`), and `tz.py`'s three names over one Python
-    /// `do_timezone` (`tz.py:19-38`). Spelled out for the same reason
-    /// [`MEASURED_NAMES`] is: a length-only guard cannot name the one that went
-    /// missing, and the registry-coverage row in `tests/test_interposition.py`
-    /// diffs the *whole* registry against `django_own_filters()` — a name
-    /// dropped here would leave that row passing on a smaller set.
+    /// The five pinned `django.templatetags` libraries register exactly these nine
+    /// `register.filter` entries: `i18n.py`'s four `language_*` (`i18n.py:292-310`),
+    /// `l10n.py`'s two (`l10n.py:7,15`), and `tz.py`'s three names over one Python
+    /// `do_timezone` (`tz.py:19-38`). Spelled out for [`MEASURED_NAMES`]'s reason: a
+    /// length-only guard cannot name the one that went missing, and the
+    /// registry-coverage row in `tests/test_interposition.py` diffs the *whole*
+    /// registry against `django_own_filters()`.
     ///
-    /// **The three `tz` names are `ours/theirs` at the seam**, not three Rust
-    /// bodies: `timezone` *is* the transcribed Python `do_timezone` and the other
-    /// two are two-line calls into it. The list does not distinguish them, and
-    /// must not — routing is what it measures, and all three route to Rust.
+    /// **The three `tz` names are `ours/theirs` at the seam**, not three Rust bodies:
+    /// `timezone` *is* the transcribed Python `do_timezone` and the other two are
+    /// two-line calls into it. The list does not distinguish them — routing is what it
+    /// measures, and all three route to Rust.
     const LIBRARY_NAMES: [&str; 9] = [
         "language_bidi",
         "language_name",
@@ -795,43 +721,18 @@ mod tests {
     /// The filters whose bodies are still stubs: the 57 minus every name a landed
     /// group already answers — **empty, because M4's last group has landed**.
     ///
-    /// A literal rather than an alias of [`MEASURED_NAMES`] now that groups have
-    /// landed, because the two are no longer the same set and an alias would have
-    /// to be trimmed in place to say so. Trimmed in full, in the order they
-    /// landed: Task 3's corpus seed (`lower`, `upper`); Task 4's six —
-    /// `capfirst`, `title`, `cut`, `addslashes`, `make_list`, `wordcount` —
-    /// Task 5's eight: `center`, `ljust`, `rjust`, `truncatechars`,
-    /// `truncatechars_html`, `truncatewords`, `truncatewords_html`, `wordwrap` —
-    /// Task 6's nine: `first`, `last`, `length`, `slice`, `join`, `random`,
-    /// `dictsort`, `dictsortreversed`, `unordered_list` — Task 7's three waves:
-    /// `add`, `divisibleby`, `get_digit`, `stringformat`; then `pluralize`,
-    /// `yesno`, `default`, `default_if_none`; then `filesizeformat` and
-    /// `floatformat`; Task 8 wave A's six — `escape`, `escapejs`,
-    /// `escapeseq`, `force_escape`, `safe`, `safeseq`; Task 9 wave A's
-    /// three — `phone2numeric`, `pprint`, `slugify`; Task 9 wave B's
-    /// three — `json_script`, `urlize`, `urlizetrunc`; and Task 10's four —
-    /// `date`, `time`, `timesince`, `timeuntil`. The wave numbering matches
-    /// `tests/test_filter_parity.py`'s, which counts the same three.
-    ///
-    /// **Deliberately no count in this doc**: it said 26 while the array held 22,
-    /// and a number in prose that nothing checks is a defect this project has
-    /// paid for more than once. The array's length is the count, and the
-    /// assertion below is what makes a stale entry fail rather than pass. An
-    /// empty array is the one shape that count cannot be wrong about — the
-    /// assertion's other direction (a declared name that is no longer a stub)
-    /// has nothing left to check, and the guard still fails if a body is
-    /// reverted to a stub, because that name would be `unbuilt` and undeclared.
+    /// Deliberately no count in this doc; the array's length is the count, and the
+    /// assertion below fails a stale entry. A body reverted to a stub would be
+    /// `unbuilt` and undeclared, so the guard still fires.
     const STILL_STUBBED: [&str; 0] = [];
 
     #[test]
     fn the_registry_is_the_measured_66() {
         // The union **as one ascending sequence**, not two concatenated lists:
-        // the two sets interleave (`language_*` and `last`, `ljust` and
-        // `localize`, `timeuntil` and `timezone`, …), so a registry that
-        // appended the nine after `yesno` would fail here — which is the point,
-        // because the registry is `filter()`-scanned and its doc claims one
-        // ascending order. Merging both sides and sorting is what makes that
-        // claim the assertion rather than a comment.
+        // the two sets interleave (`language_*`/`last`, `ljust`/`localize`,
+        // `timeuntil`/`timezone`), so a registry that appended the nine after
+        // `yesno` would fail here — which is the point, since `filter()` scans
+        // the registry and its doc claims one ascending order.
         let mut expected: Vec<&str> = MEASURED_NAMES
             .iter()
             .chain(LIBRARY_NAMES.iter())
@@ -850,23 +751,12 @@ mod tests {
 
     /// The registry's flags against the measured table, filter by filter.
     ///
-    /// A separate assertion from the name list because the two fail for different
-    /// reasons — a missing row and a wrong flag are different bugs — and because
-    /// the names and the flags come from different columns of the plan's Step 3
-    /// table. The expected set is spelled out here rather than derived from the
-    /// same four constants [`REGISTRY`] uses, or this test would agree with any
-    /// constant the registry picked.
-    ///
-    /// **That independence is what licenses the constants at all.**
-    /// [`FilterFlags::SAFE`], `SAFE_AUTOESCAPE`, `LOCALTIME` and `NONE` are each
-    /// shared by many rows, so a single wrong constant would be wrong in every
-    /// one of them at once — and the four constants are exactly the kind of
-    /// duplication a later reader deletes as "redundant with its uses". It is
-    /// not redundant: this test's names and flags are written out by hand, so
-    /// they are a second opinion rather than the constants repeated. Deriving
-    /// them from `FilterFlags::SAFE` here would remove the guard without
-    /// touching a constant, and the four names above would silently become four
-    /// aliases.
+    /// A separate assertion from the name list because a missing row and a wrong
+    /// flag are different bugs. The expected set is spelled out here rather than
+    /// derived from the same four constants [`REGISTRY`] uses, or this test would
+    /// agree with any constant the registry picked — and that independence is what
+    /// licenses the constants at all: a single wrong constant would be wrong in every
+    /// row that shares it.
     #[test]
     fn the_flags_are_the_measured_ones() {
         let safe_names: [&str; 36] = [
@@ -940,12 +830,10 @@ mod tests {
 
     /// The error a stub returns, if that is what it is.
     ///
-    /// Matched on the **kind and the name** rather than on "it returned `Err`".
-    /// "Any error counts as still-stubbed" would be wrong in both directions: a
-    /// real `add` given `Value::None` raises, so an implemented filter could look
-    /// stubbed, and a stub body that named the wrong filter — a copy-pasted
-    /// `run:` line — would look implemented. Matching the name makes the second
-    /// case a failure here, which is the one a 57-line table is likely to make.
+    /// Matched on the **kind and the name**, not on "it returned `Err`": a real
+    /// filter given `Value::None` raises, so an implemented filter could look
+    /// stubbed, and a stub body that named the wrong filter would look implemented.
+    /// Matching the name makes that second case a failure here.
     fn stub_error(name: &str, error: &Error) -> bool {
         matches!(
             &error.kind,
@@ -956,13 +844,11 @@ mod tests {
     /// Every body is a stub, and this is what makes each group's deliverable
     /// visible as it lands.
     ///
-    /// **The central commit that lands a group moves that group's names out of
-    /// [`STILL_STUBBED`]**, in the same commit. The assertion is checked in both
-    /// directions and names each side, because the two failures mean opposite
-    /// things — a name that is still a stub but no longer declared means the list
-    /// was trimmed too early, and a declared name that is already implemented
-    /// means the group landed without saying so. A plain `assert_eq!` of two
-    /// 57-name lists makes a reader find the difference by eye.
+    /// **The commit that lands a group moves that group's names out of
+    /// [`STILL_STUBBED`]** in the same commit. The assertion names each side, because
+    /// the two failures mean opposite things — a name still a stub but no longer
+    /// declared means the list was trimmed too early, and a declared name already
+    /// implemented means the group landed without saying so.
     #[test]
     fn every_registry_entry_is_a_stub_at_m4() {
         let call = FilterCall {
@@ -974,30 +860,16 @@ mod tests {
             .iter()
             .filter(|entry| {
                 // A body whose **first** host interaction is one of the trait's
-                // non-`Result` methods meets `NoFilterHost`'s `refused_panic`
-                // before it can return anything — `is_tuple` for `stringformat`
-                // (measured; `if isinstance(value, tuple)` is the source's first
-                // line), `mark_safe` for `safe`/`safeseq` (Task 8 wave A), and
-                // `is_safe` for `linebreaks` and Task 9 wave B's `urlize` /
-                // `urlizetrunc` (`autoescape and not is_safe(value)` is evaluated
-                // before any `Result`-returning call).
-                // That is the designed refusal working and it is **not a stub**:
-                // a stub returns `unimplemented_filter` without touching the host
-                // at all. A panic is caught rather than propagated because this
-                // test's question is which names still raise `UnimplementedTag`,
-                // and a panic has already answered it — the alternative is that
-                // every non-`Result`-first body makes this guard unusable, which
-                // is a hole in the detector, not a property of the filters.
+                // non-`Result` methods meets `NoFilterHost`'s `refused_panic` before
+                // it can return anything — `is_tuple` for `stringformat`, `mark_safe`
+                // for `safe`/`safeseq`, `is_safe` for `linebreaks` and `urlize`/
+                // `urlizetrunc` (measured). That is the designed refusal, **not a
+                // stub**: a stub returns `unimplemented_filter` without touching the
+                // host. A panic is caught rather than propagated because a panic has
+                // already answered this test's question.
                 //
-                // **This makes the test depend on unwinding.** `catch_unwind`
-                // cannot catch anything under `panic = "abort"`, which is the
-                // setting that travels with the `lto`/`codegen-units` already in
-                // `[profile.release]` — so if it is ever added, `cargo test` on
-                // the default (unwind) profile stays green and `cargo test
-                // --release` dies by signal instead of reporting a failure. The
-                // panic-free shape, if that day comes, is a host that *records*
-                // being touched and returns dummies, so the detector asks its
-                // question rather than inferring it from a panic.
+                // **This makes the test depend on unwinding.** Under `panic =
+                // "abort"` it would die by signal instead of reporting.
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     (entry.run)(Value::None, None, &call)
                 }));

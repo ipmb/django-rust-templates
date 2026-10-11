@@ -51,9 +51,9 @@
 //! **`SuspiciousOperation` crosses the FFI as itself.** The real host's
 //! `strip_tags` is `utility_text_checked` → `host_error`, which keeps the live
 //! `PyErr`, and `run_filter`'s `report` returns that object rather than anything
-//! rebuilt from the class name — `crates/template-py/src/filters.rs:958` is the
-//! call, `crates/template-py/src/filters.rs:311-320` the keeping, and the
-//! `host.take_raised()` in `crates/template-py/src/filters.rs:1903-1906` the
+//! rebuilt from the class name — `crates/template-py/src/filters.rs:821` is the
+//! call, `crates/template-py/src/filters.rs:246-255` the keeping, and the
+//! `host.take_raised()` in `crates/template-py/src/filters.rs:1669-1672` the
 //! returning. So a corpus row
 //! **can** pin it as a parity row — `raises: "SuspiciousOperation"`,
 //! `message: ""` — rather than a documented divergence: the exception's class

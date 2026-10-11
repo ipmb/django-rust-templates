@@ -1,154 +1,81 @@
-"""M4's filter corpus: the inputs the parity test compares Django and Rust on.
+"""The filter corpus: inputs the parity test compares Django and Rust on.
 
-Each row is one `FilterExpression.resolve` on each side — Django's real
-`FilterExpression` over a real `Context`, and `_native.filter` over the same
-input — compared on `(type name, value)` and, separately, on safety.
+Each row is one ``FilterExpression.resolve`` on each side — Django's real
+``FilterExpression`` over a real ``Context``, and ``_native.filter`` over the same
+input — compared on ``(type name, value)`` and, separately, on safety.
 
-**Why a corpus file at all, when Django's own `template_tests` is the acceptance
-criterion.** Two reasons, and neither is redundancy:
+**Why a corpus file at all.** The suite runs against the *shim*, so it tests through
+``django.template``; this compares the filter seam directly, naming the filter and the
+input rather than a test module and a line. And it compares **safety** and **type**,
+which a rendered template mostly does not: ``upper`` and ``lower`` produce the same
+text either way and differ in whether the result is a ``SafeString``.
 
-* the suite runs against the *shim*, so it tests the engine through
-  `django.template`; this compares the filter seam directly, which is what makes
-  a failure name the filter and the input instead of a test module and a line;
-* and it compares **safety** and **type**, which a rendered template mostly does
-  not. `upper` and `lower` produce the same text either way, and differ in
-  whether the result is a `SafeString` — a difference that shows up only later,
-  as an escaping decision, in a test that then looks like it is about escaping.
+**An absent ``arg`` is ``func(obj)`` and ``"arg": None`` is ``func(obj, None)``** —
+different calls, not spellings, because Django builds ``arg_vals``
+(``base.py:804-809``) and spreads it (``base.py:813``/``base.py:815``); the list's
+*length* is the distinction. The key's presence is the signal, so the harness reads it
+through ``tests/test_filter_parity.py``'s ``case_arg`` rather than ``.get("arg")``,
+which collapsed the two and scored a raise as an answer. The two tokens are ``x|f`` and
+``x|f:None``.
 
-**An absent `arg` is the call `func(obj)` and `"arg": None` is the call
-`func(obj, None)`** — two different calls, not two spellings of one, because
-Django builds `arg_vals` (`base.py:804-809`) and spreads it
-(`base.py:813`/`base.py:815`), and the list's *length* is the distinction.
-So the key's presence is the whole
-signal, which is why the harness reads it through `tests/test_filter_parity.py`'s
-`case_arg` — `case["arg"]` when the key is there, `NO_ARG` when it is not —
-rather than `.get("arg")`, which collapsed the two and scored a raise as an
-answer. Measured on the pinned tree, **three** of the 23 landed filters that take
-an argument answered where Django raises: `floatformat` and `pluralize`, whose
-bodies were handed the absent-argument value in place of the argument, and
-`unordered_list`, whose raise is a different artefact entirely (`base.py:813`;
-see [`ERROR_CASES`]). The two tokens are `x|f` and `x|f:None`, and
-`scripts/filter_probe.py` takes the choice from the command line the same way —
-omitting the argument is the first, passing the literal `None` the second.
+**An ``arg`` that is not a ``str`` is a bare token and arrives unmarked**, a different
+input from the same text quoted: ``x|ljust:5`` hands the filter the ``int`` 5, where
+``x|ljust:"5"`` hands it ``SafeString('5')`` — a quoted argument is a *constant* and
+``resolve``'s loop ``mark_safe``s it (``base.py:800-806``), a bare one a ``var_arg``
+resolved by ``Variable``.
 
-**An `arg` that is not a `str` is a bare token and arrives unmarked**, which is
-a different input from the same text quoted. Measured on the pinned 6.0.9:
-`x|ljust:5` hands the filter the `int` 5, where `x|ljust:"5"` hands it
-`SafeString('5')` — a quoted argument is a *constant* and `resolve`'s loop
-`mark_safe`s it (`base.py:800-806`), while a bare one is a `var_arg` resolved by
-`Variable`. `filter_probe.rust_answer` mirrors both, so a row may declare an
-`int` and have both sides receive an `int`. It did not, until Task 5: the
-harness marked every argument, and no row could see it because every earlier
-row's argument was a string.
+**The ``value`` is a real Python object, not a literal to be parsed.** That is what
+lets a row be ``mark_safe("AbC")``, and the safety rows are the point.
 
-**The `value` is a real Python object, not a literal to be parsed.** That is what
-lets a row be `mark_safe("AbC")` — and the safety rows are the point of this
-file. A textual format would have needed a second, private encoding for
-`safestring` and then a reason to trust it.
-
-**The optional keys change what the row *is*, and each exists because the default
-would quietly score a different question.** They are `value_factory`, `context`,
-`settings`, `arg_variable`, `membership` and `expected`, and they are **named here
-rather than counted**: this sentence said "four" while the file read six, and a
-number in prose that nothing checks is a defect this corpus has been fixed for
-more than once. `value_factory` replaces `value` for a **one-shot** input — a
+**The optional keys change what the row *is*.** They are ``value_factory``,
+``context``, ``settings``, ``arg_variable``, ``membership`` and ``expected``, **named
+rather than counted** (a number in prose nothing checks is a defect this corpus has
+been fixed for). ``value_factory`` replaces ``value`` for a **one-shot** input — a
 generator is consumed by whichever side reads it first, so a shared one makes the
-second side's answer a statement about an exhausted iterator; see [`case_value`].
-`context` overrides the `Context` the loop reads `autoescape` and `use_tz` off,
-which is how the `needs_autoescape` filters get both branches: `join` with and
-without escaping answers different text from the same input, so nothing but the
-key can tell the two rows apart. `arg_variable` carries an argument of a shape a
-template cannot spell as a constant, which is what `pluralize`'s `[1]` and `[","]`
-need (see `arg_token`); `membership` replaces the equality assertion with a
-population test for the filters whose answer is chosen at random.
+second side's answer a statement about an exhausted iterator. ``context`` overrides
+the ``Context`` the loop reads ``autoescape`` and ``use_tz`` off, how the
+``needs_autoescape`` filters get both branches. ``arg_variable`` carries an argument
+of a shape a template cannot spell as a constant (``pluralize``'s ``[1]``/``[","]``);
+``membership`` replaces the equality assertion with a population test for the filters
+whose answer is chosen at random.
 
-**`settings` is the key whose rows must carry `expected`.** It is an
-`override_settings` entered around **both** engines' calls
-— the only way a setting can be an input at all, since a body cannot see one: its
-whole contact with the outside world is the host trait. Because both sides get
+**``settings`` is the key whose rows must carry ``expected``.** It is an
+``override_settings`` entered around **both** engines' calls. Because both sides get
 the same override, a misspelt setting name is a **silent no-op** that moves both
-answers together and leaves every comparison green — measured, `USE_THOUSAND_SEPERATOR`
-(the natural typo) moved nothing anywhere — so on these rows the pinned literal
-is the test and not a nicety. `floatformat`'s separator, `filesizeformat`'s unit
-words and `yesno`'s default arguments are the three seams the key reaches; see
-`scripts/filter_probe.py` for why the harness runs with `USE_I18N=True` and
-`django.setup()`, without which the last two are invisible.
+answers together and leaves every comparison green (measured:
+``USE_THOUSAND_SEPERATOR``, the natural typo, moved nothing), so on these rows the
+pinned literal is the test. ``floatformat``'s separator, ``filesizeformat``'s unit
+words and ``yesno``'s default arguments are the three seams the key reaches; the
+harness runs with ``USE_I18N=True`` and ``django.setup()``, without which the last two
+are invisible.
 
-**`expected` pins the literal, and it is for the rows a comparison cannot fail.**
-The comparison is two engines agreeing; where a broken body moves **both** engines
-the same way it moves the answer and the comparison together, and the row stays
-green. That is exactly what a lost `context` key does — a body that never reads
-`autoescape` agrees with a Django also told to ignore it — so such a row carries
-the text it must produce and the harness asserts the literal **as well as** the
-comparison. This is the same rule, for the same reason, as the four `expected`
-strings in `tests/test_render_parity.py`: comparing two runs that changed
-together would keep passing, and on these rows the string is the whole claim.
-Measured: dropping the key escapes the items on both sides of
-`join/autoescape-false-does-not-escape`, and escapes every level of
-`unordered_list/autoescape-false-nested` — those two are pinned below.
+**``expected`` pins the literal, for the rows a comparison cannot fail.** Where a
+broken body moves **both** engines the same way it moves the answer and the
+comparison together — what a lost ``context`` key does — so such a row carries the
+text it must produce and the harness asserts the literal **as well as** the
+comparison. **Carrying a key is not depending on it**: only rows that *depend* are
+pinned.
 
-**Carrying a key is not depending on it**, and only the rows that *depend* are
-pinned. `join/typeerror-returns-the-value-not-escaping` has an `autoescape` key
-and answers the int `5` whether it is read or not, so a literal there would pin
-nothing the comparison does not already see — the row is the `autoescape=False`
-half of the failing branch, not a detector. Measured, dropping the key from each
-of the three `context` rows changes the answer for **two** of them and not for
-this one.
+**A ``CASES`` row cannot carry an exception, so an error has two homes.** ``resolve``
+propagates rather than returns, so a row whose *point* is that Django raises would
+abort the comparison — hence [`ERROR_CASES`] below. The split is by **who authors the
+message**: a message passed through from CPython (``first(5)``'s ``'int' object is not
+subscriptable``) is Python's on both sides, and what a body test adds is
+**propagation**; a message synthesised in Rust (``cut.rs``'s ``not_a_string``) is
+*composed* rather than *obtained*, and no body test can validate one.
 
-**A `CASES` row cannot carry an exception, and an error therefore has two homes
-rather than one.** `resolve` propagates an exception rather than returning it, so
-a `CASES` row whose *point* is that Django raises would abort the comparison
-instead of making it — which is why there is an [`ERROR_CASES`] list below. The
-list does not, however, *replace* the body tests the filters already have, and
-the split between the two homes is by **who authors the message**:
+**The rule governing this file: parity validates agreement, never correctness.**
+Shared inputs are invisible to it — a row handing both engines one generator scores
+the second against an exhausted iterator; a dropped ``context`` key moves both engines
+together. So is a value one side composes, because there is nothing to agree with.
+The harness's own configuration is a shared input too: ``filter_probe.ensure_settings``
+must configure ``USE_I18N=True`` and call ``django.setup()``, or a body that inlined the
+English literal scores as well as one that asked the host.
 
-* **A message passed through from CPython** — a real host call's refusal, like
-  `first(5)`'s `'int' object is not subscriptable` or `random({...})`'s
-  `KeyError: 0` — is Python's on both sides, so no comparison of the two can be
-  wrong about its wording. What a *body* test adds is **propagation**: that the
-  body lets the host's error escape rather than swallowing it into `""` or a
-  default. That test asserts the class and never the message, and it is the only
-  place an agent can see the behaviour — §10.4 gives an agent
-  `cargo test -p template-core` and never `maturin develop`, so a Python-side row
-  is invisible to the party writing the filter. `ERROR_CASES` then adds what only
-  the integration can see: the real host's text, against Django's, pinned.
-* **A message synthesised in Rust** — `cut.rs`'s `not_a_string`, which exists
-  because no host operation performs the `str.replace` — is a value this engine
-  *composes* rather than *obtains*. No body test can validate one: the body
-  produces the string and the test restates it, so the two can only agree.
-  `ERROR_CASES` is the only check that exists on such a message, and the body test
-  beside it is a restatement to **delete** rather than to keep.
-
-**That is the third form of one rule, and it is the rule that governs this whole
-file: parity validates agreement, never correctness.** Shared inputs are invisible
-to it — a row handing both engines one generator scores the second against an
-exhausted iterator, and a dropped `context` key moves both engines together (see
-[`case_value`] and `expected`) — and so are values one side composes, because
-there is nothing on the other side for them to agree with. Each time this has
-bitten M4 it has arrived looking like a new problem. It is the same one.
-
-**The fourth form is not about a row at all, and it is the one that was live for
-two waves: the harness's own configuration is a shared input too.** Until Task 7's
-third wave, `filter_probe.ensure_settings` configured `USE_I18N=False` and never
-called `django.setup()`, so every `gettext`/`ngettext` returned its msgid — to
-*both* engines. A body that inlined the English literal therefore scored exactly
-as well as one that asked the host, and every `gettext`-dependent row in waves 1
-and 2 was not weak but **inert**: it would have stayed green through a body that
-deleted the host call outright. No row can carry this, because the row is not
-where the input lives. The defense is the one below — a pinned literal on every
-settings-bearing row — and the reason it is stated as a rule rather than as a
-nicety is that the failure mode is a *silent* one: measured,
-`USE_THOUSAND_SEPERATOR=True` (one letter transposed) moves nothing anywhere, so
-a typo'd setting name leaves a row green and asserting nothing.
-
-The rows whose input survives the filter's own `try` are a different thing and
-stay here, where they are common: the `dictsort` rows that end in `""` are three
-different caught arms.
-
-Rows for a filter arrive in **the commit that lands its group** (§D6), so the
-set of filters named here is a statement about M4's progress as well as about
-correctness — which is why `test_filter_parity.py` checks both directions of it
-rather than only comparing the rows it is given.
+The rows whose input survives the filter's own ``try`` stay here, where they are
+common: the ``dictsort`` rows that end in ``""`` are three different caught arms.
+Rows for a filter arrive in **the commit that lands its group** (§D6), which is why
+``test_filter_parity.py`` checks both directions of the filter set.
 """
 
 from __future__ import annotations
@@ -161,31 +88,22 @@ from zoneinfo import ZoneInfo
 from django.utils.functional import lazy
 from django.utils.safestring import mark_safe
 
-# Django's own lazy proxy: **not** `SafeData`, but `str()` of it is a `SafeString`.
-#
-# This object is the seam `@stringfilter` exists on, and the only operand where
-# Django's two safe-marking sites disagree. `Variable.resolve` hands a filter the
-# `__proxy__` itself, so the loop's test at `base.py:816` is `False`; the wrapper
-# then coerces `str(first)` and tests *that*, which is `True`. A body handed the
-# raw value — or a wrapper that tested the raw value — answers plain `str` where
-# Django answers `SafeString`, and the two render identically, so nothing but a
-# comparison of this kind can see it.
-#
-# Built with `lazy(...)()` rather than written as a small class, because the
-# interesting thing is that this is Django's own object: a hand-written
-# not-`SafeData`-but-`str()`-is stand-in would pin our reading of the contract
-# rather than the contract. It constructs with settings unconfigured, which is
-# what lets it live at module scope here.
+# Django's own lazy proxy: **not** `SafeData`, but `str()` of it is a `SafeString`. It is the
+# seam `@stringfilter` exists on, and the only operand where Django's two safe-marking sites
+# disagree — `Variable.resolve` hands the filter the `__proxy__` itself, so the loop's test at
+# `base.py:816` is `False`, while the wrapper coerces `str(first)` and tests *that*, `True`. A
+# body handed the raw value answers plain `str` where Django answers `SafeString`, and the two
+# render identically. Built with `lazy(...)()` rather than a stand-in class, because the point
+# is that it is Django's own object.
 LAZY_SAFE_PROXY = lazy(lambda: mark_safe("AbC"), str)()
 
 
 class DOT_ATTR:
     """An object with an attribute and **no** `__getitem__`.
 
-    `dictsort`'s resolver tries `value[part]` first and falls back to `getattr`,
-    so the fallback is only reachable by an object whose subscript *raises* — a
-    dict and a list both answer the first branch. Measured: `dictsort` over these
-    sorts by `.x`, so a body that never fell back would raise `TypeError` here.
+    `dictsort`'s resolver tries `value[part]` first and falls back to `getattr`, so the fallback
+    is only reachable by an object whose subscript *raises* — a dict and a list both answer the
+    first branch. Measured: `dictsort` over these sorts by `.x`.
     """
 
     def __init__(self, x):
@@ -201,9 +119,8 @@ class DOT_ATTR:
 class STR_NOT_REPR:
     """An object whose `__str__` is not its `__repr__`.
 
-    `unordered_list`'s escaper is `"%s" % item`, which is `__str__`. A body that
-    rendered the `repr` — or that escaped the `Value` rather than its string —
-    answers `REPR-SENTINEL` here. Django's own `test_ulitem` is this row.
+    `unordered_list`'s escaper is `"%s" % item`, which is `__str__`. A body that rendered the
+    `repr` — or escaped the `Value` rather than its string — answers `REPR-SENTINEL` here.
     """
 
     def __str__(self):
@@ -219,15 +136,11 @@ class STR_NOT_REPR:
 class LOUD_STR:
     """An object whose `__str__` raises a class `builtins` does not hold.
 
-    `@stringfilter`'s coercion is `str(value)` (`defaultfilters.py:38-52`), so
-    the exception this raises is the filter's answer, and Django propagates it
-    unchanged. The class is defined *here* — a test module's own — precisely
-    because it is not in `builtins`: the FFI used to rebuild an exception from
-    its class *name*, and a name `builtins` cannot instantiate came back as a
-    plain `Exception` whose text began with the name (measured on the pinned
-    tree: `builtins.Exception: BoomError: loud` where Django raises `BoomError`).
-    See `ERROR_CASES`'s `upper/raising-str` row and
-    `crates/template-py/src/filters.rs`'s `host_error`.
+    `@stringfilter`'s coercion is `str(value)` (`defaultfilters.py:38-52`), so the exception this
+    raises is the filter's answer, and Django propagates it unchanged. The class is defined
+    *here* — a test module's own — precisely because it is not in `builtins`: the seam must carry
+    the exception's own class, not rebuild one from a name `builtins` cannot instantiate. See
+    `ERROR_CASES`'s `upper/raising-str` row and `crates/template-py/src/filters.rs`'s `host_error`.
     """
 
     class BoomError(Exception):
@@ -243,15 +156,12 @@ class LOUD_STR:
 class LOUD_REPR:
     """An object whose `repr()` raises — the input `pprint`'s `except` arm renders.
 
-    `pprint` (`defaultfilters.py:990-996`) is `pformat(value)` inside a
-    `try`, and the arm answers
-    `"Error in formatting: %s: %s" % (e.__class__.__name__, e)`. Reaching it needs
-    a `__repr__` that raises, which is why [`LOUD_STR`] cannot stand in: its
-    `__repr__` returns a string, so `pformat` *succeeds* on it and a row built on
-    it would assert the successful path twice while looking like it tested the
-    arm. The class name is `BoomError`, the same as `upper/raising-str`'s, so both
-    rows say the same thing about the name the seam carries — it is the
-    exception's own `__class__.__name__`, not a name `builtins` can instantiate.
+    `pprint` (`defaultfilters.py:990-996`) is `pformat(value)` inside a `try`, and the arm
+    answers `"Error in formatting: %s: %s" % (e.__class__.__name__, e)`. Reaching it needs a
+    `__repr__` that raises, which is why [`LOUD_STR`] cannot stand in: its `__repr__` returns a
+    string, so `pformat` *succeeds* on it and a row built on it would assert the successful path
+    twice while looking like it tested the arm. The class name is `BoomError`, the same as
+    `upper/raising-str`'s, so both rows pin the name the seam carries.
     """
 
     class BoomError(ValueError):
@@ -264,26 +174,20 @@ class LOUD_REPR:
 class DATE_WITHOUT_DAY:
     """The value that survives only `date`'s **second** branch.
 
-    `date`'s branch 1 is `formats.date_format(value, arg)`, whose default
-    resolves `get_format(None)` to `'N j, Y'` (`en-us`), and this object has no
-    `day`, so branch 1 raises `AttributeError` at `j`. Its branch 2 is
-    `dateformat.format(value, arg)` — the **raw** formatter, with no `get_format`
-    — so an absent argument is Python's `None` `str()`d to `'None'`, whose four
-    characters are all live format chars: `'N'` → `'Oct.'`, `'o'` → the ISO year,
-    `'n'` → the month number, `'e'` → empty for a non-`datetime`. Measured on the
-    pinned 6.0.9: `{{ x|date }}` is `'Oct.202610'`.
+    `date`'s branch 1 is `formats.date_format(value, arg)`, whose default resolves
+    `get_format(None)` to `'N j, Y'` (`en-us`); this object has no `day`, so branch 1 raises
+    `AttributeError` at `j`. Branch 2 is `dateformat.format(value, arg)` — the **raw** formatter —
+    so an absent argument is Python's `None` `str()`d to `'None'`, whose four characters are all
+    live format chars (`'N'` → `'Oct.'`, `'o'` → ISO year, `'n'` → month number, `'e'` → empty for a
+    non-`datetime`). Measured on the pinned 6.0.9: `{{ x|date }}` is `'Oct.202610'`.
 
-    **This is the only row that pins branch 2 receiving the sentinel's text.**
-    A body that spelled branch 2 as `date_format(value, Some("DATE_FORMAT"))`
-    resolves the default and answers `''` here — a silent wrong answer for this
-    class of input, not untidiness, which is why the seam's `dateformat_format`
-    takes `&Value` rather than `&str`.
+    **This is the only row that pins branch 2 receiving the sentinel's text.** A body that spelled
+    branch 2 as `date_format(value, Some("DATE_FORMAT"))` resolves the default and answers `''`
+    here — a silent wrong answer — which is why the seam's `dateformat_format` takes `&Value`.
 
-    `isocalendar()` returns a real `IsoCalendarDate` rather than a bare tuple,
-    because `DateFormat.o` reads `.isocalendar().year`: a tuple raises
-    `AttributeError` and the row would answer `''` for the wrong reason —
-    measured while writing this row, and the reason the fixture is written this
-    way rather than the obvious way.
+    `isocalendar()` returns a real `IsoCalendarDate` rather than a bare tuple because
+    `DateFormat.o` reads `.isocalendar().year`: a tuple raises `AttributeError` and the row would
+    answer `''` for the wrong reason.
     """
 
     month = 10
@@ -299,19 +203,14 @@ class DATE_WITHOUT_DAY:
 def case_value(case):
     """The row's input, **built fresh for each side**.
 
-    A row declares `value_factory` instead of `value` when the input cannot be
-    shared, and there is exactly one such input class: **a one-shot iterator**.
-    A generator is consumed by whichever side reads it first, so handing the same
-    object to Django and then to Rust makes the second side's answer a statement
-    about an exhausted generator rather than about the filter — measured, and it
-    cost a false divergence report: `["a", (x for x in ["b"])]` nests under
-    Django and, with the *same spent object*, does not under ours. The filter was
-    right the whole time; the row was the bug.
+    A row declares `value_factory` instead of `value` when the input cannot be shared, and the one
+    such input class is **a one-shot iterator**: a generator is consumed by whichever side reads it
+    first, so handing the same object to Django and then to Rust makes the second side's answer a
+    statement about an exhausted generator rather than about the filter.
 
-    `value_factory` rather than "call `value` if it is callable", because a
-    callable is a legitimate filter *input* — `x|default:func` resolves a
-    function — and a row that meant to test one would be silently read as a
-    factory. The two are different keys so they cannot be confused.
+    `value_factory` rather than "call `value` if it is callable", because a callable is a legitimate
+    filter *input* — `x|default:func` resolves a function — and a row that meant to test one would
+    be silently read as a factory.
     """
     if "value_factory" in case:
         return case["value_factory"]()
@@ -321,36 +220,23 @@ def case_value(case):
 def _typeerror_from_membership(value) -> str:
     """CPython's own text for ``"-" not in value`` — **derived from the value**.
 
-    The [`ERROR_CASES`] row `language_name/non-string-value` pins Django's
-    refusal of a non-`str` language code, and *that* text is **CPython's**, not
-    Django's: Django supplies only the call site
-    (`django/utils/translation/__init__.py:279`, `if "-" not in lang_code:`),
-    whose expression this function reproduces on the row's own value.
-    **Derived, not frozen, and the reason is ownership, not stability**: this
-    text is a *carrier* — the claim is that it travelled through the port
-    unchanged — where Django's `KeyError` text is the row's *subject* and is
-    frozen. CPython re-worded it at **3.14** (3.9-3.13: `is not iterable`;
-    3.14.4: `is not a container or iterable`), which made the question visible.
+    The [`ERROR_CASES`] row `language_name/non-string-value` pins Django's refusal of a non-`str`
+    language code, and *that* text is **CPython's**, not Django's: Django supplies only the call
+    site (`django/utils/translation/__init__.py:279`, `if "-" not in lang_code:`), whose expression
+    this function reproduces on the row's own value. **Derived, not frozen, and the reason is
+    ownership, not stability**: the text is a *carrier* — the claim is that it travelled through
+    the port unchanged — where Django's `KeyError` text is the row's *subject* and is frozen.
 
-    **The value is a parameter, not a literal, because the message interpolates
-    the input's type name.** `7` gives `'int'`, `7.5` gives `'float'`, and so on,
-    so a literal here would hold the row's input in two places with nothing to
-    keep them together: change the row to `7.5` and it would redden on a type
-    name for a reason unrelated to transport. The pair
-    `_LANGUAGE_NAME_NON_STRING_VALUE` / the derived text is written once and
-    used by both the row's `value` and its `message`, which is the same rule the
-    differential harness applies to `value_factory`.
+    **The value is a parameter, not a literal, because the message interpolates the input's type
+    name.** `7` gives `'int'`, `7.5` gives `'float'`, so a literal would hold the input in two
+    places with nothing to keep them together.
 
-    (Illustrate with *values*, never class objects: `"-" not in float` and
-    `"-" not in object` interpolate `'type'`, not `'float'`/`'object'`, and
-    `"-" not in NoneType` is a `NameError` — `NoneType` is `type(None).__name__`,
-    not a name bound anywhere.)
+    (Illustrate with *values*, never class objects: `"-" not in float` interpolates `'type'`, not
+    `'float'`, and `"-" not in NoneType` is a `NameError`.)
 
-    Two adjacent line numbers, kept apart because different trees own them:
-    :279 is the `in` test that raises the `TypeError` (this function's
-    expression), and :280 is `raise KeyError("Unknown language code %s." %
-    lang_code)`, which produces the `KeyError` half. That text *is* Django's, so
-    its row freezes it literally.
+    :279 is the `in` test that raises the `TypeError`; :280 is
+    `raise KeyError("Unknown language code %s." % lang_code)`, the `KeyError` half, whose text *is*
+    Django's and is frozen literally.
     """
     try:
         "-" not in value  # mirrors translation/__init__.py:279, on the row's value  # noqa: B018
@@ -362,20 +248,19 @@ def _typeerror_from_membership(value) -> str:
     )
 
 
-#: The non-string value the `language_name/non-string-value` row feeds the filter
-#: **and** the value its expected `TypeError` text is derived from — one name for
-#: both, so the input's type name in the message cannot drift from the input.
+#: The non-string value the `language_name/non-string-value` row feeds the filter **and** the
+#: value its expected `TypeError` text is derived from — one name for both, so the type name in
+#: the message cannot drift from the input.
 _LANGUAGE_NAME_NON_STRING_VALUE = 7
 _LANGUAGE_NAME_NON_STRING_TYPEERROR = _typeerror_from_membership(
     _LANGUAGE_NAME_NON_STRING_VALUE
 )
 
 
-# `lower` is `is_safe=True` and `upper` is `is_safe=False` — measured, and the
-# reason the two are in this file together rather than one per group. Same
-# operand, same shape of answer, opposite safety: a table where only one of them
-# is `mark_safe`d is what catches a loop that applied the flag unconditionally,
-# or read it off the *result* rather than the value the filter was handed.
+# `lower` is `is_safe=True` and `upper` is `is_safe=False` — measured, and the reason the two are
+# in this file together. Same operand, same shape of answer, opposite safety: a table where only
+# one is `mark_safe`d is what catches a loop that applied the flag unconditionally, or read it off
+# the *result* rather than the value the filter was handed.
 CASES: list[dict] = [
     # --- upper: `str.upper`, per code point, is_safe=False -----------------
     {
@@ -389,18 +274,13 @@ CASES: list[dict] = [
         "value": "",
     },
     {
-        # `ß` uppercases to `SS`: the answer is longer than the input, so a body
-        # that mapped code point to code point would be right for every ASCII
-        # input and wrong here.
+        # `ß` → `SS`, longer than the input: a per-code-point body is right for ASCII, wrong here.
         "name": "upper/growing-mapping",
         "filter": "upper",
         "value": "straße",
     },
     {
-        # The `@stringfilter` coercion (§D3): `upper(5)` is `"5"`, not a
-        # `TypeError`. Neither this row nor the next can be expressed as a
-        # literal-parse of a template, because the *type* of the input is the
-        # thing under test.
+        # `@stringfilter` coercion: `upper(5)` is `"5"`, not a `TypeError`.
         "name": "upper/int-coerces",
         "filter": "upper",
         "value": 5,
@@ -411,30 +291,20 @@ CASES: list[dict] = [
         "value": None,
     },
     {
-        # Beria Erfe U+16EBB, one of the 26 code points Unicode 17.0 assigned:
-        # Python 3.14.4 has no name for it and maps it to itself, Rust's tables
-        # map it to U+16EA0, and `pyunicode::case` suppresses Rust's answer. This
-        # row is the one that fails if a body ever reaches for the raw table, so
-        # it is not decoration — `upper_str` and `char::to_uppercase` differ here
-        # and nowhere a casual corpus would look.
+        # Beria Erfe U+16EBB: Python 3.14.4 maps it to itself, where Rust's tables map it to
+        # U+16EA0; `pyunicode::case` suppresses Rust's answer.
         "name": "upper/beria-erfe-assignment",
         "filter": "upper",
         "value": "\U00016ebb",
     },
     {
-        # U+A7D3, one of the 2 retro-fitted mappings: Python *names* the
-        # character, and maps it to itself; 17.0 assigned the capital U+A7D2 and
-        # retro-fitted the mapping. A different mechanism from the row above,
-        # with the same shape of answer.
+        # U+A7D3: Python maps it to itself where Rust's tables map it to the retro-fitted U+A7D2.
         "name": "upper/retro-fitted-mapping",
         "filter": "upper",
         "value": "ꟓ",
     },
     {
-        # Safe in, plain out: `upper` is `is_safe=False`, so neither half of the
-        # safe-marking (`@stringfilter`'s or the loop's) may fire. Compared on
-        # `type(x).__name__`, this row is `("str", "ABC")` and the `lower` row
-        # below is `("SafeString", "abc")`.
+        # `upper` is `is_safe=False`: the safe-in `mark_safe`d value still answers plain `str`.
         "name": "upper/safe-input-stays-plain",
         "filter": "upper",
         "value": mark_safe("AbC"),
@@ -452,27 +322,21 @@ CASES: list[dict] = [
         "value": "",
     },
     {
-        # Final_Sigma, and the finding that changed the design: `"ΟΣ".lower()` is
-        # `"ος"` and not `"οσ"`, so the answer depends on what surrounds the `Σ`
-        # and no per-code-point table can express it. This is why there is no
-        # `lower` in `pyunicode::case` and why the body must go through the host.
+        # Final_Sigma: `"ΟΣ".lower()` is `"ος"`, which depends on context — no per-code-point
+        # table can express it, so there is no `lower` in `pyunicode::case`.
         "name": "lower/final-sigma",
         "filter": "lower",
         "value": "ΟΣ",
     },
     {
-        # The same rule where it does *not* fire: the first `Σ` is word-internal,
-        # so it is `σ` while the second is `ς`. A body that special-cased "the
-        # last character" rather than the context passes the row above and fails
-        # this one.
+        # `"ΣΣ".lower()` is `"σς"`: only the second `Σ` is word-final. A body special-casing
+        # "the last character" passes the row above and fails this one.
         "name": "lower/final-sigma-only-final",
         "filter": "lower",
         "value": "ΣΣ",
     },
     {
-        # Dotted capital I: two code points out for one in, through the *lower*
-        # direction, which is the case `pyunicode::case`'s single-`char` return
-        # could not have carried even if `lower` had stayed Rust's.
+        # `"İ".lower()` is two code points out for one in — a length-changing map, lower direction.
         "name": "lower/dotted-i-grows",
         "filter": "lower",
         "value": "İ",
@@ -483,34 +347,21 @@ CASES: list[dict] = [
         "value": 5,
     },
     {
-        # Safe in, safe out: `lower` is `is_safe=True`, so the loop marks the
-        # result. Together with `upper/safe-input-stays-plain` this is the pair
-        # that pins `FilterFlags::is_safe` reaching the loop at all, which is the
-        # "incl. `FilterFlags` round-tripping" half of M4's acceptance criterion.
+        # `lower` is `is_safe=True`: the loop marks the safe operand safe again.
         "name": "lower/safe-input-stays-safe",
         "filter": "lower",
         "value": mark_safe("AbC"),
     },
     {
-        # The lazy proxy, and the only row that fails if the `@stringfilter`
-        # coercion is asked of the wrong value. Django answers
-        # `SafeString("abc")`: the loop's `isinstance(obj, SafeData)` is `False`
-        # (a `__proxy__` is not `SafeData`) and the wrapper's
-        # `isinstance(str(first), SafeData)` is `True`. Dropping the wrapper's
-        # half — or asking it of the uncoerced value — gives plain `str("abc")`:
-        # the same text, the same `==`, and a different answer to what the
-        # template does with it next. This is a safety row in a file whose whole
-        # reason for existing is the safety half.
+        # Django answers `SafeString("abc")`: the loop's `isinstance(obj, SafeData)` is `False`
+        # on a `__proxy__`, but the wrapper's `isinstance(str(first), SafeData)` is `True`.
         "name": "lower/lazy-proxy-whose-str-is-safe",
         "filter": "lower",
         "value": LAZY_SAFE_PROXY,
     },
     # --- capfirst: `value[0].upper() + value[1:]`, is_safe=True --------------
     {
-        # `value and …`: the empty string is falsy, so it is returned as-is
-        # rather than rebuilt. A body that unconditionally did
-        # `first.upper() + rest` would raise on the empty string, so this row is
-        # a crash guard as much as a value one.
+        # `value and …`: the empty string is falsy and returned as-is — also the crash guard.
         "name": "capfirst/empty",
         "filter": "capfirst",
         "value": "",
@@ -521,21 +372,14 @@ CASES: list[dict] = [
         "value": "hello",
     },
     {
-        # `value[0].upper()` is a **code point** mapping, so the answer can be
-        # longer than the input. A body that mapped code point to code point
-        # would be right for every ASCII input and wrong here.
+        # `value[0].upper()` can be longer than the input: `"ßx"` → `"SSx"`.
         "name": "capfirst/growing-mapping",
         "filter": "capfirst",
         "value": "ßx",
     },
     {
-        # U+A7D3 is one of `pyunicode::case::UNCASED`'s 28 entries: Python 3.14.4
-        # maps it to itself (measured) where Rust's tables map it to U+A7D2, so the
-        # shared table suppresses Rust's answer and the input comes back
-        # unchanged. It is a *second* code point from `upper/beria-erfe-assignment`'s
-        # list rather than the same one — that row is U+16EBB, a Unicode 17.0
-        # assignment — which is what makes the suppression reachable from two
-        # filters and not just one body's test.
+        # U+A7D3 is in `pyunicode::case::UNCASED`: Python maps it to itself where Rust's tables
+        # map it to U+A7D2, so the shared table suppresses Rust's answer.
         "name": "capfirst/suppressed-code-point",
         "filter": "capfirst",
         "value": "ꟓ",
@@ -546,27 +390,14 @@ CASES: list[dict] = [
         "value": 5,
     },
     {
-        # `capfirst` is `is_safe=True`, so the *loop* marks the result: the body
-        # returns a plain `Value::Str` and never calls `mark_safe` itself.
+        # `is_safe=True`: the loop marks the result; the body returns a plain string.
         "name": "capfirst/safe-input-stays-safe",
         "filter": "capfirst",
         "value": mark_safe("abc"),
     },
     {
-        # The lazy proxy through a second `is_safe=True` body. This comment
-        # originally claimed the row observed the wrapper's *replacement* half;
-        # the §11 mutation measured that it does not. Handing the body the raw
-        # value while the marking still asks the coerced one left **this row
-        # green** and took `cut/lazy-proxy…` red — `capfirst` never reads its
-        # input's safety, so nothing about which value the body received can
-        # reach its answer. What the row observes is the marking half: the loop's
-        # condition is `was_safe || coerced_is_safe`, and on a `__proxy__` only
-        # the second disjunct is true. `lower/lazy-proxy…` observes the same line
-        # through another body; both are kept because a row is cheap and this
-        # pair is what makes the disjunct's reach filter-independent rather than
-        # a property of one name. The replacement half has exactly one observer
-        # in M4 — `cut`, the only body in Django that reads `isinstance(value,
-        # SafeData)` — and that row is `cut/lazy-proxy-whose-str-is-safe`.
+        # The loop's condition is `was_safe || coerced_is_safe`; on a `__proxy__` only the second
+        # disjunct is true, so `str(first)` gets marked and the answer is a `SafeString`.
         "name": "capfirst/lazy-proxy-whose-str-is-safe",
         "filter": "capfirst",
         "value": LAZY_SAFE_PROXY,
@@ -578,10 +409,8 @@ CASES: list[dict] = [
         "value": "hello world",
     },
     {
-        # The Final_Sigma answer, and the reason `title` is a host call: a Rust
-        # per-code-point rule cannot produce `ς` — it needs the context, and it
-        # needs Unicode's `Cased` property and titlecase table besides. A body
-        # that reimplemented `str.title` passes every ASCII row and fails this.
+        # Final_Sigma again, and why `title` is a host call: `ς` needs context, `Cased` and the
+        # titlecase table — no per-code-point rule can produce it.
         "name": "title/final-sigma",
         "filter": "title",
         "value": "ΟΣ",
@@ -597,17 +426,13 @@ CASES: list[dict] = [
         "value": "o'connor",
     },
     {
-        # The first regex's actual work: `str.title()` answers `"They'Re"`, and
-        # `([a-z])'([A-Z])` lowercases the whole three-character match. Dropping
-        # that pass leaves this row red while every non-apostrophe row stays green.
+        # `str.title()` answers `"They'Re"`; the `([a-z])'([A-Z])` pass lowercases the match to `"they're"`.
         "name": "title/apostrophe-uppercase-after",
         "filter": "title",
         "value": "they're",
     },
     {
-        # The second regex: `"abc1Def".title()` is `"Abc1Def"` and `\d([A-Z])`
-        # lowercases the `"1D"`. `\d` is Unicode `\p{Nd}` in Rust's regex as in
-        # Python's, which is why the two select the same 760 code points.
+        # The `\d([A-Z])` pass lowercases `"1D"`; `\d` is `\p{Nd}` in Rust as in Python.
         "name": "title/digit-then-uppercase",
         "filter": "title",
         "value": "abc1Def",
@@ -619,54 +444,37 @@ CASES: list[dict] = [
     },
     # --- cut: the only body that reads its input's safety, is_safe absent ----
     {
-        # A plain `str` is not `SafeData`, so the result is a plain `str` even
-        # though the argument is not `";"`. A body that marked safe whenever it
-        # had replaced something fails here.
+        # A plain `str` is not `SafeData`, so the result stays plain `str`.
         "name": "cut/plain-string",
         "filter": "cut",
         "value": "AbC",
         "arg": "b",
     },
     {
-        # Safe in, safe out, for the ordinary argument. This row is a *control*
-        # for the proxy row below rather than a guard: `was_safe` is already true
-        # here, so handing the body the uncoerced value changes nothing. Keep it —
-        # it covers the body's marking path — but the guard is the proxy.
+        # Safe in, safe out via `was_safe`; the proxy row below is the actual guard.
         "name": "cut/safe-string-is-marked-safe",
         "filter": "cut",
         "value": mark_safe("AbC"),
         "arg": "b",
     },
     {
-        # The `arg != ";"` half of the condition, which is the half a body is
-        # most likely to drop: the value *is* safe, and the answer is still a
-        # plain `str`. Note it also pins the comparison against a converted
-        # primitive: `SafeString(";") != ";"` is `False` in Python, so a body
-        # comparing the raw values would flip this branch.
+        # The `arg != ";"` half: the value is safe yet the answer is plain `str`. Also pins that
+        # comparison is on converted primitives — `SafeString(";") != ";"` is `False`.
         "name": "cut/safe-string-semicolon-argument",
         "filter": "cut",
         "value": mark_safe("a;b"),
         "arg": ";",
     },
     {
-        # **The guard for the wrapper's other half**, and the reason this row set
-        # cannot be trimmed for speed. Django answers `SafeString("AC")`: the
-        # loop's `isinstance(obj, SafeData)` is `False` on a `__proxy__`, and the
-        # wrapper's `isinstance(str(first), SafeData)` is `True`, so `cut`'s
-        # `safe` is true only because the body was handed the *coerced* value.
-        # Hand the body the raw proxy and it answers plain `"AC"` — same text,
-        # same `==`, different type — which is the entire observable difference
-        # the coercion makes anywhere in M4 until a body reads its own input's
-        # safety, and `cut` is the only body in Django that does.
+        # Django answers `SafeString("AC")` only because the body got the coerced value: the loop
+        # sees a `__proxy__` as not `SafeData`, but `cut` reads its own input's safety.
         "name": "cut/lazy-proxy-whose-str-is-safe",
         "filter": "cut",
         "value": LAZY_SAFE_PROXY,
         "arg": "b",
     },
     {
-        # The `@stringfilter` coercion of the *value*: `cut(5, "5")` is `""`,
-        # because the body's input is `"5"` before it replaces anything. A body
-        # that read `arg` out of the value would fail this and pass the row above.
+        # `cut(5, "5")` is `""`: the value is coerced to `"5"` before replacing.
         "name": "cut/int-value-coerces",
         "filter": "cut",
         "value": 5,
@@ -689,10 +497,8 @@ CASES: list[dict] = [
         "value": 'say "hi"',
     },
     {
-        # The ordering guard: a backslash *before* a quote. Escaping the quote
-        # first and the backslash second would escape the backslash this step
-        # introduced, giving one more `\` than Django. The pairs are what make the
-        # order observable at all — a single-character input cannot see it.
+        # Ordering guard: escape the backslash *before* the quote, or the quote pass re-escapes
+        # the backslash just introduced. Only a paired input can observe the order.
         "name": "addslashes/backslash-then-quote",
         "filter": "addslashes",
         "value": 'a\\"b',
@@ -709,9 +515,7 @@ CASES: list[dict] = [
         "value": "abc",
     },
     {
-        # Code points, not graphemes and not bytes: `e` + U+0301 is two
-        # elements. A body that split on `bytes` or on grapheme clusters is right
-        # for every ASCII row and wrong here.
+        # Code points, not graphemes or bytes: `"é"` (decomposed) is two elements.
         "name": "make_list/combining-mark-is-two-elements",
         "filter": "make_list",
         "value": "é",
@@ -733,13 +537,8 @@ CASES: list[dict] = [
         "value": "  a  b  ",
     },
     {
-        # The four information separators U+001C..U+001F are separate characters
-        # for Python's `str.split()` (measured: `"a\x1cb".split()` is `["a","b"]`)
-        # and **not** whitespace for Rust's `char::is_whitespace`, which follows
-        # Unicode's `White_Space` property (measured: `"a\u{1c}b"
-        # .split_whitespace()` is one item). So these rows are the pair that
-        # separates the host's splitter from `split_whitespace` — a body using the
-        # latter answers `1` where Django answers `2`.
+        # U+001C..U+001F split under Python's `str.split()` but are not `char::is_whitespace` in
+        # Rust, so these rows separate the host splitter from `split_whitespace` (1 vs Django's 2).
         "name": "wordcount/information-separator-u001c",
         "filter": "wordcount",
         "value": "a\u001cb",
@@ -750,12 +549,8 @@ CASES: list[dict] = [
         "value": "a\u001fb",
     },
     {
-        # U+00A0 **is** a separator for Python's `str.split()` — measured,
-        # `"a\xa0b".split()` is `["a","b"]` — which is what a splitter built on
-        # `is_ascii_whitespace`, or a plain `split(' ')`, gets wrong. Rust's
-        # `split_whitespace` happens to agree here (NBSP is `White_Space`), so this
-        # row guards the *ASCII-only* mistake rather than the `split_whitespace`
-        # one the two rows above guard.
+        # U+00A0 is a separator for Python's `str.split()`, which an ASCII-only splitter misses;
+        # Rust's `split_whitespace` agrees here.
         "name": "wordcount/nbsp-separates",
         "filter": "wordcount",
         "value": "a b",
@@ -766,50 +561,27 @@ CASES: list[dict] = [
         "value": 5,
     },
 
-    # --- Task 5: padding and truncation, all is_safe=True --------------------
-    #
-    # **This group's rows carry a weight the earlier ones did not.** The four
-    # truncation filters and `wordwrap` are *delegating* bodies: they compute
-    # integers in Rust and hand the text to a host call, and `TestFilterHost`
-    # records the method **name** and not its arguments. Measured by mutation —
-    # flipping `html: true` to `false` in `truncatewords_html` leaves all six of
-    # its unit tests green. So the arguments that distinguish the four
-    # `truncate` filters from each other are pinned *here* or nowhere: one row
-    # per distinct triple, plus one for `wrap`'s width, and each is named for
-    # the argument it protects.
-    #
-    # Safety: all eight are `is_safe=True`, so the loop's `mark_safe` applies to
-    # each. Four rows below cover it — one per distinct call shape a body has
-    # (padding, `truncate` words=false, `truncate` words=true, `wrap`) — rather
-    # than eight, because the flag reaches the loop by the same line for every
-    # `is_safe=True` filter and the remaining four share a shape with one of
-    # these. That is the one place in this file where a row stands for another.
+    # --- padding and truncation: all is_safe=True, delegating to host calls --
+    # `TestFilterHost` records the method name but not its arguments, so the arguments
+    # distinguishing the `truncate` filters are pinned here; four safety rows cover all shapes.
     # --- center (`defaultfilters.py:431-438`): the format spec `^`, NOT `str.center`
     {
-        # **The row the plan mandates, and the only one that separates the two
-        # rules.** CPython's format spec puts the extra space on the **right**
-        # when the margin and the width are both odd (`left = margin // 2`);
-        # `str.center` carries a `margin & width & 1` term that moves it left.
-        # Django answers `' ab  '` and `'ab'.center(5)` answers `'  ab '` — a
-        # body written from the builtin's name passes every even-margin row
-        # above and fails only here. Measured against the pinned 6.0.9.
+        # Both margin and width odd: the format spec puts the extra space right (`' ab  '`),
+        # `str.center` left (`'  ab '`). Measured on 6.0.9.
         "name": "center/both-odd-width",
         "filter": "center",
         "value": "ab",
         "arg": 5,
     },
     {
-        # The control: margin 3 at width 6, where both rules agree. Kept beside
-        # the row above so a future reader can see which one carries the
-        # discriminating power rather than having to re-derive it.
+        # Control: margin 3 at width 6, where both rules agree.
         "name": "center/even-margin",
         "filter": "center",
         "value": "abc",
         "arg": 6,
     },
     {
-        # A 1-code-point, 2-byte value at width 4 → margin 3 → `' é  '`. A body
-        # counting bytes gets margin 2 and answers 3 wide.
+        # Width 4 counts the 2-byte `é` as one code point → margin 3; a byte count gets 2.
         "name": "center/counts-code-points-not-bytes",
         "filter": "center",
         "value": "é",
@@ -822,12 +594,8 @@ CASES: list[dict] = [
         "arg": 5,
     },
     {
-        # `width <= 0` returns the value **unchanged**
-        # (`defaultfilters.py:435-437`), and the guard runs *after* `int(arg)`,
-        # so `center("abc", 0)` is `'abc'` and `center("abc", "x")` raises
-        # rather than returning. The pair below
-        # pins the value half; the raising half is a Rust body test, because a
-        # corpus row has no exception path to compare.
+        # `width <= 0` returns the value unchanged (`defaultfilters.py:435-437`), after the
+        # `int(arg)`, so a non-numeric arg raises rather than returning.
         "name": "center/zero-width-is-the-value",
         "filter": "center",
         "value": "abc",
@@ -840,35 +608,24 @@ CASES: list[dict] = [
         "arg": -3,
     },
     {
-        # The `@stringfilter` coercion, as in the `upper` rows but through a
-        # body that also parses the argument: `center(5, 3)` is `' 5 '`.
+        # `@stringfilter` coercion: `center(5, 3)` is `' 5 '`.
         "name": "center/int-coerces",
         "filter": "center",
         "value": 5,
         "arg": 3,
     },
     {
-        # Width **4**, deliberately: at width 5 this row would be a second
-        # both-odd case and would silently share the split-rule observation with
-        # `center/both-odd-width` above. Measured — the §11 mutation of
-        # `left = margin / 2` into `str.center`'s rule moved exactly two rows
-        # until this argument was changed, and exactly one after. A row that
-        # observes two things makes the mutation count say "2" for a defect with
-        # one named observer, which is the ambiguity this project has paid for
-        # four times already.
+        # Width 4 deliberately: at width 5 the margin would be odd too and would share the
+        # split-rule observation with `center/both-odd-width`.
         "name": "center/safe-input-stays-safe",
         "filter": "center",
         "value": mark_safe("ab"),
         "arg": 4,
     },
-    # --- ljust / rjust (`defaultfilters.py:417-428`): the builtins, with no
-    #     `<= 0` guard
+    # --- ljust / rjust (`defaultfilters.py:417-428`): the builtins, no `<= 0` guard
     {
-        # **The argument is Python's `int`, not Rust's `str::parse`.** `int`
-        # accepts PEP 515 underscores, so `ljust("abc", "5_0")` is a 50-wide
-        # string. A body using `parse::<usize>()` answers `'abc'` here and
-        # agrees on every row where the argument is a plain number — which is
-        # every other row in this file.
+        # The argument is Python's `int`, not `str::parse`: `int` accepts PEP 515 underscores, so
+        # `ljust("abc", "5_0")` is 50 wide; `parse` answers `'abc'`.
         "name": "ljust/argument-is-python-int",
         "filter": "ljust",
         "value": "abc",
@@ -882,33 +639,23 @@ CASES: list[dict] = [
         "arg": " 5 ",
     },
     {
-        # **This row is what makes `filter_probe.rust_answer`'s argument-shape
-        # rule observable.** A non-`str` argument is a bare token and arrives as
-        # the `float` 5.0, which `int()` converts; a harness that `mark_safe`d
-        # every argument would hand the Rust side `SafeString('5.0')`, whose
-        # `to_int` raises `ValueError` — and `ljust` has **no** `try`, so the
-        # row fails loudly instead of comparing two different inputs. It is the
-        # only row here whose argument is a `float` rather than an `int`.
+        # The only row whose argument is a `float`: a non-`str` argument arrives as the bare
+        # `float` 5.0, and `ljust` has no `try`, so a harness mis-marking it fails loudly.
         "name": "ljust/float-argument-is-resolved-not-quoted",
         "filter": "ljust",
         "value": "abc",
         "arg": 5.0,
     },
     {
-        # Code points, not bytes: `"e" + U+0301` is one grapheme, two code
-        # points, three bytes, and pads to 5 as two code points plus three
-        # spaces. Written with the escape because an invisible combining mark is
-        # exactly what an editor mangles.
+        # Pads by code points, not bytes: `"éé"` is 4 code points, 6 bytes, so width 5 adds one space.
         "name": "ljust/counts-code-points-not-bytes",
         "filter": "ljust",
         "value": "éé",
         "arg": 5,
     },
     {
-        # `str.ljust` returns the string unchanged for any width at or below the
-        # length — the reason `ljust` needs no `<= 0` guard where `center` has
-        # one. Three rows, because the three cases reach that clamp by different
-        # arithmetic and a body that clamped only one would pass the others.
+        # `ljust` returns the string unchanged for any width at or below its length — no `<= 0`
+        # guard needed, where `center` has one. Three rows reach that clamp by different arithmetic.
         "name": "ljust/width-below-length-is-the-value",
         "filter": "ljust",
         "value": "abc",
@@ -956,12 +703,9 @@ CASES: list[dict] = [
         "value": "",
         "arg": -5,
     },
-    # --- truncatechars / truncatewords
-    #     (`defaultfilters.py:305-313`, `defaultfilters.py:330-341`)
+    # --- truncatechars / truncatewords (`defaultfilters.py:305-313`, `330-341`)
     {
-        # The ellipsis **counts toward the length**: 3 gives two characters plus
-        # `…`. A body that truncated to `length` and then appended would be one
-        # character long here.
+        # The ellipsis counts toward the length: `arg` 3 gives two characters plus `…`.
         "name": "truncatechars/ellipsis-counts-toward-the-length",
         "filter": "truncatechars",
         "value": "abcdefgh",
@@ -974,20 +718,16 @@ CASES: list[dict] = [
         "arg": 5,
     },
     {
-        # `Truncator` normalises to NFC and does not count combining marks
-        # (`text.py:205`), so the decomposed pair answers as the composed one:
-        # `'éé'` at length 2, not the ellipsis. A Rust `chars()` count answers
-        # `'…'` — the third Unicode table the plan declines to write.
+        # `Truncator` normalises to NFC and does not count combining marks (`text.py:205`), so
+        # the decomposed pair answers `'éé'` at length 2; a Rust `chars()` count answers `'…'`.
         "name": "truncatechars/combining-marks-do-not-count",
         "filter": "truncatechars",
         "value": "éé",
         "arg": 2,
     },
     {
-        # `int(arg)` in a `try/except ValueError` that **returns the value
-        # unchanged**. It is a corpus row rather than a body test precisely
-        # because the failure is silent: there is no exception to compare, and
-        # the silence *is* the observable.
+        # `int(arg)` sits in a `try/except ValueError` that returns the value unchanged, so the
+        # failure is silent — the observable.
         "name": "truncatechars/non-integer-argument-is-silent",
         "filter": "truncatechars",
         "value": "abcdefgh",
@@ -1018,9 +758,7 @@ CASES: list[dict] = [
         "arg": 5,
     },
     {
-        # The `words=true` half of the triple, and the row that separates this
-        # filter's arguments from `truncatechars`'s: the truncation text is
-        # `" …"` with a leading space, where `chars` uses a bare `"…"`.
+        # `words=true`: the truncation text is `" …"` with a leading space, where `chars` uses `"…"`.
         "name": "truncatewords/ascii",
         "filter": "truncatewords",
         "value": "one two three",
@@ -1046,12 +784,8 @@ CASES: list[dict] = [
     },
     # --- the html pair: the same host call with `html: true` -----------------
     {
-        # The `html=true` half of the triple. Measured by the §11 mutation of
-        # `truncatechars_html`'s `html: true` to `false`: **all three** rows
-        # below move, because truncating the raw string and truncating its text
-        # while re-closing tags differ on every one of these inputs. Not so for
-        # `truncatewords_html`, where only one of the two moves — which is why
-        # each count was measured rather than assumed from this one.
+        # `html=true` half of the triple: the html path truncates the text and re-closes tags,
+        # which differs from truncating the raw string on all three rows below.
         "name": "truncatechars_html/balanced-tag-is-closed",
         "filter": "truncatechars_html",
         "value": "<b>abcdef</b>",
@@ -1065,62 +799,45 @@ CASES: list[dict] = [
         "arg": 4,
     },
     {
-        # A `<` in the *text* where no tag is open: not a tag, so not closed.
-        # A body that counted `<` would answer `'a…'` or worse.
+        # A `<` where no tag is open is text, not a tag: not closed.
         "name": "truncatechars_html/lone-angle-bracket-is-text",
         "filter": "truncatechars_html",
         "value": "a<b>",
         "arg": 3,
     },
     {
-        # **This row does not observe the `html` flag, and saying so is the
-        # point.** Measured by the §11 mutation of `truncatewords_html`'s
-        # `html: true` to `false`: this row stayed **green**, because with the
-        # flag off the first two words of `"<b>one two</b> three"` are
-        # `"<b>one"` and `"two</b>"` and their join is the same string the html
-        # path produces. It is kept for the `words=true` half of the triple —
-        # it fails if `words` is wrong — but the flag's observer is the row
-        # below, and only that one.
+        # This row does **not** observe the `html` flag — the flag-off first two words join to
+        # the same string. Kept for the `words=true` half; the flag's observer is the row below.
         "name": "truncatewords_html/balanced-tag-is-closed",
         "filter": "truncatewords_html",
         "value": "<b>one two</b> three",
         "arg": 2,
     },
     {
-        # The `words=true, html=true` triple, and **the flag's only observer**:
-        # the unbalanced tag is where the html path's synthesised `</p>` shows.
-        # Measured by the same mutation — flipping the flag moves this row and
-        # no other. It is also the row the whole argument-blindness argument
-        # rests on: flipping it leaves every one of the six Rust unit tests
-        # green, because `TestFilterHost` records the method name and not its
-        # arguments.
+        # `words=true, html=true`, and the `html` flag's only observer: the unbalanced tag is
+        # where the synthesised `</p>` shows, a difference no Rust unit test can see.
         "name": "truncatewords_html/unbalanced-tag-is-synthesised",
         "filter": "truncatewords_html",
         "value": "<p>one two",
         "arg": 1,
     },
-    # --- wordwrap (`defaultfilters.py:410-414`): `textwrap` with
-    #     `break_long_words=False`
+    # --- wordwrap (`defaultfilters.py:410-414`): `textwrap`, `break_long_words=False`
     {
-        # The `wrap` width argument, which no unit test can see. A body passing
-        # a different width answers differently on every row below.
+        # The `wrap` width, which no unit test can see.
         "name": "wordwrap/wraps-at-the-given-width",
         "filter": "wordwrap",
         "value": "a b c d",
         "arg": 3,
     },
     {
-        # `break_long_words=False`: a word longer than the width is *not* split,
-        # so a 7-character word at width 3 comes back whole. A body that used
-        # Rust's `textwrap`-equivalent default breaks it into three lines.
+        # `break_long_words=False`: a word longer than the width comes back whole, not split.
         "name": "wordwrap/long-word-is-not-broken",
         "filter": "wordwrap",
         "value": "abcdefg",
         "arg": 3,
     },
     {
-        # `textwrap` collapses the run of spaces (and `replace_whitespace`
-        # normalises them), so the doubled space does not survive as padding.
+        # `textwrap` collapses runs of spaces, so the doubled space does not survive.
         "name": "wordwrap/collapses-whitespace-runs",
         "filter": "wordwrap",
         "value": "a  b c",
@@ -1132,14 +849,9 @@ CASES: list[dict] = [
         "value": mark_safe("a b c d"),
         "arg": 3,
     },
-    # --- first (`defaultfilters.py:602-608`, `value[0]`, catching **only**
-    #     IndexError)
-    #
-    # `first` and `last` have the same body shape and **opposite** `is_safe`
-    # (`first` is `False`, `last` is `True`), so the pair is what catches a loop
-    # that read the flag off the result rather than the filter. The two raising
-    # rows each filter has — an `int`'s `TypeError`, a `dict`'s `KeyError` — are
-    # body tests: a corpus row has no exception path to compare.
+    # --- first (`defaultfilters.py:602-608`, `value[0]`, catching only `IndexError`)
+    # `first` and `last` share a shape with opposite `is_safe`, catching a loop that reads the
+    # flag off the result rather than the filter.
     {
         "name": "first/list",
         "filter": "first",
@@ -1162,17 +874,14 @@ CASES: list[dict] = [
         "value": "",
     },
     {
-        # A first item that is **`None`** is returned as `None`, not `""` — so a
-        # body that answered `""` for anything falsy passes every row above and
-        # fails this one. Measured: `(NoneType, None)`.
+        # A first item that is `None` is returned as `None`, not `""` — a body answering `""`
+        # for anything falsy fails here.
         "name": "first/none-item-is-not-the-empty-string",
         "filter": "first",
         "value": [None, 1],
     },
     {
-        # `is_safe=False`: the same `mark_safe`d operand the `last` row below
-        # keeps safe. One of the two rows is what catches the flag being read off
-        # the result.
+        # `is_safe=False`: the `mark_safe`d operand still answers plain, unlike the `last` row.
         "name": "first/safe-input-is-not-safe",
         "filter": "first",
         "value": mark_safe("ab"),
@@ -1184,8 +893,7 @@ CASES: list[dict] = [
         "value": ["a", "b"],
     },
     {
-        # The index is `-1` where `first`'s is `0`; this row and `last/list`
-        # together pin it, and a body that copied `first`'s index fails.
+        # Index `-1`, where `first` uses `0`; a body copying `first`'s index fails here.
         "name": "last/empty-list-is-the-empty-string",
         "filter": "last",
         "value": [],
@@ -1195,8 +903,7 @@ CASES: list[dict] = [
         "filter": "last",
         "value": mark_safe("ab"),
     },
-    # --- length (`defaultfilters.py:633-639`, `len(value)` on
-    #     `(ValueError, TypeError)` -> 0)
+    # --- length (`defaultfilters.py:633-639`, `len(value)` on `(ValueError, TypeError)` → 0)
     {
         "name": "length/list",
         "filter": "length",
@@ -1218,27 +925,21 @@ CASES: list[dict] = [
         "value": 5,
     },
     {
-        # `None` is the `TypeError` arm, `""` is a genuine `0`: two different
-        # nothings, and a body that answered `0` for anything falsy would pass
-        # the `None` row and this one alike while getting the reason wrong.
+        # `""` is a genuine `0`, where `None` reaches the `TypeError` arm — two different nothings.
         "name": "length/empty-string-is-zero",
         "filter": "length",
         "value": "",
     },
     {
-        # A generator has no `len` at all — `TypeError`, so `0`. This is the row
-        # that tells "asked the host for a length" from "iterated and counted",
-        # because the second answers 2. One-shot: built fresh per side.
+        # A generator has no `len` — `TypeError` → 0, where iterating and counting answers 2.
+        # One-shot: built fresh per side.
         "name": "length/generator-has-no-len",
         "filter": "length",
         "value_factory": lambda: (x for x in [1, 2]),
     },
-    # --- slice (`defaultfilters.py:651-666`, Rust parses the bits, the host
-    #     subscripts)
-    #
-    # The **type** half of §D5 is the point of the first row: `"abcdef"|slice:":3"`
-    # is the *string* `"abc"`, where an index route (get + Rust slicing) yields a
-    # list. The two render alike and differ in everything downstream.
+    # --- slice (`defaultfilters.py:651-666`): Rust parses the bits, the host subscripts
+    # `":3"` answers the *string* `"abc"`, where an index route would yield a list — the two
+    # differ in type, not text.
     {
         "name": "slice/stop-is-a-string-not-a-list",
         "filter": "slice",
@@ -1246,10 +947,7 @@ CASES: list[dict] = [
         "arg": ":3",
     },
     {
-        # **This row is what pins that a lone component is the *stop*.** `"1"`
-        # splits to `["1"]` and reaches `slice(1)` = `slice(None, 1, None)`, so
-        # the answer is `"a"` — a body that read a single bit as `start` answers
-        # `"bcdef"`.
+        # A lone component is the *stop*: `"1"` reaches `slice(1)`, answering `"a"`.
         "name": "slice/single-component-is-the-stop",
         "filter": "slice",
         "value": "abcdef",
@@ -1280,8 +978,7 @@ CASES: list[dict] = [
         "arg": "::-1",
     },
     {
-        # A missing *middle* component is the only shape where a `None` bit is
-        # neither leading nor trailing.
+        # A missing *middle* component: the only shape where a `None` bit is neither leading nor trailing.
         "name": "slice/missing-middle-component",
         "filter": "slice",
         "value": "abcdef",
@@ -1307,11 +1004,8 @@ CASES: list[dict] = [
         "arg": "",
     },
     {
-        # **Two catch arms, and the plan ran them together.** Four *numeric*
-        # components reach `slice(*bits)` and raise `TypeError` there; a
-        # non-numeric one raises `ValueError` at `int(x)` and never gets that
-        # far. Both return `value`. A body that caught only one of the two passes
-        # one row and fails the other.
+        # Four numeric components raise `TypeError` at `slice(*bits)`; a non-numeric one raises
+        # `ValueError` at `int(x)`. Both arms return `value`, and are separate catches.
         "name": "slice/four-components-is-a-caught-typeerror",
         "filter": "slice",
         "value": "abcdef",
@@ -1324,17 +1018,15 @@ CASES: list[dict] = [
         "arg": "x:3",
     },
     {
-        # The subscript itself refuses: `TypeError` again, and `value` comes
-        # back. This is the *third* catch site, in the same `except`.
+        # The subscript refuses a non-subscriptable value: `TypeError` again, `value` back.
         "name": "slice/non-subscriptable-value-is-returned",
         "filter": "slice",
         "value": 5,
         "arg": ":3",
     },
     # --- join (`defaultfilters.py:611-621`, needs_autoescape, is_safe=True)
-    #
-    # The pair the per-row `context` key exists for. Both are `safe=True` and
-    # differ only in the text, so nothing but the key can tell them apart.
+    # The two `autoescape` rows differ only in the text, so only the per-row `context` key
+    # tells them apart.
     {
         "name": "join/autoescape-true-escapes-items",
         "filter": "join",
@@ -1342,10 +1034,8 @@ CASES: list[dict] = [
         "arg": ", ",
     },
     {
-        # **Pinned**, because this row is the group's `autoescape=False`
-        # detector and parity alone cannot fail on it: drop the key and both
-        # engines escape, so a body that never read `autoescape` stays green.
-        # The literal is what reddens. See the module doc on `expected`.
+        # Pinned: parity alone cannot fail on this row — dropping the key escapes on both sides,
+        # so only the asserted literal reddens for a body that ignores `autoescape`.
         "name": "join/autoescape-false-does-not-escape",
         "filter": "join",
         "value": ["a", "<b>"],
@@ -1360,21 +1050,15 @@ CASES: list[dict] = [
         "arg": ", ",
     },
     {
-        # **The group's trap**: on `TypeError` the filter returns **`value`, the
-        # unjoined operand**, not `""`. A body that returned `""` here passes
-        # every row above.
+        # On `TypeError` the filter returns `value`, the unjoined operand, not `""`.
         "name": "join/typeerror-returns-the-value",
         "filter": "join",
         "value": 5,
         "arg": ", ",
     },
     {
-        # Carries an `autoescape` key and does **not** depend on it: `join(5,
-        # ", ")` raises `TypeError` and returns the value in both branches, so
-        # this answers the int `5` either way (measured). It is here as the
-        # failing branch's non-escaping half and is deliberately **not** pinned
-        # — an `expected` here would assert something the comparison already
-        # sees. See the module doc on `expected`.
+        # Carries `autoescape=False` but does not depend on it: `join(5, ", ")` returns the int
+        # `5` in both branches, so it is deliberately not pinned.
         "name": "join/typeerror-returns-the-value-not-escaping",
         "filter": "join",
         "value": 5,
@@ -1382,10 +1066,8 @@ CASES: list[dict] = [
         "context": {"autoescape": False},
     },
     {
-        # A non-string separator splits the two branches: escaping wraps it in
-        # `conditional_escape`, which is what gives it a `.join` at all. Without
-        # escaping it is a bare `5.join`, an `AttributeError` the body does *not*
-        # catch (it catches `TypeError`), so that half is a body test.
+        # A non-string separator needs `conditional_escape` to get a `.join`; unescaped it is an
+        # `AttributeError`, which the body (catching `TypeError`) does not catch.
         "name": "join/int-separator-escaping-makes-it-a-string",
         "filter": "join",
         "value": "abc",
@@ -1411,12 +1093,9 @@ CASES: list[dict] = [
         "value_factory": lambda: (x for x in ["a", "b"]),
         "arg": ", ",
     },
-    # --- random (`defaultfilters.py:642-648`, `random.choice` on IndexError -> "")
-    #
-    # **Membership, not equality** (Review Focus 4): the answer is chosen at
-    # random, so an equality row would be green roughly one time in three. The
-    # row says what it asserts in its name, and the harness checks both sides
-    # against the *population* rather than against each other.
+    # --- random (`defaultfilters.py:642-648`, `random.choice`, IndexError -> "")
+    # Membership, not equality: the answer is random, so the harness checks each side against
+    # the population, not against each other.
     {
         "name": "random/result-is-a-member-of-the-population",
         "filter": "random",
@@ -1429,22 +1108,15 @@ CASES: list[dict] = [
         "value": [],
     },
     {
-        # The `is_safe=True` half of `random`, and it is a membership row for the
-        # same reason the one above is: the answer is still chosen at random, so
-        # only the *safety* of it can be compared exactly.
+        # `is_safe=True` half; still membership, since only the random pick's *safety* is fixed.
         "name": "random/safe-member-stays-safe",
         "filter": "random",
         "value": mark_safe("abc"),
         "membership": True,
     },
-    # --- dictsort / dictsortreversed
-    #     (`defaultfilters.py:578-587`/`defaultfilters.py:590-599`)
-    #
-    # One host call each, with `(AttributeError, TypeError)` -> `""`. The
-    # argument's *shape* decides the resolver, and this is the pair that shows it:
-    # a bare int reaches `float(1)` and becomes `itemgetter(1)` — a list index —
-    # where a quoted digit is a string key. Both are `float()`-convertible, so
-    # nothing but the token shape separates them.
+    # --- dictsort / dictsortreversed (`defaultfilters.py:578-587` / `590-599`)
+    # One host call each, `(AttributeError, TypeError)` → `""`. The argument's shape decides the
+    # resolver: a bare int is `itemgetter(1)`, a quoted digit a string key.
     {
         "name": "dictsort/by-key",
         "filter": "dictsort",
@@ -1470,18 +1142,15 @@ CASES: list[dict] = [
         "arg": "a.b",
     },
     {
-        # The `getattr` fallback, reachable only from an object whose subscript
-        # *raises* — a dict and a list both answer the first branch.
+        # The `getattr` fallback: reachable only from an object whose subscript raises.
         "name": "dictsort/getattr-when-subscript-raises",
         "filter": "dictsort",
         "value": [DOT_ATTR(2), DOT_ATTR(1)],
         "arg": "x",
     },
     {
-        # The refusal is on **any** underscore-prefixed bit, not only a leading
-        # one: the test is `"._" in arg or arg[0] == "_"`, so `"a._b"` is refused
-        # exactly as `"_a"` is. Two rows, because a body that tested only `arg[0]`
-        # passes the first and fails the second.
+        # The refusal is on any underscore bit, not only a leading one: the test is
+        # `"._" in arg or arg[0] == "_"`, so `"a._b"` is refused as `"_a"` is.
         "name": "dictsort/leading-underscore-arg-is-refused",
         "filter": "dictsort",
         "value": [{"_a": 1}],
@@ -1494,8 +1163,7 @@ CASES: list[dict] = [
         "arg": "a._b",
     },
     {
-        # Three ways the sort refuses, all becoming `""` — the outer `try`'s
-        # not-iterable arm, and two from the resolver.
+        # A non-iterable value, one of three refusals that become `""`.
         "name": "dictsort/non-iterable-is-the-empty-string",
         "filter": "dictsort",
         "value": 5,
@@ -1525,8 +1193,7 @@ CASES: list[dict] = [
         "value": [{"_a": 1}],
         "arg": "_a",
     },
-    # --- unordered_list (`defaultfilters.py:669-737`, needs_autoescape,
-    #     recursive, tabs)
+    # --- unordered_list (`defaultfilters.py:669-737`, needs_autoescape, recursive, tabs)
     {
         "name": "unordered_list/single",
         "filter": "unordered_list",
@@ -1538,20 +1205,14 @@ CASES: list[dict] = [
         "value": [],
     },
     {
-        # **Four levels**: a one-level case passes with the recursion missing
-        # entirely, and the tab depth is what shows it.
+        # Four levels: the tab depth is what shows the recursion.
         "name": "unordered_list/nested-four-levels",
         "filter": "unordered_list",
         "value": ["a", ["b", ["c", ["d"]]]],
     },
     {
-        # The nesting test is `isinstance(next_item, (list, tuple,
-        # GeneratorType))` **and then** `iter()`, and both halves are
-        # load-bearing. A tuple is in the triple and nests; a dict iterates but
-        # is not in the triple, so it does not; `None` is neither, so it does not
-        # either and becomes a **second item** instead. Three rows, one per
-        # decision, and the `None` row is the one that separates "not nested" from
-        # "dropped".
+        # Nesting is `isinstance(next_item, (list, tuple, GeneratorType))` then `iter()`: a tuple
+        # nests, a dict iterates but is not in the triple, `None` becomes a second item.
         "name": "unordered_list/tuple-nests",
         "filter": "unordered_list",
         "value": ["a", ("b", "c")],
@@ -1572,9 +1233,8 @@ CASES: list[dict] = [
         "value": ["a", []],
     },
     {
-        # A generator as the **whole value** pins that the host's view of it is
-        # `list(v)`; a generator as an *element* takes the third arm of the
-        # isinstance test. Both are one-shot, so both are built per side.
+        # A generator as the whole value pins that the host views it as `list(v)`; one as an
+        # element takes the third arm. Both are one-shot, built per side.
         "name": "unordered_list/generator-value",
         "filter": "unordered_list",
         "value_factory": lambda: (x for x in ["a", ["b", "c"]]),
@@ -1585,18 +1245,14 @@ CASES: list[dict] = [
         "value_factory": lambda: ["a", (x for x in ["b", "c"])],
     },
     {
-        # **The row that forced `NestedSequence.truthy`.** `if children:` tests
-        # the *object*, and a generator is truthy even yielding nothing, so an
-        # empty nested generator gets an empty `<ul>` where an empty nested list
-        # gets none — the same emptiness, two answers. Measured Django:
-        # `"\t<li>a\n\t<ul>\n\n\t</ul>\n\t</li>"`.
+        # `if children:` tests the object, and a generator is truthy even empty, so an empty
+        # nested generator opens a `<ul>` where an empty list opens none.
         "name": "unordered_list/empty-nested-generator-still-opens-a-ul",
         "filter": "unordered_list",
         "value_factory": lambda: ["a", (x for x in [])],
     },
     {
-        # `__str__` is not `__repr__`: the escaper is `"%s" % item`, so a body
-        # that escaped the `repr` answers `REPR-SENTINEL` here.
+        # The escaper is `"%s" % item` (`__str__`), not `repr`, so `REPR-SENTINEL` here.
         "name": "unordered_list/escapes-str-not-repr",
         "filter": "unordered_list",
         "value": [STR_NOT_REPR()],
@@ -1607,13 +1263,8 @@ CASES: list[dict] = [
         "value": [1, 2],
     },
     {
-        # The group's second `context` row, and the only one that shows the
-        # escaper being *chosen* rather than applied: nested, so the recursion
-        # must carry the choice down rather than re-deciding per level.
-        #
-        # **Pinned**, and for the same reason as the join row above: with the
-        # key ignored every level escapes on both sides, so this row is a
-        # detector only if the literal is asserted. See the module doc.
+        # Nested, so the recursion must carry the escaper choice down rather than re-deciding per
+        # level. Pinned: with the key ignored every level escapes on both sides.
         "name": "unordered_list/autoescape-false-nested",
         "filter": "unordered_list",
         "value": ["<a>", ["<b>"]],
@@ -1625,15 +1276,9 @@ CASES: list[dict] = [
         "filter": "unordered_list",
         "value": ["<a>", ["<b>"]],
     },
-    # --- Task 7, wave 1: add, divisibleby, get_digit, stringformat ---------
-    #
-    # `add`'s three arms, and the safety asymmetry that is the reason two of
-    # these rows exist. `is_safe=False` means the loop never marks the answer,
-    # but the *value* can still carry a mark: `SafeString.__add__` returns a
-    # `SafeString`, while `str.__add__` on a plain left operand returns a plain
-    # `str` even when the argument is a `SafeString`. The pair below is the two
-    # directions of that, and a body that read the flag alone would get both
-    # wrong the same way.
+    # --- add, divisibleby, get_digit, stringformat --------------------------
+    # `add` is `is_safe=False`, but the *value* can still carry a mark: `SafeString.__add__`
+    # returns a `SafeString`, while `str.__add__` on a plain left drops the argument's mark.
     {
         "name": "add/ints",
         "filter": "add",
@@ -1660,23 +1305,21 @@ CASES: list[dict] = [
         "arg": 1,
     },
     {
-        # An `IntValue::Big` on both sides — canonical decimal text, so a body
-        # that ran `i64` arithmetic would overflow here.
+        # `Big` on both sides: canonical decimal text, so `i64` arithmetic would overflow here.
         "name": "add/big-ints",
         "filter": "add",
         "value": 2**70,
         "arg": 2,
     },
     {
-        # Arm 2, the one no `Value` variant can express in Rust: `str.__add__`.
+        # The `str.__add__` arm — no `Value` variant can express it.
         "name": "add/strings-concatenate",
         "filter": "add",
         "value": "a",
         "arg": "b",
     },
     {
-        # Arm 3's bare `except Exception` — reached because `int("2.5")` is a
-        # `ValueError` and `1 + "2.5"` is a `TypeError`.
+        # Arm 3's bare `except Exception`: `int("2.5")` is a `ValueError`, `1 + "2.5"` a `TypeError`.
         "name": "add/unparseable-string-is-empty",
         "filter": "add",
         "value": 1,
@@ -1701,25 +1344,21 @@ CASES: list[dict] = [
         "arg": 1,
     },
     {
-        # `mark_safe("a") + "b"` is a `SafeString`, so the answer is marked
-        # although `is_safe=False`. The **mark is the value's**, not the flag's.
+        # The **mark is the value's**, not the flag's: `mark_safe("a") + "b"` is a `SafeString` though `is_safe=False`.
         "name": "add/safe-left-operand-keeps-the-mark",
         "filter": "add",
         "value": mark_safe("a"),
         "arg": "b",
     },
     {
-        # The mirror: a plain `str` on the left wins, so `str.__add__` returns a
-        # plain `str` and the argument's mark is dropped.
+        # The mirror: a plain `str` left operand makes `str.__add__` drop the argument's mark.
         "name": "add/plain-left-operand-drops-the-marks",
         "filter": "add",
         "value": "a",
         "arg": mark_safe("b"),
     },
 
-    # `divisibleby` has **no `try`**, so its failures escape and cannot be rows
-    # above; what is left to pin is that every surviving arm answers a Python
-    # `bool`. Measured rows only.
+    # `divisibleby` has **no `try`**, so its failures escape; every surviving arm answers a Python `bool`.
     {
         "name": "divisibleby/divisible",
         "filter": "divisibleby",
@@ -1764,9 +1403,7 @@ CASES: list[dict] = [
         "arg": 2,
     },
 
-    # `get_digit`'s two early returns and its `IndexError` arm. The `mark_safe`
-    # rows are the ones that show the early return hands back *the input as it
-    # was*, marking included.
+    # `get_digit`: two early returns plus an `IndexError` arm; the `mark_safe` rows show an early return hands back the input unchanged, marking included.
     {
         "name": "get_digit/ones",
         "filter": "get_digit",
@@ -1800,17 +1437,14 @@ CASES: list[dict] = [
         "arg": -1,
     },
     {
-        # The sign is a character in `str(-123)`, so digit 1 is `3` and digit 3
-        # is `1`; the `-` is only reachable at `arg == 4`.
+        # The sign is a character in `str(-123)`, so digit 1 is `3`; `-` is reachable only at `arg == 4`.
         "name": "get_digit/negative-value-indexes-digits",
         "filter": "get_digit",
         "value": -123,
         "arg": 1,
     },
     {
-        # `int("abc")` is the caught `ValueError`, so the value comes back as it
-        # was — a `SafeString` here, which is the marking half of the early
-        # return.
+        # `int("abc")` is the caught `ValueError`; the value returns as it was — a `SafeString` here, the marking half of the early return.
         "name": "get_digit/non-numeric-value-returns-it-marked",
         "filter": "get_digit",
         "value": mark_safe("abc"),
@@ -1835,8 +1469,7 @@ CASES: list[dict] = [
         "arg": 1,
     },
     {
-        # A `Big` value: `str(10**30)` has 31 digits, so digit 1 is `0` and the
-        # conversion must not go through `i64`.
+        # A `Big` value: `str(10**30)` has 31 digits, so digit 1 is `0`; the conversion must not go through `i64`.
         "name": "get_digit/big-value",
         "filter": "get_digit",
         "value": 10**30,
@@ -1849,9 +1482,8 @@ CASES: list[dict] = [
         "arg": 10**30,
     },
 
-    # `stringformat` is `is_safe=True`, so the loop marks the answer when the
-    # **pre-filter** value is `SafeData`. The tuple rows are the ones `is_tuple`
-    # exists for, and they are expressible here as a real Python tuple value.
+    # `stringformat` is `is_safe=True`, so the loop marks when the **pre-filter** value is `SafeData`.
+    # The tuple rows are what `is_tuple` exists for, expressible here as a real Python tuple.
     {
         "name": "stringformat/str",
         "filter": "stringformat",
@@ -1902,17 +1534,14 @@ CASES: list[dict] = [
         "arg": "s",
     },
     {
-        # A list is **not** unpacked — CPython unpacks a tuple and treats every
-        # other sequence as a single operand.
+        # A list is **not** unpacked: CPython unpacks a tuple and treats any other sequence as one operand.
         "name": "stringformat/list-is-one-operand",
         "filter": "stringformat",
         "value": [1, None],
         "arg": "s",
     },
     {
-        # The `isinstance(value, tuple)` branch: stringified first, so `%s`
-        # receives `"(1, 2)"` where the bare operator would raise `TypeError:
-        # not all arguments converted during string formatting`.
+        # The `isinstance(value, tuple)` branch: stringified first, so `%s` gets `"(1, 2)"` where the bare operator raises `TypeError`.
         "name": "stringformat/tuple-is-stringified",
         "filter": "stringformat",
         "value": (1, 2),

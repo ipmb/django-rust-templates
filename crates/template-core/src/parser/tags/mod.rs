@@ -1,15 +1,7 @@
-//! One module per built-in tag (design spec §10.4).
-//!
-//! Written once, in full, and never edited by a fan-out agent: it is the file
-//! every new tag would otherwise have to touch, and the layout exists so that no
-//! two agents share one. The consequence is a real constraint worth stating —
-//! **a helper needed by two tags lives here, not in either tag's file**, and it
-//! is added by the central commit rather than by an agent.
-//!
-//! The compile *functions* do not live here. Each tag owns `tags/<name>.rs` and
-//! exports `pub fn compile`; `crate::parser::registry` maps the command name to
-//! it. The four helpers below are the ones M2's nine tags share, moved out of
-//! the single `tags.rs` unchanged.
+//! One module per built-in tag (design spec §10.4). **A helper needed by two
+//! tags lives here, not in either tag's file**, added by the central commit
+//! rather than by a fan-out agent. Each tag owns `tags/<name>.rs` and exports
+//! `pub fn compile`; `crate::parser::registry` maps the command name to it.
 
 pub mod autoescape;
 pub mod block;
@@ -21,9 +13,8 @@ pub mod debug;
 pub mod extends;
 pub mod filter;
 pub mod firstof;
-// `for` and `if` are Rust keywords, so the module name is `for_tag`/`if_tag`
-// while the *file* keeps the command's name. `#[path]` is what lets the
-// module name differ from the file name.
+// `for` and `if` are Rust keywords: the module name is `for_tag`/`if_tag` while
+// `#[path]` keeps the file named after the command.
 #[path = "for.rs"]
 pub mod for_tag;
 pub mod i18n;
@@ -39,9 +30,8 @@ pub mod partialdef;
 pub mod regroup;
 pub mod resetcycle;
 pub mod spaceless;
-// `static` is a Rust keyword in edition 2018+ positions (`pub mod static`), so
-// this is the `for_tag`/`if_tag` idiom: the module name differs, the file keeps
-// the command's name.
+// `static` is a Rust keyword in edition 2018+ (`pub mod static`), so the same
+// `#[path]` idiom: the file keeps the command's name.
 #[path = "static.rs"]
 pub mod static_tag;
 pub mod templatetag;
@@ -62,27 +52,19 @@ use crate::parser::desc::{AttrValue, NodeDesc, NodeRef};
 #[cfg(test)]
 use crate::parser::Parser;
 
-/// `Token.split_contents`, as a compile function sees it.
-///
-/// Django reaches `next(bits)` on an exhausted iterator, so that failure leaves
-/// `parse` as a bare `StopIteration` — with `.token` attached by the
-/// `except Exception` arm — rather than a `TemplateSyntaxError`. M1's
-/// `_native.split_contents` binding already fixed that type at the FFI boundary;
-/// this keeps the two consistent instead of inventing a second behaviour for the
-/// same condition.
+/// `Token.split_contents`, as a compile function sees it. Django's `next(bits)`
+/// on an exhausted iterator is a bare `StopIteration` with `.token` attached,
+/// not a `TemplateSyntaxError` — the type M1's FFI binding already fixes.
 fn split_contents(token: &Token) -> Result<Vec<String>, Error> {
     token
         .split_contents()
         .map_err(|_| Error::unterminated_marker())
 }
 
-/// Python's `s[1:-1]`: the first and last *characters* dropped, clamping where
-/// Python clamps.
-///
-/// `{% now %}`'s format string is extracted this way, and Django does not check
-/// that the argument is quoted — so `{% now 5 %}` yields `""` and
-/// `{% now abc %}` yields `"b"`. `[1..len - 1]` on a `&str` panics on a
-/// one-character argument and is not the same operation.
+/// Python's `s[1:-1]`: first and last *characters* dropped, clamping where
+/// Python clamps. Django doesn't check `{% now %}`'s argument is quoted, so
+/// `{% now 5 %}` yields `""`; `[1..len - 1]` on a `&str` panics on a
+/// one-character argument.
 fn strip_first_and_last(s: &str) -> String {
     let mut chars = s.chars();
     chars.next();
@@ -90,37 +72,15 @@ fn strip_first_and_last(s: &str) -> String {
     chars.as_str().to_string()
 }
 
-/// Python's `repr()` for a `str`, as a `"%r"` interpolation applies it.
+/// Python's `repr()` for a `str`, as `"%r"` interpolation applies it: quote `'`
+/// unless the string contains `'` and no `"`, then escape backslash, the chosen
+/// quote, and control characters as `\xNN`/`\uNNNN`/`\UNNNNNNNN`.
 ///
-/// Python's `repr()` of a string, for the two Django messages that interpolate
-/// with `%r`: `{% resetcycle %}`'s tag name and `{% templatetag %}`'s argument
-/// list. Python chooses `'` unless the string contains `'` and no `"`, then
-/// escapes backslashes, the chosen quote, and the standard control escapes as
-/// `\xNN` / `\uNNNN` / `\UNNNNNNNN`.
-///
-/// **Exact on ASCII, and enforced as such.** The boundary is *not* "printable
-/// non-ASCII passes through": Python escapes a character when
-/// `Py_UNICODE_ISPRINTABLE` is false, which covers every non-ASCII category-C
-/// code point (Cf, Cs, Co, Cn) plus Zl, Zp and Zs. `char::is_control()` is Cc
-/// only, so this function emits those raw where Django escapes them. Measured
-/// on the pinned tree — `U+00AD` is Cf, and `option` is a live argument slot:
-///
-/// ```text
-/// >>> Template('{% include "x" ­option %}')
-/// TemplateSyntaxError: Unknown argument for 'include' tag: '\xadoption'.
-/// ```
-///
-/// The same slot exists at M5 in `{% with %}`'s `remaining_bits[0]`
-/// (`defaulttags.py:1683`): `{% with a=1 foo­bar %}` reports
-/// `'with' received an invalid token: 'foo\xadbar'`.
-///
-/// Both M2 call sites are ASCII *by construction*, which is why the assertion
-/// below holds and not by accident: `args[0]` is the tag name dispatch matched
-/// against the registry, and `TEMPLATETAG_ARGUMENTS` is a constant. When M5 and
-/// M7 wire user text into these messages they must route them through the
-/// host's `repr` rather than widen this function (design spec §10.4) — and this
-/// assertion is what makes that a decision someone has to make rather than a
-/// silently wrong message.
+/// **Exact on ASCII only, enforced as such.** Python also escapes non-printable
+/// non-ASCII (Cf/Cs/Co/Cn/Zl/Zp/Zs), which `char::is_control()` — Cc alone — does
+/// not cover. Both M2 call sites are ASCII by construction (`args[0]` is the
+/// dispatched tag name, `TEMPLATETAG_ARGUMENTS` a constant); user text must route
+/// through the host's `repr` (design spec §10.4), never widen this.
 pub(crate) fn py_repr_str(s: &str) -> String {
     debug_assert!(
         s.is_ascii(),
@@ -160,25 +120,20 @@ pub(crate) fn py_repr_str(s: &str) -> String {
 }
 
 /// Python's `repr()` of a list of strings, as `"%s" % [str, ...]` renders it.
-///
-/// ASCII-only, like [`py_repr_str`], and for the same reason: its input is a
-/// constant (`{% templatetag %}`'s argument list) rather than user text.
+/// ASCII-only like [`py_repr_str`], for the same reason: the input is a constant.
 fn py_list_repr(items: &[&str]) -> String {
     let rendered: Vec<String> = items.iter().map(|item| py_repr_str(item)).collect();
     format!("[{}]", rendered.join(", "))
 }
 
 /// Python's `repr()` of a list of **arbitrary** strings, as `"%r" % [str, …]`
-/// renders it.
+/// renders it: the user-text counterpart of [`py_list_repr`].
 ///
-/// The user-text counterpart of [`py_list_repr`]: each element goes through
-/// [`Parser::py_repr`] — the host's real `repr` — because the elements are
-/// template text, and `py_repr_str`'s ASCII-only assertion is exactly what
-/// refuses that. It lives here rather than beside one caller because two tags
-/// need it: `{% get_current_timezone %}` in `tz.rs` (`tz.py:197-199`) and the
-/// five `as variable`/`for … as` messages in `i18n.rs` (`i18n.py:237,260,287,330,353`).
-/// Generic over the element type so a `Vec<String>` from `split_contents` and a
-/// `Vec<&str>` from `pyunicode::split` both go through it without a conversion.
+/// Each element goes through [`Parser::py_repr`] — the host's real `repr` —
+/// because the elements are template text, exactly what `py_repr_str`'s
+/// ASCII-only assertion refuses. Shared by `tz.rs` (`tz.py:197-199`) and `i18n.rs`
+/// (`i18n.py:237,260,287,330,353`); generic over the element type so a
+/// `Vec<String>` and a `Vec<&str>` both pass through without a conversion.
 ///
 /// [`Parser::py_repr`]: crate::parser::Parser::py_repr
 pub(crate) fn python_list_repr<T: AsRef<str>>(
@@ -193,22 +148,14 @@ pub(crate) fn python_list_repr<T: AsRef<str>>(
 }
 
 // ---------------------------------------------------------------------------
-// Test-only stand-ins.
+// Test-only stand-ins, each for one property no M2 built-in can reach:
 //
-// The parser's machinery has to be provable before the tags that will exercise
-// it exist, and each of these exists for one property that no M2 built-in can
-// reach:
-//
-//   standin        a tag that reads its own body, so `parse(until)`,
+//   standin        reads its own body, exercising `parse(until)`,
 //                  `prepend_token`, `delete_first_token`, nesting and
-//                  `contains_nontext` are all exercised
-//   standin_ref    a node carrying `AttrValue::Ref`, the shape M3's
-//                  `FilterExpression` will use — nothing in M2 produces a `Ref`
-//                  from Rust, because both of `{% resetcycle %}`'s paths are
-//                  errors until `{% cycle %}` arrives in M5
-//   standin_first  a `must_be_first` node, so the ordering rule and the
-//                  host-supplied origin repr are tested before `{% extends %}`
-//                  arrives at M7
+//                  `contains_nontext`
+//   standin_ref    carries `AttrValue::Ref`, the shape `FilterExpression` uses
+//   standin_first  a `must_be_first` node, testing the ordering rule and the
+//                  host-supplied origin repr
 // ---------------------------------------------------------------------------
 
 /// A block tag that reads its own body, exactly as `{% spaceless %}` will.
@@ -237,10 +184,9 @@ fn standin_first(_parser: &mut Parser<'_>, _token: &Token) -> Result<NodeDesc, E
 
 /// The stand-in compile function for `command`, if `command` names one.
 ///
-/// A `match` here rather than three `REGISTRY` rows: a row would put a name in
-/// `builtin_tag_names_including_stubs` that Django's registry does not have, and
-/// the Python cross-check in `tests/test_tag_inventory.py` asserts against
-/// Django's real set. `registry::builtin_tag` consults this before the table.
+/// A `match` rather than `REGISTRY` rows: a row would name a tag Django's
+/// registry lacks, which `tests/test_tag_inventory.py` cross-checks against the
+/// real set. `registry::builtin_tag` consults this before the table.
 #[cfg(test)]
 pub(crate) fn standin_tag(command: &str) -> Option<CompileFn> {
     match command {
@@ -252,12 +198,8 @@ pub(crate) fn standin_tag(command: &str) -> Option<CompileFn> {
 }
 
 /// The parser harness shared by `tags/mod.rs`'s tests and every `tags/<name>.rs`
-/// test module.
-///
-/// One copy rather than one per tag: each of these builds a `Parser` the same
-/// way, and a per-tag copy would be a second spelling of the same helper —
-/// meaning a tag's tests could pass against a harness no other tag used. It is
-/// `pub(crate)` and lives under `#[cfg(test)]` so nothing ships it.
+/// test module — one copy, so a tag's tests cannot pass against a harness no
+/// other tag used. `pub(crate)` under `#[cfg(test)]`, so nothing ships it.
 #[cfg(test)]
 pub(crate) mod support {
     use crate::lexer::Lexer;
@@ -269,12 +211,9 @@ pub(crate) mod support {
     use crate::token::Token;
     use std::cell::{Cell, RefCell};
 
-    /// Parse `source` with no host, and return the whole top-level nodelist.
-    ///
-    /// [`compile`]'s companion, for the tests whose subject is the *list* rather
-    /// than the node: `NodeListDesc::get_nodes_by_type` walks one, and a helper
-    /// that unwrapped a single node could not express the multi-sibling case at
-    /// all.
+    /// Parse `source` with no host and return the whole top-level nodelist — for
+    /// tests whose subject is the *list*: `get_nodes_by_type` walks one, so a
+    /// helper returning a single node could not express the multi-sibling case.
     pub(crate) fn nodelist(source: &str) -> NodeListDesc {
         let mut parser = Parser::new(Lexer::new(source).tokenize(), &NoHost);
         parser.parse(&[]).expect("expected a successful parse")
@@ -298,13 +237,10 @@ pub(crate) mod support {
         parser.parse(&[]).expect_err("expected a parse failure")
     }
 
-    /// The error `source` fails with, with an origin template name attached.
-    ///
-    /// The parameter is the origin's **name**, not a rendered `repr`: since M7
-    /// Task 2 the field holds `Origin.template_name` and `extend_nodelist`
-    /// derives the `repr` from it, so a caller passing `"tpl.html"` here is what
-    /// exercises the derivation — the assertion below still expects the quoted
-    /// form, and that difference is the thing being tested.
+    /// The error `source` fails with, with an origin template name attached. The
+    /// parameter is the origin's **name**, not a rendered `repr`: the field holds
+    /// `Origin.template_name` and `extend_nodelist` derives the quoted form, so a
+    /// caller passing `"tpl.html"` is what exercises that derivation.
     pub(crate) fn failure_with_origin(source: &str, name: Option<&str>) -> Error {
         let mut parser = Parser::new(Lexer::new(source).tokenize(), &NoHost);
         if let Some(name) = name {
@@ -337,15 +273,12 @@ pub(crate) mod support {
         out
     }
 
-    /// A host that hands out a **fresh slot index per call**.
-    ///
-    /// [`NoHost`] answers `0` to every `alloc_slot`, which is right for a host
-    /// with no table and wrong for any test that has to see the table's
-    /// *sequence*: under `NoHost`, "two `{% cycle %}` definitions reserve two
-    /// slots" and "two definitions collide on one slot" produce the same
-    /// descriptors. `Cell` rather than `&mut self` because [`Host::alloc_slot`]
-    /// takes `&self` — the real host keeps its table behind interior mutability
-    /// for the same reason.
+    /// A host that hands out a **fresh slot index per call**. [`NoHost`] answers
+    /// `0` to every `alloc_slot`, which is wrong for any test that has to see the
+    /// table's *sequence*: under `NoHost`, "two definitions reserve two slots" and
+    /// "two definitions collide on one slot" produce the same descriptors. `Cell`
+    /// rather than `&mut self` because `alloc_slot` takes `&self`, as the real
+    /// host's interior mutability does.
     #[derive(Default)]
     pub(crate) struct CountingHost {
         next: std::cell::Cell<usize>,
@@ -372,42 +305,25 @@ pub(crate) mod support {
         }
 
         fn compile_filter(&self, _token: &str) -> Result<NodeRef, Error> {
-            // The counter, not the null handle, because this host's whole point
-            // is that a second reservation gets a second index — and a
-            // condition's operand *is* a reservation. Handing back `0` for every
-            // operand would make `{% if a and b %}`'s two `NodeRef`s
-            // indistinguishable, which is the same blind spot `alloc_slot`'s
-            // doc comment says this host exists to close.
-            //
-            // It does not build anything: the handle names a table entry no
-            // test fills, and nothing parsed under this host is materialised.
-            //
-            // The `as u64` is `NodeRef`'s width, not a narrowing: `NodeRef` is a
-            // `u64` handle into the same table `alloc_slot` indexes, which is
-            // why the counter and the handle number together.
+            // The counter, not the null handle: a condition's operand *is* a
+            // reservation, so returning `0` every time would make
+            // `{% if a and b %}`'s two `NodeRef`s indistinguishable. `NodeRef` is
+            // a `u64` handle into the same table `alloc_slot` indexes, so the
+            // `as u64` is its width, not a narrowing. Nothing is built: the handle
+            // names a table entry no test fills.
             Ok(NodeRef(self.alloc_slot() as u64))
         }
     }
 
     /// Parse `source` against `host`, returning the whole top-level nodelist.
-    ///
-    /// [`compile`] asserts a single node because most tag tests are about one
-    /// tag; this one does not, because the tests that need a counting host are
-    /// exactly the tests whose point is a *relationship between two* nodes.
+    /// [`compile`] asserts a single node; this one does not, because its tests are
+    /// about a relationship between two nodes.
     pub(crate) fn parse_with(source: &str, host: &dyn crate::parser::host::Host) -> NodeListDesc {
         let mut parser = Parser::new(Lexer::new(source).tokenize(), host);
         parser.parse(&[]).expect("expected a successful parse")
     }
 
     /// One `register_partial_def` call, as the tag made it.
-    ///
-    /// **This carried `#[expect(dead_code)]` until M13's Task 3, and the
-    /// attribute fired exactly as its comment said it would** — the build
-    /// failed with `unfulfilled_lint_expectations` the moment `partial`'s rows
-    /// constructed a `PartialHost`, which is the forcing function an `allow`
-    /// would have silently skipped. Removed rather than re-scoped, because what
-    /// made the item dead was the *host* being unconstructed, and the host is
-    /// constructed now.
     #[derive(Debug, PartialEq, Eq)]
     pub(crate) struct PartialDefCall {
         pub(crate) name: String,
@@ -421,18 +337,12 @@ pub(crate) mod support {
 
     /// The host `{% partial %}` and `{% partialdef %}` compile under.
     ///
-    /// Two answers, both deliberately uninformative about *materialisation*:
+    /// Both answers are deliberately uninformative about *materialisation* —
     /// `partial_node` returns a fixed handle and `register_partial_def` records
-    /// the call and returns another, because nothing parsed under this host is
-    /// ever materialised — `NodeRef` values are indices into a table the real
-    /// host owns. The rows here are about what the **tag** passes across the
-    /// seam; what the shell does with it is `tests/test_partials_rust.py`'s
-    /// subject.
-    ///
-    /// `#[expect(dead_code)]` stood here until Task 3 and fired then; see
-    /// `PartialDefCall` above for the measurement. `defs` is still unread —
-    /// `register_partial_def` is Task 4's — but the field is written by a live
-    /// trait impl, so it is not dead code and needs no attribute to say so.
+    /// the call and returns another, because nothing parsed here is ever
+    /// materialised and `NodeRef`s index a table the real host owns. The rows test
+    /// what the **tag** passes across the seam; what the shell does with it is
+    /// `tests/test_partials_rust.py`'s subject.
     #[derive(Default)]
     pub(crate) struct PartialHost {
         pub(crate) defs: RefCell<Vec<PartialDefCall>>,
@@ -489,27 +399,16 @@ pub(crate) mod support {
 
     /// A host that reports an **explicit set** of library tags as loaded.
     ///
-    /// The library tags (`{% cache %}`, `{% static %}`, the two prefix tags,
-    /// `tz`'s three) are reachable in Rust only behind
-    /// [`Host::library_tag_loaded`], so [`compile`]/[`failure`] — which use
-    /// [`NoHost`], whose answer is the trait default `false` — cannot reach them
-    /// at all: `{% static %}` under `NoHost` is `Invalid block tag on line 1:
-    /// 'static'.`, which is *correct* and is the unloaded case. These tests are
-    /// about the loaded one, so they need a host that says yes.
+    /// Library tags are reachable in Rust only behind [`Host::library_tag_loaded`],
+    /// and [`NoHost`] answers the trait default `false`, so `{% static %}` under it
+    /// is the *correct* unloaded case; these tests need the loaded one.
     ///
-    /// **Why the set is a parameter and not `library_tag_names()`.** That was
-    /// this host's first shape, and it made one of the dispatch's two questions
-    /// unanswerable: `registry::library_tag` reads the same table, so
-    /// `library_tag_loaded(name) && library_tag(name).is_none()` could not be
-    /// made true by any name, and the arm that handled it was dead code no row
-    /// could distinguish (`loaded_library_tag`, `parser/mod.rs`, records the
-    /// measurement). Taking the set from the caller is also the real
-    /// `ShellHost`'s shape — `command in parser.tags`, mutated by `{% load %}`
-    /// — so a row can now load a name Rust has **no** body for and pin what the
-    /// refusal is (the real instance is `trans` from `i18n`; the row uses a
-    /// fabricated `unregistered_` name, because `trans` becomes one Rust *has* a
-    /// body for in M12 Task 6, which is the expiry
-    /// `test_interposition.py::FabricatedNameTests` documents).
+    /// The set is a parameter rather than `library_tag_names()` because
+    /// `registry::library_tag` reads the same table: `library_tag_loaded(name) &&
+    /// library_tag(name).is_none()` could then never be true, and the arm handling
+    /// that case was dead code. A caller-supplied set also matches `ShellHost`'s
+    /// shape, and lets a row load a name Rust has **no** body for in order to pin
+    /// the refusal.
     ///
     /// [`Host::library_tag_loaded`]: crate::parser::host::Host::library_tag_loaded
     #[cfg(test)]
@@ -518,10 +417,9 @@ pub(crate) mod support {
     #[cfg(test)]
     impl crate::parser::host::Host for LoadedLibrariesHost {
         fn has_tag(&self, _command: &str) -> bool {
-            // The library tags Rust compiles are *not* host tags — that is what
-            // `ShellHost.has_tag`'s identity clause decides for the real host,
-            // and it is why these names needed a second registry table rather
-            // than a host body.
+            // The library tags Rust compiles are *not* host tags —
+            // `ShellHost.has_tag`'s identity clause decides that for the real
+            // host — which is why these names needed a second registry table.
             false
         }
 
@@ -542,27 +440,23 @@ pub(crate) mod support {
         }
 
         fn alloc_slot(&self) -> usize {
-            // `NoHost`'s answer, and honest here for the same reason: no library
-            // tag allocates a slot, and nothing parsed under this host is
-            // materialised.
+            // `NoHost`'s answer, honest here for the same reason: no library tag
+            // allocates a slot and nothing parsed under this host is materialised.
             0
         }
 
         fn compile_filter(&self, _token: &str) -> Result<NodeRef, Error> {
-            // `NoHost`'s answer, and *not* a gap for these four tags: each
-            // compiles its operands to `AttrValue::FilterExpr` descriptors
-            // through `Parser::compile_filter`, which does not cross this seam at
-            // all. The seam method is `{% if %}`'s operand handle.
+            // `NoHost`'s answer, and not a gap for these four tags: each compiles
+            // its operands to `AttrValue::FilterExpr` via `Parser::compile_filter`,
+            // which does not cross this seam. The seam method is `{% if %}`'s
+            // operand handle.
             Ok(NodeRef(0))
         }
     }
 
     /// The loaded set the library modules' own rows run under: exactly the names
     /// Rust has a body for, so those rows exercise the tag and not the routing.
-    /// `library_tag_names()` is the *registry's* answer standing in for the
-    /// host's here, which is the conflation this host's doc is about — the
-    /// routing rows pass literals instead, so that the two questions can
-    /// disagree.
+    /// (The routing rows pass literals, so the two questions can disagree.)
     fn rust_libraries_loaded() -> Vec<&'static str> {
         crate::parser::registry::library_tag_names()
     }
@@ -621,9 +515,8 @@ mod tests {
     #[test]
     fn the_terminator_is_prepended_not_consumed() {
         // `{% endstandin %}` is pushed back for the caller to consume with
-        // `delete_first_token`. A parser that consumed it here would report the
-        // *second* block as unclosed, or silently swallow a node
-        // (Review Focus item 3).
+        // `delete_first_token`: a parser that consumed it here would report the
+        // *second* block as unclosed.
         let mut parser = Parser::new(
             Lexer::new("{% standin %}a{% endstandin %}{% standin %}b{% endstandin %}").tokenize(),
             &NoHost,
@@ -666,8 +559,7 @@ mod tests {
     fn contains_nontext_starts_false_for_every_nodelist() {
         // A parser that keeps the flag on `self` — or on the node — passes every
         // single-tag test, and reports the *second* block's body as containing
-        // non-text, which is what makes `{% extends %}` refuse a legal template
-        // (Review Focus item 1).
+        // non-text, which makes `{% extends %}` refuse a legal template.
         let mut parser = Parser::new(
             Lexer::new(
                 "{% standin %}{% standin_ref %}{% endstandin %}{% standin %}b{% endstandin %}",
@@ -713,8 +605,7 @@ mod tests {
             ),
         );
         // The outer token is on line 1 and the message alone cannot tell the two
-        // apart; an `error()` that overwrote the token would report line 1 here
-        // (Review Focus item 5).
+        // apart; an `error()` that overwrote the token would report line 1 here.
         assert_eq!(error.token.unwrap().lineno, 3);
     }
 
@@ -730,10 +621,9 @@ mod tests {
     }
 
     /// Django's test is **truthiness**, not `is None` (`base.py:602-606`), so an
-    /// origin whose `template_name` is the empty string says "the template"
-    /// too. An `Option`-shaped port of that check answers `''` instead, and the
-    /// `None` row above cannot tell the two apart — both encodings agree there.
-    /// This is the row that separates them.
+    /// empty origin name says "the template" too. An `Option`-shaped port answers
+    /// `''` instead, and the `None` row above cannot tell the two apart — this row
+    /// does.
     #[test]
     fn an_empty_origin_name_says_the_template_too() {
         let error = failure_with_origin("{% standin_first %}{% standin_first %}", Some(""));
@@ -748,8 +638,7 @@ mod tests {
     #[test]
     fn a_first_node_may_lead_any_nodelist() {
         // The rule permits it when `contains_nontext` is false, so a lone
-        // `must_be_first` tag is legal — including when it is preceded by text,
-        // because text nodes do not set the flag.
+        // `must_be_first` tag is legal — text nodes do not set the flag.
         let mut parser = Parser::new(Lexer::new("  {% standin_first %}").tokenize(), &NoHost);
         let nodelist = parser.parse(&[]).unwrap();
         assert_eq!(nodelist.nodes[1].class_name, "StandinFirstNode");
@@ -788,17 +677,14 @@ mod tests {
         }
 
         fn alloc_slot(&self) -> usize {
-            // Neither of this host's tags is `{% cycle %}`, and no descriptor it
-            // builds names a slot. Zero rather than a counter so that `&TestHost`
-            // stays a promotable unit struct.
+            // Neither of this host's tags names a slot, and zero keeps `&TestHost`
+            // a promotable unit struct.
             0
         }
 
         fn compile_filter(&self, _token: &str) -> Result<NodeRef, Error> {
-            // Accepted, like `NoHost`, and for the same reason: this host exists
-            // to make dispatch order observable, and `{% if %}` is not one of
-            // the tags it dispatches. A test that wants a condition's handle to
-            // be meaningful needs the shell's host.
+            // Accepted, like `NoHost`: this host exists to make dispatch order
+            // observable, and `{% if %}` is not one of the tags it dispatches.
             Ok(NodeRef(0))
         }
     }
@@ -813,11 +699,10 @@ mod tests {
 
     #[test]
     fn the_host_wins_over_a_builtin_of_the_same_name() {
-        // Django's registry is one dict that `add_library` updates in place, so a
-        // later registration shadows an earlier one and `{% load %}` runs after
-        // the builtins. Host-first is therefore the faithful order, and the
-        // converse obligation — the shell must not register a tag Rust
-        // implements — is a note on `Parser::parse`.
+        // Django's registry is one dict `add_library` updates in place, so a later
+        // registration shadows an earlier one and `{% load %}` runs after the
+        // builtins: host-first is faithful. The converse obligation — the shell
+        // must not register a tag Rust implements — is a note on `Parser::parse`.
         let mut parser = Parser::new(Lexer::new("{% standin %}").tokenize(), &TestHost);
         let error = parser
             .parse(&[])
@@ -827,8 +712,8 @@ mod tests {
 
     #[test]
     fn a_host_error_gets_the_token_attached_by_parse() {
-        // `error()` is kind-agnostic; the `Host` branch is the one M4 will lean
-        // on, and it is exercised here rather than assumed.
+        // `error()` is kind-agnostic; the `Host` branch is exercised here rather
+        // than assumed.
         let mut parser = Parser::new(Lexer::new("\n{% standin %}").tokenize(), &TestHost);
         let error = parser.parse(&[]).expect_err("the host refused");
         assert_eq!(error.token.unwrap().lineno, 2);
@@ -855,33 +740,19 @@ mod tests {
     #[cfg_attr(not(debug_assertions), ignore = "the guard is a debug_assert")]
     #[should_panic(expected = "py_repr_str is exact for ASCII only")]
     fn python_repr_refuses_the_inputs_it_is_not_exact_for() {
-        // This replaced an `assert_eq!(py_repr_str("héllo"), "'héllo'")` test,
-        // which pinned behaviour nothing can reach and read as "this function is
-        // a general repr" to the next caller. `héllo` is *not* the divergence —
-        // printable non-ASCII passes through correctly in Python 3 too — so the
-        // old test would have passed while the function stayed wrong for every
-        // non-printable non-ASCII code point. The constraint now fails loudly
-        // instead: M5's `{% with a=1 foo\u{ad}bar %}` and M7's
-        // `{% include "x" \u{ad}option %}` trip this the moment they are wired
-        // in, rather than emitting a message Django does not emit.
+        // Not `héllo`: printable non-ASCII passes through correctly in Python 3,
+        // so that input would pass while the function stayed wrong for every
+        // non-printable non-ASCII point. The `debug_assert` fails loudly instead.
         py_repr_str("héllo");
     }
 
     #[test]
     fn python_whitespace_separators_split_arguments() {
-        // Python's `str.isspace()` is true for U+001C..U+001F as well as for
-        // Unicode `White_Space`, and every split Django performs uses that
-        // table: `.split()` for dispatch and `smart_split` for a tag's
-        // arguments. So `{% autoescape<U+001C>on %}` is two arguments to
-        // Django, and is accepted.
-        //
-        // This was a genuine divergence until M1 fixed it: the lexer trimmed
-        // and `smart_split` split on Rust's table, and the case above raised
-        // "'autoescape' tag requires exactly one argument." The fix is
-        // `pyunicode` (commit `1a013ae`), with the separators added to both
-        // parity corpora and to the randomised alphabet — 13 parity failures
-        // against the unfixed code. This test pins that the parser *inherits*
-        // the corrected table rather than re-deriving splitting for itself.
+        // Python's `str.isspace()` is true for U+001C..U+001F as well as Unicode
+        // `White_Space`, and every split Django performs uses that table, so
+        // `{% autoescape<U+001C>on %}` is two arguments to Django and is accepted.
+        // This pins that the parser *inherits* `pyunicode`'s corrected table
+        // (commit `1a013ae`) rather than re-deriving splitting for itself.
         let node = compile("{% autoescape\u{1c}on %}x{% endautoescape %}");
         assert_eq!(attr(&node, "setting"), &AttrValue::Bool(true));
     }

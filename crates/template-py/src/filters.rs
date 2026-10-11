@@ -1,36 +1,18 @@
 //! The real [`FilterHost`]: Python on the other side of the seam.
 //!
-//! Every operation here is one Python call, plus the classification that decides
-//! which Python object a Rust [`Value`] is. The rule that shaped the split
-//! (§D2/§D7.1) is that **nothing here decides anything**: `conditional_escape` is
-//! one call rather than `is_safe`-then-escape because the branch belongs to
-//! Python, `sort_by_property` is one call because the exception classification
-//! belongs to Python, and `mark_safe` is one call because the `__html__` protocol
-//! belongs to Python. A method here that started making decisions would be a
-//! second implementation of a Python behaviour, which is the failure this crate
-//! exists to prevent.
+//! Every operation here is one Python call plus the classification that decides
+//! which Python object a Rust [`Value`] is: **nothing here decides anything**, so
+//! a method that started making decisions would be a second implementation of a
+//! Python behaviour.
 //!
-//! Two things are worth reading before changing anything.
+//! **The interner.** `Value::Opaque` is an index into the `Vec<Py<PyAny>>` this
+//! host owns for one `_native.filter` call, so ids are meaningful only inside the
+//! call that minted them; a `Value` outliving its host is a bug, not a leak.
 //!
-//! **The value interner.** A `Value` is a closed enum and an `Opaque` is a
-//! `ValueId` — an index into the `Vec<Py<PyAny>>` this host owns for the length
-//! of one `_native.filter` call. Ids are therefore meaningful only inside the
-//! call that minted them, and a `Value` outliving its host is a bug rather than a
-//! leak: the ids would still resolve, to the wrong objects.
-//!
-//! **The `filter` loop is `FilterExpression.resolve`'s, and only its.**
-//! `base.py:803-819` does three things around a filter body — `template_localtime`
-//! before the call when `expects_localtime` is set, the `autoescape` keyword when
-//! `needs_autoescape` is set, and `mark_safe` after the call when `is_safe` is set
-//! *and* the pre-filter value was `SafeData`. All three are here, and so is the
-//! fourth thing Django does around a body: `@stringfilter`'s wrapper
-//! (`defaultfilters.py:38-52`), which coerces `str(first)` **before** the body runs
-//! and marks the result safe when the coerced value was `SafeData`. That is why
-//! the registry carries `stringfilter` and why this is one loop rather than 29
-//! bodies each remembering a two-line rule — the second of them, `cut`, reads the
-//! safety of the value it was handed, so the coercion has to happen on this side
-//! of the seam and produce a safety-carrying [`Value`]. The corpus exercises this
-//! loop because it is the part no filter's own unit test can reach.
+//! **The loop is `FilterExpression.resolve`'s (`base.py:803-819`), plus
+//! `@stringfilter`'s `str(first)` coercion *before* the body (`defaultfilters.py:38-52`).**
+//! The coercion happens on this side and yields a safety-carrying [`Value`]
+//! because `cut` reads the safety of the value it was handed (`defaultfilters.py:445`).
 
 use pyo3::exceptions::{
     PyAttributeError, PyException, PyIndexError, PyKeyError, PyOverflowError, PyRuntimeError,
@@ -51,30 +33,18 @@ use template_core::pynum::IntValue;
 
 /// The refusal [`PyFilterHost::classify`] raises for a value Rust cannot hold.
 ///
-/// **It is not an error and never escapes [`run_filter`].** The wrapper spends it
-/// and reports [`crate::cannot_hold`] instead, because the shell reads that
-/// singleton as "I cannot answer for this value" and takes the long way — the
-/// same control-flow signal `_native.html_escape`'s `None` is. An exception that
-/// escaped would turn a value Django renders into a 500, which is what the
-/// boundary did before this existed: measured, `{{ x|upper }}` with
-/// `x = '\ud800'` raised in this engine and rendered `'\ud800'` in stock.
-///
-/// A dedicated type rather than a message, because the test for it has to be
-/// structural: a filter body may raise `UnicodeEncodeError` of its own
-/// (`urlencode` does, on exactly this input, in Django too), and that one is a
-/// real error the caller must see.
+/// **Not an error, and never escaping [`run_filter`]**, which spends it for
+/// [`crate::cannot_hold`]. A dedicated type, not a message, because a filter body
+/// may raise `UnicodeEncodeError` of its own (`urlencode` does, in Django too).
 fn refuse() -> PyErr {
     PyErr::new::<crate::CannotHoldValue, _>(())
 }
 
 /// Django's `SafeData`, cached.
 ///
-/// `isinstance(value, SafeData)` is the question `escape`, `force_escape`,
-/// `safeseq`, `cut` and `linebreaksbr` branch on, and the one `Value::Safe`
-/// cannot answer for an object that is not a `str`. Imported rather than
-/// reproduced because it is a Django class and not a convention: `markupsafe`
-/// defines `__html__` **without** inheriting from it, and the two are treated
-/// differently by `conditional_escape` (`html.py:115-127`).
+/// Imported rather than reproduced: `markupsafe` defines `__html__` **without**
+/// inheriting from it, and `conditional_escape` treats the two differently
+/// (`html.py:115-127`).
 static SAFE_DATA: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 
 fn safe_data(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
@@ -96,28 +66,22 @@ pub struct PyFilterHost<'py> {
     interner: RefCell<Vec<Py<PyAny>>>,
     /// The exception Python raised, kept from [`PyFilterHost::host_error`].
     ///
-    /// [`ErrorKind::FilterHost`] carries the class *name* and not the class, so
-    /// an error travelling through `template-core` loses an exception's identity
-    /// — see [`PyFilterHost::host_error`] for why the object is kept here and
-    /// returned from [`run_filter`] instead. One slot, because a body stops at
-    /// the first `?`: the error being reported is always the last one raised.
+    /// One slot, because a body stops at the first `?`: the error reported is always
+    /// the last one raised. See [`PyFilterHost::host_error`] for why the object is
+    /// kept rather than rebuilt from its class name.
     raised: RefCell<Option<PyErr>>,
     /// Crossings made since this host was built, for the census's third meter.
     ///
-    /// The counter is the host's rather than a process-global because the
-    /// question is *per body*: [`run_filter_inner`] reads it before and after
-    /// `(entry.run)(...)`, so what is reported is the Python a **body** asked
-    /// for and not the seam's own conversion around it. See
-    /// [`crate::census_body_crossings`] for what counts as a crossing.
+    /// Per body, not process-global: [`run_filter_inner`] reads it before and after
+    /// `(entry.run)(...)`, so the number reports what the **body** asked Python for.
+    /// See [`crate::census_body_crossings`] for what counts as a crossing.
     crossings: Cell<usize>,
 }
 
 /// Why a value could not be turned back into the Python object it came from.
 ///
 /// Reachable only through a `Value::Opaque` whose id was minted by a *different*
-/// host — a programming error in this crate, not a Python one, since every id
-/// reaches here from the interner that minted it. Its own message rather than a
-/// panic so that the failure names the id.
+/// host — a bug in this crate, not a Python one.
 const STALE_OPAQUE: &str = "an Opaque id did not resolve in the host that minted it";
 
 impl<'py> PyFilterHost<'py> {
@@ -132,12 +96,8 @@ impl<'py> PyFilterHost<'py> {
 
     /// Count one Rust→Python crossing, for [`crate::census_body_crossings`].
     ///
-    /// Called at every point where this host **touches a Python object or asks
-    /// Python to compute something**, and deliberately not at every use of `py`:
-    /// building a `PyString` from Rust text, or reading a `Value`'s own `int`,
-    /// is Rust's work with an FFI conversion at the end. The distinction is the
-    /// meter's whole content — see the module comment on `BODY_CROSSINGS` in
-    /// `lib.rs` — and the site list is asserted by
+    /// Called where this host **touches a Python object or asks Python to compute
+    /// something**, not at every use of `py`: the site list is asserted by
     /// `tests/test_interposition.py::FilterCrossingCoverageTests`.
     fn crossed(&self) {
         if crate::census_on() {
@@ -159,30 +119,21 @@ impl<'py> PyFilterHost<'py> {
 
     /// Classify a Python object into a [`Value`].
     ///
-    /// The order of the tests is the whole of the correctness: `bool` before
-    /// `int` (because `PyBool` **is** a `PyInt` subclass, so the reverse order
-    /// turns every `True` into `1`), and the exact-`str` fast path before the
-    /// subclass path (because a `str` subclass is where `SafeString` and
-    /// markupsafe's `Markup` live, and they must not be conflated).
+    /// The order is the whole correctness: `bool` before `int` (`PyBool` **is** a
+    /// `PyInt` subclass, so the reverse turns every `True` into `1`), and the
+    /// exact-`str` fast path before the subclass path (`SafeString` and `Markup`
+    /// live there, and must not be conflated).
     ///
-    /// A `str` subclass that is neither `SafeData` nor `__html__`-bearing
-    /// classifies as `Value::Str`, which loses the subclass — deliberately, and
-    /// measured: `type(x).__name__` would then disagree with Django's for such an
-    /// object, so the harness compares types **in Python** (see
-    /// `Value::type_name`). Anything that is not a `str`, `int`, `float`, `bool`,
-    /// `list` or `None` is interned as an `Opaque` *including* tuples and dicts,
-    /// because a `Value::List` that a tuple had been flattened into would answer
+    /// A `str` subclass that is neither `SafeData` nor `__html__`-bearing becomes
+    /// `Value::Str`, losing the subclass — measured, hence the harness compares
+    /// types **in Python** (`Value::type_name`). Tuples and dicts are interned as
+    /// `Opaque`, because a `Value::List` a tuple was flattened into would answer
     /// `as_nested_sequence` and `get_index` with the wrong type's semantics.
     ///
-    /// **One input cannot be held at all, and it does not raise: it refuses.**
-    /// `PyString::to_str` cannot encode a lone surrogate, because Rust's `&str`
-    /// is UTF-8 and a Python `str` is not — so [`refuse`] is raised and
-    /// [`run_filter`] turns it into the [`crate::CannotHold`] singleton rather
-    /// than an exception. A `str` is the *only* type with this problem: every
-    /// other branch above produces a `Value` from a fixed-width or
-    /// already-canonical form, and a `list` inherits it through its elements,
-    /// which is why the recursion at the `PyList` arm propagates the same
-    /// refusal instead of flattening to what it managed.
+    /// **A lone surrogate cannot be held**: `PyString::to_str` cannot encode it, so
+    /// [`refuse`] is raised and [`run_filter`] turns it into the
+    /// [`crate::CannotHold`] singleton. A `list` inherits the refusal through its
+    /// elements, which is why the `PyList` arm propagates rather than flattening.
     fn classify(&self, obj: &Bound<'py, PyAny>) -> PyResult<Value> {
         let py = self.py;
         if obj.is_none() {
@@ -264,9 +215,8 @@ impl<'py> PyFilterHost<'py> {
                 let table = self.interner.borrow();
                 match table.get(*id as usize) {
                     Some(obj) => obj.clone_ref(py),
-                    // A programming error in this crate — every id reaches here
-                    // from the interner that minted it — so the message names the
-                    // id rather than pretending Python said something.
+                    // A bug in this crate — every id reaches here from the interner
+                    // that minted it — so the message names the id.
                     None => {
                         return Err(PyRuntimeError::new_err(format!("{STALE_OPAQUE}: {id}")));
                     }
@@ -275,44 +225,20 @@ impl<'py> PyFilterHost<'py> {
         })
     }
 
-    /// A Python exception turned into the seam's error, keeping the **class**.
-    ///
-    /// The class is what survives, because the class is what Django's bodies
-    /// match on: `first` catches `IndexError` and lets `TypeError` escape,
-    /// `divisibleby` has no `try`, `add` catches bare `Exception`. A seam that
-    /// flattened these to one error would make those three filters
-    /// unimplementable — which is why [`PyErrorKind`] exists at all.
     /// A Python failure as a core `Error` — **and the exception object, kept**.
     ///
-    /// [`ErrorKind::FilterHost`] carries the class *name* and the message, so a
-    /// name alone is all `template-core` can hand back; `filter_py_error` then
-    /// rebuilds an exception *of that name*, and a name `builtins` does not hold
-    /// degrades to `Exception` with the name prefixed. That is a real divergence
-    /// on the far side of a `catch`, and it was measured twice before this slot
-    /// existed:
-    ///
-    /// * **`SuspiciousOperation`**, raised by `strip_tags`'s depth limit
-    ///   (`html.py:221-222`) and by nothing in `builtins` — the corpus row wave B
-    ///   lands for `striptags` compares the class, so name-only reconstruction
-    ///   fails it;
-    /// * **a class of the caller's own**, which is the wider half: `str(v)` is
-    ///   the `@stringfilter` coercion, so `{{ x|upper }}` on an object whose
-    ///   `__str__` raises `BoomError` propagates `BoomError` from Django and
-    ///   arrived here as `builtins.Exception: BoomError: loud` (measured on the
-    ///   pinned tree). User-defined exception classes are the *ordinary* case for
-    ///   a template rendering a model, not an edge.
-    ///
-    /// So the exception Python raised is kept, and [`run_filter`] returns it as
-    /// itself rather than anything rebuilt from a name. Keeping it is legitimate
-    /// only because this seam is **in-process with the GIL held**: the `PyErr` is
-    /// a handle to a live Python object, it is `Send`/`Sync`, and it outlives the
-    /// `Error` that describes it. A boundary that crossed a thread or a process
-    /// boundary would have to serialise, and this would not be an option.
+    /// [`ErrorKind::FilterHost`] carries only a class *name*, and name-only
+    /// reconstruction diverges when the class is not in `builtins`
+    /// (`SuspiciousOperation` from `strip_tags`'s depth limit, `html.py:221-222`) or
+    /// is the caller's own (`{{ x|upper }}` on a `__str__` that raises `BoomError`
+    /// propagates `BoomError` in Django, but name-only gives `builtins.Exception`).
+    /// So the `PyErr` is kept and [`run_filter`] returns it as itself — legitimate only
+    /// because this seam is **in-process with the GIL held**.
     fn host_error(&self, operation: &'static str, err: PyErr) -> Error {
         let py = self.py;
         let kind = py_error_kind(py, &err);
-        // `str(e)`, not `repr(e)`: Django's own messages are the argument text,
-        // and the class is already carried separately.
+        // `str(e)`, not `repr(e)`: Django's messages are the argument text, and
+        // the class is carried separately.
         let message = match err.value(py).str() {
             Ok(text) => text.to_string(),
             Err(_) => String::new(),
@@ -323,13 +249,10 @@ impl<'py> PyFilterHost<'py> {
 
     /// The exception [`PyFilterHost::host_error`] kept, consumed.
     ///
-    /// Taken rather than read so a stale object cannot stand in for a later
-    /// error: the one error a call reports is the one it just converted. `None`
-    /// means the `Error` was **synthesised on the Rust side** — `wordwrap`'s
-    /// `invalid width 0 (must be > 0)` is one, built from a `ValueError` the body
-    /// chose and no `PyErr` ever existed for — and such an error is the one case
-    /// [`crate::filter_py_error`] reconstructs from the name, which it does
-    /// exactly for every class it can instantiate with one string.
+    /// Taken rather than read so a stale object cannot stand in for a later error.
+    /// `None` means the `Error` was **synthesised on the Rust side** (e.g.
+    /// `wordwrap`'s `invalid width 0 (must be > 0)`), the one case
+    /// [`crate::filter_py_error`] reconstructs from the name.
     pub fn take_raised(&self) -> Option<PyErr> {
         self.raised.borrow_mut().take()
     }
@@ -338,10 +261,7 @@ impl<'py> PyFilterHost<'py> {
     ///
     /// Split from the trait's [`FilterHost::mark_safe`] because the trait's
     /// signature cannot fail and Django's call can: `mark_safe` on a non-`str`
-    /// computes `str(v)`, and a `__str__` that raises propagates out of
-    /// `FilterExpression.resolve`. The loop below uses this one, so that path
-    /// stays exact; the trait method wraps it and is what a *body* calls, where
-    /// the value is one the body assembled.
+    /// computes `str(v)`, whose `__str__` may raise out of `resolve`.
     fn mark_safe_checked(&self, value: Value) -> PyResult<Value> {
         self.crossed();
         let py = self.py;
@@ -382,24 +302,12 @@ impl<'py> PyFilterHost<'py> {
 
     /// `float(value)` through Python, for the same reason `int_of` exists.
     ///
-    /// **Through the `float` *type*, not `extract::<f64>()`.** A pyo3 `f64`
-    /// extraction is `PyFloat_AsDouble`, i.e. `__float__` — and a `str` has no
-    /// `__float__`, so pyo3 raises a `TypeError` where Python's `float()` parses
-    /// the string and raises a **`ValueError`** for a bad one. Measured on the
-    /// pinned tree: `float("abc")` is `ValueError: could not convert string to
-    /// float: 'abc'`, while `extract::<f64>()` on the same object answers
-    /// `TypeError: must be real number, not str`. The class is the whole
-    /// contract — `pluralize` catches `(ValueError, TypeError)` and branches
-    /// *differently* on the two, so an inverted pair is a wrong answer rather
-    /// than a missed one: `{{ "abc"|pluralize }}` is `""` through the
-    /// `ValueError` arm and `"s"` through the `TypeError` one. `float("2")` is
-    /// 2.0 and `extract` refuses it outright, which is a wrong *value*.
-    ///
-    /// It went unnoticed because no earlier row could see it: `float("1")` and
-    /// the `TypeError`/`len` path agree by coincidence (`len("1") == 1` selects
-    /// the same empty singular suffix), so the corpus row that exposed it was
-    /// the one where the two arms disagree. `int_of` never had the bug, having
-    /// called the `int` type from the start.
+    /// **Through the `float` *type*, not `extract::<f64>()`, which is `__float__`:**
+    /// a `str` lacks `__float__`, so extract raises `TypeError` where Python's
+    /// `float()` parses the string and raises **`ValueError`** for a bad one.
+    /// `pluralize` catches `(ValueError, TypeError)` and branches *differently* on the
+    /// two, so an inverted pair is a wrong answer: `{{ "abc"|pluralize }}` is `""` via
+    /// `ValueError` and `"s"` via `TypeError`.
     fn float_of(&self, value: &Value) -> PyResult<f64> {
         match value {
             Value::Float(number) => return Ok(*number),
@@ -465,20 +373,10 @@ impl<'py> PyFilterHost<'py> {
     /// `value[index]`, with **Python's** negative-index and error semantics.
     ///
     /// `first` and `last` are `value[0]` / `value[-1]` inside
-    /// `try: … except IndexError`, and Django lets a `TypeError` out of that
-    /// handler. A Rust `Value::List` answers both halves; everything else goes to
-    /// Python so that the exception class is Python's.
-    ///
-    /// **Only the class is Python's.** The `IndexError` on the `Value::List` path
-    /// is *synthesised* and its message is not CPython's: this raises
-    /// `list index out of range (5)` where CPython raises `list index out of
-    /// range` with no index. It is unobservable, and only because both callers
-    /// catch `IndexError` and answer `""` — so a third caller that lets it out
-    /// would make a synthetic message look like Python's. Left as it is rather
-    /// than made to match, on the grounds that the index is the more useful text
-    /// and no reader is promised CPython's; recorded because the previous draft
-    /// of this paragraph claimed the message was Python's as well, which is the
-    /// `json_dumps` lesson applied to a comment instead of a kwarg.
+    /// `try: … except IndexError`, and Django lets a `TypeError` out of that handler,
+    /// so everything but a `Value::List` goes to Python and the class stays Python's.
+    /// On the `Value::List` path only the class is Python's: its `IndexError` says
+    /// `list index out of range (5)`, unobservably, since both callers answer `""`.
     fn index_of(&self, value: &Value, index: i64) -> PyResult<Value> {
         if let Value::List(items) = value {
             let len = items.len() as i64;
@@ -552,8 +450,8 @@ impl<'py> PyFilterHost<'py> {
         match left.add(right) {
             Ok(sum) => self.classify(&sum),
             Err(err) => {
-                // The second arm catches bare `Exception` and yields `""`. A
-                // `BaseException` — `KeyboardInterrupt`, `SystemExit` — is not an
+                // The second arm catches bare `Exception` and yields `""`; a
+                // `BaseException` (`KeyboardInterrupt`, `SystemExit`) is not an
                 // `Exception` and must not be swallowed.
                 if err.is_instance_of::<PyException>(py) {
                     Ok(Value::Str(Box::from("")))
@@ -564,24 +462,21 @@ impl<'py> PyFilterHost<'py> {
         }
     }
 
-    /// The key callable Django's `_property_resolver` returns for the string
-    /// branch — `defaultfilters.py:558-570`.
+    /// The key callable Django's `_property_resolver` returns for the string branch
+    /// — `defaultfilters.py:558-570`.
     ///
-    /// A Python callable rather than a Rust comparison because the *ordering*
-    /// must stay Python's: `sorted` on arbitrary interned objects compares with
-    /// `__lt__`, which Rust cannot see. So Rust extracts the key and Python sorts.
+    /// A Python callable because the *ordering* stays Python's: `sorted` compares
+    /// interned objects with `__lt__`, which Rust cannot see.
     fn property_resolver(&self, parts: Vec<String>) -> PyResult<Py<PyAny>> {
         Ok(Py::new(self.py, PropertyResolver { parts })?.into_any())
     }
 
     /// `sorted(value, key=…, reverse=…)` with the key Django's `dictsort` builds.
     ///
-    /// The whole of `_property_resolver`, including the two branches that are not
-    /// sorting at all: `float(arg)` succeeding means `operator.itemgetter(arg)`
-    /// (so `dictsort(x, 1)` is the list and `dictsort(x, "1")` is a `TypeError`),
-    /// and the string branch refuses a private name with the `AttributeError`
-    /// Django refuses it with — which `dictsort`'s own `(AttributeError,
-    /// TypeError)` handler then turns into `""`.
+    /// The whole of `_property_resolver`, including its two non-sorting branches:
+    /// `float(arg)` succeeding means `operator.itemgetter(arg)` (so `dictsort(x, 1)`
+    /// is the list and `dictsort(x, "1")` a `TypeError`), and the string branch
+    /// refuses a private name with Django's `AttributeError`.
     fn sort_by_property_checked(
         &self,
         value: &Value,
@@ -625,13 +520,11 @@ impl<'py> PyFilterHost<'py> {
         self.classify(&sorted)
     }
 
-    /// `isinstance(value, SafeData)` — answered by Python for an `Opaque`, which
-    /// is the only variant where the answer is not already known.
+    /// `isinstance(value, SafeData)` — asked of Python for an `Opaque`, the only
+    /// variant where the answer is not already known.
     ///
-    /// `Value::Safe` is `true` by construction: the classifier puts a `str`
-    /// subclass there only after asking `isinstance(x, SafeData)`. A failure to
-    /// import or to call is `false`, which is the safe direction — `is_safe`
-    /// gates `mark_safe`, so guessing "safe" would skip escaping.
+    /// A failure to import or call is `false`, the safe direction: `is_safe` gates
+    /// `mark_safe`, so guessing "safe" would skip escaping.
     fn is_safe_value(&self, value: &Value) -> bool {
         match value {
             Value::Safe(_) => true,
@@ -652,29 +545,15 @@ impl<'py> PyFilterHost<'py> {
     /// `@stringfilter`'s coercion (`defaultfilters.py:46`): `str(value)`, as the
     /// `Value` the body is handed.
     ///
-    /// **Not the same question as [`PyFilterHost::is_safe_value`], and that is the
-    /// whole reason this exists.** Django's wrapper rebinds `first = str(first)`
-    /// *before* calling the body, so the value a body sees is the coerced one —
-    /// and `cut` reads `isinstance(value, SafeData)` off it (`defaultfilters.py:445`). The two
-    /// questions differ on exactly one operand: an object that is not a `str`
-    /// subclass but whose `str()` is `SafeData`, which is Django's own lazy
-    /// `__proxy__`. Measured on the pinned tree: `Variable.resolve` hands the
-    /// filter the `__proxy__` itself — *not* `SafeData` — and `str()` of it is a
-    /// `SafeString`, so `x|lower` over one is `SafeString` while the loop's own
-    /// test (`base.py:816`) says no.
-    ///
-    /// [`PyFilterHost::classify`] **is** the safety question, so this asks it by
-    /// classifying the coerced object rather than by writing a second
-    /// `isinstance`: the classifier puts a `str` in [`Value::Safe`] only after
-    /// asking `isinstance(x, SafeData)`, so a hand-written test here could drift
-    /// from the one the rest of the crate relies on. It also keeps the rest of
-    /// the protocol free — a `str` subclass answering `__html__` without being
-    /// `SafeData` is markupsafe's `Markup`, and it interned as an `Opaque` here
-    /// for the same reason it is one anywhere else.
-    ///
-    /// A failure propagates, where [`PyFilterHost::is_safe_value`] answers `false`:
-    /// a `__str__` that raises is a real exception out of Django's wrapper, so
-    /// swallowing it would turn a `TypeError` into a plausible wrong string.
+    /// **A different question from [`PyFilterHost::is_safe_value`].** Django's wrapper
+    /// rebinds `first = str(first)` before the body, and `cut` reads
+    /// `isinstance(value, SafeData)` off the coerced value (`defaultfilters.py:445`).
+    /// The two disagree on one operand, a lazy `__proxy__` — measured,
+    /// `Variable.resolve` hands over the `__proxy__` itself (not `SafeData`) while
+    /// `str()` of it is a `SafeString`, so `x|lower` over one is `SafeString` while
+    /// `base.py:816` says no. Classifying the coerced object keeps this from drifting
+    /// from [`PyFilterHost::classify`]. A failure propagates, where `is_safe_value`
+    /// answers `false`.
     fn coerce_stringfilter(&self, value: &Value) -> Result<Value, Error> {
         let py = self.py;
         let outcome = (|| {
@@ -689,8 +568,7 @@ impl<'py> PyFilterHost<'py> {
 /// falling back to attribute access, exactly as `_property_resolver` does.
 ///
 /// A `#[pyclass]` rather than a Rust closure because `sorted` needs a *Python*
-/// callable, and the five-exception fallback is the part of `_property_resolver`
-/// that must not be re-derived on the Rust side of the seam.
+/// callable, and the five-exception fallback must not be re-derived in Rust.
 #[pyclass]
 struct PropertyResolver {
     parts: Vec<String>,
@@ -725,15 +603,10 @@ impl PropertyResolver {
 
 /// `PyErr`'s class, by Python's own name, as the seam's taxonomy.
 ///
-/// By name and not by `is_instance_of`, because the interesting answer for a
-/// class this crate does not know is *its name* — `pprint` prints
-/// `type(e).__name__` and `defaultfilters.py:996` is why
-/// [`PyErrorKind::name`] exists.
-///
-/// `pub(crate)` because the **tag** seam needs the identical mapping — an
-/// exception out of `ShellHost.call_tag` is as much a Python class as one the
-/// filter bodies catch — and two tables keyed on `__name__` is how one of them
-/// quietly stops covering a class the other still does.
+/// By name, not `is_instance_of`, because the interesting answer for an unknown
+/// class is *its name* — `pprint` prints `type(e).__name__` (`defaultfilters.py:996`),
+/// which is why [`PyErrorKind::name`] exists. `pub(crate)` because the **tag** seam
+/// needs the identical mapping.
 pub(crate) fn py_error_kind(py: Python<'_>, err: &PyErr) -> PyErrorKind {
     let name = err
         .get_type(py)
@@ -817,10 +690,9 @@ impl FilterHost for PyFilterHost<'_> {
         let py = self.py;
         let outcome = (|| {
             // The dict is Python's to build because it is the operand: `%` reads
-            // it as a **mapping**, and a `Value` cannot be one (`classify` interns
-            // a dict as an `Opaque`). Measured — the same expression with a list,
-            // a tuple, an int or a str raises `TypeError: format requires a
-            // mapping`, so there is nothing here Rust could pass instead.
+            // it as a **mapping**, and `classify` interns a dict as an `Opaque`.
+            // Measured: the same expression with a list, tuple, int or str raises
+            // `TypeError: format requires a mapping`.
             let mapping = PyDict::new(py);
             mapping.set_item(name, self.object(size)?)?;
             let formatted = PyString::new(py, format).call_method1("__mod__", (mapping,))?;
@@ -834,12 +706,10 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     fn is_tuple(&self, value: &Value) -> bool {
-        // Only an `Opaque` can be one: the host's `classify` never flattens a
-        // tuple into a `Value::List`, and a `str`, `int`, `float`, `bool` or
-        // `None` is not a tuple under any reading. So the fast path is a
-        // refusal rather than a question, and only the `Opaque` arm pays for an
-        // `isinstance` — which is the arm that *needs* it, since `__class__` of
-        // an arbitrary object is Python's to walk (§D2).
+        // Only an `Opaque` can be a tuple: `classify` never flattens one into a
+        // `Value::List`, and no other variant is a tuple under any reading. So
+        // only the `Opaque` arm pays for an `isinstance`, which `__class__` of an
+        // arbitrary object needs (§D2).
         match value {
             Value::Opaque(_) => {
                 self.crossed();
@@ -858,9 +728,8 @@ impl FilterHost for PyFilterHost<'_> {
     fn mark_safe(&self, value: Value) -> Value {
         // Infallible because the trait says so; see `mark_safe_checked` for the
         // loop's error-reporting path. The fallback is reachable only for an
-        // `Opaque` whose `__str__` raises — Django would propagate that out of
-        // `resolve`, and the trait cannot, so the value passes through unchanged
-        // rather than the process dying.
+        // `Opaque` whose `__str__` raises: Django would propagate that, the trait
+        // cannot, so the value passes through unchanged.
         match self.mark_safe_checked(value.clone()) {
             Ok(marked) => marked,
             Err(_) => value,
@@ -897,17 +766,14 @@ impl FilterHost for PyFilterHost<'_> {
             if !nested {
                 return Ok(None);
             }
-            // `if children:` tests the **object**, and it is evaluated here on
-            // the object rather than derived from the items — a generator is
-            // truthy even when it yields nothing, where a list or tuple is truthy
-            // exactly when it is non-empty. `bool()` does not consume a
-            // generator, so asking before materialising costs nothing and keeps
+            // `if children:` tests the **object**: a generator is truthy even when
+            // it yields nothing, where a list or tuple is truthy only when
+            // non-empty. `bool()` does not consume a generator, so this keeps
             // Django's own order (`if children:` precedes `list_formatter`).
             let truthy = object.is_truthy()?;
-            // The second half of the test is `iter(item) does not raise`, which
-            // `list(item)` answers by construction — and for a generator it is
-            // also what the body is about to do, so consuming it here loses
-            // nothing.
+            // The other half is `iter(item) does not raise`, which `list(item)`
+            // answers by construction — and for a generator it is also what the
+            // body is about to do.
             match self.items_of(value) {
                 Ok(items) => Ok(Some(NestedSequence { items, truthy })),
                 Err(_) => Ok(None),
@@ -921,18 +787,15 @@ impl FilterHost for PyFilterHost<'_> {
         let py = self.py;
         let outcome = (|| -> PyResult<Vec<String>> {
             let mut argument = self.object(value)?.into_bound(py);
-            // `if "," not in arg: arg = "," + arg`. Both halves are Python's, and
-            // the short circuit is what keeps `yesno`'s order: an argument that
-            // is not a container must reach the `split` below untouched so that
-            // it dies there, with `AttributeError`, rather than at an `in` it
-            // never performs. Measured, `{{ x|yesno:5 }}` is that `AttributeError`
-            // while `{{ x|pluralize:5 }}` — which does perform the `in` — is a
-            // `TypeError` naming the `in` instead.
+            // `if "," not in arg: arg = "," + arg`. Both halves are Python's; the
+            // short circuit keeps `yesno`'s order, so a non-container argument reaches
+            // `split` untouched and dies there with `AttributeError`. Measured:
+            // `{{ x|yesno:5 }}` is that `AttributeError`, while `{{ x|pluralize:5 }}` —
+            // which does perform the `in` — is a `TypeError`.
             if prepend_comma && !argument.contains(",")? {
-                // `str.__add__`, which is why the concatenation is Python's: a
-                // list gets past the membership test above and dies here with
-                // `TypeError: can only concatenate str (not "list") to str`,
-                // where a Rust `format!` would answer a string.
+                // `str.__add__`, which is why the concatenation is Python's: a list gets
+                // past the membership test and dies here with `TypeError: can only
+                // concatenate str (not "list") to str`, where `format!` would answer.
                 argument = PyString::new(py, ",")
                     .into_any()
                     .call_method1("__add__", (&argument,))?;
@@ -967,11 +830,10 @@ impl FilterHost for PyFilterHost<'_> {
         let py = self.py;
         let outcome = (|| {
             // The helper, whole, and the `Value` goes in as it is:
-            // `@keep_lazy_text` has to see the actual object for a `Promise` to
-            // yield a lazy result, and CPython has to see a `dict` as a `dict` to
-            // name it in its own `AttributeError`. A `to_str` here, or a
-            // Rust-side classification, would destroy both — which is why this
-            // method takes a `Value` where its neighbours take a `&str`.
+            // `@keep_lazy_text` must see the actual object for a `Promise` to yield
+            // a lazy result, and CPython must see a `dict` as a `dict` to name it in
+            // its own `AttributeError`. This is why this method takes a `Value`
+            // where its neighbours take a `&str`.
             let digits = py
                 .import("django.utils.text")?
                 .getattr("phone2numeric")?
@@ -986,14 +848,12 @@ impl FilterHost for PyFilterHost<'_> {
         let py = self.py;
         let outcome = (|| {
             let kwargs = PyDict::new(py);
-            // `trim_url_limit` rebuilt as a Python int rather than narrowed on
-            // this side: `trim_url` compares it against a length **and slices
-            // with it** (`html.py:407-410`), so a negative sentinel and a literal
-            // too large for any length are both answers Django gives — measured
-            // through `{{ x|urlizetrunc:… }}`, `-1` is `'…'` and a 30-digit
-            // literal truncates nothing. `Big` holds canonical decimal text by
-            // construction, so Python's own `int()` rebuilds it exactly, which is
-            // the route `int_divide_by_power_of_two` takes and never `eval`.
+            // `trim_url_limit` rebuilt as a Python int rather than narrowed here:
+            // `trim_url` compares it against a length **and slices with it**
+            // (`html.py:407-410`), so a negative sentinel and an out-of-range literal
+            // are both answers Django gives — measured, `{{ x|urlizetrunc:… }}` with
+            // `-1` is `'…'` and a 30-digit literal truncates nothing. Python's own
+            // `int()` rebuilds `Big`'s canonical text exactly.
             let limit = match limit {
                 None => py.None(),
                 Some(IntValue::Small(n)) => (*n).into_pyobject(py)?.into_any().unbind(),
@@ -1003,8 +863,7 @@ impl FilterHost for PyFilterHost<'_> {
             };
             kwargs.set_item("trim_url_limit", limit)?;
             // `nofollow=True` is not a caller's choice: `urlize` and `urlizetrunc`
-            // both hardcode it (`defaultfilters.py:386`, `defaultfilters.py:399`), and the trait's
-            // signature carries no `nofollow` for that reason.
+            // both hardcode it (`defaultfilters.py:386`, `defaultfilters.py:399`).
             kwargs.set_item("nofollow", true)?;
             kwargs.set_item("autoescape", autoescape)?;
             let result = py
@@ -1059,16 +918,14 @@ impl FilterHost for PyFilterHost<'_> {
     }
 
     /// `urllib.parse.quote` with `urlencode`'s own kwargs construction
-    /// (`defaultfilters.py:365-379`): the `safe` keyword is omitted when the
-    /// argument is `None` and the object itself is passed otherwise.
+    /// (`defaultfilters.py:365-379`): the `safe` keyword is omitted when the argument
+    /// is `None` and the object itself passed otherwise.
     ///
-    /// The argument is converted back through [`PyFilterHost::object`], which is
-    /// lossless in both directions that matter here — a `list` of values is
-    /// rebuilt as a `list`, and anything this crate interns (`bytes`, a
-    /// `bytearray`, a `dict`, a generator) is **the same object**, taken from the
-    /// interner by id. So `quote` sees exactly what it would have seen in Django,
-    /// and its `bytes([c for c in safe if c < 128])` branch is Python's answer
-    /// rather than a Rust reconstruction of it.
+    /// The argument goes back through [`PyFilterHost::object`], which is lossless
+    /// here: a `list` is rebuilt as a `list`, and anything interned (`bytes`,
+    /// `bytearray`, `dict`, generator) is **the same object**. So `quote` sees what
+    /// it would in Django, and its `bytes([c for c in safe if c < 128])` branch stays
+    /// Python's answer rather than a Rust reconstruction.
     fn quote(&self, text: &str, safe: Option<&Value>) -> Result<String, Error> {
         self.crossed();
         let py = self.py;
@@ -1092,26 +949,12 @@ impl FilterHost for PyFilterHost<'_> {
         self.crossed();
         let py = self.py;
         let outcome = (|| {
-            // **Django's own call, and an earlier revision of these two lines was
-            // not.** `django.utils.html.json_script` (`html.py:103-105`) is
-            // `json.dumps(value, cls=encoder or DjangoJSONEncoder)` — **default
-            // separators**, and the encoder is what makes a `date`, `Decimal` or
-            // `UUID` serialisable at all. The revision here passed
-            // `separators=(",", ":")` and `ensure_ascii=True`, on a reading that
-            // `json_script`'s output is compact; it is not. Measured on the pinned
-            // tree: `json_script({"a": 1})` is `'{"a": 1}'` with the space, where
-            // the tight separators give `'{"a":1}'`, and
-            // `json_script({"d": date(2026, 10, 8)})` is
-            // `'{"d": "2026-10-08"}'` where they raise
-            // `TypeError: Object of type date is not JSON serializable`.
-            // `ensure_ascii` is `json.dumps`' own default and so is correctly
-            // absent: `"\uXXXX"` for non-ASCII was right by accident, not by
-            // choice.
-            //
-            // The defect was invisible until Task 9 because `json_script` was a
-            // stub and this was its only caller; no gate could see it. Recorded
-            // rather than silently corrected, because the same reading could be
-            // made again elsewhere in the seam.
+            // **Django's own call.** `django.utils.html.json_script` (`html.py:103-105`)
+            // is `json.dumps(value, cls=encoder or DjangoJSONEncoder)` — **default
+            // separators**, and the encoder is what makes a `date`, `Decimal` or `UUID`
+            // serialisable at all. Measured: `json_script({"a": 1})` is `'{"a": 1}'`
+            // with the space; tight separators would give `'{"a":1}'` and raise
+            // `TypeError` on a `date`.
             let kwargs = PyDict::new(py);
             let encoder = py
                 .import("django.core.serializers.json")?
@@ -1191,7 +1034,7 @@ impl FilterHost for PyFilterHost<'_> {
         })();
         // Python's message is carried through so `assert_raises_same` can compare
         // it: the filter catches `(ValueError, TypeError)` and lets the
-        // `AttributeError` escape, so the text of the escaping class is a row.
+        // `AttributeError` escape.
         outcome.map_err(|e| self.host_error("timesince", e))
     }
 
@@ -1225,22 +1068,20 @@ impl FilterHost for PyFilterHost<'_> {
         let py = self.py;
         let outcome = (|| -> PyResult<LanguageInfo> {
             // The argument crosses as the object it is, not as text: the four
-            // `language_*` filters pass their `lang_code` straight through
-            // (`i18n.py:292-310`), and `get_language_info`'s `LANG_INFO[lang_code]`
-            // would raise `TypeError` for a non-string in Python's own way.
+            // `language_*` filters pass `lang_code` straight through
+            // (`i18n.py:292-310`), and `get_language_info` raises `TypeError` for a
+            // non-string in Python's own way.
             let info = py
                 .import("django.utils.translation")?
                 .getattr("get_language_info")?
                 .call1((self.object(lang_code)?,))?;
             Ok(LanguageInfo {
-                // The three keys the four filters read. `name_translated` is
-                // deliberately not one of them: `language_name_translated` runs
-                // `["name"]` through `translation.gettext` itself rather than
-                // reading that lazy key (see the Rust module's doc).
+                // The three keys the four filters read. `name_translated` is not
+                // one: `language_name_translated` runs `["name"]` through
+                // `translation.gettext` itself.
                 name: info.get_item("name")?.extract::<String>()?,
                 name_local: info.get_item("name_local")?.extract::<String>()?,
-                // `bidi` is a `bool` in `LANG_INFO`, and `language_bidi` returns
-                // it as one — not as `str(...)`.
+                // `bidi` is a `bool` in `LANG_INFO`, returned as one — not `str(...)`.
                 bidi: info.get_item("bidi")?.extract::<bool>()?,
             })
         })();
@@ -1257,14 +1098,12 @@ impl FilterHost for PyFilterHost<'_> {
                 .import("django.utils.formats")?
                 .getattr("localize")?
                 .call((self.object(value)?,), Some(&kwargs))?;
-            // **The `str()` is the source's and it must run on this side.**
-            // `localize` returns a `str` unchanged (`formats.py:201-202`) and
-            // `str(SafeString)` is that same object, so
-            // `str(formats.localize(mark_safe("123"), use_l10n=True))` is a
-            // `SafeString`; `text_of` would flatten it to a plain `String`, and
-            // since `localize` is `is_safe=False` the loop does not re-mark it —
-            // ours would escape where Django does not. `classify` is what keeps
-            // the marker, by asking `SafeData`.
+            // **The `str()` is the source's and must run on this side.** `localize`
+            // returns a `str` unchanged (`formats.py:201-202`) and `str(SafeString)` is
+            // that same object, so `str(localize(mark_safe("123"), use_l10n=True))` is a
+            // `SafeString`; `text_of` would flatten it, and since `localize` is
+            // `is_safe=False` the loop does not re-mark it — ours would escape where
+            // Django does not. `classify` keeps the marker by asking `SafeData`.
             let text = localized.str()?;
             self.classify(text.as_any())
         })();
@@ -1275,15 +1114,13 @@ impl FilterHost for PyFilterHost<'_> {
         self.crossed();
         let py = self.py;
         let outcome = (|| {
-            // The argument the three `tz` filters pass to the one Python body,
-            // each as its own source spells it: `localtime` passes
-            // `timezone.get_current_timezone()` (`tz.py:26`), `utc` passes the
-            // `do_timezone(value, UTC)` call (`tz.py:34`), and `timezone` is
-            // `def do_timezone(value, arg):` itself (`tz.py:38`), so the template's own argument is the value.
-            // Resolving the two fixed ones here is the same
-            // expression the two one-line filters perform, moved to the side of
-            // the seam that owns the clock (§D2) — not a re-derivation of
-            // `do_timezone`.
+            // The argument the three `tz` filters pass to one Python body, each as its
+            // own source spells it: `localtime` passes `timezone.get_current_timezone()`
+            // (`tz.py:26`), `utc` passes `do_timezone(value, UTC)` (`tz.py:34`), and
+            // `timezone` is `def do_timezone(value, arg)` itself (`tz.py:38`), so the
+            // template's own argument is the value. Resolving the fixed two here puts
+            // them on the side of the seam that owns the clock (§D2), not a
+            // re-derivation of `do_timezone`.
             let zone = match source {
                 TimezoneSource::Current => py
                     .import("django.utils.timezone")?
@@ -1291,19 +1128,18 @@ impl FilterHost for PyFilterHost<'_> {
                     .call0()?
                     .unbind(),
                 TimezoneSource::Utc => py.import("datetime")?.getattr("UTC")?.unbind(),
-                // The template's argument as the object it is — a `tzinfo`, a
-                // zone name, or `None`; which of those is `do_timezone`'s to
-                // decide (`tz.py:59-67`), and the Rust body does not read it.
+                // The template's argument as the object it is — a `tzinfo`, a zone
+                // name, or `None`; which of those is `do_timezone`'s to decide
+                // (`tz.py:59-67`).
                 TimezoneSource::Given(argument) => match argument {
                     Some(argument) => self.object(argument)?,
                     None => py.None(),
                 },
             };
             // **The transcribed Python body, under the seam**:
-            // `django_rust_templates.engine.templatetags.tz` is the verbatim Task 4
+            // `django_rust_templates.engine.templatetags.tz` is the verbatim
             // transcription of `do_timezone`, not one of Django's installed
-            // modules. `ours/theirs` — the routing is Rust's, the algorithm is
-            // Python's.
+            // modules — the routing is Rust's, the algorithm Python's.
             let converted = py
                 .import("django_rust_templates.engine.templatetags.tz")?
                 .getattr("do_timezone")?
@@ -1340,10 +1176,9 @@ impl FilterHost for PyFilterHost<'_> {
 
             let subject = self.object(value)?.bind(py).clone();
             // `input_val = str(text)` shares the `try` with the parse, and the
-            // handler names `InvalidOperation` **only** (`defaultfilters.py:152-155`), so a
-            // `__str__` that raises anything else is not retried — it leaves the
-            // filter. That is why this is `str()` and not `text_of`, whose
-            // fallback would swallow exactly the case this must not.
+            // handler names `InvalidOperation` **only** (`defaultfilters.py:152-155`),
+            // so a `__str__` that raises anything else is not retried — which is
+            // why this is `str()` and not `text_of`.
             let input_val = subject.str()?.to_string();
 
             let decimal = match decimal_type.call1((PyString::new(py, &input_val),)) {
@@ -1353,9 +1188,9 @@ impl FilterHost for PyFilterHost<'_> {
                         return Err(error);
                     }
                     // `Decimal(str(float(text)))`, with the source's own tuple —
-                    // `(ValueError, InvalidOperation, TypeError)` at `defaultfilters.py:158` — so
-                    // an `OverflowError` from an object whose `__float__` cannot
-                    // fit escapes rather than answering `""`.
+                    // `(ValueError, InvalidOperation, TypeError)` at
+                    // `defaultfilters.py:158` — so an `OverflowError` from a
+                    // `__float__` that cannot fit escapes.
                     let retried = py
                         .get_type::<PyFloat>()
                         .call1((subject.clone(),))
@@ -1380,20 +1215,17 @@ impl FilterHost for PyFilterHost<'_> {
             for digit in tuple.get_item(1)?.try_iter()? {
                 digits.push(digit?.extract::<u8>()?);
             }
-            // `None` for a `"F"`/`"n"`/`"N"` exponent **and** for an integer one that does not fit
-            // an `i64`. The fold is safe rather than merely convenient: a `Decimal` whose exponent
-            // exceeds `i64` has `len(digits) + abs(exponent) > 200`, so `defaultfilters.py:176`
-            // refuses it and returns `input_val` — the same answer the non-finites get at
-            // `defaultfilters.py:168-170` and `defaultfilters.py:180-182`, which is the only thing
-            // the body does with a `None`.
+            // `None` for a `"F"`/`"n"`/`"N"` exponent **and** for an integer one that
+            // does not fit an `i64`. Safe: such a `Decimal` has
+            // `len(digits) + abs(exponent) > 200`, so `defaultfilters.py:176` refuses
+            // it, the same answer the non-finites get
+            // (`defaultfilters.py:168-170`, `defaultfilters.py:180-182`).
             let exponent = tuple.get_item(2)?.extract::<i64>().ok();
 
-            // `m = int(d) - d` (`defaultfilters.py:180`), inside a handler that names
-            // `(ValueError, OverflowError, InvalidOperation)`. That handler is
-            // where the non-finites land — `int(Decimal("inf"))` raises
-            // `OverflowError`, `int(Decimal("NaN"))` a `ValueError` — so
-            // `integral` is `false` for exactly the decimals whose `exponent` is
-            // `None`, and the body never reads it in that case.
+            // `m = int(d) - d` (`defaultfilters.py:180`), inside a handler naming
+            // `(ValueError, OverflowError, InvalidOperation)` — where the
+            // non-finites land. So `integral` is `false` for exactly the decimals
+            // whose `exponent` is `None`, and the body never reads it there.
             let integral = {
                 let difference = py
                     .get_type::<PyInt>()
@@ -1438,12 +1270,10 @@ impl FilterHost for PyFilterHost<'_> {
             let decimal_type = decimal_module.getattr("Decimal")?;
             let subject = self.object(decimal)?.bind(py).clone();
 
-            // `exp = Decimal(1).scaleb(-abs(p))` (`defaultfilters.py:194`). The negation happens
-            // on the Python side because `p` is an arbitrary-precision int: a
-            // `u64` does not fit an `i64`, and `scaleb` must see the real
-            // magnitude — `defaultfilters.py:194` is one of the two places where a `p` past
-            // `2*(Emax + prec)` is observable, clamping below that and raising
-            // `InvalidOperation` above it.
+            // `exp = Decimal(1).scaleb(-abs(p))` (`defaultfilters.py:194`). Negated in
+            // Python because `p` is arbitrary-precision — a `u64` does not fit an `i64`,
+            // and `scaleb` must see the real magnitude. A `p` past `2*(Emax + prec)` is
+            // observable here, clamping below that and raising `InvalidOperation` above.
             let negative_places = -(i128::from(places));
             let exponent = decimal_type
                 .call1((1,))?
@@ -1461,9 +1291,9 @@ impl FilterHost for PyFilterHost<'_> {
             };
 
             // `prec = abs(p) + units + 1; prec = max(getcontext().prec, prec)`
-            // (`defaultfilters.py:199-200`). The context read is the point of the whole method:
-            // it bounds the quantize below, so a caller that computed its own
-            // `prec` would be answering a different question.
+            // (`defaultfilters.py:199-200`). The context read bounds the quantize
+            // below, so a caller computing its own `prec` answers a different
+            // question.
             let mut prec = i128::from(places) + units + 1;
             let context_prec = decimal_module
                 .getattr("getcontext")?
@@ -1493,9 +1323,9 @@ impl FilterHost for PyFilterHost<'_> {
                 sign: rounded_tuple.get_item(0)?.is_truthy()?,
                 digits,
                 exponent: rounded_tuple.get_item(2)?.extract::<i64>()?,
-                // `defaultfilters.py:210`'s second half, and a question `integral` does not
-                // answer: `m` is the *unrounded* value's truthiness, this the
-                // rounded one's. Measured `floatformat("-0.0001", 2)` is
+                // `defaultfilters.py:210`'s second half, a question `integral` does
+                // not answer: `m` is the *unrounded* value's truthiness, this the
+                // rounded one's. Measured: `floatformat("-0.0001", 2)` is
                 // `"0.00"` — `m` truthy, `Decimal("-0.00")` falsy.
                 truthy: rounded.is_truthy()?,
             })
@@ -1507,10 +1337,10 @@ impl FilterHost for PyFilterHost<'_> {
         self.crossed();
         let py = self.py;
         let outcome = (|| {
-            // `round(value, 1)` as a two-argument call to the builtin, not a Rust
-            // round: on a float Python rounds the **exact binary** value, so
-            // measured `round(0.35, 1)` is `0.3` where the decimal tie-break gives
-            // `0.4`. `bytes_ / KB` is a float, which is why this takes an `f64`.
+            // `round(value, 1)` as the builtin, not a Rust round: on a float Python
+            // rounds the **exact binary** value, so `round(0.35, 1)` is `0.3` where
+            // the decimal tie-break gives `0.4`. `bytes_ / KB` is a float, which is
+            // why this takes an `f64`.
             let rounded = py.import("builtins")?.getattr("round")?.call1((value, 1))?;
             let formatted = py
                 .import("django.utils.formats")?
@@ -1526,9 +1356,8 @@ impl FilterHost for PyFilterHost<'_> {
         let py = self.py;
         let outcome = (|| {
             let int_type = py.get_type::<PyInt>();
-            // `Big` holds canonical decimal text by construction, so rebuilding
-            // through Python's own `int()` is exact — the route `get_index`
-            // takes, never `eval` and never a formatted source string.
+            // `Big` holds canonical decimal text, so rebuilding through Python's own
+            // `int()` is exact — never `eval`.
             let left = match value {
                 IntValue::Small(n) => (*n).into_pyobject(py)?.into_any(),
                 IntValue::Big(digits) => int_type.call1((digits.as_str(),))?,
@@ -1536,11 +1365,10 @@ impl FilterHost for PyFilterHost<'_> {
             // `1 << shift`, built in Rust because it is exact and bounded: the
             // five branches are 10, 20, 30, 40 and 50, well inside `i64`.
             let divisor = (1i64 << shift).into_pyobject(py)?;
-            // `__truediv__`, not `float(left) / float(divisor)`: CPython divides
-            // the two ints exactly and rounds the *quotient* once, so this keeps
-            // Django's answer for every value in range and Django's
-            // `OverflowError: integer division result too large for a float` out
-            // of it — where converting first would raise a different message.
+            // `__truediv__`, not `float(left) / float(divisor)`: CPython divides the
+            // two ints exactly and rounds the *quotient* once, so this keeps
+            // Django's answer in range and its `OverflowError: integer division
+            // result too large for a float` out of it.
             left.div(divisor)?.extract::<f64>()
         })();
         outcome.map_err(|e| self.host_error("int_divide_by_power_of_two", e))
@@ -1551,11 +1379,10 @@ impl FilterHost for PyFilterHost<'_> {
         let py = self.py;
         let outcome = (|| {
             let int_type = py.get_type::<PyInt>();
-            // `int(value) % int(arg)`, in that order (`defaultfilters.py:857`): Python evaluates
-            // the value's conversion first, so a `ValueError` from it is the one
+            // `int(value) % int(arg)`, in that order (`defaultfilters.py:857`): Python
+            // evaluates the value's conversion first, so its `ValueError` is the one
             // that escapes when both operands are bad. No `try` in the source, so
-            // `arg == 0` leaves as a `ZeroDivisionError` and a non-numeric
-            // operand as its conversion's own class.
+            // `arg == 0` leaves as a `ZeroDivisionError`.
             let left = int_type.call1((self.object(a)?,))?;
             let right = int_type.call1((self.object(b)?,))?;
             let remainder = left.rem(right)?;
@@ -1590,9 +1417,8 @@ impl PyFilterHost<'_> {
     }
 
     /// [`PyFilterHost::utility_text`] for an operation that **can** report a
-    /// failure. Only `strip_tags` is one, and only because its input can make it
-    /// raise: see [`FilterHost::strip_tags`] for the measurement and for why its
-    /// neighbours stay infallible.
+    /// failure — `strip_tags` only, whose input can make it raise (see
+    /// [`FilterHost::strip_tags`]).
     fn utility_text_checked(
         &self,
         operation: &'static str,
@@ -1614,9 +1440,8 @@ impl PyFilterHost<'_> {
 
     /// `text.<method>()` → `str`, for `str.lower` and `str.title`.
     ///
-    /// A method name rather than a closure because a closure's return type would
-    /// have to name the lifetime of the receiver it borrows, which is more
-    /// machinery than two callers justify.
+    /// A method name rather than a closure because the closure's return type would
+    /// have to name the receiver's lifetime.
     fn call_text(&self, operation: &'static str, text: &str, method: &str) -> String {
         self.crossed();
         let py = self.py;
@@ -1639,9 +1464,9 @@ impl PyFilterHost<'_> {
         let outcome = (|| {
             // `None` crosses as Python's own `None`, which is the point: the
             // default is `get_format(format or "DATE_FORMAT")` *inside* the
-            // callee, and `settings.DATE_FORMAT` is a different string from
-            // `get_format("DATE_FORMAT")` in any language with a format module.
-            // Resolving it here would be the seam computing what Django computes.
+            // callee, which differs from `settings.DATE_FORMAT` in any language
+            // with a format module. Resolving it here would be the seam computing
+            // what Django computes.
             let formatted = py
                 .import("django.utils.formats")?
                 .getattr(operation)?
@@ -1654,10 +1479,8 @@ impl PyFilterHost<'_> {
     /// `django.utils.dateformat`'s two convenience functions — the second branch
     /// of `date` and of `time`.
     ///
-    /// The module's `format` shadows the builtin's name, so the operation string
-    /// is qualified (`dateformat.format`): that is what names which of the pair
-    /// was asked for, in an error and in a test's `raise_on`, where a bare
-    /// `format` would be ambiguous.
+    /// The module's `format` shadows the builtin's, so the operation is qualified
+    /// (`dateformat.format`), which is what names which of the pair was asked for.
     fn dateformat_text(
         &self,
         function: &'static str,
@@ -1668,10 +1491,9 @@ impl PyFilterHost<'_> {
         self.crossed();
         let py = self.py;
         let outcome = (|| {
-            // `format` crosses as a `&Value` and is `str()`d by Python *inside*
-            // the callee, so an absent argument is the text `"None"` — four live
-            // format characters — rather than an empty string. See `FilterHost`'s
-            // doc for the measurement.
+            // `format` crosses as a `&Value` and is `str()`d by Python *inside* the
+            // callee, so an absent argument is the text `"None"` — four live format
+            // characters — not an empty string. See `FilterHost`'s doc.
             let formatted = py
                 .import("django.utils.dateformat")?
                 .getattr(function)?
@@ -1683,36 +1505,12 @@ impl PyFilterHost<'_> {
 
     /// What an **infallible** operation does when Python nevertheless raises.
     ///
-    /// The trait declares a block of operations as returning a bare value, which
-    /// means they cannot report a failure — a decision taken and reviewed before
-    /// the fan-out, and the reason this path exists at all. It is not a swallow:
-    /// the panic names the operation and carries Python's message, so a filter
-    /// whose host call failed says so rather than producing a plausible wrong
-    /// string.
-    ///
-    /// **The set was then audited against inputs a template can carry, and two
-    /// operations have left it**: `strip_tags` raises Django's `SuspiciousOperation`
-    /// from `HTMLParser`'s depth limit on plain ASCII, and `timesince` raises
-    /// `AttributeError` on a value with no date protocol (`'str' object has no
-    /// attribute 'year'`) in a filter that catches only `(ValueError, TypeError)`.
-    /// Both are now `Result<String, Error>`. The audit is also what says the rest
-    /// stay — each entry is a probe, not an argument:
-    ///
-    /// | operation | the input that raises | why a body cannot reach it |
-    /// |---|---|---|
-    /// | `iri_to_uri`, `quote` | `UnicodeEncodeError` on a lone surrogate | a `&str` cannot hold one; the FFI raises before the call |
-    /// | `str_lower`, `str_title`, `slugify`, `urlize` | none found — all four answer on that same surrogate in Django | the input cannot arrive |
-    /// | `truncate` | none found — `"<p>unclosed"` and a 50-deep unterminated tag both answer | |
-    /// | `wrap` | `ValueError: invalid width 0 (must be > 0)` | the width is `wordwrap`'s argument and the *body* raises it (`wordwrap.rs`) |
-    /// | `number_format` | none found — the landed callers (`floatformat`, `filesizeformat`) answer on `nan`, `inf` and `10**400` exactly as Django does | |
-    /// | `filesize_number_format` | none found — same three inputs, matching Django's own `OverflowError`s, which arrive through `to_int` instead | |
-    /// | `gettext`, `ngettext` | none found | |
-    ///
-    /// "None found" is a measurement over the inputs probed, not a proof that
-    /// none exists, and the difference is the whole point of writing it down: an
-    /// operation whose raising input is later found **leaves this list by gaining
-    /// a `Result`**, exactly as `strip_tags` and `timesince` did, and the row that
-    /// found it is what forces the signature change.
+    /// These operations return a bare value by trait declaration. This is not a
+    /// swallow: the panic names the operation and carries Python's message. Two have
+    /// already left the set — `strip_tags` raises `SuspiciousOperation` from
+    /// `HTMLParser`'s depth limit, and `timesince` raises `AttributeError` on a value
+    /// with no date protocol — both now `Result`; an operation whose raising input is
+    /// later found **leaves this list by gaining a `Result`**.
     fn infallible_failure(&self, operation: &'static str, err: PyErr) -> String {
         let message = match err.value(self.py).str() {
             Ok(text) => text.to_string(),
@@ -1723,11 +1521,9 @@ impl PyFilterHost<'_> {
 }
 
 /// The loop `FilterExpression.resolve` runs around a filter body
-/// (`base.py:803-819`), together with the one thing Django does inside every
-/// `@stringfilter`-decorated one (`defaultfilters.py:38-52`).
-///
-/// Split out from the `#[pyfunction]` so it can be exercised without Python's
-/// calling convention and so its order is visible in one place:
+/// (`base.py:803-819`), plus `@stringfilter`'s coercion inside every decorated body
+/// (`defaultfilters.py:38-52`). Split from the `#[pyfunction]` so its order is visible
+/// in one place:
 ///
 /// ```text
 /// if expects_localtime: value = localtime(value, use_tz)
@@ -1738,44 +1534,22 @@ impl PyFilterHost<'_> {
 /// if is_safe and (was_safe or coerced_is_safe): result = mark_safe(result)
 /// ```
 ///
-/// **`args` is Django's `*arg_vals` (`base.py:804-809`) and the body's `arg` is
-/// `Option<Value>`, and the two are one model: a list of length 0 or 1 is `None`
-/// for the empty list and `Some` for the single element — including
-/// `Some(Value::None)`, which is the argument `None` and not its absence.** The
-/// list's *length* is the argument's presence and its element is the argument's
-/// value; neither stands for the other, which is why this takes a tuple rather
-/// than an `Option<&PyAny>` that would have to encode two facts in one field (see
-/// `filter` in `lib.rs`, and the measurement that forced it). So `{{ x|f }}`
-/// reaches a body as `None` — Django's `arg is None` question about the
-/// *parameter* — and `{{ x|f:price }}` with `price = None` reaches it as
-/// `Some(Value::None)`, the call `func(obj, None)`.
+/// **`args` is Django's `*arg_vals` (`base.py:804-809`)**, one model with the body's
+/// `Option<Value>`: a length of 0 or 1 is `None` or `Some`, where `Some(Value::None)`
+/// is the argument `None`, not its absence. `{{ x|f:price }}` with `price = None` is
+/// the call `func(obj, None)`.
 ///
-/// **The two `is_safe` questions are different questions, which is why there are
-/// two.** `was_safe` is `base.py:816`'s `isinstance(obj, SafeData)`, and `obj`
-/// still holds the pre-filter value there because the result went to a separate
-/// `new_obj`; reading it *after* the call would make every filter that returns a
-/// `SafeString` mark its own output and would make `escape`'s `is_safe=True` mean
-/// nothing. `coerced_is_safe` is the wrapper's, and it is asked of the value the
-/// wrapper produced. The two agree for every `str` and every `str` subclass —
-/// `str(SafeString)` returns itself — and disagree on exactly one operand, a lazy
-/// `__proxy__`: not `SafeData`, but `str()` of it is. Neither subsumes the other,
-/// so the result is safe when *either* fired; `stringfilter` is the registry field
-/// that says which filters have the second site at all, and for the other 28 the
-/// union would mark safe a result Django leaves bare.
+/// **The two `is_safe` questions differ**: `was_safe` is `base.py:816`'s, on the
+/// *pre-filter* value (reading it after the call would make every `SafeString`
+/// returner mark its own output); the other is the wrapper's, on the coerced value.
+/// They disagree on one operand, a lazy `__proxy__`, so the result is safe when
+/// *either* fired — `stringfilter` is the registry field saying which filters have
+/// the second site at all. The coercion is applied **here, once**, not by the 29
+/// bodies, because `cut` reads the coerced value's safety (`defaultfilters.py:445`).
 ///
-/// The coercion is applied **here, once**, rather than by each of the 29 bodies.
-/// Django rebinds `first = str(first)` before calling the body, so the body genuinely receives the
-/// coerced value — `cut` reads its safety (`defaultfilters.py:445`) — and a wrapper that handed
-/// bodies the raw value would make that filter unimplementable without a second, subtler rule that
-/// 29 separately-written bodies would each have to remember.
-///
-/// **`walked` says which of the two callers this is, and the third meter needs
-/// it.** `true` from the render walk applying the filter itself
-/// (`Walk::apply_step`), `false` from Python asking through `_native.filter`. The
-/// census's `crate::BODY_CROSSINGS` counts only the walk's applications, because
-/// those are the ones with a `Census::filters` entry beside them — the pair is
-/// what says "applied *and* computed in Rust", and a number from a body the walk
-/// never applied would be answering a question nobody asked it.
+/// **`walked` says which caller this is** for the third meter: `true` from the render
+/// walk (`Walk::apply_step`), `false` from `_native.filter`; only the walk's
+/// applications are counted, the ones with a `Census::filters` entry.
 pub fn run_filter(
     py: Python<'_>,
     name: &str,
@@ -1788,14 +1562,10 @@ pub fn run_filter(
     match run_filter_inner(py, name, value, args, autoescape, use_tz, walked) {
         Ok(answered) => Ok(answered),
         // **A refusal is an answer, and the answer is "not mine".** The caller
-        // runs Django's own body for this filter instead — the `else` branch
-        // `engine/base.py` already had for a name that is not a builtin — so the
-        // value is rendered by the code Django would have used, rather than by an
-        // exception. Matching on the type and not the message is what keeps a
-        // body's own `UnicodeEncodeError` (`urlencode`'s, on this same input)
-        // reported as the error it is; and the return is the shared singleton
-        // rather than `None` because a filter may *answer* `None` (see
-        // [`crate::CannotHold`]).
+        // runs Django's own body for this filter instead. Matching on the type and
+        // not the message keeps a body's own `UnicodeEncodeError` (`urlencode`'s, on
+        // this same input) reported as the error it is; the return is the shared
+        // singleton rather than `None` because a filter may *answer* `None`.
         Err(error) if error.is_instance_of::<crate::CannotHoldValue>(py) => {
             Ok(crate::cannot_hold(py))
         }
@@ -1805,12 +1575,10 @@ pub fn run_filter(
 
 /// [`run_filter`]'s body, which may *raise* the refusal `run_filter` spends.
 ///
-/// Split only so the boundary's sentinel is one arm in one place: everything
-/// below is unchanged, and every `?` here that can carry a refusal
-/// ([`PyFilterHost::classify`], and its recursion through a `list` — or through
-/// the `str()` of a `@stringfilter` input, which is the same crossing) reaches
-/// the wrapper as `Err`, where the type decides whether it is the seam declining
-/// or an error to report.
+/// Split only so the boundary's sentinel is one arm in one place: every `?` here
+/// that can carry a refusal ([`PyFilterHost::classify`], or a `list`'s recursion
+/// through it) reaches the wrapper as `Err`, where the type decides whether it is
+/// the seam declining or an error to report.
 fn run_filter_inner(
     py: Python<'_>,
     name: &str,
@@ -1892,14 +1660,11 @@ fn run_filter_inner(
 
 /// A core `Error` back across the FFI, **as the exception Python raised**.
 ///
-/// The host keeps the `PyErr` it converted ([`PyFilterHost::host_error`]), and
-/// this is where it is spent: returning that object rather than one rebuilt from
-/// its class name is what makes `except SuspiciousOperation` and `except
-/// MyModelError` work on this side exactly as they do on Django's.
-///
-/// [`crate::filter_py_error`] answers only for errors **synthesised on the Rust
-/// side** — a body's own refusal, `wordwrap`'s `invalid width 0 (must be > 0)`,
-/// an unimplemented filter — where no Python exception exists to return.
+/// The host keeps the `PyErr` it converted ([`PyFilterHost::host_error`]), and this
+/// spends it: returning that object rather than one rebuilt from its class name is
+/// what makes `except SuspiciousOperation` and `except MyModelError` work on this
+/// side as they do on Django's. [`crate::filter_py_error`] answers only for errors
+/// **synthesised on the Rust side**, where no Python exception exists to return.
 fn report(host: &PyFilterHost<'_>, py: Python<'_>, error: Error) -> PyErr {
     host.take_raised()
         .unwrap_or_else(|| crate::filter_py_error(py, &error))
