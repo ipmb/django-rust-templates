@@ -1876,11 +1876,12 @@ fn base_context_getitem(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 // question this guard is entitled to ask.
 // Declared here rather than through `pyo3::ffi` because `pyo3-ffi` 0.29.3 skips it as private, while CPython
 // declares it `PyAPI_FUNC` on the non-limited API (`Include/cpython/object.h:292`). This crate is not built for
-// the stable ABI (no `abi3` feature), so the symbol resolves at import.
-// It is the only `unsafe` in `template-py`: one symbol, called with a type pointer and an **interned** name (the
-// lookup's cache keys on the name's identity — a fresh string would miss it, correct but slower), whose
+// the stable ABI (no `abi3` feature). Windows does not export this private symbol,
+// so it uses the public dictionary lookup below instead.
+// The name is **interned** (the lookup cache keys on its identity), and the
 // *borrowed* result is compared by pointer and dropped in the next statement, so nothing can free it in
 // between. It sets no exception (`typeobject.c:5964`, comment at 5962-5963).
+#[cfg(not(windows))]
 extern "C" {
     fn _PyType_Lookup(
         type_: *mut pyo3::ffi::PyTypeObject,
@@ -1899,16 +1900,49 @@ extern "C" {
 /// `__get__(None, cls)` for the attribute read while the slot binds `__get__(obj, cls)`. No MRO entry answers
 /// `NULL` — where Django's own method lands too. `tests/test_loop_read_guard.py` is the control.
 fn subscript_entry_is_pin(class: &Bound<'_, PyType>, pin: &Bound<'_, PyAny>) -> bool {
-    // SAFETY: `class` is a live type pointer, the name is the interpreter's own interned
-    // `"__getitem__"`, and the *borrowed* result is compared on the next line with no Python code
-    // running in between and no exception set on either answer.
-    let entry = unsafe {
-        _PyType_Lookup(
-            class.as_type_ptr(),
-            intern!(class.py(), "__getitem__").as_ptr(),
-        )
-    };
-    !entry.is_null() && entry == pin.as_ptr()
+    #[cfg(windows)]
+    {
+        mro_subscript_entry_is_pin(class, pin).unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        // SAFETY: `class` is a live type pointer, the name is the interpreter's own interned
+        // `"__getitem__"`, and the *borrowed* result is compared on the next line with no Python code
+        // running in between and no exception set on either answer.
+        let entry = unsafe {
+            _PyType_Lookup(
+                class.as_type_ptr(),
+                intern!(class.py(), "__getitem__").as_ptr(),
+            )
+        };
+        !entry.is_null() && entry == pin.as_ptr()
+    }
+}
+
+/// Read the actual MRO dictionaries without invoking metaclass hooks or descriptors.
+#[cfg(any(windows, all(test, not(feature = "extension-module"))))]
+fn mro_subscript_entry_is_pin(class: &Bound<'_, PyType>, pin: &Bound<'_, PyAny>) -> PyResult<bool> {
+    // SAFETY: the live type holds its ready MRO tuple. The GIL is held and the
+    // owned Bound keeps that tuple alive throughout the dictionary walk.
+    let mro_ptr = unsafe { (*class.as_type_ptr()).tp_mro };
+    if mro_ptr.is_null() {
+        return Ok(false);
+    }
+    let mro = unsafe { Bound::<PyAny>::from_borrowed_ptr(class.py(), mro_ptr) };
+    for base in mro.cast::<PyTuple>()?.iter() {
+        let base = base.cast::<PyType>()?;
+        // SAFETY: PyType_GetDict returns the live type's borrowed dictionary.
+        // This public API is available on every supported Python (3.12+).
+        let dict_ptr = unsafe { pyo3::ffi::PyType_GetDict(base.as_type_ptr()) };
+        let dict = unsafe { Bound::<PyAny>::from_borrowed_ptr(class.py(), dict_ptr) };
+        if let Some(entry) = dict
+            .cast::<PyDict>()?
+            .get_item(intern!(class.py(), "__getitem__"))?
+        {
+            return Ok(entry.is(pin));
+        }
+    }
+    Ok(false)
 }
 
 /// Django's `VariableDoesNotExist`, cached for the same reason.
@@ -4585,6 +4619,58 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(all(test, not(feature = "extension-module")))]
 mod walk_depth {
     use super::*;
+
+    #[test]
+    fn public_mro_lookup_does_not_call_metaclass_hooks_or_descriptors() {
+        Python::initialize();
+        Python::attach(|py| {
+            let namespace = PyDict::new(py);
+            let code = std::ffi::CString::new(
+                r#"
+def pin(self, key):
+    return key
+class Base:
+    __getitem__ = pin
+class Inherited(Base):
+    pass
+class Liar(type):
+    def __getattribute__(cls, name):
+        if name in ('__mro__', '__dict__'):
+            raise AssertionError('metaclass lookup')
+        if name == '__getitem__':
+            return pin
+        return super().__getattribute__(name)
+class Overridden(Base, metaclass=Liar):
+    def __getitem__(self, key):
+        return None
+class Missing(metaclass=Liar):
+    pass
+class Descriptor:
+    def __get__(self, instance, owner):
+        raise AssertionError('descriptor lookup')
+class Described(Base):
+    __getitem__ = Descriptor()
+"#,
+            )
+            .unwrap();
+            py.run(&code, Some(&namespace), None).unwrap();
+            let pin = namespace.get_item("pin").unwrap().unwrap();
+            for (name, expected) in [
+                ("Base", true),
+                ("Inherited", true),
+                ("Overridden", false),
+                ("Missing", false),
+                ("Described", false),
+            ] {
+                let class = namespace.get_item(name).unwrap().unwrap();
+                assert_eq!(
+                    mro_subscript_entry_is_pin(class.cast::<PyType>().unwrap(), &pin).unwrap(),
+                    expected,
+                    "{name}"
+                );
+            }
+        });
+    }
 
     /// `ForPlan.sequence`, which `run_for` calls `.resolve(context, true)` on — the walk's only Python call
     /// on the path under test, and what makes the synthetic plan descend instead of taking the `{% empty %}`

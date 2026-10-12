@@ -61,6 +61,8 @@ select = ["E9", "F63", "F7", "F82"]
 build = "cp312-* cp313-* cp314-*"
 skip = "*-musllinux_*"
 archs = ["auto64"]
+# Run the upstream permission test without root's discretionary-access bypass.
+container-engine = { name = "docker", create-args = ["--cap-drop=DAC_OVERRIDE", "--cap-drop=DAC_READ_SEARCH"] }
 test-command = [
     "python -I {project}/scripts/ci/wheel_smoke.py",
     "python -I {project}/scripts/ci/django_acceptance.py",

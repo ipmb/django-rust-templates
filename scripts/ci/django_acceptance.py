@@ -18,6 +18,10 @@ def expected_skips():
         skips.remove(
             "template_tests.test_loaders.FileSystemLoaderTests.test_case_sensitivity"
         )
+    if sys.platform == "win32":
+        skips.add(
+            "template_tests.test_loaders.FileSystemLoaderTests.test_permissions_error"
+        )
     if sys.version_info < (3, 14):
         skips.update(
             {
