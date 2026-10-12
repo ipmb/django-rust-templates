@@ -44,8 +44,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: |
           python -m venv .venv
-          .venv/bin/python -m pip install 'Django>=6.0.9,<6.1'
+          .venv/bin/python -m pip install 'Django>=6.0.9,<6.1' 'maturin>=1.7,<2'
       - run: cargo test --locked --workspace
+      - name: Build extension imported by embedded-Python Rust tests
+        run: |
+          source scripts/env.sh
+          maturin develop --locked
       - run: scripts/run_rust_unit_tests.sh --locked
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
