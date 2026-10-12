@@ -9,6 +9,21 @@ from tests.test_suite_outcome import transcript
 
 
 class MatrixAcceptanceTests(unittest.TestCase):
+    def test_timezone_skips_match_upstreams_platform_capability(self):
+        with patch("scripts.ci.django_acceptance.TZ_SUPPORT", True):
+            supported = expected_skips()
+        with patch("scripts.ci.django_acceptance.TZ_SUPPORT", False):
+            unsupported = expected_skips()
+        self.assertEqual(
+            unsupported - supported,
+            {
+                "template_tests.filter_tests.test_timesince.TimesinceTests.test_timesince12",
+                "template_tests.filter_tests.test_timesince.TimesinceTests.test_timesince13",
+                "template_tests.filter_tests.test_timeuntil.TimeuntilTests.test_timeuntil10",
+                "template_tests.filter_tests.test_timeuntil.TimeuntilTests.test_timeuntil11",
+            },
+        )
+
     def test_windows_only_adds_the_upstream_permission_skip(self):
         with patch("scripts.ci.django_acceptance.sys.platform", "linux"):
             linux = expected_skips()

@@ -4,11 +4,14 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from assert_suite_outcome import DECLARED_RAN, DECLARED_SKIPS, outcome  # noqa: E402
+
+TZ_SUPPORT = hasattr(time, "tzset")
 
 
 def expected_skips():
@@ -21,6 +24,15 @@ def expected_skips():
     if sys.platform == "win32":
         skips.add(
             "template_tests.test_loaders.FileSystemLoaderTests.test_permissions_error"
+        )
+    if not TZ_SUPPORT:
+        skips.update(
+            {
+                "template_tests.filter_tests.test_timesince.TimesinceTests.test_timesince12",
+                "template_tests.filter_tests.test_timesince.TimesinceTests.test_timesince13",
+                "template_tests.filter_tests.test_timeuntil.TimeuntilTests.test_timeuntil10",
+                "template_tests.filter_tests.test_timeuntil.TimeuntilTests.test_timeuntil11",
+            }
         )
     if sys.version_info < (3, 14):
         skips.update(

@@ -61,8 +61,6 @@ select = ["E9", "F63", "F7", "F82"]
 build = "cp312-* cp313-* cp314-*"
 skip = "*-musllinux_*"
 archs = ["auto64"]
-# Run the upstream permission test without root's discretionary-access bypass.
-container-engine = { name = "docker", create-args = ["--cap-drop=DAC_OVERRIDE", "--cap-drop=DAC_READ_SEARCH"] }
 test-command = [
     "python -I {project}/scripts/ci/wheel_smoke.py",
     "python -I {project}/scripts/ci/django_acceptance.py",
@@ -70,5 +68,10 @@ test-command = [
 test-requires = ["numpy"]
 
 [tool.cibuildwheel.linux]
-before-all = "curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal"
+before-all = "command -v setpriv && curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal"
 environment = { PATH = "$HOME/.cargo/bin:$PATH" }
+# Keep build permissions; remove root's file-access bypass only while testing.
+test-command = [
+    "setpriv --bounding-set=-dac_override,-dac_read_search python -I {project}/scripts/ci/wheel_smoke.py",
+    "setpriv --bounding-set=-dac_override,-dac_read_search python -I {project}/scripts/ci/django_acceptance.py",
+]
