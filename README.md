@@ -67,6 +67,12 @@ Python 3.12/3.13 use Unicode 15.0/15.1 tables; Python 3.14 uses Unicode 16.
 The native parser, numeric literals, and uppercase filters select the matching
 tables when the extension loads. Exhaustive parity tests check these tables.
 
+The **Benchmarks** Actions workflow runs on pushes to `main`, `v*` tags, pull
+requests, and manual runs. Its job summary contains compile, render, and
+parse-and-render timings for Django, this engine, and Jinja2, plus measurement
+parameters and output hashes. JSON results and the Markdown summary are saved
+as workflow artifacts.
+
 ## Preliminary releases
 
 Run **Release artifacts** manually in Actions to verify release builds without

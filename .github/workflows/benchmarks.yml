@@ -1,0 +1,61 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmarks:
+    name: Template benchmarks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: benchmarks
+      - run: scripts/fetch_django.sh
+      - name: Build release extension and install benchmark dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install 'maturin>=1.7,<2' 'Django==6.0.9'
+          .venv/bin/python -m pip install --target .bench-deps 'Jinja2==3.1.6' 'MarkupSafe==3.0.4'
+          source scripts/env.sh
+          maturin develop --release --locked
+          python -I scripts/assert_native_is_the_built_artifact.py
+      - name: Measure benchmarks
+        run: .venv/bin/python -u -I scripts/bench.py --engines django,rust,jinja2 --repeats 7 --target 0.05 --json benchmark.json > benchmark.log 2>&1
+      - name: Write Markdown summary
+        if: always()
+        env:
+          BENCHMARK_COMMIT: ${{ github.sha }}
+          BENCHMARK_REF: ${{ github.ref }}
+        run: |
+          if [ -f benchmark.json ]; then
+            .venv/bin/python -I scripts/ci/benchmark_summary.py benchmark.json --output benchmark.md
+            cat benchmark.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f benchmark.log ]; then
+            cat benchmark.log
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmarks-${{ github.sha }}
+          path: |
+            benchmark.json
+            benchmark.md
+            benchmark.log
+          if-no-files-found: ignore
