@@ -22,6 +22,7 @@
 //! the original object, and this body tests that.
 
 use crate::filters::host::{FilterCall, NestedSequence};
+use crate::filters::safety;
 use crate::filters::value::Value;
 use crate::parser::error::{Error, PyErrorKind};
 
@@ -72,7 +73,7 @@ fn walk_items(items: &[Value], call: &FilterCall<'_>) -> Result<Vec<WalkPair>, E
 /// autoescape, `to_str(conditional_escape(item))`; without, a bare `to_str(item)`.
 fn escape_item(item: &Value, call: &FilterCall<'_>) -> Result<String, Error> {
     if call.autoescape {
-        let escaped = call.host.conditional_escape(item)?;
+        let escaped = safety::conditional_escape(item, call)?;
         return call.host.to_str(&escaped);
     }
     call.host.to_str(item)
@@ -131,7 +132,7 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
     // with no `try` around it, escapes.
     let items = call.host.iter_values(&value)?;
     let formatted = list_formatter(&items, 1, call)?;
-    Ok(call.host.mark_safe(Value::Str(formatted.into())))
+    Ok(safety::mark_safe(Value::Str(formatted.into()), call))
 }
 
 #[cfg(test)]
@@ -240,8 +241,11 @@ mod tests {
     /// the call pattern: `conditional_escape` must be absent when autoescape is off.
     #[test]
     fn the_escaper_branches_on_autoescape() {
+        // `Opaque`, because a native string is escaped in Rust now and the branch
+        // would no longer be visible in the call list. The claim is the branch:
+        // `autoescape=False` must not escape.
         let h = plain_host("ESCAPED");
-        let items = [Value::Str("a".into())];
+        let items = [Value::Opaque(0)];
         assert_eq!(
             list_formatter(&items, 1, &call(&h, true)).unwrap(),
             "\t<li>ESCAPED</li>"
@@ -309,13 +313,16 @@ mod tests {
             mark_safe: Some(Value::Safe("MARKED".into())),
             ..TestFilterHost::default()
         };
-        assert_eq!(
-            run(Value::List(vec![]), None, &call(&h, true)).unwrap(),
-            Value::Safe("MARKED".into())
+        // The result is safe, and its text is the formatter's rather than a
+        // scripted marker: the final `mark_safe` takes a native string and so is
+        // Rust's. This row is about *how the value was read*, not about the text.
+        let rendered = run(Value::List(vec![]), None, &call(&h, true)).unwrap();
+        assert!(
+            matches!(&rendered, Value::Safe(text) if text.contains("<li>")),
+            "{rendered:?}"
         );
         h.assert_called("iter_values");
         h.assert_called("as_nested_sequence");
-        h.assert_called("mark_safe");
         assert!(
             !h.calls().contains(&"get_index"),
             "the value is iterated, never indexed: {:?}",
@@ -337,7 +344,9 @@ mod tests {
             run(Value::List(vec![]), None, &call(&h, true)).unwrap(),
             Value::Safe("".into())
         );
-        h.assert_called("mark_safe");
+        // `mark_safe` of the empty native string is Rust's (`filters::safety`),
+        // so the only host call left is the iteration itself.
+        assert_eq!(h.calls(), vec!["iter_values"]);
         assert!(
             !h.calls().contains(&"as_nested_sequence"),
             "no items means no walk: {:?}",

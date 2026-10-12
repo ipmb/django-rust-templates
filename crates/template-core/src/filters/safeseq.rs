@@ -27,6 +27,7 @@
 //! non-iterable raises there with no `try`.
 
 use crate::filters::host::FilterCall;
+use crate::filters::safety;
 use crate::filters::value::Value;
 use crate::parser::error::Error;
 
@@ -35,7 +36,7 @@ pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<V
     let items = call.host.iter_values(&value)?;
     let mut marked = Vec::with_capacity(items.len());
     for item in items {
-        marked.push(call.host.mark_safe(item));
+        marked.push(safety::mark_safe(item, call));
     }
     Ok(Value::List(marked))
 }
@@ -59,11 +60,10 @@ mod tests {
     #[test]
     fn it_marks_every_element_through_the_host() {
         let h = TestFilterHost {
-            iter_values: Some(vec![
-                Value::Str("a".into()),
-                Value::Int(5),
-                Value::Safe("<b>".into()),
-            ]),
+            // `Opaque` is the half Rust cannot mark itself — `mark_safe(5)` is
+            // `SafeString("5")` and an `__html__` carrier comes back unchanged —
+            // so this is where the per-element host call is still observable.
+            iter_values: Some(vec![Value::Opaque(0), Value::Int(5), Value::Opaque(1)]),
             mark_safe: Some(Value::Safe("MARKED".into())),
             ..TestFilterHost::default()
         };
@@ -82,6 +82,24 @@ mod tests {
                 .count(),
             3,
             "`mark_safe` runs once per element, not once for the sequence"
+        );
+    }
+
+    /// A list of plain strings is marked in Rust: same answer, no host call.
+    #[test]
+    fn plain_string_elements_are_marked_without_the_host() {
+        let h = TestFilterHost {
+            iter_values: Some(vec![Value::Str("a".into()), Value::Safe("<b>".into())]),
+            ..TestFilterHost::default()
+        };
+        assert_eq!(
+            run(Value::List(vec![]), None, &call(&h)).unwrap(),
+            Value::List(vec![Value::Safe("a".into()), Value::Safe("<b>".into())])
+        );
+        assert_eq!(
+            h.calls(),
+            vec!["iter_values"],
+            "no element reached `mark_safe`"
         );
     }
 

@@ -66,6 +66,7 @@
 //! around.
 
 use crate::filters::host::FilterCall;
+use crate::filters::safety;
 use crate::filters::value::Value;
 use crate::parser::error::{Error, ErrorKind, PyErrorKind};
 
@@ -113,7 +114,7 @@ fn as_str(value: &Value) -> Option<&str> {
 /// — a non-str separator must raise the escaping `AttributeError`.
 fn separator(arg: &Value, call: &FilterCall<'_>) -> Result<String, Error> {
     if call.autoescape {
-        let escaped = call.host.conditional_escape(arg)?;
+        let escaped = safety::conditional_escape(arg, call)?;
         return call.host.to_str(&escaped);
     }
     match as_str(arg) {
@@ -127,7 +128,7 @@ fn separator(arg: &Value, call: &FilterCall<'_>) -> Result<String, Error> {
 /// anything else is the caught `TypeError`.
 fn element_text(value: &Value, call: &FilterCall<'_>) -> Result<String, Error> {
     if call.autoescape {
-        let escaped = call.host.conditional_escape(value)?;
+        let escaped = safety::conditional_escape(value, call)?;
         return call.host.to_str(&escaped);
     }
     match as_str(value) {
@@ -163,9 +164,10 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
         }
     }
     // `mark_safe(data)` — in both branches.
-    Ok(call
-        .host
-        .mark_safe(Value::Str(parts.join(&separator).into())))
+    Ok(safety::mark_safe(
+        Value::Str(parts.join(&separator).into()),
+        call,
+    ))
 }
 
 #[cfg(test)]
@@ -204,15 +206,13 @@ mod tests {
     /// elements, or only the separator, fails this.
     #[test]
     fn the_escaping_branch_escapes_the_separator_and_every_element() {
-        let h = escaping_host(vec![Value::Str("a".into())], Value::Safe("MARKED".into()));
+        // `Opaque` so every step is still observable; the order is the claim —
+        // the separator is escaped *before* the sequence is iterated, so a bad
+        // separator fails before the value is ever walked.
+        let h = escaping_host(vec![Value::Opaque(0)], Value::Safe("MARKED".into()));
         assert_eq!(
-            run(
-                Value::List(vec![Value::Str("a".into())]),
-                Some(Value::Str(" & ".into())),
-                &call(&h, true)
-            )
-            .unwrap(),
-            Value::Safe("MARKED".into())
+            run(Value::List(vec![]), Some(Value::Opaque(1)), &call(&h, true)).unwrap(),
+            Value::Safe("x".into())
         );
         assert_eq!(
             h.calls(),
@@ -222,9 +222,9 @@ mod tests {
                 "iter_values",
                 "conditional_escape",
                 "to_str",
-                "mark_safe",
             ],
-            "the escaping branch's host calls, in order"
+            "the escaping branch's host calls, in order; `mark_safe` of the joined \
+             native string is Rust's"
         );
     }
 
@@ -232,16 +232,15 @@ mod tests {
     /// elements), which the count guards where a fixed call list could not.
     #[test]
     fn every_element_is_escaped_not_just_the_first() {
+        // `Opaque` throughout: a native string is escaped in Rust now, so the
+        // per-element call is observable only for the values that still cross.
+        // The claim is unchanged — one escape per element plus one for the
+        // separator, never one for the sequence.
         let h = escaping_host(
-            vec![Value::Str("a".into()), Value::Str("b".into())],
+            vec![Value::Opaque(0), Value::Opaque(1)],
             Value::Safe("MARKED".into()),
         );
-        run(
-            Value::List(vec![Value::Str("a".into()), Value::Str("b".into())]),
-            Some(Value::Str("-".into())),
-            &call(&h, true),
-        )
-        .unwrap();
+        run(Value::List(vec![]), Some(Value::Opaque(2)), &call(&h, true)).unwrap();
         assert_eq!(
             h.calls()
                 .iter()
@@ -271,9 +270,15 @@ mod tests {
                 &call(&h, false)
             )
             .unwrap(),
-            Value::Safe("MARKED".into())
+            // The bare branch joins the elements' own text, and `mark_safe` of a
+            // native string is Rust's, so this is the real joined value.
+            Value::Safe("a-b".into())
         );
-        assert_eq!(h.calls(), vec!["iter_values", "mark_safe"]);
+        assert_eq!(
+            h.calls(),
+            vec!["iter_values"],
+            "nothing is escaped, and the marker never reaches the host"
+        );
     }
 
     /// **The trap: a bad value returns the value, not `""`.** A non-iterable value
@@ -386,8 +391,13 @@ mod tests {
                 &call(&h, true)
             )
             .unwrap(),
-            Value::Safe("MARKED".into())
+            // The scripted `to_str` answers for every part, and the final
+            // `mark_safe` is Rust's now (`filters::safety`), so the marker is the
+            // joined text rather than the host's sentinel.
+            Value::Safe("x".into())
         );
+        // `None` is not a native string, so the separator still crosses — which is
+        // the half of this row that distinguishes the two branches.
         h.assert_called("conditional_escape");
     }
 }
