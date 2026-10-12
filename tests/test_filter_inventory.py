@@ -346,7 +346,10 @@ CODE_POINT_LOCAL_STR_METHODS = {"upper"}
 # the delegating set is for.
 HOST_RS = PROJECT_ROOT / "crates/template-core/src/filters/host.rs"
 FILTER_MODULES = HOST_RS.parent
-NON_FILTER_MODULES = {"host", "mod", "html_escape", "padding", "value"}
+# `safety` is a helper, not a filter: `mark_safe`/`conditional_escape` answered
+# natively for the `Value` variants the classifier proves are plain text, shared
+# by the bodies that used to spend a Python crossing on them.
+NON_FILTER_MODULES = {"host", "mod", "html_escape", "padding", "safety", "value"}
 
 # The trait's section markers, in order. Metric D's entire content is *which of
 # these sections count*, so the list is asserted against the trait rather than

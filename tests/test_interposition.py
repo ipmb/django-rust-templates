@@ -1726,33 +1726,73 @@ class FilterRoutingTests(unittest.TestCase):
             "rather than being in it",
         )
 
-    def test_the_escape_row_is_the_one_the_pair_is_blind_to(self):
-        """The reviewer's exact case, as a row: `applied` and `crossed` both lie here.
+    def test_a_body_that_enters_python_is_the_row_the_pair_is_blind_to(self):
+        """`applied` and `crossed` both read clean while the work ran in Python.
 
-        `{{ x|escape }}` under autoescape reads `applied == [("escape", 1)]` and
-        `crossed == []`, and both are true while the escaping ran in Python —
-        Rust's body for `escape` **is** `django.utils.html.conditional_escape`.
-        So the row is the pair's counterexample and the third meter's reason to
-        exist, and it asserts all three numbers rather than only the third: the
-        first two must go on being true, or this row stops being about a blind
-        spot and becomes about a routing bug.
+        `{{ x|pprint }}` reads `applied == [("pprint", 1)]` and `crossed == []`,
+        and both are true while the formatting ran in Python — Rust's body for
+        `pprint` is `pformat`. So the row is the pair's counterexample and the
+        third meter's reason to exist, and it asserts all three numbers rather
+        than only the third: the first two must go on being true, or this row
+        stops being about a blind spot and becomes about a routing bug.
+
+        **The canary used to be `escape`, and it had to move.** `escape`'s body
+        is now answered in Rust for the `Value` variants the classifier proves
+        are plain text (`filters::safety`), so it reads zero crossings — which is
+        the point of that change and would have turned this guard into a false
+        alarm. `pprint` is a durable replacement because `pformat` is Python's
+        and has no Rust equivalent to move to.
         """
+        from django_rust_templates.engine import Engine
+
+        rendered, crossed, applied, body_crossings = self._render_with_both_meters(
+            Engine(), "{{ x|pprint }}", {"x": [1, 2]}
+        )
+
+        self.assertEqual(rendered, "[1, 2]")
+        self.assertEqual(applied, [("pprint", 1)], "the walk did not apply `pprint`")
+        self.assertEqual(crossed, [], "`pprint` was applied from Python too")
+        self.assertGreaterEqual(
+            body_crossings,
+            1,
+            "`pprint`'s body is `pformat`, a Python function: zero crossings "
+            "means the body did not run, or the count is not the body's",
+        )
+
+    def test_escape_no_longer_enters_python_for_a_plain_string(self):
+        """The change that moved the canary above, pinned as its own row.
+
+        An exact `str` cannot carry `__html__` and is not a `Promise`, so
+        `conditional_escape`'s answer for it is Django's escape table and a safe
+        result — which Rust produces without asking Python. Measured before the
+        change: 1.35x *slower* than the engine this package replaces, one
+        crossing per call.
+
+        The safe-input row is here too, because it is the one that tells `escape`
+        from `force_escape` and it is now also answered in Rust.
+        """
+        from django.utils.safestring import mark_safe
+
         from django_rust_templates.engine import Engine
 
         rendered, crossed, applied, body_crossings = self._render_with_both_meters(
             Engine(), "{{ x|escape }}", {"x": "<b>"}
         )
-
         self.assertEqual(rendered, "&lt;b&gt;")
         self.assertEqual(applied, [("escape", 1)], "the walk did not apply `escape`")
         self.assertEqual(crossed, [], "`escape` was applied from Python too")
-        self.assertGreaterEqual(
+        self.assertEqual(
             body_crossings,
-            1,
-            "`escape`'s body is `conditional_escape`, a Python function: zero "
-            "crossings means the body did not run, or the count is not the "
-            "body's",
+            0,
+            "`escape` of an exact `str` is a Rust table: a crossing here means "
+            "the native path in `filters::safety` was not taken",
         )
+
+        rendered, _, _, body_crossings = self._render_with_both_meters(
+            Engine(), "{{ x|escape }}", {"x": mark_safe("<b>")}
+        )
+        self.assertEqual(rendered, "<b>", "a SafeData input must not be escaped again")
+        self.assertEqual(body_crossings, 0)
 
     def test_a_bare_number_argument_reaches_the_walk(self):
         """`|floatformat:2` — a *number* is a `var_arg`, and the walk carries it.
