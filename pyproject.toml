@@ -6,7 +6,7 @@ build-backend = "maturin"
 name = "django-rust-templates"
 description = "Django's template engine, reimplemented in Rust, as an ordinary template backend"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.15"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 authors = [{ name = "Peter Baumgartner" }]
@@ -20,16 +20,21 @@ dynamic = ["version"]
 # render builds the backend.
 #
 # The bound is the version claim, and `_require_django` enforces the same one at
-# runtime, from `RustTemplates.__init__`. `>=6.0` is Django 6.0's own floor, which
-# is also the floor of the source the engine was transcribed from; `<6.1` is the
+# runtime, from `RustTemplates.__init__`. `>=6.0.9` supplies the inspect helpers
+# imported by this transcription; `<6.1` is the
 # other side of it. A wheel installed against Django 6.1 was measured to load and
 # render correctly — every gate this project has would have said green while the
 # transcription and the running Django were different versions. The resolver is
 # the first line, because most users never reach the runtime guard; `OPTIONS`'
 # `allow_django_mismatch` is the door out of it.
-dependencies = ["Django>=6.0,<6.1"]
+dependencies = ["Django>=6.0.9,<6.1"]
 
 classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Django :: 6.0",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
 ]
@@ -42,3 +47,26 @@ Repository = "https://github.com/ipmb/django-rust-templates"
 python-source = "python"
 module-name = "django_rust_templates._native"
 manifest-path = "crates/template-py/Cargo.toml"
+exclude = ["crates/template-py/src/*.pristine-*"]
+
+[tool.ruff]
+target-version = "py312"
+extend-exclude = [".django", "django_suite", "target", "*.pristine-*"]
+
+[tool.ruff.lint]
+# Start with correctness checks; copied source is checked by the transcription gates.
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.cibuildwheel]
+build = "cp312-* cp313-* cp314-*"
+skip = "*-musllinux_*"
+archs = ["auto64"]
+test-command = [
+    "python -I {project}/scripts/ci/wheel_smoke.py",
+    "python -I {project}/scripts/ci/django_acceptance.py",
+]
+test-requires = ["numpy"]
+
+[tool.cibuildwheel.linux]
+before-all = "curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal"
+environment = { PATH = "$HOME/.cargo/bin:$PATH" }

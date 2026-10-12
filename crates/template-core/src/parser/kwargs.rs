@@ -9,7 +9,6 @@ use regex::{Captures, Regex};
 
 use crate::parser::desc::AttrValue;
 use crate::parser::error::Error;
-use crate::pyregex::PYTHON_WORD_STANDALONE;
 
 /// Django's `kwarg_re`, `_lazy_re_compile(r"(?:(\w+)=)?(.+)")` (`base.py:1160`).
 ///
@@ -21,8 +20,8 @@ use crate::pyregex::PYTHON_WORD_STANDALONE;
 pub fn kwarg_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(&format!(r"(?:({PYTHON_WORD_STANDALONE}+)=)?(.+)"))
-            .expect("kwarg_re is a valid pattern")
+        let word = crate::pyunicode::profile::word_in_class();
+        Regex::new(&format!(r"(?:([{word}]+)=)?(.+)")).expect("kwarg_re is a valid pattern")
     })
 }
 

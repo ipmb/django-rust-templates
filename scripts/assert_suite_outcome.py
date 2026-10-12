@@ -111,7 +111,7 @@ class Report:
         self.skips = skips  # list of dotted names, in transcript order
         self.lines = lines
 
-    def refusals(self) -> list[str]:
+    def refusals(self, expected_ran=DECLARED_RAN, expected_skips=DECLARED_SKIPS) -> list[str]:
         """Every way this report fails §2, as sentences.
 
         Two *kinds* of condition live in here and they fail for different
@@ -133,24 +133,25 @@ class Report:
                 "the transcript has no `OK`/`FAILED` summary line — the run did "
                 "not finish, and an unfinished run is not a pass"
             ]
-        if self.summary != DECLARED_SUMMARY:
+        expected_summary = f"OK (skipped={len(expected_skips)})"
+        if self.summary != expected_summary:
             out.append(
                 f"the run ended `{self.summary}` and §2:31-33 pins "
-                f"`{DECLARED_SUMMARY}`"
+                f"`{expected_summary}`"
             )
         if self.ran is None:
             out.append("the transcript has no `Ran N tests` line")
-        elif self.ran != DECLARED_RAN:
-            out.append(f"Ran {self.ran} tests, and §2:31 declares {DECLARED_RAN}")
+        elif self.ran != expected_ran:
+            out.append(f"Ran {self.ran} tests, and the acceptance gate requires {expected_ran}")
         seen = set()
         for dotted in self.skips:
             if dotted in seen:
                 out.append(f"{dotted} is reported twice — the transcript is not one run")
             seen.add(dotted)
         found = set(self.skips)
-        for dotted in sorted(found - DECLARED_SKIPS):
+        for dotted in sorted(found - expected_skips):
             out.append(f"{dotted} skipped and §2:35-45 does not declare it")
-        for dotted in sorted(DECLARED_SKIPS - found):
+        for dotted in sorted(expected_skips - found):
             out.append(f"§2:35-45 declares {dotted} and the run did not skip it")
         # The one place a *parsed* number is still read, and it is a claim about
         # this file rather than about §2: the summary saying `skipped=6` and the

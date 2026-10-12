@@ -358,7 +358,8 @@ class FilterParityTests(unittest.TestCase):
         )
         self.assertEqual(
             str(caught),
-            case["message"],
+            case["message"].replace("is not a container or iterable", "is not iterable")
+            if __import__("sys").version_info < (3, 14) else case["message"],
             f"{case['name']}: {side}'s message is not the measured one",
         )
 

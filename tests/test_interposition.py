@@ -5024,6 +5024,15 @@ class IncludeProtocolTests(unittest.TestCase):
     The census is asserted beside the string because the two questions fail differently:
     a build missing the instance half still returns the right string on the delegated
     path, and only the column says the slot claimed a node it should not have.
+
+    **A refusal is answered in place, so the delegated column stays empty.** The slot
+    pushes ``IncludeNode.render``'s context layer before it reads ``render``, and
+    ``Template.render``'s render-context layer before it reads ``_render``, because those
+    are the points Python reads them at. Handing the node back from there would run
+    ``IncludeNode.render`` from the top and push both a second time — which an override of
+    ``push`` can see — so a refusal is answered with the one call Django would have made
+    from there, taken here. The census therefore reads the same on the control row and on
+    the rows below, and the string is what separates them.
     """
 
     SOURCE = '{% include "a.html" %}'
@@ -5088,8 +5097,10 @@ class IncludeProtocolTests(unittest.TestCase):
 
         output, handled, delegated = self._render()
         self.assertEqual(output, "OVERRIDE")
-        self.assertIn("IncludeNode", delegated)
-        self.assertNotIn("IncludeNode", handled)
+        # Answered in place: claimed by the walk, and never handed back to
+        # ``IncludeNode.render`` — which would push both context layers again.
+        self.assertIn("IncludeNode", handled)
+        self.assertNotIn("IncludeNode", delegated)
 
     def test_an_overriding_subclass_wins_over_the_plan(self):
         """Same, one level out: the class resolves ``render`` to something that is not
@@ -5100,8 +5111,10 @@ class IncludeProtocolTests(unittest.TestCase):
 
         output, handled, delegated = self._render()
         self.assertEqual(output, "LOUD")
-        self.assertIn("IncludeNode", delegated)
-        self.assertNotIn("IncludeNode", handled)
+        # Answered in place: claimed by the walk, and never handed back to
+        # ``IncludeNode.render`` — which would push both context layers again.
+        self.assertIn("IncludeNode", handled)
+        self.assertNotIn("IncludeNode", delegated)
 
     def test_a_subclass_wrapping_render_wins_over_its_own_walk(self):
         """The row the pair *on the walk's class* could not see: the target's class and
@@ -5124,8 +5137,10 @@ class IncludeProtocolTests(unittest.TestCase):
 
         output, handled, delegated = self._render()
         self.assertEqual(output, "[[x]]")
-        self.assertIn("IncludeNode", delegated)
-        self.assertNotIn("IncludeNode", handled)
+        # Answered in place: claimed by the walk, and never handed back to
+        # ``IncludeNode.render`` — which would push both context layers again.
+        self.assertIn("IncludeNode", handled)
+        self.assertNotIn("IncludeNode", delegated)
 
     def test_a_class_saying_nothing_is_not_a_class_saying_no(self):
         """An instance whose ``render`` comes from neither the class nor the dict.
@@ -5141,8 +5156,10 @@ class IncludeProtocolTests(unittest.TestCase):
 
         output, handled, delegated = self._render()
         self.assertEqual(output, "HOOK")
-        self.assertIn("IncludeNode", delegated)
-        self.assertNotIn("IncludeNode", handled)
+        # Answered in place: claimed by the walk, and never handed back to
+        # ``IncludeNode.render`` — which would push both context layers again.
+        self.assertIn("IncludeNode", handled)
+        self.assertNotIn("IncludeNode", delegated)
 
     def test_a_method_shaped_callable_is_not_a_method(self):
         """The two names are attributes, so a claim to them is not the same as being it.
@@ -5160,8 +5177,10 @@ class IncludeProtocolTests(unittest.TestCase):
 
         output, handled, delegated = self._render()
         self.assertEqual(output, "FAKE")
-        self.assertIn("IncludeNode", delegated)
-        self.assertNotIn("IncludeNode", handled)
+        # Answered in place: claimed by the walk, and never handed back to
+        # ``IncludeNode.render`` — which would push both context layers again.
+        self.assertIn("IncludeNode", handled)
+        self.assertNotIn("IncludeNode", delegated)
 
     def test_a_rebound_render_is_not_the_implementation_the_slot_reproduces(self):
         """The pair is the one ``engine/_stock.py`` captured, not whatever the class says.
@@ -5187,8 +5206,10 @@ class IncludeProtocolTests(unittest.TestCase):
 
         output, handled, delegated = self._render()
         self.assertEqual(output, "[[x]]")
-        self.assertIn("IncludeNode", delegated)
-        self.assertNotIn("IncludeNode", handled)
+        # Answered in place: claimed by the walk, and never handed back to
+        # ``IncludeNode.render`` — which would push both context layers again.
+        self.assertIn("IncludeNode", handled)
+        self.assertNotIn("IncludeNode", delegated)
 
         controlled, _, _ = self._render_source("{% include which %}", {"which": "a.html"})
         self.assertEqual(controlled, "[[x]]")
@@ -5204,6 +5225,865 @@ class IncludeProtocolTests(unittest.TestCase):
         finally:
             handled, delegated, _, _, _ = _native.census_take()
         return output, dict(handled), dict(delegated)
+
+
+class _MutatesOnce:
+    """Three items, and one hook that runs Python between the first and the second.
+
+    The walk runs no delegate on the iteration path, so whatever ``mutate`` does here
+    lands with no census column and no error between two renders of one include node.
+    That is the window a cached include resolution would have to survive.
+    """
+
+    LENGTH = 3
+
+    def __init__(self, mutate):
+        self._mutate = mutate
+        self._taken = 0
+
+    def __len__(self):
+        """The hook has to land *between* two iterations, so this has to be sized.
+
+        ``ForNode.render`` does ``if not hasattr(values, "__len__"): values =
+        list(values)`` (``engine/defaulttags.py``), which drains the sequence — and runs
+        the hook — before the first body, where there is nothing cached to move yet.
+        """
+        return self.LENGTH
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._taken == self.LENGTH:
+            raise StopIteration
+        self._taken += 1
+        if self._taken == 2:
+            self._mutate()
+        return self._taken
+
+
+class IncludeCacheFreshnessTests(unittest.TestCase):
+    """A second render of one include node re-asks the context, and keeps Django's answer.
+
+    ``IncludeNode.render`` looks the target up in ``render_context.dicts[0]`` and, on a
+    miss, selects it through ``context.template.engine`` — every time it runs
+    (``loader_tags.py:197-201``). The walk stands in for it, so it owes both lookups on
+    every render of the node. **Each row below is a way Python moves the answer without
+    the walk delegating**, which is the window in which a cached resolution, however it
+    is keyed, hands back a target the context no longer names.
+
+    **These rows guard a reverted optimisation.** Resolving an include costs ~130 ns plus
+    a ~264 ns verdict, and a loop body of one include asks both 72 times with the same
+    answer, so the walk did cache it: ``real-world/complex`` render fell 12% and the
+    ``real-world/complex`` row went from 1.22x jinja2 to 1.05x. It came out because the
+    first three rows below reproduced a stale answer under it. They are why it cannot
+    come back in that shape.
+
+    **The delegate row is the control for the other three.** It is the one window the
+    walk already closes — ``Walk::delegate`` cleared the cache — so it passed under the
+    memo too, and a build that fails it has lost the signal rather than the cache.
+    """
+
+    SOURCE = '{% for i in items %}{% include "a.html" %}{% endfor %}'
+    DELEGATE_SOURCE = (
+        '{% load m_incl_memo %}{% for i in items %}'
+        '{% include "a.html" %}{% plant %}{% endfor %}'
+    )
+    TEMPLATES = {"a.html": "x", "b.html": "y"}
+
+    def _render(self, mutate, source=None, library=None):
+        from django_rust_templates.engine import Context, Engine
+
+        engine = Engine(
+            loaders=[
+                ("django_rust_templates.engine.loaders.locmem.Loader", self.TEMPLATES),
+            ],
+        )
+        if library is not None:
+            engine.template_libraries["m_incl_memo"] = library
+        context = Context()
+        context["items"] = _MutatesOnce(lambda: mutate(engine, context))
+        return engine.from_string(source or self.SOURCE).render(context), context
+
+    def _cached_target(self, context):
+        """``cache[("a.html",)]``, found by shape.
+
+        ``render_context.dicts[0]`` is Django's own base layer and carries the render's
+        other bookkeeping besides, and the node is not reachable from here.
+        """
+        for cache in context.render_context.dicts[0].values():
+            if isinstance(cache, dict) and ("a.html",) in cache:
+                return cache[("a.html",)]
+        raise AssertionError("no cached include after a render")
+
+    def test_a_planted_cache_entry_between_iterations_is_honoured(self):
+        """The first render populates the entry; the hook overwrites it with a second
+        template from the same engine, which is what ``context.push`` inside a nested
+        ``{% include %}`` looks like from here."""
+
+        def plant(engine, context):
+            for cache in context.render_context.dicts[0].values():
+                if isinstance(cache, dict) and ("a.html",) in cache:
+                    cache[("a.html",)] = engine.get_template("b.html")
+
+        output, _ = self._render(plant)
+
+        # `x` on the iteration that populated the entry, `y` on the two that followed.
+        self.assertEqual(output, "xyy")
+
+    def test_a_rebound_render_on_the_cached_target_is_honoured(self):
+        """The target is the one the context names and the verdict on it is stale.
+
+        The slot declines — the instance dict shadows ``Template.render`` — and Django
+        renders the override, which is the answer a cached verdict would have skipped.
+        """
+
+        def rebind(engine, context):
+            self._cached_target(context).render = lambda context: "OVERRIDE"
+
+        output, _ = self._render(rebind)
+        self.assertEqual(output, "xOVERRIDEOVERRIDE")
+
+    def test_a_replaced_plan_on_the_cached_target_is_honoured(self):
+        """The same window under the *other* name the slot reads.
+
+        ``Template._render`` reads ``self._native_plan`` on every call, so a target handed
+        the plan of a second template renders that template — ``IncludeNode.render`` still
+        finds the same object in the cache and still calls the same ``render``. A memo that
+        kept the plan it read on the first render answers ``x`` here where Django answers
+        ``y``, which is the third probe the reviewer ran against it.
+        """
+
+        def replan(engine, context):
+            self._cached_target(context)._native_plan = engine.get_template(
+                "b.html",
+            )._native_plan
+
+        output, _ = self._render(replan)
+        self.assertEqual(output, "xyy")
+
+    def test_a_replaced_base_layer_between_iterations_is_honoured(self):
+        """The registry itself moves, not just an entry under it.
+
+        ``dicts[0]`` is where ``IncludeNode.render`` starts, so a walk that hoisted it out
+        of the render would keep answering from a dict nothing consults any more — the
+        hole the memo shared with ``Walk::include_cache``.
+        """
+
+        def replace(engine, context):
+            layers = context.render_context.dicts
+            node = next(
+                key
+                for key, cache in layers[0].items()
+                if isinstance(cache, dict) and ("a.html",) in cache
+            )
+            layers[0] = {node: {("a.html",): engine.get_template("b.html")}}
+
+        output, _ = self._render(replace)
+        self.assertEqual(output, "xyy")
+
+    def test_a_delegate_between_iterations_is_honoured(self):
+        """The window the walk already closes: ``{% plant %}`` is an ordinary
+        ``simple_tag``, so ``Walk::delegate`` runs it, and a delegate runs Python.
+        """
+        from django_rust_templates.engine import Library
+
+        library = Library()
+
+        @library.simple_tag(takes_context=True)
+        def plant(context):
+            engine = context.template.engine
+            for cache in context.render_context.dicts[0].values():
+                if isinstance(cache, dict) and ("a.html",) in cache:
+                    cache[("a.html",)] = engine.get_template("b.html")
+            return ""
+
+        output, _ = self._render(
+            lambda engine, context: None,
+            source=self.DELEGATE_SOURCE,
+            library=library,
+        )
+        self.assertEqual(output, "xyy")
+
+
+class _Pushing(Context):
+    """A context whose ``push`` is where a target can still be swapped underneath.
+
+    ``IncludeNode.render`` resolves the target, pushes this layer, and *then* calls
+    ``template.render(context)`` (``loader_tags.py:197-211``), so a ``Context`` subclass that
+    rewrites the resolved target inside ``push`` is seen by Django on the next line — and by
+    a slot that read the target before pushing, not at all.
+
+    ``pushes`` counts the layers pushed over one render. ``render_context.push_state`` is a
+    different object's ``push`` and is not counted, so a plain render of one ``{% include %}``
+    is exactly one; a refusal that pushed and *then* handed the node back would be two.
+    """
+
+    def __init__(self, dict_=None, mutate=None):
+        super().__init__(dict_)
+        self._mutate = mutate
+        self.pushes = 0
+
+    def push(self, *args, **kwargs):
+        result = super().push(*args, **kwargs)
+        self.pushes += 1
+        if self._mutate is not None:
+            for cache in self.render_context.dicts[0].values():
+                if isinstance(cache, dict) and ("a.html",) in cache:
+                    self._mutate(cache[("a.html",)])
+        return result
+
+
+class IncludePushOrderTests(unittest.TestCase):
+    """The target is asked for its names where Python asks for them.
+
+    ``IncludeNode.render`` resolves the target, pushes the context layer, and only then
+    calls ``template.render(context)``; ``Template.render`` reads ``self._render`` one frame
+    further in, inside its own ``push_state`` (``base.py:168-176``). A ``push`` override that
+    rewrites either name is therefore seen by Django, so the slot owes both reads *after*
+    their own push and neither before it.
+
+    **A refusal reached after a push is answered in place, not handed back.** Handing the
+    node back runs ``IncludeNode.render`` from the top and pushes the layer a second time,
+    which is what ``pushes`` is asserted at 1 against.
+
+    **The two arms are one template rendered twice**: once with a constant include name, so
+    the slot claims the node, and once through a context variable, so the node is
+    ``Act::Delegate`` and ``IncludeNode.render`` makes the call in Python. Django is the
+    oracle; the pair has to agree.
+    """
+
+    NATIVE = '{% include "a.html" %}'
+    DELEGATED = "{% include which %}"
+    TEMPLATES = {"a.html": "x", "b.html": "y"}
+
+    def _both(self, mutate):
+        """``(output, pushes)`` for each arm, in that order."""
+        from django_rust_templates.engine import Engine
+
+        results = []
+        for source in (self.NATIVE, self.DELEGATED):
+            # A fresh engine per arm: the target lives in it, and the first arm mutates it.
+            engine = Engine(
+                loaders=[
+                    ("django_rust_templates.engine.loaders.locmem.Loader", self.TEMPLATES),
+                ],
+            )
+            context = _Pushing({"which": "a.html"}, mutate)
+            results.append((engine.from_string(source).render(context), context.pushes))
+        return results
+
+    def test_a_push_that_rebinds_render_is_honoured(self):
+        """Read after the context push: this is the call ``IncludeNode.render`` makes."""
+        arms = self._both(
+            lambda target: setattr(target, "render", lambda context: "OVERRIDE"),
+        )
+        self.assertEqual(arms, [("OVERRIDE", 1), ("OVERRIDE", 1)])
+
+    def test_a_push_that_replaces_the_plan_is_honoured(self):
+        """Read after the render-context push, one frame further in: ``Template._render``."""
+
+        def replan(target):
+            target._native_plan = target.engine.get_template("b.html")._native_plan
+
+        self.assertEqual(self._both(replan), [("y", 1), ("y", 1)])
+
+
+class _WatchingRenderContext(RenderContext):
+    """A render context that writes down every layer it is asked to push and pop."""
+
+    def __init__(self, log):
+        super().__init__()
+        self._log = log
+
+    def push(self):
+        self._log.append(("push", self.template.name if self.template else None))
+        return super().push()
+
+    def pop(self):
+        self._log.append(("pop", self.template.name if self.template else None))
+        return super().pop()
+
+
+class _ReroutesContext(Context):
+    """``push`` swaps in a render context of its own, which is the one Django enters.
+
+    ``render_context`` is an ordinary attribute of the context, and ``Context.push``
+    is arbitrary Python, so replacing it there is a move ``Template.render`` sees: it
+    reads the attribute inside ``push_state``, one frame after ``IncludeNode.render``
+    has pushed. A slot that captured the object before pushing writes ``template`` and
+    pushes the layers on an object nothing else is looking at.
+    """
+
+    def __init__(self, mutate=None):
+        super().__init__({"which": "a.html"})
+        self.log = []
+
+    def push(self, *args, **kwargs):
+        result = super().push(*args, **kwargs)
+        self.render_context = _WatchingRenderContext(self.log)
+        return result
+
+
+class _ClearingRenderContext(RenderContext):
+    """``push`` clears ``context.template``, which puts Django one branch over."""
+
+    def __init__(self, context):
+        super().__init__()
+        self._context = context
+
+    def push(self):
+        result = super().push()
+        self._context.template = None
+        return result
+
+
+class _UnbindingContext(Context):
+    def __init__(self, mutate=None):
+        super().__init__({"which": "a.html"})
+        self.render_context = _ClearingRenderContext(self)
+
+
+class _FreshRead:
+    """A descriptor handing out a new callable on every access, and counting them."""
+
+    def __init__(self):
+        self.reads = 0
+
+    def __get__(self, obj, objtype=None):
+        self.reads += 1
+        n = self.reads
+        return lambda context: f"CALL{n}"
+
+
+class _RecountContext(Context):
+    """``push`` rebinds ``Template.render``, one call before the include's own read.
+
+    The rebind lands between the outer ``render`` — already read and called — and the
+    include's, which is where Python reads that name.
+    """
+
+    def __init__(self, mutate=None):
+        super().__init__({"which": "a.html"})
+        self.reads = _FreshRead()
+        self._original = Template.render
+
+    def push(self, *args, **kwargs):
+        result = super().push(*args, **kwargs)
+        Template.render = self.reads
+        return result
+
+    def restore(self):
+        Template.render = self._original
+
+
+class _RaisingPlan:
+    """A data descriptor, so that an instance attribute cannot shadow it."""
+
+    def __set__(self, obj, value):
+        pass
+
+    def __get__(self, obj, objtype=None):
+        raise RuntimeError("plan lookup")
+
+
+class _AngryPopContext(Context):
+    """``pop`` raises, and ``_native_plan`` does too — the later failure is the answer.
+
+    ``Context.pop`` runs in the ``__exit__`` of ``IncludeNode.render``'s own layer,
+    which is a ``finally`` Python has already entered by the time the plan is read. A
+    ``finally`` that raises replaces the exception travelling through it, so the
+    ``ValueError`` is what the caller sees and the ``RuntimeError`` is its context.
+    """
+
+    def __init__(self, mutate=None):
+        super().__init__({"which": "a.html"})
+        self._original = Template.__dict__["_native_plan"]
+
+    def pop(self, *args, **kwargs):
+        raise ValueError("cleanup")
+
+    def push(self, *args, **kwargs):
+        result = super().push(*args, **kwargs)
+        Template._native_plan = _RaisingPlan()
+        return result
+
+    def restore(self):
+        Template._native_plan = self._original
+
+
+class _Swallowing:
+    """A context manager that swallows whatever its block raises, for one template name.
+
+    ``__exit__`` returning true is a ``with`` that does not propagate: Python continues
+    after the block and the frame that block belongs to falls off its end.
+    """
+
+    def __init__(self, context, template, names):
+        self._context = context
+        self._template = template
+        self._names = names
+        self._saved = None
+
+    def __enter__(self):
+        self._saved = self._context.template
+        self._context.template = self._template
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._context.template = self._saved
+        return exc_type is not None and self._template.name in self._names
+
+
+class _SwallowingBind(_UnbindingContext):
+    """``bind_template`` whose manager swallows the block's failure.
+
+    Paired with ``_UnbindingContext``'s clearing render context, which is what puts the
+    render into the binding branch at all: ``base.py:171`` is read after ``push_state``.
+    ``page.html`` is left out of ``NAMES`` so the outermost binding, the one the render
+    was entered through, still propagates.
+    """
+
+    NAMES = ("a.html",)
+
+    def bind_template(self, template):
+        return _Swallowing(self, template, self.NAMES)
+
+
+class _AngryPushState(RenderContext):
+    """``push_state`` raises for one template, one frame above the include's own read."""
+
+    def push_state(self, template, isolated_context=True):
+        if template.name == "a.html":
+            raise RuntimeError("push_state hook")
+        return super().push_state(template, isolated_context)
+
+
+class _AngryPushStateContext(Context):
+    def __init__(self, mutate=None):
+        super().__init__({"which": "a.html"})
+        self.render_context = _AngryPushState()
+
+
+class _AngryEnter:
+    """A manager whose ``__enter__`` raises — ``Context.push`` may return any of these."""
+
+    def __init__(self, context):
+        self._context = context
+
+    def __enter__(self):
+        raise RuntimeError("context enter hook")
+
+    def __exit__(self, *args):
+        raise AssertionError("a manager that never entered is never exited")
+
+
+class _AngryEnterContext(Context):
+    """``push`` hands back a manager, and ``with`` is what enters it."""
+
+    def __init__(self, mutate=None):
+        super().__init__({"which": "a.html"})
+
+    def push(self, *args, **kwargs):
+        return _AngryEnter(self)
+
+
+class _Unreadable:
+    """What a manager returns when nothing may read the return value."""
+
+    def __bool__(self):
+        raise RuntimeError("truthiness hook")
+
+
+class _UnreadableExit:
+    """``__exit__`` returns something whose ``__bool__`` raises.
+
+    A ``with`` on its ordinary path calls ``__exit__(None, None, None)`` and drops the
+    result: CPython reaches its truthiness test only on the path an exception took. So
+    reading this return turns a render Django completes into a ``RuntimeError``.
+    """
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return _Unreadable()
+
+
+class _UnreadableExitContext(Context):
+    """``push`` returns a manager whose ``__exit__`` result must never be interrogated."""
+
+    def __init__(self, mutate=None):
+        super().__init__({"which": "a.html"})
+
+    def push(self, *args, **kwargs):
+        return _UnreadableExit()
+
+
+class _AngryRenderPop(RenderContext):
+    """The render context's ``pop`` raises, after the body already produced a value.
+
+    ``pop`` runs in ``push_state``'s ``finally``, which is *after* ``_render`` has
+    returned — so the value the frame was going to return is already computed when the
+    failure arrives, and a failure cancels it.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.armed = False
+
+    def push(self, *args, **kwargs):
+        result = super().push(*args, **kwargs)
+        self.armed = True
+        return result
+
+    def pop(self, *args, **kwargs):
+        if self.armed:
+            self.armed = False
+            raise ValueError("render cleanup")
+        return super().pop(*args, **kwargs)
+
+
+class _SwallowingPush:
+    """A ``Context.push`` manager that swallows whatever its block raises."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def __enter__(self):
+        return self._inner.__enter__()
+
+    def __exit__(self, *args):
+        self._inner.__exit__(*args)
+        return args[0] is not None
+
+
+class _SuppressingPushContext(Context):
+    """The render context's cleanup fails, and the include's own layer swallows it."""
+
+    def __init__(self, mutate=None):
+        super().__init__({"which": "a.html"})
+        self.render_context = _AngryRenderPop()
+
+    def push(self, *args, **kwargs):
+        return _SwallowingPush(super().push(*args, **kwargs))
+
+
+class _ObservingExit:
+    """A ``push`` manager that records what Python says is being handled as it exits."""
+
+    def __init__(self, log):
+        self.log = log
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, kind, value, traceback):
+        self.log.append(
+            (
+                type(sys.exception()).__name__,
+                None if kind is None else kind.__name__,
+                None if value is None else type(value).__name__,
+            )
+        )
+        return False
+
+
+class _ObservingExitContext(Context):
+    """The hook is on an *exceptional* exit, so the include has to fail inside."""
+
+    def __init__(self, mutate=None):
+        super().__init__({"which": "a.html"})
+        self.log = []
+
+    def push(self, *args, **kwargs):
+        return _ObservingExit(self.log)
+
+
+class _ChainWalk:
+    """``push``'s manager: its ``__exit__`` raises an error that already carries a context.
+
+    The context is set by hand rather than by an ``except``, because it is what the raise
+    is going to overwrite — a chain that arrived at the raise is not the chain that leaves
+    it when something is being handled.
+    """
+
+    def __init__(self, context):
+        self.context = context
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, kind, value, traceback):
+        self.context.travelled = value
+        error = RuntimeError("cleanup")
+        error.__context__ = KeyError("already")
+        self.context.raised = error
+        raise error
+
+
+class _ChainedExitContext(Context):
+    """``__exit__`` raises while the render's own failure is travelling through it."""
+
+    def __init__(self, mutate=None):
+        super().__init__({"which": "a.html"})
+        self.travelled = None
+        self.raised = None
+
+    def push(self, *args, **kwargs):
+        return _ChainWalk(self)
+
+
+class _SwapsItsExit:
+    """A manager whose ``__enter__`` installs a different ``__exit__`` on its own class."""
+
+    def __init__(self, log):
+        self.log = log
+
+    def __enter__(self):
+        type(self).__exit__ = type(self).swapped
+        return self
+
+    def __exit__(self, kind, value, traceback):
+        self.log.append("original")
+        return False
+
+    def swapped(self, kind, value, traceback):
+        self.log.append("swapped")
+        return False
+
+
+class _SwapsItsExitContext(Context):
+    """A fresh manager class per arm, so the swap cannot leak into the other arm."""
+
+    def __init__(self, mutate=None):
+        super().__init__({"which": "a.html"})
+        self.log = []
+
+    def push(self, *args, **kwargs):
+        return type("_ArmManager", (_SwapsItsExit,), {})(self.log)
+
+
+class IncludeCallbackTests(unittest.TestCase):
+    """What the slot reads after the first push, it reads where and as often as Python does.
+
+    ``IncludeNode.render`` resolves the target, pushes the context layer, and calls
+    ``template.render(context)``; ``Template.render`` then enters ``push_state`` and
+    reads ``context.template`` and ``_render`` inside it (``base.py:168-176``). Twelve
+    things follow, one per row below, each reproducible by reverting just that one
+    from ``lib.rs``:
+
+    * ``render_context`` is read *after* the context push, because that is where
+      ``push_state`` reads it.
+    * ``context.template`` is read after ``push_state``, so a ``RenderContext.push``
+      that clears it puts the slot in Django's ``bind_template`` branch rather than
+      past it.
+    * the call a refusal makes is the read it decided on, so an object answering
+      differently on each read sees one read and not two.
+    * every exit after the first push runs the ``finally`` blocks, so a cleanup that
+      raises is reported instead of the failure it replaced.
+    * a manager whose ``__exit__`` returns true is a ``with`` that does not propagate:
+      the failure stops there and the frame falls off its end, so the include renders
+      ``None``.
+    * the ``push_state`` that is entered is the one the render context *has* — an
+      override on a subclass is a real override, and ``@contextmanager`` puts its
+      ``raise`` at the ``__enter__`` where transcribing the body would never see it.
+    * the object a ``push`` returns is the one entered, so a ``Context`` with its own
+      ``__enter__``/``__exit__`` is entered rather than merely have its side effect
+      reproduced.
+    * an ``__exit__`` whose block did not raise is called for its side effect alone:
+      its return value is never made true or false. Only the path an exception took
+      reaches CPython's truthiness test.
+    * a failure during the unwind cancels the frame's value even when a manager
+      outside it later suppresses the failure — the ``with`` statement finished by
+      suppressing, so the block never fell off its end with a value.
+    * an exceptional ``__exit__`` runs with the travelling failure *handled*, so
+      ``sys.exception()`` answers it and a raise inside chains onto it. Rust cannot
+      establish that state, so the exceptional call is made from Python.
+    * the failure an ``__exit__`` raises is chained onto the failure in flight, replacing
+      whatever chain it arrived with, and does not get the one it replaced appended to the
+      tail of that chain instead.
+    * ``__exit__`` is resolved off the type and bound *before* ``__enter__`` runs, as
+      ``BEFORE_WITH`` does, so an enter that replaces it does not get to be the exit.
+
+    All twelve go through the real ``with`` statements: every manager is built, entered,
+    and exited, and neither the ``@contextmanager`` body nor a ``finally`` is
+    transcribed. Four of them are not about the managers at all but about CPython's
+    ``with``, which is why they read as pairs — the same code, once with a failure in
+    flight and once without.
+
+    **Every row has the same two arms, and Django is the oracle.** ``{% include
+    "a.html" %}`` gives the slot the node; ``{% include which %}`` is ``Act::Delegate``,
+    so ``IncludeNode.render`` makes the call in Python. The arms have to agree on both
+    the string and on what the hook observed.
+    """
+
+    NATIVE = '{% include "a.html" %}'
+    DELEGATED = "{% include which %}"
+    TEMPLATES = {"a.html": "x", "b.html": "y"}
+
+    def _both(self, context_for, observe, templates=None):
+        """``(output, observed)`` for each arm, native first, with a fresh engine each."""
+        from django_rust_templates.engine import Engine
+
+        results = []
+        for source in (self.NATIVE, self.DELEGATED):
+            engine = Engine(
+                loaders=[
+                    (
+                        "django_rust_templates.engine.loaders.locmem.Loader",
+                        self.TEMPLATES if templates is None else templates,
+                    ),
+                ],
+            )
+            context = context_for()
+            try:
+                output = repr(engine.from_string(source).render(context))
+            except BaseException as error:  # noqa: BLE001 — the exception is the answer
+                output = f"{type(error).__name__}<={type(error.__context__).__name__}"
+            finally:
+                # A row that rebinds a class attribute puts it back before the next
+                # arm, which needs the real one.
+                restore = getattr(context, "restore", None)
+                if restore is not None:
+                    restore()
+            results.append((output, observe(context)))
+        return results
+
+    def test_a_push_that_replaces_the_render_context_is_entered(self):
+        arms = self._both(_ReroutesContext, lambda context: context.log)
+        self.assertEqual(arms, [("'x'", [("push", "a.html"), ("pop", None)])] * 2)
+
+    def test_a_push_that_clears_the_template_binds_the_target(self):
+        """``template_name`` is the marker: only the binding branch writes it, and
+        ``bind_template`` does not put it back on the way out (``context.py:156-163``).
+        """
+        arms = self._both(_UnbindingContext, lambda context: context.template_name)
+        self.assertEqual(arms, [("'x'", "a.html")] * 2)
+
+    def test_a_render_answered_twice_is_read_once(self):
+        arms = self._both(_RecountContext, lambda context: context.reads.reads)
+        self.assertEqual(arms, [("'CALL1'", 1)] * 2)
+
+    def test_a_post_push_error_leaves_through_the_finally(self):
+        arms = self._both(_AngryPopContext, lambda context: None)
+        self.assertEqual(arms, [("ValueError<=RuntimeError", None)] * 2)
+
+    def test_a_manager_that_swallows_the_failure_renders_none(self):
+        """The manager's truthy ``__exit__`` is the answer, not the failure it swallowed.
+
+        ``a.html`` includes a template that does not exist, so the binding block's body
+        raises and its manager — entered because the render context's ``push`` cleared
+        ``context.template`` — returns true. Django then falls off the end of
+        ``Template.render`` with ``None``, and the parent's ``''.join`` is what raises.
+        """
+        arms = self._both(
+            _SwallowingBind,
+            lambda context: None,
+            templates={"a.html": '{% include "nope.html" %}'},
+        )
+        self.assertEqual(arms, [("TypeError<=NoneType", None)] * 2)
+
+    def test_the_render_contexts_own_push_state_is_the_one_entered(self):
+        """``push_state`` is a generator, so a ``with`` runs whatever the call returns.
+
+        Transcribing its body instead skips an override entirely.
+        """
+        arms = self._both(_AngryPushStateContext, lambda context: None)
+        self.assertEqual(arms, [("RuntimeError<=NoneType", None)] * 2)
+
+    def test_the_manager_a_push_returns_is_the_one_entered(self):
+        """``Context.push`` returns a manager; entering that is what a ``with`` does."""
+        arms = self._both(_AngryEnterContext, lambda context: None)
+        self.assertEqual(arms, [("RuntimeError<=NoneType", None)] * 2)
+
+    def test_a_successful_exits_return_is_not_read(self):
+        """Nothing on the way out succeeds, so nothing on the way out is interrogated.
+
+        A ``with`` whose body did not raise calls ``__exit__(None, None, None)`` for its
+        side effect and discards the result; only the path an exception took reaches
+        CPython's truthiness test. So a manager returning an object with a raising
+        ``__bool__`` renders fine here and fails under a failure — and the include
+        renders ``x``, which is what delegation does.
+        """
+        arms = self._both(_UnreadableExitContext, lambda context: None)
+        self.assertEqual(arms, [("'x'", None)] * 2)
+
+    def test_a_cancelled_return_stays_cancelled_when_suppressed(self):
+        """A failure during the unwind cancels the value, even if an outer manager eats it.
+
+        ``pop`` raises out of ``push_state``'s ``finally`` after ``_render`` already
+        answered ``x``. The include's own layer then swallows that failure — and stock
+        Django does *not* fall back on the value it had: the ``with`` statement finished
+        by suppressing, so ``IncludeNode.render`` falls off its end and the include is
+        ``None``. The parent's ``''.join`` is what raises, which is the whole answer.
+        """
+        arms = self._both(_SuppressingPushContext, lambda context: None)
+        self.assertEqual(arms, [("TypeError<=NoneType", None)] * 2)
+
+    def test_an_exceptional_exit_runs_with_the_failure_being_handled(self):
+        """``WITH_EXCEPT_START`` runs ``__exit__`` with the travelling failure *handled*.
+
+        That state is what ``sys.exception()`` reads, and it is not something the triple
+        passed as arguments establishes: a slot that calls ``__exit__(kind, value,
+        traceback)`` from Rust leaves ``sys.exception()`` at ``None``. Delegation answers
+        the render's own failure, and so does a slot that makes the call from Python.
+        """
+        arms = self._both(
+            _ObservingExitContext,
+            lambda context: context.log,
+            templates={"a.html": '{% include "nope.html" %}'},
+        )
+        self.assertEqual(
+            arms, [("TemplateDoesNotExist<=NoneType", [("TemplateDoesNotExist", "TemplateDoesNotExist", "TemplateDoesNotExist")])] * 2
+        )
+
+    def test_an_exit_that_raises_chains_onto_the_failure_in_flight(self):
+        """The failure an ``__exit__`` raises is chained onto the one *being handled*.
+
+        ``_PyErr_SetObject`` sets the new exception's ``__context__`` to whatever is
+        handled, replacing whatever chain the newcomer arrived with — so the render's own
+        failure is the context, and the ``KeyError`` the manager was carrying is not in
+        the chain at all. An exit called with no failure being handled leaves that
+        ``KeyError`` in place, and appending the travelling failure to the tail of it puts
+        a link back in that Python takes out.
+        """
+        arms = self._both(
+            _ChainedExitContext,
+            lambda context: (_chain(context.travelled), _chain(context.raised)),
+            templates={"a.html": '{% include "nope.html" %}'},
+        )
+        self.assertEqual(
+            arms,
+            [
+                (
+                    "RuntimeError<=TemplateDoesNotExist",
+                    (["TemplateDoesNotExist"], ["RuntimeError", "TemplateDoesNotExist"]),
+                )
+            ]
+            * 2,
+        )
+
+    def test_the_exit_callable_is_resolved_before_the_enter(self):
+        """``BEFORE_WITH`` binds both names first, then calls the enter.
+
+        So a manager whose ``__enter__`` replaces its class's ``__exit__`` is still exited
+        by the one that was there when the ``with`` was reached. Looking the name up at
+        unwind time finds the replacement.
+        """
+        arms = self._both(_SwapsItsExitContext, lambda context: context.log)
+        self.assertEqual(arms, [("'x'", ["original"])] * 2)
+
+
+def _chain(error):
+    """``error``'s implicit chain, outermost first, stopping if it closes on itself."""
+    names = []
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        names.append(type(error).__name__)
+        error = error.__context__
+    return names
 
 
 class IncludeRecursionTests(unittest.TestCase):

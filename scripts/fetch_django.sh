@@ -4,9 +4,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DJANGO_TAG="6.0.9"
 DEST="$ROOT/.django"
 LOCK="$ROOT/django.lock"
+DJANGO_TAG="$(sed -n 's/^tag=//p' "$LOCK")"
+EXPECTED_SHA="$(sed -n 's/^sha=//p' "$LOCK")"
+if [[ ! "$DJANGO_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "invalid Django tag or SHA in $LOCK" >&2
+  exit 1
+fi
 
 if [ -d "$DEST/.git" ]; then
   echo "checkout already present at $DEST"
@@ -18,10 +23,10 @@ else
   SHA="$(git -C "$DEST" rev-parse HEAD)"
 fi
 
-cat > "$LOCK" <<EOF
-tag=$DJANGO_TAG
-sha=$SHA
-EOF
+if [ "$SHA" != "$EXPECTED_SHA" ]; then
+  echo "Django checkout is $SHA; expected $EXPECTED_SHA from $LOCK" >&2
+  exit 1
+fi
 
 echo "pinned: $DJANGO_TAG @ $SHA"
-echo "wrote $LOCK"
+python3 "$ROOT/scripts/assert_checkout_pinned.py"

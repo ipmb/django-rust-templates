@@ -30,7 +30,6 @@ use crate::parser::desc::{AttrValue, FilterCall, FilterExprDesc, FilterVar};
 use crate::parser::error::Error;
 use crate::parser::host::Host;
 use crate::parser::variable::parse_variable;
-use crate::pyregex::{PYTHON_WORD_IN_CLASS, PYTHON_WORD_STANDALONE};
 use crate::pyunicode::WS_CLASS;
 
 /// The double-quoted string alternative from `constant_string` (`base.py:695`).
@@ -68,9 +67,10 @@ fn filter_re_source() -> String {
     let constant = constant_string();
     // `var_chars = r"\w\.\+-"` spliced into `[%(var_chars)s]+` (`base.py:714`):
     // inside a class, so the *contents* form of Python's `\w`.
-    let var_chars = format!(r"[{PYTHON_WORD_IN_CLASS}\.\+-]+");
+    let word = crate::pyunicode::profile::word_in_class();
+    let var_chars = format!(r"[{word}\.\+-]+");
     // `(?P<filter_name>\w+)` (`base.py:705`): standalone, so the bracketed form.
-    let filter_name = format!("{PYTHON_WORD_STANDALONE}+");
+    let filter_name = format!("[{word}]+");
     format!(
         concat!(
             r"^(?P<constant>{constant})|",

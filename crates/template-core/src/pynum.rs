@@ -121,6 +121,9 @@ static DECIMAL_DIGIT_RANGES: &[(u32, u32)] = &[
 /// `char::to_digit` is not usable: it knows only ASCII (and, at 10 and above, letters).
 pub fn decimal_digit_value(c: char) -> Option<u32> {
     let code = c as u32;
+    if crate::pyunicode::profile::excludes_digit(code) {
+        return None;
+    }
     DECIMAL_DIGIT_RANGES
         .iter()
         .find(|(first, last)| (*first..=*last).contains(&code))
@@ -294,6 +297,7 @@ pub fn decimal_digit_codepoints() -> Vec<u32> {
     DECIMAL_DIGIT_RANGES
         .iter()
         .flat_map(|(first, last)| *first..=*last)
+        .filter(|code| !crate::pyunicode::profile::excludes_digit(*code))
         .collect()
 }
 #[cfg(test)]

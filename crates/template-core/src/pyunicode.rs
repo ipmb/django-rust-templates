@@ -46,6 +46,7 @@
 //! about the tag's contents, and therefore about which tag it is.
 
 pub mod case;
+pub mod profile;
 
 pub use case::{upper, upper_str, UNCASED};
 

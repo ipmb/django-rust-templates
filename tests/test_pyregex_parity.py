@@ -22,6 +22,10 @@ DJANGO_CHECKOUT = PROJECT_ROOT / ".django"
 RANGES_PATH = (
     PROJECT_ROOT / "crates" / "template-core" / "src" / "pyregex_word_ranges.txt"
 )
+if unicodedata.unidata_version in {"15.0.0", "15.1.0"}:
+    # Use the actual major/minor, including 15.0's zero minor.
+    profile = "_".join(unicodedata.unidata_version.split(".")[:2])
+    RANGES_PATH = RANGES_PATH.parent / "pyunicode" / f"word_{profile}.txt"
 SPLICES_PATH = PROJECT_ROOT / "tests" / "pyregex_splices.txt"
 
 if str(DJANGO_CHECKOUT) not in sys.path:
@@ -79,7 +83,7 @@ class WordTableTests(unittest.TestCase):
         total = sum(hi - lo + 1 for lo, hi in ranges)
         self.assertEqual(
             (len(ranges), total),
-            (771, 142_940),
+            {"15.0.0": (748, 137_936), "15.1.0": (749, 138_558), "16.0.0": (771, 142_940)}[unicodedata.unidata_version],
             "the committed table is stale for "
             f"unicodedata {unicodedata.unidata_version}; re-run "
             "scripts/gen_python_word_ranges.py and record the new counts",

@@ -59,6 +59,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 import django  # noqa: E402
+from django.core.exceptions import ImproperlyConfigured  # noqa: E402
 
 from django.template.backends.django import DjangoTemplates  # noqa: E402
 
@@ -88,6 +89,11 @@ class DjangoVersionGuardTests(unittest.TestCase):
         pin = (*TRANSCRIBED_DJANGO, "final", 0)
         with mock.patch.object(django, "VERSION", pin):
             self.assertIsNone(_require_django(), "the guard refused its own pin")
+
+    def test_the_guard_refuses_patches_before_the_required_helpers(self):
+        with mock.patch.object(django, "VERSION", (6, 0, 8, "final", 0)):
+            with self.assertRaises(ImproperlyConfigured):
+                _require_django()
 
     def test_the_constructor_is_the_door_the_guard_is_behind(self):
         """``_require_django`` runs from ``RustTemplates.__init__``, first.

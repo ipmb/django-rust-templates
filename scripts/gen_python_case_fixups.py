@@ -288,7 +288,7 @@ pub const UNCASED: [char; {upper_count}] = [
 /// own direction), so collapsing to a single `char` would be wrong for the same
 /// strings the table exists to fix.
 pub fn upper(ch: char) -> impl Iterator<Item = char> {{
-    if UNCASED.binary_search(&ch).is_ok() {{
+    if UNCASED.binary_search(&ch).is_ok() || super::profile::suppress_upper(ch) {{
         // Python leaves this one alone and Rust would map it. Yield the code
         // point itself, and only it — the two arms have different lengths and
         // that asymmetry is the point.

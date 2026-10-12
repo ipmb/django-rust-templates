@@ -18,11 +18,14 @@ Usage:
 
 `--check` exits 1 when the committed file and CPython disagree, which is what
 notices a CPython `unicodedata` revision moving the table.
+On Python 3.12/3.13 this writes the matching Unicode 15.0/15.1 profile instead
+of the Unicode 16 reference table.
 """
 
 import argparse
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -30,6 +33,14 @@ OUT = ROOT / "crates" / "template-core" / "src" / "pyregex_word_ranges.txt"
 
 EXPECTED_CODEPOINTS = 142_940
 EXPECTED_RANGES = 771
+
+if unicodedata.unidata_version in {"15.0.0", "15.1.0"}:
+    profile = "_".join(unicodedata.unidata_version.split(".")[:2])
+    OUT = OUT.parent / "pyunicode" / f"word_{profile}.txt"
+    EXPECTED_CODEPOINTS, EXPECTED_RANGES = {
+        "15.0.0": (137_936, 748),
+        "15.1.0": (138_558, 749),
+    }[unicodedata.unidata_version]
 
 
 def python_word_codepoints():

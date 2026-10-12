@@ -140,9 +140,10 @@ class _DeferredAnnotation:
     draft of this class quoted it and passed against the pre-fix Rust.
     """
 
-    @staticmethod
-    def uses_deferred_annotations(value: AnnotatedKwarg):  # noqa: F821
-        return value
+    if sys.version_info >= (3, 14):
+        @staticmethod
+        def uses_deferred_annotations(value: AnnotatedKwarg):  # noqa: F821
+            return value
 
 
 class _FalsyClassAttributeContext(BaseContext):

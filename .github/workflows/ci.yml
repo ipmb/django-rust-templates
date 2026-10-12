@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integrity:
+    name: Upstream suite and generated source integrity
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - run: scripts/fetch_django.sh
+      - run: python -I scripts/assert_checkout_pinned.py
+      - run: python -I scripts/gen_django_suite.py --check
+      - run: python -I scripts/check_transcriptions.py
+      - run: python -I scripts/gen_impl_transcription.py --check
+      - run: python -I scripts/check_python_anchors.py --check --frozen
+
+  rust:
+    name: Rust tests and lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install 'Django>=6.0.9,<6.1'
+      - run: cargo test --locked --workspace
+      - run: scripts/run_rust_unit_tests.sh --locked
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo clippy --locked -p template-py --no-default-features --all-targets -- -D warnings
+
+  python:
+    name: Python ${{ matrix.python }} / ${{ matrix.django }}
+    needs: integrity
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.13', '3.14']
+        django: ['Django==6.0.9', 'Django>=6.0.9,<6.1']
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: python-${{ matrix.python }}
+      - run: scripts/fetch_django.sh
+      - name: Build current extension
+        env:
+          DJANGO_SPEC: ${{ matrix.django }}
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install 'maturin>=1.7,<2' numpy "$DJANGO_SPEC"
+          .venv/bin/maturin develop --release --locked
+          .venv/bin/python -I scripts/assert_native_is_the_built_artifact.py
+          .venv/bin/python -m django --version
+      - run: scripts/run_unit_tests.sh
+      - run: .venv/bin/python -I scripts/gen_python_word_ranges.py --check
+      - run: .venv/bin/python scripts/differential.py
+      - name: Django template acceptance suite
+        run: .venv/bin/python -I scripts/ci/django_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: django-suite-py${{ matrix.python }}-${{ strategy.job-index }}
+          path: django-suite.log
+
+  python-lint:
+    name: Python lint and formatting
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - run: python -m pip install 'ruff==0.14.14'
+      - run: ruff check python scripts tests
+      # Transcriptions and upstream tests retain their source formatting.
+      - run: ruff format --check scripts/ci python/django_rust_templates/engine/_unwind.py tests/test_ci_acceptance.py tests/test_unicode_profiles.py

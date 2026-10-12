@@ -40,6 +40,13 @@ base.py:151-152	django/template/base.py	151	152	if origin is None:	origin = Orig
 base.py:151-154	django/template/base.py	151	154	Origin(UNKNOWN_SOURCE)	-
 base.py:154	django/template/base.py	154	-	self.origin = origin	-
 base.py:168-176	django/template/base.py	168	176	-	-
+base.py:170	django/template/base.py	170	-	with context.render_context.push_state(self):	-
+base.py:171-174	django/template/base.py	171	174	if context.template is None:	return self._render(context)
+base.py:171	django/template/base.py	171	-	if context.template is None:	-
+base.py:172	django/template/base.py	172	-	with context.bind_template(self):	-
+base.py:173	django/template/base.py	173	-	context.template_name = self.name	-
+base.py:174	django/template/base.py	174	-	return self._render(context)	-
+base.py:176	django/template/base.py	176	-	return self._render(context)	-
 base.py:183-186	django/template/base.py	183	186	lexer = DebugLexer(self.source)	-
 django/template/base.py:198	django/template/base.py	198	-	-	-
 base.py:198-200	django/template/base.py	198	200	parser.parse()	-
@@ -201,7 +208,9 @@ base.py:1202	django/template/base.py	1202	-	kwargs[key] = parser.compile_filter(
 base.py:1203-1206	django/template/base.py	1203	1206	-	-
 django/template/context.py:5	django/template/context.py	5	-	_builtin_context_processors = ("django.template.context_processors.csrf",)	-
 context.py:88-91	django/template/context.py	88	91	raise KeyError(key)	-
+context.py:156-163	django/template/context.py	156	163	def bind_template(self, template):	self.template = None
 context.py:210-221	django/template/context.py	210	221	def push_state(self, template, isolated_context=True):	-
+context.py:254	django/template/context.py	254	-	def bind_template(self, template):	-
 defaultfilters.py:14	django/template/defaultfilters.py	14	-	-	-
 defaultfilters.py:38-52	django/template/defaultfilters.py	38	52	def stringfilter(func):	return _dec
 defaultfilters.py:44-48	django/template/defaultfilters.py	44	48	first = str(first)	-
@@ -511,7 +520,10 @@ loader_tags.py:121	django/template/loader_tags.py	121	-	self.parent_name.var	-
 loader_tags.py:187	django/template/loader_tags.py	187	-	-	-
 loader_tags.py:197	django/template/loader_tags.py	197	-	cache = context.render_context.dicts[0].setdefault(self, {})	-
 loader_tags.py:197-201	django/template/loader_tags.py	197	201	render_context.dicts[0]	-
+loader_tags.py:197-211	django/template/loader_tags.py	197	211	template.render(context)	-
 loader_tags.py:210-211	django/template/loader_tags.py	210	211	-	-
+loader_tags.py:210	django/template/loader_tags.py	210	-	with context.push(**values)	-
+loader_tags.py:211	django/template/loader_tags.py	211	-	template.render(context)	-
 loader_tags.py:215	django/template/loader_tags.py	215	-	def do_block(parser, token):	-
 loader_tags.py:219-220	django/template/loader_tags.py	219	220	# token.split_contents() isn't useful here because this tag doesn't accept	# variable as arguments.
 loader_tags.py:221-241	django/template/loader_tags.py	221	241	bits = token.contents.split()	parser.invalid_block_tag(endblock, "endblock", acceptable_endblocks)
@@ -761,6 +773,7 @@ django/utils/translation/__init__.py:290	django/utils/translation/__init__.py	29
 engine/__init__.py:26	python/django_rust_templates/engine/__init__.py	26	-	from .engine import Engine	-
 django_rust_templates/engine/__init__.py:26	python/django_rust_templates/engine/__init__.py	26	-	from .engine import Engine	-
 engine/base.py:61	python/django_rust_templates/engine/base.py	61	-	from .context import BaseContext	-
+engine/base.py:177-194	python/django_rust_templates/engine/base.py	177	194	self._native_plan	-
 engine/base.py:819-832	python/django_rust_templates/engine/base.py	819	832	except VariableDoesNotExist:	-
 engine/base.py:868-874	python/django_rust_templates/engine/base.py	868	874	for func, args in self.filters:	-
 python/django_rust_templates/engine/base.py:894	python/django_rust_templates/engine/base.py	894	-	names.get(func)	-
@@ -828,7 +841,7 @@ tests.py:148-155	tests/template_tests/tests.py	148	155	def test_compile_tag_extr
 tests/template_tests/tests.py:231-243	tests/template_tests/tests.py	231	243	def test_callable_uses_deferred_annotations(self):	self.assertEqual(template.render(Context({"obj": MyObject()})), "")
 tests/test_host_tags.py:36-44	tests/test_host_tags.py	36	44	PROJECT_ROOT = Path(__file__).resolve().parent.parent	sys.path.insert(0, str(_path))
 tests/test_materialise.py:464	tests/test_materialise.py	464	-	test_a_nodelist_ref_resolves_because_children_are_built_first	-
-test_render_parity.py:615	tests/test_render_parity.py	615	-	def test_a_silent_variable_failure_is_substituted(self):	-
+test_render_parity.py:616	tests/test_render_parity.py	616	-	def test_a_silent_variable_failure_is_substituted(self):	-
 test_resolve_callarm.py:86	tests/test_resolve_callarm.py	86	-	def test_a_silent_type_error_is_substituted(self):	-
 .django/tests/timezones/tests.py:1051-1071	tests/timezones/tests.py	1051	1071	test_localtime_filters_do_not_raise_exceptions	-
 .django/tests/utils_tests/test_html.py:204-217	tests/utils_tests/test_html.py	204	217	-	-

@@ -2027,7 +2027,7 @@ fn log_resolution_failure(
 /// `context.template.engine`, and by both logging arms, which read `context.template_name`.
 /// The log lives here rather than in the shell's `_resolve_lookup` because `_native.resolve` is the Rust mirror
 /// of `_resolve_lookup`, and the differential harnesses exercise `silent_variable_failure` at the method
-/// (`test_render_parity.py:615`, `test_resolve_callarm.py:86`) — a `_native.resolve` returning the raw failure
+/// (`test_render_parity.py:616`, `test_resolve_callarm.py:86`) — a `_native.resolve` returning the raw failure
 /// would diverge from the pinned method on exactly those rows.
 fn outcome_to_py(
     py: Python<'_>,
@@ -2430,185 +2430,262 @@ fn resolve_include<'py>(
     Ok(template)
 }
 
-/// The context layers `IncludeNode.render` and `Template.render` push, and the two ways they come off.
+/// The three `with` blocks an `{% include %}` puts a context through, entered here and left in
+/// Python's order.
 ///
-/// Rust's `?` runs no `finally`, so three pushes set one after another and popped inline leak every
-/// layer after the first that raised — into a `Context` a later render then reads. Each flag says
-/// whether that layer is *on*, so an unwind part-way through `push` still pops exactly what it
-/// pushed.
+/// `IncludeNode.render` pushes a layer and *then* calls `template.render(context)`
+/// (`loader_tags.py:210-211`), which is where `Template.render` enters `push_state` (`base.py:170`)
+/// and, when the context is unbound, `bind_template` (`base.py:171-174`). So the layers nest
+/// `push` → `push_state` → `bind_template`, and every one of them is a manager Python handed back.
+///
+/// **The managers, not their effects.** Each of the three is driven with `__enter__` and `__exit__`
+/// rather than by transcribing the body behind it: `Context.push` returns a `ContextDict`, and
+/// `push_state` and `bind_template` are generators, so what a `with` runs is whatever those return
+/// and a subclass is free to return something else. Measured, a `RenderContext.push_state` override
+/// that raises on entry, a `Context.push` whose manager raises on entry, and a `bind_template`
+/// manager returning `True` each render one way through Python and another through a slot that
+/// called the underlying methods instead.
+///
+/// **A manager is recorded only once its `__enter__` returned.** A `with` whose expression or
+/// `__enter__` raises runs no `__exit__`, and neither does this — so `self` stays as it was and
+/// whatever the manager already did to the context stands. That is the residue Python leaves too:
+/// `ContextDict.__init__` appends before it returns, and `push_state`'s body runs up to its `yield`.
 ///
 /// **The ordinary path is [`finish`](Self::finish), which is fallible, and `Drop` is the emergency.**
-/// A `finally` in Python can raise anything — `context.pop()` is a `Context` subclass's method, and
-/// measured, one that raises `RuntimeError` does it here — and a `Drop` cannot return that error, so
-/// leaving the pop to `Drop` would swallow it and render this include as though the template had
-/// returned. `finish` reports it, [`pop_all`](Self::pop_all) having finished the unwinding first so
-/// no layer is left behind.
+/// An `__exit__` in Python can raise anything, and a `Drop` cannot return that error — leaving it to
+/// `Drop` would swallow it and render this include as though the template had returned.
 struct ContextLayers<'py> {
     context: Bound<'py, PyAny>,
-    render_context: Bound<'py, PyAny>,
-    saved_template: Option<Bound<'py, PyAny>>,
-    pushed_context: bool,
-    pushed_render_context: bool,
+    /// `context.push()`'s `__exit__`, resolved and bound before the enter.
+    pushed_exit: Option<Bound<'py, PyAny>>,
+    /// `context.render_context.push_state(target)`'s, likewise.
+    pushed_state_exit: Option<Bound<'py, PyAny>>,
+    /// `context.bind_template(target)`'s, likewise.
+    bound_template_exit: Option<Bound<'py, PyAny>>,
+    /// Whether anything was ever travelling through the unwind — the body's failure, or one an
+    /// `__exit__` raised. A failure that leaves cancels the body's *value*, and a manager outside it
+    /// that later swallows the failure does not bring the value back: see [`finish`](Self::finish).
+    tripped: bool,
     /// Whether [`finish`](Self::finish) already unwound — `Drop` then has nothing to do.
     done: bool,
 }
 
 impl<'py> ContextLayers<'py> {
-    /// `with context.push(**values)` — `values` is empty, [`constant_include_name`] refused every
-    /// `with`, and the layer is pushed anyway because `Context.__setitem__` writes to `dicts[-1]`.
+    /// `with context.push(**values)` (`loader_tags.py:210`) — the expression, then the enter.
     ///
-    /// Then `Template.render`'s `with context.render_context.push_state(self)`, whose own order is
-    /// `template` first and `push` second (`base.py:168-176`). `bind_template` is *not* called:
-    /// `context.template` is not `None` inside a walk, and the caller checked.
-    fn push(context: &Bound<'py, PyAny>, template: &Bound<'py, PyAny>) -> PyResult<Self> {
-        let render_context = context.getattr("render_context")?;
+    /// The layer is pushed even though `values` is empty: [`constant_include_name`] refused every
+    /// `with`, and `Context.__setitem__` writes to `dicts[-1]`, so the loop variable of a surrounding
+    /// `{% for %}` would otherwise be visible inside the included template.
+    ///
+    /// **The two pushes are two calls and not one.** `IncludeNode.render` pushes this layer and
+    /// *then* calls `template.render(context)`, which is where `push_state` pushes the second.
+    /// Everything the slot reads to decide whether it can render natively is read by Python in one
+    /// of those two gaps, so the slot has to be able to refuse in one of them — and what it refuses
+    /// with is a call to the target that belongs in that gap, which is only possible while the gap
+    /// is still open.
+    fn push_context(context: &Bound<'py, PyAny>) -> PyResult<Self> {
         let mut layers = Self {
             context: context.clone(),
-            render_context,
-            saved_template: None,
-            pushed_context: false,
-            pushed_render_context: false,
+            pushed_exit: None,
+            pushed_state_exit: None,
+            bound_template_exit: None,
+            tripped: false,
             done: false,
         };
-        // The first step has nothing under it, so a failure here needs no unwind and `?` is enough.
-        // Everything after it unwinds before returning, because `Drop` cannot report what it finds.
-        layers.context.call_method0("push")?;
-        layers.pushed_context = true;
-        // `pushed_render_context` is the flag for the *whole* `push_state` block, and it stays false
-        // until `push` returns: if any of the three steps below raises, the generator never reached
-        // its `finally`, so Python writes nothing back and pops nothing — it leaves
-        // `render_context.template` where it lies. Only the outer `context.pop()` runs.
-        let mut failed = None;
-        match layers.render_context.getattr("template") {
-            Err(error) => failed = Some(error),
-            Ok(saved) => {
-                layers.saved_template = Some(saved);
-                if let Err(error) = layers.render_context.setattr("template", template) {
-                    failed = Some(error);
-                } else if let Err(error) = layers.render_context.call_method0("push") {
-                    failed = Some(error);
-                }
-            }
-        }
-        if let Some(error) = failed {
-            return Err(layers.abandon(error));
-        }
-        layers.pushed_render_context = true;
+        layers.pushed_exit = Some(enter(context.call_method0("push")?)?);
         Ok(layers)
     }
 
-    /// Unwind after a failed push, letting the unwinding error replace the one that caused it — the
-    /// rule [`pop_all`](Self::pop_all) applies, and the reason this exists instead of a `?`.
-    fn abandon(mut self, error: PyErr) -> PyErr {
-        self.done = true;
-        // A second reference to the same exception, not a copy of it: the unwinding error that
-        // supersedes this one chains onto *this* exception, and `error` itself is the fallback when
-        // nothing fails on the way out.
-        let in_flight = error.clone_ref(self.context.py());
-        self.pop_all(Some(in_flight)).err().unwrap_or(error)
+    /// `with context.render_context.push_state(self)` (`base.py:170`).
+    ///
+    /// **The render context is read here and not earlier**, because this is where Python reads it:
+    /// `IncludeNode.render` has already pushed its own layer, so a `Context.push` override that
+    /// rebinds `context.render_context` is seen.
+    ///
+    /// **The object's own `push_state` is called, and what it returns is entered.** `push_state` is
+    /// `@contextmanager`-decorated, so the block is a `_GeneratorContextManager` and the body is a
+    /// generator: the manager path is the only one that reproduces the body's `finally` running
+    /// with the failure raised *at the `yield`* — which is what `sys.exception()` reads inside it,
+    /// and what turns a `StopIteration` out of the body into `RuntimeError`. A subclass's `raise`,
+    /// too, happens at the `__enter__`. Measured, this costs **546 ns** an include over calling the
+    /// body directly; the difference is the manager and the generator, and there is no cheaper
+    /// shape that keeps any of those three.
+    fn enter_render_context(&mut self, template: &Bound<'py, PyAny>) -> PyResult<()> {
+        let render_context = self.context.getattr("render_context")?;
+        let manager = render_context.call_method1("push_state", (template,))?;
+        self.pushed_state_exit = Some(enter(manager)?);
+        Ok(())
     }
 
-    /// Unwind the layers the way the two `finally` blocks do, and report what Python would have
-    /// propagated.
+    /// `with context.bind_template(self)` (`base.py:172`), the branch `base.py:171` picks.
     ///
-    /// **The last failure wins, not the first.** `push_state`'s `finally` writes `template` back and
-    /// *then* pops the render context — so a write that raises skips the pop — and that whole block
-    /// sits inside `IncludeNode.render`'s `with context.push(**values)`, whose `__exit__` runs
-    /// `context.pop()` afterwards regardless. A `finally` that raises **replaces** the exception
-    /// travelling through it, so the outer `context.pop()` is the one the caller sees and the inner
-    /// failure becomes its `__context__`. Reporting the first would report the wrong exception.
-    ///
-    /// Every step runs so that no layer is left behind: the two blocks are separate `finally`s and
-    /// the later one runs even when the earlier one raised.
-    ///
-    /// `render` is the render's own outcome, which is still travelling when these blocks run — a
-    /// failure there is the first thing a cleanup failure supersedes, exactly as it would be in
-    /// Python. It is left alone (and returned by the caller) when no cleanup fails.
-    fn finish(mut self, render: Option<&PyErr>) -> PyResult<()> {
-        self.done = true;
-        let render = render.map(|error| error.clone_ref(self.context.py()));
-        self.pop_all(render)
+    /// **The context's own `bind_template`**, which `RequestContext` overrides to install its
+    /// context processors (`context.py:254`), so the manager is entered rather than reproduced.
+    /// `context.template_name = self.name` is the `with` body's line (`base.py:173`) and is written
+    /// here, after the enter and before anything reads further.
+    fn enter_bind_template(&mut self, template: &Bound<'py, PyAny>) -> PyResult<()> {
+        let manager = self.context.call_method1("bind_template", (template,))?;
+        self.bound_template_exit = Some(enter(manager)?);
+        self.context
+            .setattr("template_name", template.getattr("name")?)?;
+        Ok(())
     }
 
-    /// Run both `finally` blocks in order, starting from `last` — the failure already in flight — and
-    /// returning whichever failure is in flight when they are done.
-    fn pop_all(&mut self, last: Option<PyErr>) -> PyResult<()> {
+    /// Leave the layers with `outcome` — what the body produced — in flight, and answer with what
+    /// the render actually yields.
+    ///
+    /// **One exit, and it is the one Python would take.** The body's value and the body's failure
+    /// travel through the same `__exit__`s; only the failure can be acted on, which is what
+    /// [`exit`] does with it.
+    ///
+    /// **A manager that swallows the failure makes the frame return `None`.** A truthy `__exit__` is
+    /// a `with` that does not propagate: execution continues after the block and the frame that
+    /// block belongs to falls off its end. Measured, a `bind_template` manager returning `True`
+    /// leaves stock Django rendering the include as `None` and raising `TypeError` in the parent's
+    /// `''.join`; reporting the swallowed `TemplateDoesNotExist` instead is a different answer.
+    ///
+    /// **And a failure that is *raised* during the unwind cancels the value even when a manager
+    /// outside it swallows that failure.** `self.tripped`, not `outcome.is_err()`, is the question:
+    /// the body returning `"x"` and then an `__exit__` raising leaves stock Django with no value at
+    /// all, so the include is `None` and the parent's join raises — measured against a
+    /// `render_context.pop` that raises into an outer `context.push` that suppresses.
+    fn finish(mut self, outcome: PyResult<Py<PyAny>>) -> PyResult<Py<PyAny>> {
+        let py = self.context.py();
+        self.done = true;
+        let in_flight = match &outcome {
+            Ok(_) => None,
+            Err(error) => Some(error.clone_ref(py)),
+        };
+        self.tripped = in_flight.is_some();
+        match self.pop_all(in_flight) {
+            // An `__exit__` that raised replaces whatever was travelling through it, value or not.
+            Some(error) => Err(error),
+            // Nothing left in flight, but something was: the body never reached its end with a value.
+            None if self.tripped => Ok(py.None()),
+            None => outcome,
+        }
+    }
+
+    /// Run the three `__exit__`s innermost first, and answer with the failure still in flight —
+    /// `None` when one of them swallowed it.
+    ///
+    /// **Innermost first**, because that is how the `with` blocks nest: the binding block sits
+    /// inside `push_state`, which sits inside `IncludeNode.render`'s own push.
+    ///
+    /// **A failure in one does not stop the others.** Each `with` has its own `__exit__` and Python
+    /// runs the next one outwards whatever the previous did; one that raises leaves the failure it
+    /// replaced as the new one's `__context__` — chained by Python, see [`exit`] — and the
+    /// unwinding carries on.
+    fn pop_all(&mut self, last: Option<PyErr>) -> Option<PyErr> {
         let py = self.context.py();
         let mut last = last;
-        if std::mem::take(&mut self.pushed_render_context) {
-            if let Some(saved) = self.saved_template.take() {
-                match self.render_context.setattr("template", saved) {
-                    Err(error) => supersede(&mut last, error, py),
-                    Ok(()) => {
-                        if let Err(error) = self.render_context.call_method0("pop") {
-                            supersede(&mut last, error, py);
-                        }
-                    }
-                }
-            }
+        for exit_method in [
+            self.bound_template_exit.take(),
+            self.pushed_state_exit.take(),
+            self.pushed_exit.take(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            exit(&exit_method, &mut last, py);
+            self.tripped |= last.is_some();
         }
-        if std::mem::take(&mut self.pushed_context) {
-            if let Err(error) = self.context.call_method0("pop") {
-                supersede(&mut last, error, py);
-            }
-        }
-        match last {
-            Some(error) => Err(error),
-            None => Ok(()),
-        }
+        last
     }
 }
 
-/// Report `error` as the failure that leaves, chaining the one it replaced onto it as
-/// `__context__` — a `finally` that raises does not erase the exception travelling through it, it
-/// makes that exception the new one's context (CPython's `_PyErr_SetObject`, which writes it at the
-/// moment the new exception is raised, while the old one is the topmost handled exception).
+/// `with manager:` — resolve the pair CPython's `BEFORE_WITH` resolves, then call the enter.
 ///
-/// **At the end of `error`'s own chain, not on top of it.** The call that raised is Python's, and
-/// Python may already have chained something onto what it raised before returning it here: a
-/// `pop()` that catches `KeyError` and raises `RuntimeError` runs with the travelling exception
-/// active, so CPython hangs `KeyError` — which itself already carries the render's failure — under
-/// the `RuntimeError`, and the `KeyError` is what the render's error belongs under, not the top.
-/// Setting it on top instead is measured: this file chained `RuntimeError → TemplateDoesNotExist`
-/// where delegation chains `RuntimeError → KeyError → TemplateDoesNotExist`. Appending puts the
-/// travelling exception where it chronologically is, which reproduces both shapes.
+/// **Both names, off the type, bound, and *before* the enter.** `BEFORE_WITH` looks each up with
+/// `_PyObject_LookupSpecial`, which skips the instance `__dict__` and binds through the descriptor,
+/// and it resolves `__exit__` while `__enter__` has not run yet. Measured, a manager whose
+/// `__enter__` replaces its class's `__exit__` is exited by the replacement under delegation and by
+/// the original through a slot that looked the name up afterwards; one carrying the name only on
+/// the instance is the mirror image.
 ///
-/// The one case not reproduced is that Python's own `__exit__` machinery leaves the travelling
-/// exception where it lies rather than re-raising it, so the chain never repeats itself; the walk
-/// appends at the end of every failure it supersedes, and stops rather than loop if the chain
-/// closes on itself.
-fn supersede(last: &mut Option<PyErr>, error: PyErr, py: Python<'_>) {
-    let Some(previous) = last.take() else {
-        *last = Some(error);
+/// The exit is what is kept — it holds the manager alive on its own — and what [`exit`] calls.
+///
+/// **What this costs, and what the cheaper spelling would buy.** `manager.getattr(name)` is one C
+/// call where this is three, two of them Python-level. Measured over `real-world/complex` that
+/// spelling is 9.3% of the row — 476.3 us against 525.1 us, 72 includes, ~0.68 us an include — and it
+/// is wrong for a manager carrying `__enter__` or `__exit__` in its own `__dict__`, which
+/// `_PyObject_LookupSpecial` skips and `PyObject_GetAttr` honours; `contextlib._GeneratorContextManager`
+/// has a `__dict__`. Replacing the `__get__` call with `PyMethod_New` — the function case of what the
+/// special lookup does — measured inside one build's own scatter, so it was not taken.
+fn enter<'py>(manager: Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let class = manager.get_type();
+    let bind = |name: &str| -> PyResult<Bound<'py, PyAny>> {
+        class
+            .getattr(name)?
+            .call_method1("__get__", (&manager, &class))
+    };
+    let enter_method = bind("__enter__")?;
+    let exit_method = bind("__exit__")?;
+    enter_method.call0()?;
+    Ok(exit_method)
+}
+
+/// Exit one layer with the failure in flight, if there is one, and **swallow** it if the manager
+/// says to.
+///
+/// **Two paths, and they are not the same call.**
+///
+/// *Ordinary* — nothing in flight. `with` calls `__exit__(None, None, None)` for its side effect and
+/// drops the result unread; CPython only reaches the truthiness test on the path an exception took.
+/// Made here, so a manager whose return is an object with a raising `__bool__` is measured to render
+/// fine on the happy path and to fail on the unhappy one. Nothing about the handled-exception state
+/// changes on this path in CPython either, so there is nothing to stand in for.
+///
+/// *Exceptional* — through [`Stock::unwind`], which is Python. CPython reaches this `__exit__`
+/// through `WITH_EXCEPT_START`, which runs the call with the travelling failure as the *handled*
+/// exception; that state is what `sys.exception()` reads and what a newly raised exception's
+/// `__context__` is chained onto, and PyO3 exposes no way to establish it — `PyErr::restore` sets
+/// the *raised* exception, a different slot. So the call is made from Python and the chaining is
+/// Python's, which is also why nothing here writes `__context__`. Measured, this file used to chain
+/// `RuntimeError → KeyError → TemplateDoesNotExist` where delegation chains
+/// `RuntimeError → TemplateDoesNotExist` — and `sys.exception()` answers `NoneType` here where
+/// delegation answers the failure.
+fn exit(exit_method: &Bound<'_, PyAny>, last: &mut Option<PyErr>, py: Python<'_>) {
+    let Some(error) = last.as_ref().map(|error| error.clone_ref(py)) else {
+        let none = py.None();
+        if let Err(error) = exit_method.call1((none.clone_ref(py), none.clone_ref(py), none)) {
+            *last = Some(error);
+        }
         return;
     };
-    // The cursor walks to the tail and writes there; `error` is what leaves. `clone_ref` is a second
-    // reference to the same exception, so a write through the cursor is a write to `error`.
-    let mut cursor = error.clone_ref(py);
-    loop {
-        match cursor.context(py) {
-            None => {
-                cursor.set_context(py, Some(previous));
-                break;
-            }
-            Some(next) => {
-                if next.value(py).is(previous.value(py)) {
-                    break;
-                }
-                cursor = next;
-            }
-        }
+    // `stock` answered when the slot was taken, and a slot without it declines; see
+    // [`Walk::renders_through`].
+    let Some(unwind) = stock(py).map(|stock| stock.unwind.bind(py)) else {
+        return;
+    };
+    let value = error.value(py);
+    let args = (
+        exit_method,
+        error.get_type(py).into_any(),
+        value.clone().into_any(),
+        value
+            .getattr("__traceback__")
+            .unwrap_or_else(|_| py.None().into_bound(py)),
+    );
+    match unwind.call1(args) {
+        // `UNWIND` answers with the truthiness of the return, tested where CPython tests it.
+        Ok(returned) => match returned.is_truthy() {
+            Ok(true) => *last = None,
+            Ok(false) => {}
+            Err(error) => *last = Some(error),
+        },
+        Err(error) => *last = Some(error),
     }
-    *last = Some(error);
 }
 
 impl Drop for ContextLayers<'_> {
-    /// The net, not the path: [`push`](ContextLayers::push) and [`finish`](ContextLayers::finish)
-    /// both unwind before they return, so nothing reachable today leaves layers for this to find.
+    /// The net, not the path: [`push_context`](ContextLayers::push_context) is the only way to get
+    /// one of these and its caller unwinds through [`finish`](ContextLayers::finish) before it
+    /// returns, so nothing reachable today leaves a layer for this to find.
     ///
     /// It stays because the alternative to a net is leaking a layer into a `Context` a later render
-    /// reads, and because a `?` added between them would find this rather than a compiler error. It
-    /// cannot report what it finds — the error is already leaving by another route — so anything
+    /// reads, and because a `?` added between the two would find this rather than a compiler error.
+    /// It cannot report what it finds — the error is already leaving by another route — so anything
     /// that *must* report goes through [`finish`](ContextLayers::finish).
     fn drop(&mut self) {
         if !self.done {
@@ -3416,7 +3493,7 @@ struct Walk<'py> {
     census: Option<Census>,
     /// The implementations an included target must still answer to, read once per process by
     /// [`stock`]. `None` when they could not be read, in which case every include declines. See
-    /// [`Walk::renders_the_plan_in_place`], which is the only thing standing between an include and
+    /// [`Walk::renders_through`], which is the only thing standing between an include and
     /// rendering a target whose `render` is not what the slot is standing in for.
     bypassed: Option<&'static Stock>,
 }
@@ -3747,42 +3824,90 @@ impl<'py> Walk<'py> {
 
     /// Render one `{% include %}` natively, or answer `false` so the caller delegates.
     ///
-    /// The sequence is `IncludeNode.render`'s for the shape [`constant_include_name`] accepted, then
-    /// `Template.render`'s non-binding branch (`base.py:168-176`).
+    /// **The refusal is only free before the first push.** Answering `false` hands the node back to
+    /// Python, which runs `IncludeNode.render` from the top and pushes these layers a second time.
+    /// So the order below is Django's order and a refusal that sits after the first push renders the
+    /// target *here* instead, calling what Python would have called from that point.
     ///
-    /// Every refusal past this point is `Ok(false)` and not an error. An optimisation must not turn a
-    /// shape it does not understand into a compile error, and the node renders on the Python path
-    /// unchanged — except a `TemplateDoesNotExist`, which propagates because Python raises the same
-    /// one.
+    /// **One exit.** [`include_inside`](Self::include_inside) is the whole of `IncludeNode.render`
+    /// and the `Template.render` it calls, and it has no exit of its own: the value it returns and
+    /// the failure it returns both travel out through [`ContextLayers::finish`], which is the
+    /// `__exit__`s Python would have run. That is also what lets a manager swallow the failure —
+    /// the include's output is then `None`, and joining it in the parent is what raises.
     fn run_include(&mut self, slot: &Slot, plan: &IncludePlan, depth: usize) -> PyResult<bool> {
         let py = self.py;
-        // `context.template` is never `None` inside a walk: `_render` is reached only through
-        // `Template.render` and through `ExtendsNode`'s `_render`, both inside a binding. Checked
-        // rather than assumed — the other branch would need `bind_template`, which sets
-        // `context.template_name` too.
-        if self.context.getattr("template")?.is_none() {
-            return Ok(false);
-        }
         let target = resolve_include(py, &self.context, slot.node.bind(py), plan)?;
-        if !self.renders_the_plan_in_place(&target)? {
-            return Ok(false);
-        }
-        // A template with no plan is any template compiled while the walk was off, and an attribute
-        // that is not a `NativePlan` is a template another engine built. Both render on the Python
-        // path. `AttributeError` is the only lookup failure that means one of those two things;
-        // anything else is the object's own exception and belongs to the caller.
-        let held = match target.getattr("_native_plan") {
-            Ok(held) => held,
-            Err(error) if error.is_instance_of::<PyAttributeError>(py) => return Ok(false),
-            Err(error) => return Err(error),
-        };
-        let Ok(child) = held.extract::<Py<NativePlan>>() else {
-            return Ok(false);
-        };
+        // The frame is taken before any layer is pushed, so a refusal here still repeats nothing.
         let Some(_frame) = WalkFrame::enter() else {
             return Ok(false);
         };
-        let layers = ContextLayers::push(&self.context, &target)?;
+
+        // `with context.push(**values)` (`loader_tags.py:210-211`).
+        let mut layers = ContextLayers::push_context(&self.context)?;
+        let outcome = self.include_inside(&target, depth, &mut layers);
+        self.push_python(layers.finish(outcome)?)?;
+        Ok(true)
+    }
+
+    /// `IncludeNode.render` from its first read to the string it returns, and the `Template.render`
+    /// it calls — with no exit of its own. The caller unwinds, once, after this returns.
+    ///
+    /// **What is read, and where.** `render` is read after `context.push` and before `push_state`,
+    /// which is where Python reads it; `context.template`, `_render` and `_native_plan` are read
+    /// after `push_state`, which is where Python reads those. Measured, a `Context.push` override
+    /// that rebinds a name on the target renders `OVERRIDE` through stock Django and the plan
+    /// through a slot that read the target before pushing.
+    ///
+    /// **Every read after the first push is made once and kept.** `target.render` and
+    /// `target._render` are attributes like any other, and the call a refusal makes is the one
+    /// Python would have made from there — never a second lookup that an object answering
+    /// differently each time could see.
+    fn include_inside(
+        &mut self,
+        target: &Bound<'py, PyAny>,
+        depth: usize,
+        layers: &mut ContextLayers<'py>,
+    ) -> PyResult<Py<PyAny>> {
+        let py = self.py;
+
+        // `template.render(context)`: the attribute read at `loader_tags.py:211`, after
+        // `context.push` and before `Template.render` enters `push_state` — and `push()` is arbitrary
+        // Python, so a target it rebound must be seen.
+        let render = target.getattr(Renders::Render.name())?;
+        if !self.renders_through(&render, target, Renders::Render) {
+            return Ok(render.call1((&self.context,))?.unbind());
+        }
+
+        // `with context.render_context.push_state(self)` (`base.py:170`).
+        layers.enter_render_context(target)?;
+
+        // `if context.template is None:` (`base.py:171`), asked here because this is where Python
+        // asks it — after `push_state`, whose `render_context.push` may have cleared it.
+        if self.context.getattr("template")?.is_none() {
+            layers.enter_bind_template(target)?;
+        }
+
+        // `self._render(context)` (`base.py:174`, `base.py:176`), the second name read once.
+        let plan_read = target.getattr(Renders::Plan.name())?;
+        if !self.renders_through(&plan_read, target, Renders::Plan) {
+            return Ok(plan_read.call1((&self.context,))?.unbind());
+        }
+
+        // `_native_plan` is the first line of `_render` (`engine/base.py:177-194`). A template with no
+        // plan is any template compiled while the walk was off, and an attribute that is not a
+        // `NativePlan` is a template another engine built; both render on the Python path.
+        // `AttributeError` is the only lookup failure that means one of those two things; anything
+        // else is the object's own exception and belongs to the caller.
+        let child = match target.getattr("_native_plan") {
+            Ok(held) => match held.extract::<Py<NativePlan>>() {
+                Ok(child) => child,
+                Err(_) => return Ok(plan_read.call1((&self.context,))?.unbind()),
+            },
+            Err(error) if error.is_instance_of::<PyAttributeError>(py) => {
+                return Ok(plan_read.call1((&self.context,))?.unbind())
+            }
+            Err(error) => return Err(error),
+        };
 
         // The included template's output is `SafeString("".join(...))` of *its own* nodelist, so it is
         // one element of the parent's list and the ordinal a non-`str` piece is reported at is its
@@ -3803,19 +3928,12 @@ impl<'py> Walk<'py> {
         // A plain `str`, not a `SafeString`: `push_python` reads the piece's *characters*, and an
         // include's output is already escaped by the time it is joined. Wrapping it here would only
         // ask `SafeString` to re-wrap a string it did not produce.
-        let inner = rendered.and_then(|()| match inner_spill {
+        rendered.and_then(|()| match inner_spill {
             None => Ok(PyString::new(py, &inner_out).into_any().unbind()),
             Some(pieces) => Ok(PyString::new(py, "")
                 .call_method1("join", (PyList::new(py, pieces)?,))?
                 .unbind()),
-        });
-        // The two `finally` blocks run before the piece is appended and before the error leaves —
-        // `with context.push(...): return template.render(context)` (`loader_tags.py:210-211`) — and a
-        // `finally` that raises **replaces** the exception travelling through it, so this is `?`
-        // before `inner` is unwrapped rather than after.
-        layers.finish(inner.as_ref().err())?;
-        self.push_python(inner?)?;
-        Ok(true)
+        })
     }
 
     /// Whether `target` still renders through the `render` and `_render` this slot stands in for.
@@ -3853,27 +3971,35 @@ impl<'py> Walk<'py> {
     /// **Refusal is the answer when it cannot be given.** No pair read at entry, or a name that
     /// does not resolve to a bound method of the right function on this object, declines.
     /// Declining is a lost optimisation, never a different string.
-    fn renders_the_plan_in_place(&self, target: &Bound<'py, PyAny>) -> PyResult<bool> {
+    ///
+    /// **Asked one name at a time, because the two are read in different gaps.** Python reads
+    /// `render` in `IncludeNode.render`, after `context.push` and before `Template.render` enters
+    /// `push_state`; it reads `_render` inside `Template.render`, after both. The caller asks
+    /// [`Renders::Render`] at the first of those points and [`Renders::Plan`] at the second, so
+    /// that the call each one refuses with is the call Python would have made from there.
+    fn renders_through(
+        &self,
+        bound: &Bound<'py, PyAny>,
+        target: &Bound<'py, PyAny>,
+        which: Renders,
+    ) -> bool {
         let Some(stock) = self.bypassed else {
-            return Ok(false);
+            return false;
         };
-        let method_type = stock.method_type.bind(self.py);
-        for (name, implementation) in [("render", &stock.render), ("_render", &stock.plan)] {
-            let Ok(bound) = target.getattr(name) else {
-                return Ok(false);
-            };
-            if !bound.get_type().is(method_type) {
-                return Ok(false);
-            }
-            let (Ok(func), Ok(this)) = (bound.getattr("__func__"), bound.getattr("__self__"))
-            else {
-                return Ok(false);
-            };
-            if !func.is(implementation.bind(self.py)) || !this.is(target) {
-                return Ok(false);
-            }
+        let implementation = match which {
+            Renders::Render => &stock.render,
+            Renders::Plan => &stock.plan,
+        };
+        if !bound.get_type().is(stock.method_type.bind(self.py)) {
+            return false;
         }
-        Ok(true)
+        let (Ok(func), Ok(this)) = (bound.getattr("__func__"), bound.getattr("__self__")) else {
+            return false;
+        };
+        if !func.is(implementation.bind(self.py)) || !this.is(target) {
+            return false;
+        }
+        true
     }
 
     /// A `{% for %}` the walk runs itself, in `ForNode.render`'s order (`engine/defaulttags.py:193-258`).
@@ -4147,7 +4273,7 @@ static SAFE_STRING: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 ///
 /// `render` and `_render` are the implementations the walk stands in for: an include target may be
 /// claimed only while those two names still resolve to these two objects. See
-/// [`Walk::renders_the_plan_in_place`].
+/// [`Walk::renders_through`].
 ///
 /// **Captured in Python, at import, because only Python can answer "what did the class say
 /// first".** Reading `Template.render` again per walk follows a rebind rather than noticing it — a
@@ -4157,25 +4283,51 @@ static SAFE_STRING: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 /// it is captured when the backend is, which is the earliest moment the engine exists at all.
 ///
 /// `method_type` is `types.MethodType`, checked by identity because it cannot be subclassed: see
-/// [`Walk::renders_the_plan_in_place`].
+/// [`Walk::renders_through`].
 struct Stock {
     render: Py<PyAny>,
     plan: Py<PyAny>,
     method_type: Py<PyAny>,
+    /// `engine/_unwind.py`'s `UNWIND` — the exceptional `__exit__`. See [`exit`].
+    unwind: Py<PyAny>,
 }
 
-/// [`Stock`], or `None` if `engine/_stock.py` cannot be read — which leaves every include of this
-/// process declining, an optimisation lost and nothing else.
+/// Which of the two names on [`Stock`] a check is about. They are read by Python at different
+/// points in `IncludeNode.render`'s call into the target, and each refusal has to be made from the
+/// point the name it refuses on is read at. See [`Walk::renders_through`].
+#[derive(Clone, Copy)]
+enum Renders {
+    /// `Template.render`, read in `IncludeNode.render` before `push_state`.
+    Render,
+    /// `Template._render`, read inside `Template.render` after `push_state`.
+    Plan,
+}
+
+impl Renders {
+    /// The name itself — the one the caller reads off the target, once, and hands to
+    /// [`Walk::renders_through`].
+    fn name(self) -> &'static str {
+        match self {
+            Renders::Render => "render",
+            Renders::Plan => "_render",
+        }
+    }
+}
+
+/// [`Stock`], or `None` if the two modules behind it cannot be read — which leaves every include
+/// of this process declining, an optimisation lost and nothing else.
 static STOCK: PyOnceLock<Stock> = PyOnceLock::new();
 
 fn stock(py: Python<'_>) -> Option<&'static Stock> {
     STOCK
         .get_or_try_init(py, || -> PyResult<Stock> {
             let module = py.import("django_rust_templates.engine._stock")?;
+            let unwind = py.import("django_rust_templates.engine._unwind")?;
             Ok(Stock {
                 render: module.getattr("RENDER")?.unbind(),
                 plan: module.getattr("PLAN")?.unbind(),
                 method_type: module.getattr("METHOD_TYPE")?.unbind(),
+                unwind: unwind.getattr("UNWIND")?.unbind(),
             })
         })
         .ok()
@@ -4371,6 +4523,13 @@ fn compile_template(
 
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let unicode_version: String = m
+        .py()
+        .import("unicodedata")?
+        .getattr("unidata_version")?
+        .extract()?;
+    template_core::pyunicode::profile::configure(&unicode_version)
+        .map_err(pyo3::exceptions::PyImportError::new_err)?;
     m.add_function(wrap_pyfunction!(builtin_tag_names_including_stubs, m)?)?;
     m.add_function(wrap_pyfunction!(builtin_tag_stub_names, m)?)?;
     m.add_function(wrap_pyfunction!(library_tag_names, m)?)?;

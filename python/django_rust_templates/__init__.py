@@ -88,12 +88,8 @@ def _require_django(allow_mismatch: bool = False) -> None:
     as a broken Django. It is exercised in ``scripts/check_packaging.sh``, where
     the population is a real venv.
 
-    **The bound is major.minor, not the patch.** Any 6.0.x passes, which matches
-    the declared dependency ``Django>=6.0,<6.1``; treating a patch release as a
-    new engine would make the guard fire on routine security updates and train
-    the reader to reach for ``allow_mismatch``. The message still names 6.0.9,
-    because that is the version the behaviour was actually pinned against and
-    the one worth reporting.
+    The supported range starts at 6.0.9, which supplies the inspect helpers
+    used by the transcription, and accepts later 6.0 security updates.
     """
     from django.core.exceptions import ImproperlyConfigured
 
@@ -103,14 +99,14 @@ def _require_django(allow_mismatch: bool = False) -> None:
         raise ImproperlyConfigured(
             "django-rust-templates is a template backend for Django and needs "
             "Django, which is not importable in this interpreter. Install it "
-            "(`pip install 'Django>=6.0,<6.1'`) before naming this backend in "
+            "(`pip install 'Django>=6.0.9,<6.1'`) before naming this backend in "
             "TEMPLATES."
         ) from exc
 
     if allow_mismatch:
         return
 
-    if django.VERSION[:2] == TRANSCRIBED_DJANGO[:2]:
+    if django.VERSION[:2] == TRANSCRIBED_DJANGO[:2] and django.VERSION[:3] >= TRANSCRIBED_DJANGO:
         return
 
     pin = ".".join(str(part) for part in TRANSCRIBED_DJANGO)
@@ -120,7 +116,7 @@ def _require_django(allow_mismatch: bool = False) -> None:
         f"Django's template machinery by reproducing one version's behaviour, "
         f"and it is proven against that version only — run it against another "
         f"and every check this project has would still report success. Install "
-        f"Django {TRANSCRIBED_DJANGO[0]}.{TRANSCRIBED_DJANGO[1]}.x, or set "
+        f"Django>={pin},<6.1, or set "
         f"``allow_django_mismatch`` in this backend's OPTIONS if you mean to "
         f"test a transcription against a Django it was not taken from."
     )
