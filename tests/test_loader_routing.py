@@ -215,5 +215,29 @@ class BackendOrderingCheckTests(SimpleTestCase):
         self.assertNotIn("django_rust_templates.W001", self.ids(engine.check()))
 
 
+class FormRendererCheckTests(SimpleTestCase):
+    """`FORM_RENDERER` builds a private engine the TEMPLATES setting cannot reach."""
+
+    def ids(self, errors):
+        return [error.id for error in errors]
+
+    def engine(self):
+        return RustTemplates(
+            {"NAME": "rust", "DIRS": [], "APP_DIRS": False, "OPTIONS": {}}
+        )
+
+    @override_settings(FORM_RENDERER="django.forms.renderers.DjangoTemplates")
+    def test_warns_for_the_default_private_renderer(self):
+        self.assertIn("django_rust_templates.W002", self.ids(self.engine().check()))
+
+    @override_settings(FORM_RENDERER="django.forms.renderers.Jinja2")
+    def test_warns_for_the_private_jinja2_renderer(self):
+        self.assertIn("django_rust_templates.W002", self.ids(self.engine().check()))
+
+    @override_settings(FORM_RENDERER="django.forms.renderers.TemplatesSetting")
+    def test_silent_when_widgets_go_through_TEMPLATES(self):
+        self.assertNotIn("django_rust_templates.W002", self.ids(self.engine().check()))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -146,6 +146,47 @@ class RustTemplates(DjangoTemplates):
             *self._check_string_if_invalid_is_string(),
             *self._check_for_template_tags_with_the_same_name(),
             *self._check_this_backend_is_first(),
+            *self._check_form_renderer(),
+        ]
+
+    def _check_form_renderer(self):
+        """Warn when form widgets are rendered by a second, private engine.
+
+        ``FORM_RENDERER`` defaults to ``django.forms.renderers.DjangoTemplates``,
+        which builds a **standalone** ``DjangoTemplates`` engine of its own
+        (``django/forms/renderers.py``) with its own loaders. ``TEMPLATES`` does
+        not reach it, so every widget on every page is rendered by Django's
+        engine no matter which backend a project configures.
+
+        Measured on bakerydemo with a tripwire on ``NodeList.render``: ten of
+        eleven pages reached Django's engine zero times, and the form page
+        reached it 103 times, all of them ``django/forms/widgets/*``.
+        ``FORM_RENDERER = "django.forms.renderers.TemplatesSetting"`` plus
+        ``"django.forms"`` in ``INSTALLED_APPS`` took that to zero with
+        byte-identical output.
+
+        A warning, not an error: the default is Django's and a project may have
+        good reason to keep it — widget templates are small, and the setting is
+        global rather than per-backend, so a project running two backends cannot
+        satisfy both.
+        """
+        renderer = getattr(settings, "FORM_RENDERER", "")
+        private = (
+            "django.forms.renderers.DjangoTemplates",
+            "django.forms.renderers.Jinja2",
+        )
+        if renderer not in private:
+            return []
+        return [
+            Warning(
+                f"FORM_RENDERER is {renderer!r}, which builds its own private "
+                f"template engine, so form widgets are rendered by it and not by "
+                f"this backend. Set FORM_RENDERER to "
+                f"'django.forms.renderers.TemplatesSetting' and add 'django.forms' "
+                f"to INSTALLED_APPS to render widgets through TEMPLATES.",
+                obj=self,
+                id="django_rust_templates.W002",
+            )
         ]
 
     def _check_this_backend_is_first(self):
