@@ -31,11 +31,14 @@ mod tests {
 
     #[test]
     fn version_is_semver_like() {
-        let parts: Vec<&str> = version().split('.').collect();
+        // Cargo validates the full version, including prerelease/build identifiers.
+        // Only the core MAJOR.MINOR.PATCH components must be numeric.
+        let core = version().split(['-', '+']).next().unwrap();
+        let parts: Vec<&str> = core.split('.').collect();
         assert_eq!(
             parts.len(),
             3,
-            "expected MAJOR.MINOR.PATCH, got {}",
+            "expected MAJOR.MINOR.PATCH core, got {}",
             version()
         );
         for part in parts {
