@@ -147,7 +147,7 @@ def django_exception(error, host=None):
     of being re-derived. Three facts, each checked in the tree:
 
     * `ErrorKind::Host` **carrying a class** is constructed at exactly one
-      place, `python_host_error` (`crates/template-py/src/lib.rs:950`), and
+      place, `python_host_error` (`crates/template-py/src/lib.rs:951`), and
       every host boundary that can raise a Python exception calls it — `call_tag`
       (`crates/template-py/src/lib.rs:1088`), `partial_node`
       (`crates/template-py/src/lib.rs:1185`) and `register_partial_def`
