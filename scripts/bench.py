@@ -728,6 +728,8 @@ def nondeterministic_rows() -> list[str]:
     """
     out = []
     for workload in bench_corpus.workloads():
+        if getattr(workload, "deterministic", False):
+            continue
         for text in workload.templates.values():
             for pattern, why in NONDETERMINISTIC:
                 if re.search(pattern, text):
@@ -919,6 +921,10 @@ def main() -> int:
     ap.add_argument("--json", default=None, help="write the full payload here")
     ap.add_argument("--html", default=None, help="write a self-contained HTML report here")
     ap.add_argument(
+        "--bakerydemo", default=str(PROJECT_ROOT / "docs/benchmarks/bakerydemo-2026-10-12.json"),
+        help="recorded Bakerydemo JSON to include in the report",
+    )
+    ap.add_argument(
         "--compare",
         nargs=2,
         metavar=("BEFORE.json", "AFTER.json"),
@@ -972,9 +978,16 @@ def main() -> int:
     if args.quick:
         args.repeats, args.target = 3, 0.02
 
+    from django.conf import settings
+
+    settings.ROOT_URLCONF = "bench_urls"
+    settings.STATIC_URL = "/static/"
+    settings.MEDIA_URL = "/media/"
+
     print(f"python:  {platform.python_version()} on {platform.platform()}")
     print(f"django:  {django.get_version()}")
-    print(native_artifact())
+    native = native_artifact()
+    print(native)
     print(f"corpus:  {len(bench_corpus.workloads())} rows, {len(engines)} engine(s): {', '.join(engines)}")
     if dropped:
         print(
@@ -1043,7 +1056,7 @@ def main() -> int:
             print("  fix, so a disagreement on these rows is expected rather than a bug.")
         return 2
 
-    payload = build_payload(records, verdicts, engines, args, floor)
+    payload = build_payload(records, verdicts, engines, args, floor, native=native)
     if args.json:
         Path(args.json).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"\nwrote {args.json}")
@@ -1055,10 +1068,27 @@ def main() -> int:
     return 0
 
 
-def build_payload(records, verdicts, engines, args, floor) -> dict:
+def build_payload(records, verdicts, engines, args, floor, native=None) -> dict:
+    page_files = {
+        "real-world/normal": "report.html", "real-world/complex": "invoice.html",
+        "real-world/large": "large.html", "django-only/realistic": "translated_report.html",
+    }
+    bakery_path = Path(args.bakerydemo)
     return {
+        "bakerydemo": json.loads(bakery_path.read_text(encoding="utf-8")) if bakery_path.is_file() else None,
+        "workloads": {
+            w.key: {
+                "source": w.templates[w.entry],
+                "libraries": list(w.library_names),
+                "url": "https://github.com/ipmb/django-rust-templates/blob/main/scripts/"
+                + ("bench_templates/" + page_files[w.key] if w.key in page_files else "bench_features.py"),
+            }
+            for w in bench_corpus.workloads()
+        },
         "meta": environment(),
-        "native": native_artifact(),
+        # Snapshot before measuring: another build can replace the installed
+        # file while this process still runs the extension it already loaded.
+        "native": native if native is not None else native_artifact(),
         "args": {"repeats": args.repeats, "target": args.target},
         # The exact invocation, so a report that turns up in a directory six
         # months from now can be re-run rather than admired. `sys.orig_argv` is

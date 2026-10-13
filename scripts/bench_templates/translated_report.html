@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% load i18n %}
+{% block title %}{% translate "Monthly Report" %}{% endblock %}
+{% block content %}
+<table>
+{% for row in rows %}
+<tr><td>{{ row.name }}</td><td>{{ row.value|floatformat:2 }}</td>
+<td>{% blocktranslate count count=row.count %}{{ count }} item{% plural %}{{ count }} items{% endblocktranslate %}</td></tr>
+{% endfor %}
+</table>
+{% endblock %}

@@ -1,0 +1,5 @@
+# Install into .bench-deps, keeping optional packages out of the parity-test venv.
+Django==6.0.9
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+nanodjango==0.16.2

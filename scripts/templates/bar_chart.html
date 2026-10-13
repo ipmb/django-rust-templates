@@ -1,0 +1,7 @@
+<figure class="bar-chart{% if show_details %} bar-chart--details{% endif %}">
+<figcaption>{{ title }} · {{ unit }} · lower is better</figcaption>
+<div class="chart-legend"><span><i class="django"></i>Django</span><span><i class="rust"></i>Rust</span>{% if show_jinja %}<span><i class="jinja2"></i>Jinja2</span>{% endif %}</div>
+{% for row in rows %}<div class="chart-group"><div class="chart-label"><a href="{{ row.url }}" class="chart-name">{{ row.name }}</a>{% if show_details %}<span class="description">{{ row.description }}</span><span class="difference {{ row.difference.class }}">{{ row.difference.text }}</span>{% if not row.match %}<span class="description">Output differs</span>{% endif %}{% endif %}</div><div class="chart-series">{% for bar in row.bars %}<div class="chart-line"><span class="chart-engine">{{ bar.engine }}</span><div class="chart-track"><span class="plot-bar {{ bar.class }}" style="width:{{ bar.width }}%"></span></div><span class="chart-value">{{ bar.value }} {{ bar.unit }}</span></div>{% endfor %}</div></div>{% endfor %}
+<div class="chart-axis"><span>0</span><span>{{ maximum }} {{ unit }}</span></div>
+<p class="note">Linear scale starting at zero, shared by all pages in this chart.</p>
+</figure>

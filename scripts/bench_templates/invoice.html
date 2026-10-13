@@ -1,0 +1,1 @@
+{% extends "layout.html" %}{% block heading %}{{ title|upper }}{% endblock %}{% block body %}{% for s in sections %}<section><h2>{{ s.title|title }}</h2><table>{% for line in s.lines %}{% include "partials/line.html" %}{% endfor %}</table>{% if s.total %}<p>total {{ s.total }}</p>{% endif %}</section>{% endfor %}{% endblock %}

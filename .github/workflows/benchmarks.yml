@@ -3,9 +3,14 @@ name: Benchmarks
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      pages:
+        description: Prepare the benchmark report for GitHub Pages
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,12 +36,23 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install 'maturin>=1.7,<2' 'Django==6.0.9'
-          .venv/bin/python -m pip install --target .bench-deps 'Jinja2==3.1.6' 'MarkupSafe==3.0.4'
+          .venv/bin/python -m pip install --target .bench-deps -r scripts/bench-report-requirements.txt
           source scripts/env.sh
           maturin develop --release --locked
           python -I scripts/assert_native_is_the_built_artifact.py
       - name: Measure benchmarks
-        run: .venv/bin/python -u -I scripts/bench.py --engines django,rust,jinja2 --repeats 7 --target 0.05 --json benchmark.json > benchmark.log 2>&1
+        run: .venv/bin/python -u -I scripts/bench.py --engines django,rust,jinja2 --repeats 7 --target 0.05 --json benchmark.json --html benchmark.html > benchmark.log 2>&1
+      - name: Prepare public report
+        if: inputs.pages
+        run: |
+          mkdir -p _site
+          cp benchmark.html _site/index.html
+          cp benchmark.json _site/benchmark-results.json
+      - name: Upload GitHub Pages artifact
+        if: inputs.pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
       - name: Write Markdown summary
         if: always()
         env:
@@ -56,6 +72,7 @@ jobs:
           name: benchmarks-${{ github.sha }}
           path: |
             benchmark.json
+            benchmark.html
             benchmark.md
             benchmark.log
           if-no-files-found: ignore
