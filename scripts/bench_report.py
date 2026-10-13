@@ -162,13 +162,16 @@ def context(payload):
             p["url"]: p for p in bakery.get("request_comparison", {}).get("pages", [])
         }
         for page in bakery["pages"]:
+            # One hash per page: the recorded run aborts unless both engines agree.
             d, r = page["median_ms"]["django"], page["median_ms"]["candidate"]
             request = requests.get(page["url"])
             pages.append(
                 {
                     "name": page["url"],
+                    "description": BAKERY_TEMPLATES[page["url"]],
                     "django": f"{d:.3f}",
                     "rust": f"{r:.3f}",
+                    "match": True,
                     "timings": [("django", d), ("rust", r)],
                     "difference": comparison(d, r),
                     "request_difference": comparison(
