@@ -1,0 +1,192 @@
+{
+  "date": "2026-10-12",
+  "mode": "warm template render (including UTF-8 encoding)",
+  "samples_per_page_per_backend": 250,
+  "bakerydemo_commit": "788bdabfcd6db0a89f1891e3fab3ecb209937876",
+  "baseline_engine_commit": "bddaffd",
+  "python": "3.12.9",
+  "django": "6.0.9",
+  "ratios": {
+    "candidate_django": 0.9774057480013261,
+    "candidate_baseline": 0.968878185371267,
+    "baseline_django": 1.008801480680248
+  },
+  "native_sha256": {
+    "baseline": "1a55355f022ba72f636b76a8bbae126bc2c3b9a389553b8ddd01cdf967e6fc9c",
+    "candidate": "3c474d0191b63d9e4f2c45c6611c4601402aab089f28f6eefd294e9849db1aa0"
+  },
+  "pages": [
+    {
+      "url": "/",
+      "median_ms": {
+        "django": 17.935000000000002,
+        "baseline": 17.954146,
+        "candidate": 17.5500415
+      },
+      "output_sha256": "b824708d7f987258db718bdf9ca050b645c3d47022a8343c65d05ee774dbab2f"
+    },
+    {
+      "url": "/blog/",
+      "median_ms": {
+        "django": 10.912271,
+        "baseline": 10.9819165,
+        "candidate": 10.6394165
+      },
+      "output_sha256": "10957710ab9ac814f53b38e33bc142ceeaa06ade37ccf1769218fa46cccd1620"
+    },
+    {
+      "url": "/blog/wild-yeast/",
+      "median_ms": {
+        "django": 6.484854,
+        "baseline": 6.49525,
+        "candidate": 6.327
+      },
+      "output_sha256": "ad17f5016a3a7ece17c4fd0759519674471de1450269325f2b23b83bf1ede957"
+    },
+    {
+      "url": "/breads/",
+      "median_ms": {
+        "django": 7.2945415,
+        "baseline": 7.3888335000000005,
+        "candidate": 7.042229000000001
+      },
+      "output_sha256": "a971f9a37c513bd087b31a1a0c98ed6ae75c6bda9e2d12aab988d7436d326fa5"
+    },
+    {
+      "url": "/breads/bagel/",
+      "median_ms": {
+        "django": 4.2791875,
+        "baseline": 4.3247705,
+        "candidate": 4.155937
+      },
+      "output_sha256": "cc0faa6e4d2ae0f6bebae71003a967d12af21cc003f4ad23f7dd33918018e2a6"
+    },
+    {
+      "url": "/locations/",
+      "median_ms": {
+        "django": 6.759854000000001,
+        "baseline": 6.8111255,
+        "candidate": 6.664292
+      },
+      "output_sha256": "7bbeea3d37b6189fa7f53750dad14a0aa228014fdd0a975022c3b3ed146242eb"
+    },
+    {
+      "url": "/locations/hof/",
+      "median_ms": {
+        "django": 7.0738330000000005,
+        "baseline": 7.1885414999999995,
+        "candidate": 6.9913125
+      },
+      "output_sha256": "d49ad9e236016dbdcc32ad0cfb06d059c5db7e7c528a6cee64151a345a661ce6"
+    },
+    {
+      "url": "/recipes/",
+      "median_ms": {
+        "django": 4.985354,
+        "baseline": 4.9949165,
+        "candidate": 4.832687
+      },
+      "output_sha256": "1c6fcc3ce779de0feda28f05ee3de7398b79020ec8e3a3d862096657b92881c1"
+    },
+    {
+      "url": "/recipes/hot-cross-bun/",
+      "median_ms": {
+        "django": 6.2390004999999995,
+        "baseline": 6.480041,
+        "candidate": 6.1681875
+      },
+      "output_sha256": "f5b31ee7556be863cf7b94a8d74e7085ef747081e0c66fc4412ce0b2ab8b1fd0"
+    },
+    {
+      "url": "/gallery/",
+      "median_ms": {
+        "django": 10.4840005,
+        "baseline": 10.473229499999999,
+        "candidate": 10.139208
+      },
+      "output_sha256": "4b401fc91dfec95ff545888695ea63ac234819a43a05cecfed0505cc2e3c6303"
+    },
+    {
+      "url": "/about/",
+      "median_ms": {
+        "django": 3.8263540000000003,
+        "baseline": 3.8320415,
+        "candidate": 3.7755415
+      },
+      "output_sha256": "5c7f9154a3ee2cd24eb8e535578f56d59061e5f1842c98a9990a49e57247eb91"
+    }
+  ],
+  "request_comparison": {
+    "mode": "warm Django test-client request (views, middleware, DB, and rendering; no network transport)",
+    "samples_per_page_per_backend": 250,
+    "candidate_django_ratio": 0.9765289972617647,
+    "pages": [
+      {
+        "url": "/",
+        "django_ms": 22.831937,
+        "candidate_ms": 22.390729,
+        "ratio": 0.9806758401619626
+      },
+      {
+        "url": "/blog/",
+        "django_ms": 15.153646,
+        "candidate_ms": 14.894187500000001,
+        "ratio": 0.9828781469489257
+      },
+      {
+        "url": "/blog/wild-yeast/",
+        "django_ms": 11.323729499999999,
+        "candidate_ms": 11.000271,
+        "ratio": 0.9714353385075121
+      },
+      {
+        "url": "/breads/",
+        "django_ms": 18.236062500000003,
+        "candidate_ms": 17.6126045,
+        "ratio": 0.9658118083330761
+      },
+      {
+        "url": "/breads/bagel/",
+        "django_ms": 8.18975,
+        "candidate_ms": 8.053771000000001,
+        "ratio": 0.9833964406727923
+      },
+      {
+        "url": "/locations/",
+        "django_ms": 12.8178545,
+        "candidate_ms": 12.697771,
+        "ratio": 0.9906315444601123
+      },
+      {
+        "url": "/locations/hof/",
+        "django_ms": 11.819145500000001,
+        "candidate_ms": 11.4742295,
+        "ratio": 0.9708171796345174
+      },
+      {
+        "url": "/recipes/",
+        "django_ms": 8.786458,
+        "candidate_ms": 8.562333500000001,
+        "ratio": 0.9744920535669779
+      },
+      {
+        "url": "/recipes/hot-cross-bun/",
+        "django_ms": 11.2546045,
+        "candidate_ms": 10.799875,
+        "ratio": 0.9595961368522546
+      },
+      {
+        "url": "/gallery/",
+        "django_ms": 14.200521,
+        "candidate_ms": 14.0130625,
+        "ratio": 0.9867991815229877
+      },
+      {
+        "url": "/about/",
+        "django_ms": 6.9394165,
+        "candidate_ms": 6.771020999999999,
+        "ratio": 0.9757334784560056
+      }
+    ]
+  }
+}

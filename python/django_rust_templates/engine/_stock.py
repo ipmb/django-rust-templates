@@ -31,6 +31,44 @@ PLAN = Template._render
 # whole question.
 METHOD_TYPE = types.MethodType
 
+# The native emitter can append an exact SafeString directly while these
+# implementations still govern its conversion and attribute reads.
+from django.utils.safestring import SafeString
+
+SAFE_STRING = SafeString
+
+
+def _identity(self):
+    return self
+
+
+def _identity_pin(function):
+    # Django's class may have been changed before this package was imported.
+    # License only the two trivial `return self` bodies, never an arbitrary
+    # function that happened to be installed when we first read the class.
+    if type(function) is not types.FunctionType:
+        return None
+    code = function.__code__
+    reference = _identity.__code__
+    if (
+        code.co_code == reference.co_code
+        and not code.co_names
+        and not code.co_freevars
+        and not code.co_cellvars
+        and code.co_argcount == 1
+        and code.co_kwonlyargcount == 0
+        and code.co_nlocals == 1
+        and not code.co_flags & (0x04 | 0x08 | 0x20 | 0x80 | 0x200)
+    ):
+        return function
+    return None
+
+
+SAFE_STRING_STR = _identity_pin(SafeString.__str__)
+SAFE_STRING_HTML = _identity_pin(SafeString.__html__)
+SAFE_STRING_GETATTRIBUTE = str.__getattribute__
+SAFE_STRING_CLASS = vars(object)["__class__"]
+
 
 # --- nodes whose text is fixed before any context exists ---------------------
 #

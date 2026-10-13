@@ -11,7 +11,7 @@ use pyo3::exceptions::{
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyBool, PyDict, PyList, PyString, PyTuple, PyType};
+use pyo3::types::{PyBool, PyDict, PyInt, PyList, PyString, PyTuple, PyType};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -1495,6 +1495,9 @@ fn swallowed(py: Python<'_>, error: &PyErr, arm: Arm) -> bool {
 /// `Python::attach`, which is reentrant.
 struct PyTarget {
     value: Py<PyAny>,
+    /// Immutable names owned by the compiled head; absent on the Python resolver
+    /// seam, which receives fresh components rather than a render plan.
+    names: Option<Arc<HashMap<String, Py<PyString>>>>,
     /// Fresh per `resolve` call and shared by every container in it, so a handle is dereferenceable
     /// within the call that produced it and meaningless outside it. Deliberately **not** the shell's
     /// `resolve_ref` table: those resolve *descriptor* references, these are values the caller asked for,
@@ -1526,6 +1529,7 @@ impl Clone for PyTarget {
     fn clone(&self) -> Self {
         Python::attach(|py| Self {
             value: self.value.clone_ref(py),
+            names: self.names.clone(),
             arena: Rc::clone(&self.arena),
             pending: Rc::clone(&self.pending),
             // No token needed: this is an `Rc` bump, not a `Py` clone.
@@ -1543,6 +1547,7 @@ impl PyTarget {
     ) -> Self {
         Self {
             value,
+            names: None,
             arena: Rc::clone(arena),
             pending: Rc::clone(pending),
             context: Rc::clone(context),
@@ -1554,7 +1559,16 @@ impl PyTarget {
     /// A method rather than an inline `Self::new` because `call` and `string_if_invalid` both produce a
     /// fresh value mid-loop, and sharing the four `Rc`s is the whole contract.
     fn target_for(&self, value: Py<PyAny>) -> Box<dyn LookupTarget> {
-        Box::new(Self::new(value, &self.arena, &self.pending, &self.context))
+        let mut target = Self::new(value, &self.arena, &self.pending, &self.context);
+        target.names = self.names.clone();
+        Box::new(target)
+    }
+
+    fn key<'py>(&self, py: Python<'py>, bit: &str) -> Bound<'py, PyString> {
+        match self.names.as_ref().and_then(|names| names.get(bit)) {
+            Some(key) => key.bind(py).clone(),
+            None => PyString::new(py, bit),
+        }
     }
 
     /// Classify one arm's result: a swallowed exception is a miss the next arm covers, anything else is
@@ -1625,7 +1639,7 @@ impl PyTarget {
         let Ok(dicts) = dicts.cast::<PyList>() else {
             return Ok(None);
         };
-        let key = PyString::new(py, bit);
+        let key = self.key(py, bit);
         // Every layer must be a `dict` before any is probed: a bail runs Django's method over the whole
         // stack, so probing first would run the layers above the non-dict twice. Measured — Django logs
         // one `__contains__` call, probing-then-bailing logs two.
@@ -1656,11 +1670,24 @@ impl LookupTarget for PyTarget {
     /// only on the instance is invisible to Django's guard (`base.py:963`).
     fn has_getitem(&self) -> bool {
         Python::attach(|py| {
-            self.value
-                .bind(py)
-                .get_type()
-                .hasattr("__getitem__")
-                .unwrap_or(false)
+            let class = self.value.bind(py).get_type();
+            let name = intern!(py, "__getitem__");
+            // Most model attribute lookups have no subscript arm. Prove absence
+            // without constructing and clearing AttributeError on every bit.
+            // A custom metaclass can fabricate the attribute, so it must use
+            // type's attribute reader and have neither relevant hook nor entry.
+            if type_entry_is_absent(&class, name) {
+                let meta = class.get_type();
+                let plain_meta = meta.is(py.get_type::<PyType>())
+                    || (type_getattribute(py).is_ok_and(|pin| {
+                        type_entry_is_pin(&meta, intern!(py, "__getattribute__"), pin)
+                    }) && type_entry_is_absent(&meta, intern!(py, "__getattr__"))
+                        && type_entry_is_absent(&meta, name));
+                if plain_meta {
+                    return false;
+                }
+            }
+            class.hasattr(name).unwrap_or(false)
         })
     }
 
@@ -1671,7 +1698,7 @@ impl LookupTarget for PyTarget {
                 None => self
                     .value
                     .bind(py)
-                    .get_item(bit)
+                    .get_item(self.key(py, bit))
                     .map(|found| found.unbind()),
             }
         });
@@ -1679,8 +1706,12 @@ impl LookupTarget for PyTarget {
     }
 
     fn get_attr(&self, bit: &str) -> Step {
-        let result =
-            Python::attach(|py| self.value.bind(py).getattr(bit).map(|found| found.unbind()));
+        let result = Python::attach(|py| {
+            self.value
+                .bind(py)
+                .getattr(self.key(py, bit))
+                .map(|found| found.unbind())
+        });
         self.step(result, Arm::Attr)
     }
 
@@ -1719,7 +1750,7 @@ impl LookupTarget for PyTarget {
             self.value
                 .bind(py)
                 .get_type()
-                .getattr(bit)
+                .getattr(self.key(py, bit))
                 .map(|value| !value.is_truthy().unwrap_or(true))
                 .unwrap_or(false)
         })
@@ -1741,7 +1772,7 @@ impl LookupTarget for PyTarget {
             if !value.is_callable() {
                 return None;
             }
-            let flag = |name: &str| {
+            let flag = |name: &Bound<'_, PyString>| {
                 value
                     .getattr(name)
                     .ok()
@@ -1749,9 +1780,9 @@ impl LookupTarget for PyTarget {
                     .unwrap_or(false)
             };
             // Order matters: both flags set takes `pass`, so it is `DoNotCall`.
-            if flag("do_not_call_in_templates") {
+            if flag(intern!(py, "do_not_call_in_templates")) {
                 Some(CallArm::DoNotCall)
-            } else if flag("alters_data") {
+            } else if flag(intern!(py, "alters_data")) {
                 Some(CallArm::AltersData)
             } else {
                 Some(CallArm::Call)
@@ -1796,7 +1827,7 @@ impl LookupTarget for PyTarget {
                             self.pending.set(Some(error));
                             Err(CallFailure::Raised)
                         }
-                        Ok(sig) => match sig.call_method0("bind") {
+                        Ok(sig) => match sig.call_method0(intern!(py, "bind")) {
                             Err(e) if e.is_instance_of::<PyTypeError>(py) => {
                                 Err(CallFailure::ArgsRequired)
                             }
@@ -1901,28 +1932,83 @@ extern "C" {
 /// `__get__(None, cls)` for the attribute read while the slot binds `__get__(obj, cls)`. No MRO entry answers
 /// `NULL` — where Django's own method lands too. `tests/test_loop_read_guard.py` is the control.
 fn subscript_entry_is_pin(class: &Bound<'_, PyType>, pin: &Bound<'_, PyAny>) -> bool {
+    type_entry_is_pin(class, intern!(class.py(), "__getitem__"), pin)
+}
+
+fn type_entry_is_pin(
+    class: &Bound<'_, PyType>,
+    name: &Bound<'_, PyString>,
+    pin: &Bound<'_, PyAny>,
+) -> bool {
     #[cfg(windows)]
     {
-        mro_subscript_entry_is_pin(class, pin).unwrap_or(false)
+        mro_entry_is_pin(class, name, pin).unwrap_or(false)
     }
     #[cfg(not(windows))]
     {
-        // SAFETY: `class` is a live type pointer, the name is the interpreter's own interned
-        // `"__getitem__"`, and the *borrowed* result is compared on the next line with no Python code
+        // SAFETY: `class` is a live type pointer, the name is interned,
+        // and the *borrowed* result is compared on the next line with no Python code
         // running in between and no exception set on either answer.
-        let entry = unsafe {
-            _PyType_Lookup(
-                class.as_type_ptr(),
-                intern!(class.py(), "__getitem__").as_ptr(),
-            )
-        };
+        let entry = unsafe { _PyType_Lookup(class.as_type_ptr(), name.as_ptr()) };
         !entry.is_null() && entry == pin.as_ptr()
     }
 }
 
+static TYPE_GETATTRIBUTE: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+fn type_getattribute(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
+    TYPE_GETATTRIBUTE
+        .get_or_try_init(py, || {
+            py.get_type::<PyType>()
+                .getattr("__getattribute__")
+                .map(Bound::unbind)
+        })
+        .map(|pin| pin.bind(py))
+}
+
+fn type_entry_is_absent(class: &Bound<'_, PyType>, name: &Bound<'_, PyString>) -> bool {
+    #[cfg(not(windows))]
+    {
+        // SAFETY: live type and interned name, with the GIL held; the lookup
+        // neither executes Python nor sets an exception.
+        unsafe { _PyType_Lookup(class.as_type_ptr(), name.as_ptr()).is_null() }
+    }
+    #[cfg(windows)]
+    {
+        let lookup = || -> PyResult<bool> {
+            // SAFETY: the live type owns its MRO; dictionaries are borrowed
+            // from live bases while the GIL is held.
+            let ptr = unsafe { (*class.as_type_ptr()).tp_mro };
+            if ptr.is_null() {
+                return Ok(false);
+            }
+            let mro = unsafe { Bound::<PyAny>::from_borrowed_ptr(class.py(), ptr) };
+            for base in mro.cast::<PyTuple>()?.iter() {
+                let base = base.cast::<PyType>()?;
+                let ptr = unsafe { pyo3::ffi::PyType_GetDict(base.as_type_ptr()) };
+                let dict = unsafe { Bound::<PyDict>::from_borrowed_ptr(class.py(), ptr) };
+                if dict.get_item(name)?.is_some() {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        };
+        lookup().unwrap_or(false)
+    }
+}
+
 /// Read the actual MRO dictionaries without invoking metaclass hooks or descriptors.
-#[cfg(any(windows, all(test, not(feature = "extension-module"))))]
+#[cfg(all(test, not(feature = "extension-module")))]
 fn mro_subscript_entry_is_pin(class: &Bound<'_, PyType>, pin: &Bound<'_, PyAny>) -> PyResult<bool> {
+    mro_entry_is_pin(class, intern!(class.py(), "__getitem__"), pin)
+}
+
+#[cfg(any(windows, all(test, not(feature = "extension-module"))))]
+fn mro_entry_is_pin(
+    class: &Bound<'_, PyType>,
+    name: &Bound<'_, PyString>,
+    pin: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
     // SAFETY: the live type holds its ready MRO tuple. The GIL is held and the
     // owned Bound keeps that tuple alive throughout the dictionary walk.
     let mro_ptr = unsafe { (*class.as_type_ptr()).tp_mro };
@@ -1936,10 +2022,7 @@ fn mro_subscript_entry_is_pin(class: &Bound<'_, PyType>, pin: &Bound<'_, PyAny>)
         // This public API is available on every supported Python (3.12+).
         let dict_ptr = unsafe { pyo3::ffi::PyType_GetDict(base.as_type_ptr()) };
         let dict = unsafe { Bound::<PyAny>::from_borrowed_ptr(class.py(), dict_ptr) };
-        if let Some(entry) = dict
-            .cast::<PyDict>()?
-            .get_item(intern!(class.py(), "__getitem__"))?
-        {
+        if let Some(entry) = dict.cast::<PyDict>()?.get_item(name)? {
             return Ok(entry.is(pin));
         }
     }
@@ -2231,8 +2314,9 @@ fn resolve_components(
 // (`autoescape` and the escape function read once per render); and the escape fast path
 // (`render_value_in_context`'s own `type(value) is str` arm) inline, so `{{ name }}` pays no Python frame.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// The node classes the walk renders itself, by the name `type(node).__name__` answers.
 /// [`TEXT_NODE`] is the fourth and comes from `template-core`, because the descriptor names it too.
@@ -2257,11 +2341,26 @@ const MAX_WALK_DEPTH: usize = 500;
 enum Head {
     /// A lookup, resolved against the context through the same `Variable.resolve` the Python engine
     /// runs.
-    Lookups { lookups: Vec<String> },
+    Lookups {
+        lookups: Vec<String>,
+        keys: Arc<HashMap<String, Py<PyString>>>,
+    },
     /// A literal, as the Python object Django's `Variable.literal` holds — `literal_to_py`'s answer,
     /// computed once at plan time. Django reuses its own `literal` object across renders the same way,
     /// and every value a literal can be is immutable.
     Value(Py<PyAny>),
+}
+
+/// Keep the Python lookup names with the compiled plan, including their cached
+/// hashes. A render reuses them for subscripting and attribute lookup rather
+/// than allocating the same Python strings for each node and loop iteration.
+fn lookup_keys(py: Python<'_>, lookups: &[String]) -> Arc<HashMap<String, Py<PyString>>> {
+    Arc::new(
+        lookups
+            .iter()
+            .map(|bit| (bit.clone(), PyString::new(py, bit).unbind()))
+            .collect(),
+    )
 }
 
 /// One filter argument, in Django's three shapes.
@@ -3053,6 +3152,7 @@ fn plan_head(py: Python<'_>, expr: &FilterExprDesc) -> PyResult<Option<Head>> {
     if *lookup {
         Ok(variable.lookups.as_ref().map(|lookups| Head::Lookups {
             lookups: lookups.clone(),
+            keys: lookup_keys(py, lookups),
         }))
     } else {
         match variable.literal.as_ref() {
@@ -3205,8 +3305,10 @@ fn plan_condition(py: Python<'_>, expression: &Bound<'_, PyAny>) -> PyResult<Opt
                 steps,
             }));
         }
+        let lookups: Vec<String> = lookups.extract()?;
         Head::Lookups {
-            lookups: lookups.extract()?,
+            keys: lookup_keys(py, &lookups),
+            lookups,
         }
     } else {
         // `obj = self.var` — `FilterExpression.resolve`'s non-var arm (`base.py:801-802`).
@@ -3809,7 +3911,7 @@ impl<'py> Walk<'py> {
         let rendered = slot
             .node
             .bind(self.py)
-            .call_method1("render_annotated", (&self.context,))?;
+            .call_method1(intern!(self.py, "render_annotated"), (&self.context,))?;
         // Before the piece is moved into the sink: what this node contributed to the output.
         if let Some(census) = self.census.as_mut() {
             census.delegated_len += rendered.len().unwrap_or(0);
@@ -3818,7 +3920,10 @@ impl<'py> Walk<'py> {
         // The two context attributes a delegate can have changed, both written **in place** on the context
         // rather than restored later: `autoescape` by `AutoEscapeControlNode`, `use_tz` by `{% localtime %}`
         // and `{% timezone %}`.
-        self.autoescape = self.context.getattr("autoescape")?.extract()?;
+        self.autoescape = self
+            .context
+            .getattr(intern!(self.py, "autoescape"))?
+            .extract()?;
         self.use_tz = None;
         census_bump(&mut self.census, &slot.class_name, true);
         Ok(())
@@ -4095,7 +4200,9 @@ impl<'py> Walk<'py> {
     fn resolve_head(&self, head: &Head) -> PyResult<Py<PyAny>> {
         match head {
             Head::Value(value) => Ok(value.clone_ref(self.py)),
-            Head::Lookups { lookups } => self.scope.resolve(self.py, lookups, &self.context),
+            Head::Lookups { lookups, keys } => {
+                self.scope.resolve(self.py, lookups, keys, &self.context)
+            }
         }
     }
 
@@ -4161,12 +4268,34 @@ impl<'py> Walk<'py> {
 
     /// Append one resolved value, taking `render_value_in_context`'s first arm here when it applies.
     ///
-    /// The arm is **exact `str` under autoescaping**, and the exactness is load-bearing: a `str` subclass
-    /// is where `SafeString` lives, it carries `__html__`, and escaping one is the bug the predicate
-    /// declines. `html_escape` returning `None` (a lone surrogate, which the binding refuses rather than
-    /// raises on) falls through to the Python function.
+    /// Exact strings are escaped inline, stock SafeStrings are appended, and
+    /// ungrouped exact integers use their decimal spelling. Subclasses and
+    /// rebound SafeString hooks reach Python. Strings with lone surrogates spill
+    /// into Python's accumulator rather than being forced into a Rust String.
     fn emit(&mut self, value: Py<PyAny>) -> PyResult<()> {
         let py = self.py;
+        if self
+            .bypassed
+            .is_some_and(|stock| stock.is_safe_string(py, value.bind(py)))
+        {
+            return self.push_python(value);
+        }
+        // The same exact-int arm as engine/base.py's render_value_in_context:
+        // with grouping disabled, localizing an integer only produces its decimal
+        // spelling. Those characters need no HTML escaping, and the final safe
+        // nodelist constructor supplies the output's safety.
+        if value.bind(py).is_exact_instance_of::<PyInt>()
+            && (self
+                .context
+                .getattr(intern!(py, "use_l10n"))?
+                .is(false.into_pyobject(py)?)
+                || !DJANGO_SETTINGS
+                    .import(py, "django.conf", "settings")?
+                    .getattr(intern!(py, "USE_THOUSAND_SEPARATOR"))?
+                    .is_truthy()?)
+        {
+            return self.push_python(value.bind(py).str()?.into_any().unbind());
+        }
         // Gated on the spill because the fast path writes `out` directly: once the accumulator is
         // Python's, `out` is an empty remnant and a piece written to it would be lost.
         if self.autoescape && self.spill.is_none() {
@@ -4709,6 +4838,38 @@ struct Stock {
     method_type: Py<PyAny>,
     /// `engine/_unwind.py`'s `UNWIND` — the exceptional `__exit__`. See [`exit`].
     unwind: Py<PyAny>,
+    safe_string: Py<PyAny>,
+    safe_string_str: Py<PyAny>,
+    safe_string_html: Py<PyAny>,
+    safe_string_getattribute: Py<PyAny>,
+    safe_string_class: Py<PyAny>,
+}
+
+impl Stock {
+    fn is_safe_string(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> bool {
+        let class = value.get_type();
+        class.is(self.safe_string.bind(py))
+            && type_entry_is_pin(
+                &class,
+                intern!(py, "__str__"),
+                self.safe_string_str.bind(py),
+            )
+            && type_entry_is_pin(
+                &class,
+                intern!(py, "__html__"),
+                self.safe_string_html.bind(py),
+            )
+            && type_entry_is_pin(
+                &class,
+                intern!(py, "__getattribute__"),
+                self.safe_string_getattribute.bind(py),
+            )
+            && type_entry_is_pin(
+                &class,
+                intern!(py, "__class__"),
+                self.safe_string_class.bind(py),
+            )
+    }
 }
 
 /// Which of the two names on [`Stock`] a check is about. They are read by Python at different
@@ -4747,6 +4908,11 @@ fn stock(py: Python<'_>) -> Option<&'static Stock> {
                 plan: module.getattr("PLAN")?.unbind(),
                 method_type: module.getattr("METHOD_TYPE")?.unbind(),
                 unwind: unwind.getattr("UNWIND")?.unbind(),
+                safe_string: module.getattr("SAFE_STRING")?.unbind(),
+                safe_string_str: module.getattr("SAFE_STRING_STR")?.unbind(),
+                safe_string_html: module.getattr("SAFE_STRING_HTML")?.unbind(),
+                safe_string_getattribute: module.getattr("SAFE_STRING_GETATTRIBUTE")?.unbind(),
+                safe_string_class: module.getattr("SAFE_STRING_CLASS")?.unbind(),
             })
         })
         .ok()
@@ -4781,15 +4947,17 @@ impl LookupScope {
         &self,
         py: Python<'_>,
         lookups: &[String],
+        keys: &Arc<HashMap<String, Py<PyString>>>,
         context: &Bound<'_, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         self.reset();
-        let root = PyTarget::new(
+        let mut root = PyTarget::new(
             context.clone().unbind(),
             &self.arena,
             &self.pending,
             &self.context,
         );
+        root.names = Some(Arc::clone(keys));
         outcome_to_py(
             py,
             resolve_lookup(lookups, Box::new(root)),
