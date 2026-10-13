@@ -2,6 +2,8 @@
 
 Django's template engine, reimplemented in Rust.
 
+[📊 Performance Benchmark](https://ipmb.github.io/django-rust-templates/)
+
 **Experimental. All code in this repository was written by AI.**
 
 - Django's own `tests/template_tests/` pass. The copy this runs against is generated
