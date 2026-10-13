@@ -220,8 +220,8 @@ crates/template-py/src/lib.rs:1088	crates/template-py/src/lib.rs	1088	-	-	-
 crates/template-py/src/lib.rs:1104	crates/template-py/src/lib.rs	1104	-	-	-
 crates/template-py/src/lib.rs:1185	crates/template-py/src/lib.rs	1185	-	-	-
 crates/template-py/src/lib.rs:1243	crates/template-py/src/lib.rs	1243	-	-	-
-crates/template-py/src/lib.rs:595	crates/template-py/src/lib.rs	595	-	fn if_condition_to_py(py: Python<'_>, tree: &IfConditionDesc)	-
-crates/template-py/src/lib.rs:950	crates/template-py/src/lib.rs	950	-	fn python_host_error(py: Python<'_>, error: &PyErr) -> Error {	-
+crates/template-py/src/lib.rs:596	crates/template-py/src/lib.rs	596	-	fn if_condition_to_py(py: Python<'_>, tree: &IfConditionDesc)	-
+crates/template-py/src/lib.rs:951	crates/template-py/src/lib.rs	951	-	fn python_host_error(py: Python<'_>, error: &PyErr) -> Error {	-
 custom.py:396-399	tests/template_tests/templatetags/custom.py	396	399	parser.extra_data["extra_data"]	-
 dateformat.py:326-329	django/utils/dateformat.py	326	329	-	-
 dateformat.py:332-335	django/utils/dateformat.py	332	335	-	-
@@ -546,6 +546,7 @@ engine.py:194	django/template/engine.py	194	-	-	-
 engine.py:63	django/template/engine.py	63	-	self.template_builtins = self.get_template_builtins(self.builtins)	-
 engine.py:7	django/template/engine.py	7	-	from .base import Template	-
 engine/__init__.py:26	python/django_rust_templates/engine/__init__.py	26	-	from .engine import Engine	-
+engine/base.py:1050-1052	python/django_rust_templates/engine/base.py	1050	1052	else:	value = self.literal
 engine/base.py:1135-1164	python/django_rust_templates/engine/base.py	1135	1164	def render_annotated(self, context):	-
 engine/base.py:1204-1205	python/django_rust_templates/engine/base.py	1204	1205	return SafeString("".join([node.render_annotated(context) for node in self]))	-
 engine/base.py:1288-1296	python/django_rust_templates/engine/base.py	1288	1296	-	-
@@ -568,6 +569,7 @@ engine/defaulttags.py:223-224	python/django_rust_templates/engine/defaulttags.py
 engine/defaulttags.py:248	python/django_rust_templates/engine/defaulttags.py	248	-	self.loopvars[0]	-
 engine/defaulttags.py:324-337	python/django_rust_templates/engine/defaulttags.py	324	337	-	-
 engine/defaulttags.py:329-330	python/django_rust_templates/engine/defaulttags.py	329	330	except VariableDoesNotExist:	-
+engine/defaulttags.py:334	python/django_rust_templates/engine/defaulttags.py	334	-	if match:	-
 engine/defaulttags.py:337	python/django_rust_templates/engine/defaulttags.py	337	-	-	-
 engine/defaulttags.py:919-920	python/django_rust_templates/engine/defaulttags.py	919	920	self.value.resolve(context, ignore_failures=True)	-
 engine/engine.py:7	python/django_rust_templates/engine/engine.py	7	-	from .base import Template	-

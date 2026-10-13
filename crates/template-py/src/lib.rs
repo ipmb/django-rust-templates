@@ -2,6 +2,7 @@
 //! The only crate that may depend on Python; `template-core`'s seam traits are
 //! implemented here over `PyObject`.
 
+use pyo3::basic::CompareOp;
 use pyo3::create_exception;
 use pyo3::exceptions::{
     PyAttributeError, PyException, PyIndexError, PyKeyError, PyNotImplementedError, PyRuntimeError,
@@ -10,7 +11,7 @@ use pyo3::exceptions::{
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyDict, PyList, PyString, PyTuple, PyType};
+use pyo3::types::{PyBool, PyDict, PyList, PyString, PyTuple, PyType};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -2306,13 +2307,50 @@ struct Emit {
 
 /// One `{% if %}`/`{% elif %}`/`{% else %}` the walk owns.
 ///
-/// Owned only when **every** branch's condition is an `{% else %}` or a `TemplateLiteral` that is not an
-/// operator. A condition built from an operator (`and`, `==`, `in`, …) is one of `smartif`'s thirteen,
-/// evaluated by a tree this walk does not walk, so the whole node delegates.
+/// Every branch is an `{% else %}` or a `smartif` tree the walk evaluates itself; a branch whose
+/// leaves it cannot plan declines the whole node.
 struct IfPlan {
     /// `(condition, body)` in source order, `None` for the `{% else %}` — Django's own list, in Django's
     /// own order, with Django's own `None`.
-    branches: Vec<(Option<Emit>, Vec<Slot>)>,
+    branches: Vec<(Option<Cond>, Vec<Slot>)>,
+}
+
+/// One node of a `{% if %}` condition — `smartif`'s tree (`engine/smartif.py`).
+///
+/// `do_if` builds this from thirteen operators and one leaf class, and `IfNode.render` asks the root
+/// for a value it tests for truth. The leaf is always a `TemplateLiteral`: `TemplateIfParser` overrides
+/// `create_var`, so `smartif`'s own `Literal` is unreachable through `{% if %}`.
+enum Cond {
+    /// A `TemplateLiteral` — `self.value.resolve(context, ignore_failures=True)`.
+    Leaf(Emit),
+    /// `not x`, the one prefix operator (`smartif.py`'s `prefix(8, …)`).
+    Not(Box<Cond>),
+    /// One of the twelve infix operators.
+    Infix {
+        op: Infix,
+        first: Box<Cond>,
+        second: Box<Cond>,
+    },
+}
+
+/// `smartif.OPERATORS`' twelve infix keys.
+///
+/// `Or` and `And` are **not** comparisons and are kept apart from the rest at evaluation: their
+/// lambdas are Python's own `or`/`and`, which short-circuit and yield the *operand*, not a bool.
+#[derive(Clone, Copy)]
+enum Infix {
+    Or,
+    And,
+    In,
+    NotIn,
+    Is,
+    IsNot,
+    Eq,
+    Ne,
+    Gt,
+    Ge,
+    Lt,
+    Le,
 }
 
 /// One node's native action.
@@ -3125,7 +3163,23 @@ fn plan_condition(py: Python<'_>, expression: &Bound<'_, PyAny>) -> PyResult<Opt
         }
         let lookups = variable.getattr("lookups")?;
         if lookups.is_none() {
-            return Ok(None);
+            // `Variable.resolve`'s own else: "We're dealing with a literal, so it's already been
+            // resolved" — `value = self.literal` (`engine/base.py:1050-1052`). A `{% if %}` operand
+            // written as a number or a quoted string is one of these, and declining it here was
+            // sending every `{% if n > 1 %}` and `{% if s == 'x' %}` back to Python over an operand
+            // the parse had already finished with.
+            //
+            // `translate` is refused above, which is what leaves this branch with nothing to do but
+            // hand the value over. A `literal` of `None` is a `Variable` neither arm explains, so it
+            // declines rather than emitting a `None` the parse never produced.
+            let literal = variable.getattr("literal")?;
+            if literal.is_none() {
+                return Ok(None);
+            }
+            return Ok(plan_steps(py, expression)?.map(|steps| Emit {
+                head: Head::Value(literal.unbind()),
+                steps,
+            }));
         }
         Head::Lookups {
             lookups: lookups.extract()?,
@@ -3146,6 +3200,79 @@ fn plan_condition(py: Python<'_>, expression: &Bound<'_, PyAny>) -> PyResult<Opt
 /// question about the parse tree, so it is asked of the descriptor; the conditions are read from the
 /// object. A branch body that declines hands the whole node back — [`plan_slot`]'s convention, so a
 /// half-planned `{% if %}` cannot render.
+/// One condition, from the descriptor's tree paired with the object `do_if` built.
+///
+/// Both sides are walked together and asserted to agree, the rule `plan_slot` applies to nodes: the
+/// descriptor says the shape, the materialised object supplies the `FilterExpression` at each leaf,
+/// and a disagreement plans nothing rather than guessing. `id` is `smartif`'s own operator key —
+/// `op.id = key`, assigned on each generated class at import.
+fn plan_cond(
+    py: Python<'_>,
+    desc: &IfConditionDesc,
+    node: &Bound<'_, PyAny>,
+) -> PyResult<Option<Cond>> {
+    match desc {
+        IfConditionDesc::Literal { .. } => {
+            let value = match node.getattr("value") {
+                Ok(value) => value,
+                // Not a `TemplateLiteral`: the pairing is wrong, so nothing here is planned.
+                Err(_) => return Ok(None),
+            };
+            Ok(plan_condition(py, &value)?.map(Cond::Leaf))
+        }
+        IfConditionDesc::Operator { key, first, second } => {
+            // The object must be the operator the descriptor names.
+            match node.getattr("id") {
+                Ok(id) if id.extract::<String>().is_ok_and(|id| &id == key) => {}
+                _ => return Ok(None),
+            }
+            let Some(first_node) = node.getattr("first").ok() else {
+                return Ok(None);
+            };
+            let Some(first) = plan_cond(py, first, &first_node)? else {
+                return Ok(None);
+            };
+            if key == "not" {
+                // `nud` sets `self.second = None` (`smartif.py`), and the descriptor carries the
+                // same absence; a `not` with a second operand is not the tree `do_if` builds.
+                if second.is_some() {
+                    return Ok(None);
+                }
+                return Ok(Some(Cond::Not(Box::new(first))));
+            }
+            let op = match key.as_str() {
+                "or" => Infix::Or,
+                "and" => Infix::And,
+                "in" => Infix::In,
+                "not in" => Infix::NotIn,
+                "is" => Infix::Is,
+                "is not" => Infix::IsNot,
+                "==" => Infix::Eq,
+                "!=" => Infix::Ne,
+                ">" => Infix::Gt,
+                ">=" => Infix::Ge,
+                "<" => Infix::Lt,
+                "<=" => Infix::Le,
+                // An operator this walk does not know. `smartif.OPERATORS` has thirteen keys and the
+                // twelve above plus `not` are all of them, so this is a table that grew.
+                _ => return Ok(None),
+            };
+            let (Some(second_desc), Some(second_node)) = (second, node.getattr("second").ok())
+            else {
+                return Ok(None);
+            };
+            let Some(second) = plan_cond(py, second_desc, &second_node)? else {
+                return Ok(None);
+            };
+            Ok(Some(Cond::Infix {
+                op,
+                first: Box::new(first),
+                second: Box::new(second),
+            }))
+        }
+    }
+}
+
 fn plan_if(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResult<Option<IfPlan>> {
     let Some(AttrValue::List(branches)) = find_attr(desc, "conditions_nodelists") else {
         return Ok(None);
@@ -3169,20 +3296,16 @@ fn plan_if(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResult
             // `conditions_nodelists.append((None, nodelist))` — `do_if`'s own `{% else %}`
             // (`defaulttags.py:1009`).
             AttrValue::None => None,
-            AttrValue::IfCondition(tree) => match tree.as_ref() {
-                // A `smartif` operator tree is thirteen operators deep. Declined as a whole.
-                IfConditionDesc::Operator { .. } => return Ok(None),
-                IfConditionDesc::Literal { .. } => {
-                    let literal = pair.get_item(0)?;
-                    if literal.is_none() {
-                        return Ok(None);
-                    }
-                    match plan_condition(py, &literal.getattr("value")?)? {
-                        Some(emit) => Some(emit),
-                        None => return Ok(None),
-                    }
+            AttrValue::IfCondition(tree) => {
+                let condition = pair.get_item(0)?;
+                if condition.is_none() {
+                    return Ok(None);
                 }
-            },
+                match plan_cond(py, tree.as_ref(), &condition)? {
+                    Some(cond) => Some(cond),
+                    None => return Ok(None),
+                }
+            }
             _ => return Ok(None),
         };
         let AttrValue::NodeListRef(body_index) = body_ref else {
@@ -3514,15 +3637,6 @@ enum Absorbed {
     Nothing,
 }
 
-/// What one `{% if %}` condition decided.
-enum Branch {
-    Match,
-    /// Falsy — and the `VariableDoesNotExist` that `IfNode.render` catches and turns into the same falsy
-    /// `None` (`engine/defaulttags.py:329-330`).
-    NoMatch,
-    Refused,
-}
-
 /// The render-invariant state of one walk.
 struct Walk<'py> {
     py: Python<'py>,
@@ -3691,10 +3805,19 @@ impl<'py> Walk<'py> {
         for (condition, body) in &plan.branches {
             let matched = match condition {
                 None => true,
-                Some(condition) => match self.condition_matches(condition)? {
-                    Branch::Match => true,
-                    Branch::NoMatch => false,
-                    Branch::Refused => return Ok(Rendered::Refused),
+                Some(condition) => match self.eval_cond(condition) {
+                    // A filter the seam cannot hold: the node has emitted nothing yet, so it can
+                    // still be handed back whole.
+                    Ok(None) => return Ok(Rendered::Refused),
+                    // `if match:` (`engine/defaulttags.py:334`), which is **not** inside the
+                    // `except`, so a `__bool__` that raises here travels as Django's does.
+                    Ok(Some(value)) => value.bind(self.py).is_truthy()?,
+                    // `except VariableDoesNotExist: match = None` (`engine/defaulttags.py:329-330`)
+                    // — the branch misses and the next one is tried. Only a *bare* leaf reaches
+                    // here: inside an operator the same exception is swallowed to `False` by that
+                    // operator's own `except Exception`.
+                    Err(error) if is_variable_does_not_exist(self.py, &error)? => false,
+                    Err(error) => return Err(error),
                 },
             };
             if matched {
@@ -3708,36 +3831,103 @@ impl<'py> Walk<'py> {
         Ok(Rendered::Done)
     }
 
+    /// One condition's value — `smartif`'s `eval(context)`, which `IfNode.render` tests for truth.
+    ///
+    /// `Ok(None)` is a refusal, not a value: a filter the seam cannot hold has to hand the whole node
+    /// back, so it travels through the operators untouched rather than being swallowed as `False`.
+    ///
+    /// **Every operator catches `Exception` and answers `False`** (`smartif.py`'s `infix`/`prefix`),
+    /// and it catches it *at its own node*, so a failure deep in a subtree is `False` for the operator
+    /// that contains it rather than for the whole condition. That is why the wrapper is here and not
+    /// around the root: a bare leaf has no operator above it and its exception reaches
+    /// `IfNode.render`, which is what makes `{% if a|nope:b %}` and `{% if x and a|nope:b %}` differ.
+    fn eval_cond(&mut self, cond: &Cond) -> PyResult<Option<Py<PyAny>>> {
+        match cond {
+            Cond::Leaf(emit) => self.eval_leaf(emit),
+            operator => match self.eval_operator(operator) {
+                Ok(answer) => Ok(answer),
+                Err(_) => Ok(Some(self.py_bool(false))),
+            },
+        }
+    }
+
     /// `TemplateLiteral.eval` (`engine/defaulttags.py:919-920`) —
     /// `self.value.resolve(context, ignore_failures=True)`.
     ///
-    /// `ignore_failures=True` is the whole difference from an emitted `{{ … }}`: a failed head is `None`
-    /// and the filters still run on it, where a `{{ … }}` would have reached for `string_if_invalid`.
-    /// `IfNode.render` then catches `VariableDoesNotExist` from anywhere in the evaluation and calls the
-    /// branch a miss, which is why the filter loop below has a `VariableDoesNotExist` arm of its own.
-    fn condition_matches(&mut self, condition: &Emit) -> PyResult<Branch> {
-        let mut value = match self.resolve_head(&condition.head) {
+    /// `ignore_failures=True` is the whole difference from an emitted `{{ … }}`: a failed *head* is
+    /// `None` and the filters still run on it, where a `{{ … }}` would have reached for
+    /// `string_if_invalid`. A failed filter *argument* has no handler in `resolve`, so it travels.
+    fn eval_leaf(&mut self, emit: &Emit) -> PyResult<Option<Py<PyAny>>> {
+        let mut value = match self.resolve_head(&emit.head) {
             Ok(value) => value,
             Err(error) if is_variable_does_not_exist(self.py, &error)? => self.py.None(),
             Err(error) => return Err(error),
         };
-        for step in &condition.steps {
-            match self.apply_step(step, &value) {
-                Ok(StepOutcome::Value(next)) => value = next,
-                Ok(StepOutcome::Refused) => return Ok(Branch::Refused),
-                // The failed *argument* case: `resolve` has no handler there, so it travels, and
-                // `IfNode.render` is what decides it is a miss.
-                Err(error) if is_variable_does_not_exist(self.py, &error)? => {
-                    return Ok(Branch::NoMatch);
-                }
-                Err(error) => return Err(error),
+        for step in &emit.steps {
+            match self.apply_step(step, &value)? {
+                StepOutcome::Value(next) => value = next,
+                StepOutcome::Refused => return Ok(None),
             }
         }
-        Ok(if value.bind(self.py).is_truthy()? {
-            Branch::Match
-        } else {
-            Branch::NoMatch
-        })
+        Ok(Some(value))
+    }
+
+    /// The body of one operator, with its `except Exception` supplied by [`eval_cond`].
+    ///
+    /// The lambdas are `smartif.OPERATORS`', in their own terms: `or` and `and` are Python's, so they
+    /// short-circuit and yield the **operand** rather than a bool — `{% if a or b %}` evaluates to
+    /// `b`'s value when `a` is falsy, which a nested comparison can then see. The ten comparisons use
+    /// Python's own protocols, so `==` on an object with an exotic `__eq__` answers whatever that
+    /// answers, exactly as the lambda would.
+    fn eval_operator(&mut self, cond: &Cond) -> PyResult<Option<Py<PyAny>>> {
+        let py = self.py;
+        match cond {
+            // `eval_cond` routes a leaf to `eval_leaf`; nothing else reaches here.
+            Cond::Leaf(_) => Ok(None),
+            Cond::Not(inner) => {
+                let Some(value) = self.eval_cond(inner)? else {
+                    return Ok(None);
+                };
+                Ok(Some(self.py_bool(!value.bind(py).is_truthy()?)))
+            }
+            Cond::Infix { op, first, second } => {
+                let Some(left) = self.eval_cond(first)? else {
+                    return Ok(None);
+                };
+                // `x.eval(context) or y.eval(context)` / `and`: the right operand is not evaluated
+                // at all when the left decides it.
+                match op {
+                    Infix::Or if left.bind(py).is_truthy()? => return Ok(Some(left)),
+                    Infix::And if !left.bind(py).is_truthy()? => return Ok(Some(left)),
+                    Infix::Or | Infix::And => return self.eval_cond(second),
+                    _ => {}
+                }
+                let Some(right) = self.eval_cond(second)? else {
+                    return Ok(None);
+                };
+                let (left, right) = (left.bind(py), right.bind(py));
+                let answer = match op {
+                    Infix::In => self.py_bool(right.contains(left)?),
+                    Infix::NotIn => self.py_bool(!right.contains(left)?),
+                    Infix::Is => self.py_bool(left.is(right)),
+                    Infix::IsNot => self.py_bool(!left.is(right)),
+                    Infix::Eq => left.rich_compare(right, CompareOp::Eq)?.unbind(),
+                    Infix::Ne => left.rich_compare(right, CompareOp::Ne)?.unbind(),
+                    Infix::Gt => left.rich_compare(right, CompareOp::Gt)?.unbind(),
+                    Infix::Ge => left.rich_compare(right, CompareOp::Ge)?.unbind(),
+                    Infix::Lt => left.rich_compare(right, CompareOp::Lt)?.unbind(),
+                    Infix::Le => left.rich_compare(right, CompareOp::Le)?.unbind(),
+                    // Handled above; `or`/`and` never reach the comparison arm.
+                    Infix::Or | Infix::And => return Ok(Some(left.clone().unbind())),
+                };
+                Ok(Some(answer))
+            }
+        }
+    }
+
+    /// Python's `True`/`False`, which an operator's refusal and `not` both answer with.
+    fn py_bool(&self, value: bool) -> Py<PyAny> {
+        PyBool::new(self.py, value).to_owned().into_any().unbind()
     }
 
     /// The head's value, by whichever of [`Head`]'s two shapes it is.

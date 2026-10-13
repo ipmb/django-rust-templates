@@ -194,7 +194,7 @@ class InterpositionTests(unittest.TestCase):
         ``{% if %}`` grammar into ``crates/template-core/src/parser/smartif.rs``,
         which the parse seam drives inside ``compile_template``, and the shell
         then materialises the resulting ``IfCondition`` tree into real
-        ``smartif`` objects (``crates/template-py/src/lib.rs:595``). A row
+        ``smartif`` objects (``crates/template-py/src/lib.rs:596``). A row
         named after the plan's premise would have asserted something untrue
         about a call that does not happen, so it is renamed and rewritten here;
         the substitution is recorded in the plan's Task 3 corrections.
@@ -1432,14 +1432,22 @@ class ResolverDelegationTests(unittest.TestCase):
 
         **But an absent meter reads the same whether the lookup stopped crossing
         or the meter stopped working**, so the row carries a positive control
-        drawn from the same population: `{% if a.b == 1 %}` resolves `a.b` on the
-        Python path, because `plan_if` takes `TemplateLiteral` conditions only and
-        an operator tree — thirteen operators deep — declines the whole node to
-        `Act::Delegate`. That tree must show the crossing the other two do not.
-        Note *delegated* and not *declined*: the plan survives and
-        `_native_plan is None` is reserved for `plan_list` rejecting the
-        template, a different failure an earlier draft of this docstring sent a
-        reader looking for.
+        drawn from the same population: a loop that unpacks —
+        `{% for p, q in a.b %}` — resolves its sequence on the Python path,
+        because `plan_for` takes single-variable loops only. An unpacking loop
+        writes one context entry per name and the order between those writes is
+        observable, so it is declined deliberately rather than half-owned. That
+        tree must show the crossing the other two do not. Note *delegated* and
+        not *declined*: the plan survives and `_native_plan is None` is reserved
+        for `plan_list` rejecting the template, a different failure an earlier
+        draft of this docstring sent a reader looking for.
+
+        **The control was `{% if a.b == 1 %}` until the walk learned `smartif`.**
+        An operator condition is owned now, so that tree stops crossing and the
+        control stopped controlling — the same way the crossing meter's canary
+        had to move off `escape` when its body became Rust's. Whatever is chosen
+        here has to be a construct the walk declines *on purpose*, and it has to
+        move again the day that stops being true.
 
         **And it must be the components, not a re-joined path.** Until M19 the
         shell called `_native.resolve(".".join(self.lookups), context)`, which is
@@ -1496,15 +1504,19 @@ class ResolverDelegationTests(unittest.TestCase):
                 f"and the node fell back to Python: {components}",
             )
 
-            delegated = render("{% if a.b == 1 %}y{% endif %}", {"a": {"b": 1}})
+            # A text body, so the sequence is the *only* lookup in the tree: a
+            # `{{ p }}` inside would resolve in Python too — the whole node is
+            # delegated — and the row would assert on two crossings where it
+            # means to assert on the one the control is about.
+            delegated = render("{% for p, q in a.b %}y{% endfor %}", {"a": {"b": [(1, 2)]}})
             self.assertEqual(delegated, "y", "the control tree's premise")
             self.assertEqual(
                 components,
                 [["a", "b"]],
                 "the control did not cross the seam either, and that is what "
                 "makes the two empty rows above assertions rather than "
-                "silence: an operator condition is `Act::Delegate` by design "
-                "and must resolve `a.b` in Python",
+                "silence: a loop that unpacks is `Act::Delegate` by design and "
+                "must resolve its sequence `a.b` in Python",
             )
             # The control is the last render and the only one that can push a
             # path, so this asserts on the row that would revert to the join.
