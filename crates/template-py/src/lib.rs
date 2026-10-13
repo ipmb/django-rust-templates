@@ -1975,26 +1975,28 @@ fn type_entry_is_absent(class: &Bound<'_, PyType>, name: &Bound<'_, PyString>) -
     }
     #[cfg(windows)]
     {
-        let lookup = || -> PyResult<bool> {
-            // SAFETY: the live type owns its MRO; dictionaries are borrowed
-            // from live bases while the GIL is held.
-            let ptr = unsafe { (*class.as_type_ptr()).tp_mro };
-            if ptr.is_null() {
-                return Ok(false);
-            }
-            let mro = unsafe { Bound::<PyAny>::from_borrowed_ptr(class.py(), ptr) };
-            for base in mro.cast::<PyTuple>()?.iter() {
-                let base = base.cast::<PyType>()?;
-                let ptr = unsafe { pyo3::ffi::PyType_GetDict(base.as_type_ptr()) };
-                let dict = unsafe { Bound::<PyDict>::from_borrowed_ptr(class.py(), ptr) };
-                if dict.get_item(name)?.is_some() {
-                    return Ok(false);
-                }
-            }
-            Ok(true)
-        };
-        lookup().unwrap_or(false)
+        mro_entry_is_absent(class, name).unwrap_or(false)
     }
+}
+
+#[cfg(any(windows, all(test, not(feature = "extension-module"))))]
+fn mro_entry_is_absent(class: &Bound<'_, PyType>, name: &Bound<'_, PyString>) -> PyResult<bool> {
+    // SAFETY: the live type owns its MRO; dictionaries are borrowed
+    // from live bases while the GIL is held.
+    let ptr = unsafe { (*class.as_type_ptr()).tp_mro };
+    if ptr.is_null() {
+        return Ok(false);
+    }
+    let mro = unsafe { Bound::<PyAny>::from_borrowed_ptr(class.py(), ptr) };
+    for base in mro.cast::<PyTuple>()?.iter() {
+        let base = base.cast::<PyType>()?;
+        let ptr = unsafe { pyo3::ffi::PyType_GetDict(base.as_type_ptr()) };
+        let dict = unsafe { Bound::<PyAny>::from_borrowed_ptr(class.py(), ptr) };
+        if dict.cast::<PyDict>()?.get_item(name)?.is_some() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Read the actual MRO dictionaries without invoking metaclass hooks or descriptors.
@@ -5219,6 +5221,15 @@ class Described(Base):
                 assert_eq!(
                     mro_subscript_entry_is_pin(class.cast::<PyType>().unwrap(), &pin).unwrap(),
                     expected,
+                    "{name}"
+                );
+                assert_eq!(
+                    mro_entry_is_absent(
+                        class.cast::<PyType>().unwrap(),
+                        intern!(py, "__getitem__")
+                    )
+                    .unwrap(),
+                    name == "Missing",
                     "{name}"
                 );
             }
