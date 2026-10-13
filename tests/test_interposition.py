@@ -1968,10 +1968,14 @@ class FilterRoutingTests(unittest.TestCase):
         third round deleted the rewriting altogether, so this row and its
         siblings no longer depend on where a boundary is drawn.
 
+        The delegated list was `[("LoadNode", 1)]` until `{% load %}` became
+        constant text; it is empty now, which states the same claim more
+        strongly.
+
         This row is the sibling of the one above for the same reason that one
         exists: the rows in the corpus pass if the loop is *re-delegated*, and
         the census is what separates the port from that. Both loops are the
-        walk's here, and the only delegated node is the `{% load %}`.
+        walk's here, and nothing is delegated at all.
         """
         from django_rust_templates import _native
         from django_rust_templates.engine import Context, Engine
@@ -2014,10 +2018,11 @@ class FilterRoutingTests(unittest.TestCase):
             )
         self.assertEqual(
             delegated,
-            [("LoadNode", 1)],
-            "`{% load %}` is the only node here the walk does not model — every "
-            "other node is the walk's own, so a `ForNode` in this list would be "
-            "a loop handed back to Python",
+            [],
+            "every node here is the walk's own, so anything in this list — a "
+            "`ForNode` above all — is a node handed back to Python. `{% load %}` "
+            "used to be the one entry; it renders `\"\"`, so it is now planned "
+            "as constant text (`engine/_stock.py::constant_text`)",
         )
 
     def test_every_read_of_the_loop_variable_reaches_the_context(self):

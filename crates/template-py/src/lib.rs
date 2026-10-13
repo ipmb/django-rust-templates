@@ -3247,6 +3247,31 @@ fn plan_for(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResul
 ///
 /// `None` means the pairing does not hold, which aborts the whole plan: a plan right about most nodes and
 /// wrong about one is a render that differs from Django's in a way no test would name.
+/// `engine/_stock.py`'s `constant_text`, cached.
+static CONSTANT_TEXT: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+/// The text a node will always render, or `None` for everything else.
+///
+/// Four built-ins answer this: `{% comment %}` and `{% load %}` render `""`,
+/// `{% verbatim %}` the content it was compiled with, `{% templatetag %}` one of eight
+/// constants. Delegating them spends a Python frame per render to return a value the compile
+/// already knew — measured against stock Django, `{% verbatim %}` 2.20x, `{% comment %}` 2.02x,
+/// `{% templatetag %}` 1.80x, and `{% load %}` is 119 of the 709 delegated nodes over eleven
+/// real pages.
+///
+/// **The decision is Python's, not a class-name match here.** `engine/_stock.py` holds the four
+/// classes and their stock `render` functions, read at import before anything can rebind them,
+/// and answers `None` for a subclass or a patched body. A name comparison in Rust would accept
+/// both. Called once per node at plan time, never per render.
+fn constant_text(py: Python<'_>, node: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
+    let func = CONSTANT_TEXT.import(py, "django_rust_templates.engine._stock", "constant_text")?;
+    let answer = func.call1((node,))?;
+    if answer.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(answer.extract::<String>()?))
+}
+
 fn plan_slot(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResult<Option<Slot>> {
     let class_name: String = node.get_type().name()?.to_string();
     // `HOST_NODE` is the one descriptor whose class name is not the object's: a user tag's compile
@@ -3284,6 +3309,11 @@ fn plan_slot(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResu
             })),
             None => Act::Delegate,
         }
+    } else if let Some(text) = constant_text(py, node)? {
+        // The node's whole output, known before any context exists. `Act::Text` and not a
+        // removed slot: the slot carries the node, which the culprit protocol reads when a
+        // *later* node raises.
+        Act::Text(text)
     } else {
         Act::Delegate
     };
