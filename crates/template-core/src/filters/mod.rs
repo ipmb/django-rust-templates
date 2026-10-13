@@ -19,6 +19,11 @@ mod padding;
 /// The one pure table more than one group's bodies need; see [`html_escape`].
 mod html_escape;
 
+/// `mark_safe`/`conditional_escape` answered natively for text Rust holds. Not
+/// a filter: a helper the safety-related bodies share, so the rule about which
+/// `Value` variants may be answered without Python is written down once.
+pub mod safety;
+
 /// Reachable outside the crate while the *module* stays private. `pub use` rather
 /// than `pub mod` so `filters::html_escape::html_escape` is not a second name for it.
 pub use html_escape::html_escape;

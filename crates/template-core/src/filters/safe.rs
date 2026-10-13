@@ -23,13 +23,14 @@
 //! `(SafeString, '<b>')` — the passthrough.
 
 use crate::filters::host::FilterCall;
+use crate::filters::safety;
 use crate::filters::value::Value;
 use crate::parser::error::Error;
 
 /// `safe`'s body: `mark_safe(value)`, whole, on the value the `@stringfilter`
 /// wrapper produced.
 pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
-    Ok(call.host.mark_safe(value))
+    Ok(safety::mark_safe(value, call))
 }
 
 #[cfg(test)]
@@ -45,18 +46,18 @@ mod tests {
         }
     }
 
-    /// The marker is the host's answer, and the body makes exactly that one call.
+    /// An exact `str` is marked in Rust: `mark_safe` of a plain `str` is
+    /// `SafeString` with the same text, which `Value::Safe` is. The host is not
+    /// asked — this was one Python crossing per call and measured 1.21x *slower*
+    /// than the engine this package replaces.
     #[test]
-    fn it_marks_the_value_safe_through_the_host() {
-        let h = TestFilterHost {
-            mark_safe: Some(Value::Safe("MARKED".into())),
-            ..TestFilterHost::default()
-        };
+    fn a_plain_string_is_marked_in_rust() {
+        let h = TestFilterHost::default();
         assert_eq!(
             run(Value::Str("x".into()), None, &call(&h)).unwrap(),
-            Value::Safe("MARKED".into())
+            Value::Safe("x".into())
         );
-        assert_eq!(h.calls(), vec!["mark_safe"]);
+        assert!(h.calls().is_empty(), "{:?}", h.calls());
     }
 
     /// **A non-`str` value is handed to the host rather than cast in Rust.** The

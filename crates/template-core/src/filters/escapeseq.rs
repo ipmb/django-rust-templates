@@ -30,6 +30,7 @@
 //! — `escapeseq(5)` has no `try`.
 
 use crate::filters::host::FilterCall;
+use crate::filters::safety;
 use crate::filters::value::Value;
 use crate::parser::error::Error;
 
@@ -38,7 +39,7 @@ pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<V
     let items = call.host.iter_values(&value)?;
     let mut escaped = Vec::with_capacity(items.len());
     for item in &items {
-        escaped.push(call.host.conditional_escape(item)?);
+        escaped.push(safety::conditional_escape(item, call)?);
     }
     Ok(Value::List(escaped))
 }
@@ -57,13 +58,41 @@ mod tests {
         }
     }
 
-    /// One `conditional_escape` per element, and the list is a plain
+    /// Every element is escaped, not just the first, and the list is a plain
     /// [`Value::List`] — **not** `Value::Safe` — so the safety is per element, as
     /// `is_safe=True` plus `base.py:816` measure it.
+    ///
+    /// Asserted on the text rather than on a scripted sentinel: native strings are
+    /// escaped in Rust now (`filters::safety`), and the real table is the stronger
+    /// claim anyway.
     #[test]
-    fn it_escapes_every_element_through_the_host() {
+    fn it_escapes_every_element() {
+        // `iter_values` is scripted because it is a host *trait* call whatever the
+        // value is; the real host answers it for a `Value::List` without Python.
         let h = TestFilterHost {
             iter_values: Some(vec![Value::Str("a".into()), Value::Str("<b>".into())]),
+            ..TestFilterHost::default()
+        };
+        assert_eq!(
+            run(Value::List(vec![]), None, &call(&h)).unwrap(),
+            Value::List(vec![
+                Value::Safe("a".into()),
+                Value::Safe("&lt;b&gt;".into()),
+            ])
+        );
+        assert_eq!(
+            h.calls(),
+            vec!["iter_values"],
+            "no element reached `conditional_escape`"
+        );
+    }
+
+    /// The same claim for elements Rust cannot escape itself: one host call per
+    /// element, never one for the sequence.
+    #[test]
+    fn it_escapes_every_opaque_element_through_the_host() {
+        let h = TestFilterHost {
+            iter_values: Some(vec![Value::Opaque(0), Value::Opaque(1)]),
             conditional_escape: Some(Value::Safe("ESCAPED".into())),
             ..TestFilterHost::default()
         };

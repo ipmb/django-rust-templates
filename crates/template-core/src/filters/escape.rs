@@ -31,12 +31,13 @@
 //! skips the table.
 
 use crate::filters::host::FilterCall;
+use crate::filters::safety;
 use crate::filters::value::Value;
 use crate::parser::error::Error;
 
 /// `escape`'s body: `conditional_escape(value)`, whole.
 pub fn run(value: Value, _arg: Option<Value>, call: &FilterCall<'_>) -> Result<Value, Error> {
-    call.host.conditional_escape(&value)
+    safety::conditional_escape(&value, call)
 }
 
 #[cfg(test)]
@@ -52,41 +53,50 @@ mod tests {
         }
     }
 
-    /// The body is one call and returns whatever it answered, so both the text and
-    /// the safety marker are the host's.
+    /// An exact `str` is escaped in Rust, with Django's own table and Django's
+    /// own answer — `conditional_escape` reaches `escape(text)` for a value with
+    /// no `__html__`, and the result is safe. The host is not asked, which is the
+    /// point: this was one Python crossing per call and measured 1.35x *slower*
+    /// than the engine this package replaces.
     #[test]
-    fn it_delegates_to_conditional_escape_and_returns_its_answer() {
+    fn a_plain_string_is_escaped_in_rust() {
+        let h = TestFilterHost::default();
+        assert_eq!(
+            run(Value::Str("<a>&'\"".into()), None, &call(&h)).unwrap(),
+            Value::Safe("&lt;a&gt;&amp;&#x27;&quot;".into())
+        );
+        assert!(h.calls().is_empty(), "{:?}", h.calls());
+    }
+
+    /// The branch that is still the host's, and the reason it has to be: a
+    /// `Promise` or a markupsafe `Markup` is an `Opaque`, and `conditional_escape`
+    /// answers for both in ways no Rust `Value` can.
+    #[test]
+    fn an_opaque_value_is_still_the_hosts() {
         let h = TestFilterHost {
             conditional_escape: Some(Value::Safe("ESCAPED".into())),
             ..TestFilterHost::default()
         };
         assert_eq!(
-            run(Value::Str("<a>".into()), None, &call(&h)).unwrap(),
+            run(Value::Opaque(0), None, &call(&h)).unwrap(),
             Value::Safe("ESCAPED".into())
         );
         assert_eq!(h.calls(), vec!["conditional_escape"]);
     }
 
-    /// **The `SafeData` branch is the host's, deliberately.** A body that asked
-    /// [`FilterHost::is_safe`](crate::filters::host::FilterHost::is_safe) itself
-    /// and skipped the escape would be a second, drifting `conditional_escape` —
-    /// wrong for markupsafe's `Markup` and for a `Promise`, per §D4. So the body
-    /// must reach `conditional_escape` even when the input is already safe.
+    /// **A `SafeData` string is returned unescaped, and that is the row that
+    /// tells `escape` from `force_escape`.** It is answered in Rust now, which is
+    /// sound only because `Value::Safe` is produced for `isinstance(…, SafeData)`
+    /// alone: a `str` subclass carrying `__html__` *without* being `SafeData` —
+    /// markupsafe's `Markup` — is interned as an `Opaque` by the classifier and so
+    /// takes the host branch above. See `filters::safety`.
     #[test]
-    fn it_leaves_the_safe_data_branch_to_the_host() {
-        let h = TestFilterHost {
-            conditional_escape: Some(Value::Safe("<b>".into())),
-            ..TestFilterHost::default()
-        };
+    fn a_safe_string_is_not_escaped_again() {
+        let h = TestFilterHost::default();
         assert_eq!(
             run(Value::Safe("<b>".into()), None, &call(&h)).unwrap(),
             Value::Safe("<b>".into())
         );
-        h.assert_called("conditional_escape");
-        assert!(
-            !h.calls().contains(&"is_safe"),
-            "the host owns the `__html__` question: {:?}",
-            h.calls()
-        );
+        assert!(h.calls().is_empty(), "{:?}", h.calls());
     }
 }

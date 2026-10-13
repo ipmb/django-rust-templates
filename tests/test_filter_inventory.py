@@ -344,9 +344,29 @@ CODE_POINT_LOCAL_STR_METHODS = {"upper"}
 # Rust bodies did not exist. Metric D asks the bodies directly, and is the only
 # one of the four that fails when someone *edits a body* — which is the claim
 # the delegating set is for.
+# Filters whose body **used** to delegate and no longer does, each with the reason
+# the conversion was sound. Metric D is read off our own bodies, so these must be
+# subtracted from the set A-C derive from `defaultfilters.py` -- which still
+# delegates, because that is Django's code and it has not changed.
+#
+# Naming them is the point of the guard rather than an escape from it: a body that
+# stops delegating without being listed here still reddens.
+#
+# * `truncatewords` -- `Truncator.words` is `" ".join(text.split()[:length])` plus a
+#   marker (`text.py:251-261`). It does **not** normalize and never calls
+#   `unicodedata.combining`; only `Truncator.chars` does (`text.py:205`,
+#   `text.py:220`), which is why `truncatechars` is still on the list. The split is
+#   `pyunicode::split`, Python's `str.split()` over the table this package already
+#   pins, and the marker is `" …"` rather than `None`, so `add_truncation_text`
+#   (`text.py:73-86`) takes its literal branch and never reaches `pgettext`.
+CONVERTED_TO_RUST = {"truncatewords"}
+
 HOST_RS = PROJECT_ROOT / "crates/template-core/src/filters/host.rs"
 FILTER_MODULES = HOST_RS.parent
-NON_FILTER_MODULES = {"host", "mod", "html_escape", "padding", "value"}
+# `safety` is a helper, not a filter: `mark_safe`/`conditional_escape` answered
+# natively for the `Value` variants the classifier proves are plain text, shared
+# by the bodies that used to spend a Python crossing on them.
+NON_FILTER_MODULES = {"host", "mod", "html_escape", "padding", "safety", "value"}
 
 # The trait's section markers, in order. Metric D's entire content is *which of
 # these sections count*, so the list is asserted against the trait rather than
@@ -880,10 +900,12 @@ class FilterInventoryTests(unittest.TestCase):
             f"union: {sorted(union)} ({len(union)})",
         )
         self.assertEqual(
-            in_rust, DELEGATING_FILTERS | LIBRARY_FILTERS,
+            in_rust, (DELEGATING_FILTERS | LIBRARY_FILTERS) - CONVERTED_TO_RUST,
             "the Rust bodies and the Python source disagree about who delegates:"
             f" only in Rust: {sorted(in_rust - (DELEGATING_FILTERS | LIBRARY_FILTERS))};"
-            f" only in Python: {sorted((DELEGATING_FILTERS | LIBRARY_FILTERS) - in_rust)}",
+            " only in Python:"
+            f" {sorted((DELEGATING_FILTERS | LIBRARY_FILTERS) - CONVERTED_TO_RUST - in_rust)}"
+            f" (converted on purpose: {sorted(CONVERTED_TO_RUST)})",
         )
         self.assertEqual(len(DELEGATING_FILTERS), 24)
 
@@ -950,10 +972,14 @@ class FilterInventoryTests(unittest.TestCase):
             {"f"},
         )
         self.assertEqual(host_calls("// host.h(x)\ncall.host.k(y)"), {"k"})
-        # And both multi-line truncators are in the derived set, which is what
-        # the whitespace-tolerant match buys.
-        for name in ("truncatewords", "truncatewords_html"):
-            self.assertIn(name, delegating_filters_in_rust())
+        # And the multi-line truncator is in the derived set, which is what the
+        # whitespace-tolerant match buys. `truncatewords` was the second example
+        # until its body stopped delegating (see `CONVERTED_TO_RUST`);
+        # `truncatewords_html` still writes `call.host\n            .truncate(…)`,
+        # so the shape that broke the first derivation is still covered by a real
+        # file rather than only by the synthetic strings above.
+        self.assertIn("truncatewords_html", delegating_filters_in_rust())
+        self.assertNotIn("truncatewords", delegating_filters_in_rust())
 
     def test_the_lazy_decorator_metric_cuts_its_five_to_one(self):
         """Metric C's candidates, its verdicts, and the cut from 5 to 1.
