@@ -52,6 +52,7 @@
 //!   `cut("abc", "")` is a pinned case below.
 
 use crate::filters::host::FilterCall;
+use crate::filters::safety;
 use crate::filters::value::Value;
 use crate::parser::error::{Error, PyErrorKind};
 
@@ -104,7 +105,7 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
     };
     let replaced = text.replace(arg_text, "");
     if safe && arg_text != ";" {
-        Ok(call.host.mark_safe(Value::Str(replaced.into())))
+        Ok(safety::mark_safe(Value::Str(replaced.into()), call))
     } else {
         Ok(Value::Str(replaced.into()))
     }
@@ -219,7 +220,9 @@ mod tests {
             Value::Safe("ab".into()),
             "safe value, arg != \";\": mark_safe"
         );
-        h.assert_called("mark_safe");
+        // The safety is asserted on the value just above. `mark_safe` of a
+        // native string is Rust's now (`filters::safety`), so there is no host
+        // call left to assert on.
     }
 
     /// The value is coerced, so `cut(5, "5")` is `""` — measured. The argument is

@@ -60,6 +60,7 @@
 //!   append digits.
 
 use crate::filters::host::{DecimalParse, DecimalTuple, FilterCall, NumberFormatArgs};
+use crate::filters::safety;
 use crate::filters::value::Value;
 use crate::parser::error::{Error, ErrorKind, PyErrorKind};
 use crate::pynum::IntValue;
@@ -282,7 +283,7 @@ fn formatted(
         use_l10n: Some(dispatch.use_l10n),
         force_grouping: dispatch.force_grouping,
     });
-    call.host.mark_safe(Value::Str(text.into()))
+    safety::mark_safe(Value::Str(text.into()), call)
 }
 
 /// `floatformat`'s body: the Rust dispatch, the host's decimal parse, the three
@@ -381,7 +382,7 @@ mod tests {
             decimal_parse: Some(decimal),
             to_int: Some(int),
             number_format: Some("FORMATTED".to_string()),
-            mark_safe: Some(Value::Safe("MARKED".into())),
+            mark_safe: Some(Value::Safe("FORMATTED".into())),
             decimal_quantize: Some(DecimalTuple {
                 sign: false,
                 digits: vec![7],
@@ -399,13 +400,10 @@ mod tests {
         let h = args(parsed(true, Some(0), &[6, 6, 6, 7]), IntValue::Small(-1));
         assert_eq!(
             run(Value::Float(6666.6666), None, &call(&h)).unwrap(),
-            Value::Safe("MARKED".into()),
+            Value::Safe("FORMATTED".into()),
             "the marked answer comes back, not the assembled text"
         );
-        assert_eq!(
-            h.calls(),
-            vec!["decimal_parse", "to_int", "number_format", "mark_safe"]
-        );
+        assert_eq!(h.calls(), vec!["decimal_parse", "to_int", "number_format"]);
     }
 
     /// A fractional value takes the quantize path, in the source's order: parse,
@@ -418,16 +416,17 @@ mod tests {
         );
         assert_eq!(
             run(Value::Float(6666.6666), None, &call(&h)).unwrap(),
-            Value::Safe("MARKED".into())
+            Value::Safe("FORMATTED".into())
         );
         assert_eq!(
             h.calls(),
             vec![
+                // `mark_safe` of the formatted native string is Rust's
+                // (`filters::safety`), so it is no longer a host call.
                 "decimal_parse",
                 "to_int",
                 "decimal_quantize",
-                "number_format",
-                "mark_safe"
+                "number_format"
             ]
         );
     }
@@ -442,7 +441,7 @@ mod tests {
         let h = args(parsed(true, Some(199), &digits), IntValue::Small(-1));
         assert_eq!(
             run(Value::Int(1), None, &call(&h)).unwrap(),
-            Value::Safe("MARKED".into())
+            Value::Safe("FORMATTED".into())
         );
         h.assert_called("number_format");
 
@@ -586,7 +585,7 @@ mod tests {
         let h = args(parsed(true, Some(0), &[3, 4]), IntValue::Small(-1));
         assert_eq!(
             run(Value::Float(34.0), None, &call(&h)).unwrap(),
-            Value::Safe("MARKED".into())
+            Value::Safe("FORMATTED".into())
         );
         h.assert_called("decimal_parse");
         h.assert_called("to_int");
