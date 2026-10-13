@@ -2900,8 +2900,8 @@ fn special_entry<'py>(
         for base in mro.cast::<PyTuple>()?.iter() {
             let base = base.cast::<PyType>()?;
             let ptr = unsafe { pyo3::ffi::PyType_GetDict(base.as_type_ptr()) };
-            let dict = unsafe { Bound::<PyDict>::from_borrowed_ptr(class.py(), ptr) };
-            if let Some(entry) = dict.get_item(name)? {
+            let dict = unsafe { Bound::<PyAny>::from_borrowed_ptr(class.py(), ptr) };
+            if let Some(entry) = dict.cast::<PyDict>()?.get_item(name)? {
                 return Ok(Some(entry));
             }
         }

@@ -21,7 +21,7 @@ Focused scope workloads show larger savings over alpha2 (Python 3.12.9, medians 
 
 The bakerydemo benchmark still spends most of its time in tag bodies, ORM work, and caches, which these changes preserve. All implementation and test changes are inside django-rust-templates.
 
-Use `scripts/bench_bakerydemo.py` with a freshly extracted candidate wheel and `--rust-pythonpath` to reproduce the page comparison. Baseline and candidate were built separately from alpha2's source and this implementation; the three-way run rotates Django, baseline, and candidate order, with 250 samples per page and backend.
+Use `scripts/bench_bakerydemo.py` with a freshly extracted candidate wheel and `--rust-pythonpath` to reproduce the page comparison. Baseline and candidate were built separately from alpha2's source and this implementation, before the alpha3 version bump; the three-way run rotates Django, baseline, and candidate order, with 250 samples per page and backend.
 
 ## Validation
 

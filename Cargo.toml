@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/template-core", "crates/template-py"]
 
 [workspace.package]
-version = "6.0.9-alpha2"
+version = "6.0.9-alpha3"
 edition = "2021"
 rust-version = "1.82"
 license = "BSD-3-Clause"
