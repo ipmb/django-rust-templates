@@ -1,6 +1,10 @@
 """Presentation arithmetic, inventory completeness, and a real Rust-backed export."""
 
+import json
+import os
 from pathlib import Path
+import subprocess
+import tempfile
 import sys
 import unittest
 
@@ -119,7 +123,22 @@ class BenchmarkPresentationTests(unittest.TestCase):
             self.skipTest(
                 "Report dependencies are installed only for the benchmark workflow"
             )
-        page = bench_report.render(payload())
+        with tempfile.TemporaryDirectory(prefix="benchmark-report-test-") as directory:
+            results = Path(directory) / "results.json"
+            output = Path(directory) / "report.html"
+            results.write_text(json.dumps(payload()), encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    str(ROOT / "scripts/bench_site.py"),
+                    "--export",
+                    str(output),
+                ],
+                env=dict(os.environ, BENCHMARK_RESULTS=str(results)),
+                check=True,
+            )
+            page = output.read_text(encoding="utf-8")
         self.assertIn("Rendered with django-rust-templates + nanodjango.", page)
         self.assertIn("&lt;unsafe example&gt;", page)
         self.assertNotIn("<unsafe example>", page)
