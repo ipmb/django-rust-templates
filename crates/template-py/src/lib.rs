@@ -2330,6 +2330,7 @@ const INCLUDE_NODE: &str = "IncludeNode";
 /// `BlockNode.render` renders the body nodelist through `NodeList._render_with_plan`, so the plan goes
 /// on the nodelist — see [`plan_block_bodies`].
 const BLOCK_NODE: &str = "BlockNode";
+const WITH_NODE: &str = "WithNode";
 
 /// The nesting depth past which the walk raises, rather than letting the Rust stack run out.
 ///
@@ -2467,6 +2468,8 @@ enum Act {
     If(Box<IfPlan>),
     /// A `{% for %}` the walk owns end to end.
     For(Box<ForPlan>),
+    /// A scoped body, with Django's context manager and binding resolution.
+    With(Box<WithPlan>),
     /// An `{% include %}` the walk resolves and renders itself.
     Include(Box<IncludePlan>),
     /// A third-party `simple_tag`, whose scaffolding the walk owns.
@@ -2510,6 +2513,11 @@ struct ForPlan {
     /// `PyString::new` and not `PyString::intern` — the name comes from the template, and the
     /// interpreter's intern table is permanent.
     loopvar: Py<PyString>,
+}
+
+struct WithPlan {
+    body: Vec<Slot>,
+    nodelist: Py<PyAny>,
 }
 
 /// A third-party `{% simple_tag %}` the walk calls itself.
@@ -2681,6 +2689,13 @@ impl<'py> ContextLayers<'py> {
     /// with is a call to the target that belongs in that gap, which is only possible while the gap
     /// is still open.
     fn push_context(context: &Bound<'py, PyAny>) -> PyResult<Self> {
+        Self::push_values(context, None)
+    }
+
+    fn push_values(
+        context: &Bound<'py, PyAny>,
+        values: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Self> {
         let mut layers = Self {
             context: context.clone(),
             pushed_exit: None,
@@ -2689,7 +2704,7 @@ impl<'py> ContextLayers<'py> {
             tripped: false,
             done: false,
         };
-        layers.pushed_exit = Some(enter(context.call_method0("push")?)?);
+        layers.pushed_exit = Some(enter(context.call_method("push", (), values)?)?);
         Ok(layers)
     }
 
@@ -2802,24 +2817,96 @@ impl<'py> ContextLayers<'py> {
 ///
 /// The exit is what is kept — it holds the manager alive on its own — and what [`exit`] calls.
 ///
-/// **What this costs, and what the cheaper spelling would buy.** `manager.getattr(name)` is one C
-/// call where this is three, two of them Python-level. Measured over `real-world/complex` that
-/// spelling is 9.3% of the row — 476.3 us against 525.1 us, 72 includes, ~0.68 us an include — and it
-/// is wrong for a manager carrying `__enter__` or `__exit__` in its own `__dict__`, which
-/// `_PyObject_LookupSpecial` skips and `PyObject_GetAttr` honours; `contextlib._GeneratorContextManager`
-/// has a `__dict__`. Replacing the `__get__` call with `PyMethod_New` — the function case of what the
-/// special lookup does — measured inside one build's own scatter, so it was not taken.
+/// Resolve from the actual MRO dictionaries and bind through `tp_descr_get`, as
+/// CPython does. This skips metaclass and instance hooks and avoids the Python
+/// reflection calls that the old `class.getattr(...).__get__(...)` spelling made.
 fn enter<'py>(manager: Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = manager.py();
     let class = manager.get_type();
     let bind = |name: &str| -> PyResult<Bound<'py, PyAny>> {
-        class
-            .getattr(name)?
-            .call_method1("__get__", (&manager, &class))
+        let key = if name == "__enter__" {
+            intern!(py, "__enter__")
+        } else {
+            intern!(py, "__exit__")
+        };
+        let Some(descriptor) = special_entry(&class, key)? else {
+            let type_name = if py.version_info().minor >= 14 {
+                class.fully_qualified_name()?.extract::<String>()?
+            } else {
+                // SAFETY: the live type owns this NUL-terminated name, under the GIL.
+                unsafe { std::ffi::CStr::from_ptr((*class.as_type_ptr()).tp_name) }
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            let missing = if py.version_info().minor >= 14 || name == "__exit__" {
+                format!(" (missed {name} method)")
+            } else {
+                String::new()
+            };
+            return Err(PyTypeError::new_err(format!(
+                "'{type_name}' object does not support the context manager protocol{missing}"
+            )));
+        };
+        // Special lookup binds through the descriptor's type slot, ignoring
+        // both metaclass hooks and a __get__ placed on the descriptor instance.
+        // SAFETY: all three objects are live under the GIL; tp_descr_get returns
+        // a new reference, or NULL with an exception set.
+        let getter = unsafe { (*pyo3::ffi::Py_TYPE(descriptor.as_ptr())).tp_descr_get };
+        match getter {
+            Some(get) => unsafe {
+                Bound::from_owned_ptr_or_err(
+                    py,
+                    get(descriptor.as_ptr(), manager.as_ptr(), class.as_ptr()),
+                )
+            },
+            None => Ok(descriptor),
+        }
     };
-    let enter_method = bind("__enter__")?;
-    let exit_method = bind("__exit__")?;
+    // 3.14's LOAD_SPECIAL binds exit first; BEFORE_WITH on 3.12/3.13 binds enter first.
+    let (enter_method, exit_method) = if py.version_info().minor >= 14 {
+        let exit_method = bind("__exit__")?;
+        (bind("__enter__")?, exit_method)
+    } else {
+        let enter_method = bind("__enter__")?;
+        (enter_method, bind("__exit__")?)
+    };
     enter_method.call0()?;
     Ok(exit_method)
+}
+
+fn special_entry<'py>(
+    class: &Bound<'py, PyType>,
+    name: &Bound<'py, PyString>,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    #[cfg(not(windows))]
+    {
+        // SAFETY: live type and interned name under the GIL. The borrowed
+        // entry is promoted to an owned reference before any descriptor runs.
+        let ptr = unsafe { _PyType_Lookup(class.as_type_ptr(), name.as_ptr()) };
+        Ok(if ptr.is_null() {
+            None
+        } else {
+            Some(unsafe { Bound::from_borrowed_ptr(class.py(), ptr) })
+        })
+    }
+    #[cfg(windows)]
+    {
+        // SAFETY: the live type owns its ready MRO, and each live base owns its dictionary.
+        let ptr = unsafe { (*class.as_type_ptr()).tp_mro };
+        if ptr.is_null() {
+            return Ok(None);
+        }
+        let mro = unsafe { Bound::<PyAny>::from_borrowed_ptr(class.py(), ptr) };
+        for base in mro.cast::<PyTuple>()?.iter() {
+            let base = base.cast::<PyType>()?;
+            let ptr = unsafe { pyo3::ffi::PyType_GetDict(base.as_type_ptr()) };
+            let dict = unsafe { Bound::<PyAny>::from_borrowed_ptr(class.py(), ptr) };
+            if let Some(entry) = dict.cast::<PyDict>()?.get_item(name)? {
+                return Ok(Some(entry));
+            }
+        }
+        Ok(None)
+    }
 }
 
 /// Exit one layer with the failure in flight, if there is one, and **swallow** it if the manager
@@ -3567,6 +3654,39 @@ fn plan_simple_tag(py: Python<'_>, node: &Bound<'_, PyAny>) -> PyResult<Option<S
     }))
 }
 
+static WITH_NODE_IS_STOCK: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+static WITH_VALUES: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+static WITH_LOOP_IS_STOCK: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+fn plan_with(
+    py: Python<'_>,
+    desc: &NodeDesc,
+    node: &Bound<'_, PyAny>,
+) -> PyResult<Option<WithPlan>> {
+    if !WITH_NODE_IS_STOCK
+        .import(
+            py,
+            "django_rust_templates.engine._stock",
+            "with_node_is_stock",
+        )?
+        .call1((node,))?
+        .is_truthy()?
+    {
+        return Ok(None);
+    }
+    let Some((_, body_desc)) = desc.nodelists.iter().find(|(name, _)| name == "nodelist") else {
+        return Ok(None);
+    };
+    let nodelist = node.getattr("nodelist")?;
+    let Some(slots) = plan_list(py, body_desc, &nodelist)? else {
+        return Ok(None);
+    };
+    Ok(Some(WithPlan {
+        body: slots,
+        nodelist: nodelist.unbind(),
+    }))
+}
+
 fn plan_slot(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResult<Option<Slot>> {
     let class_name: String = node.get_type().name()?.to_string();
     // `HOST_NODE` is the one descriptor whose class name is not the object's: a user tag's compile
@@ -3590,6 +3710,11 @@ fn plan_slot(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResu
     } else if class_name == FOR_NODE {
         match plan_for(py, desc, node)? {
             Some(plan) => Act::For(Box::new(plan)),
+            None => Act::Delegate,
+        }
+    } else if class_name == WITH_NODE {
+        match plan_with(py, desc, node)? {
+            Some(plan) => Act::With(Box::new(plan)),
             None => Act::Delegate,
         }
     } else if class_name == IF_NODE {
@@ -3842,6 +3967,9 @@ struct Walk<'py> {
     /// How many nodes have been pushed. Read by [`Walk::push_python`] as the **node index** of the piece it
     /// is holding, the ordinal `NodeList.render`'s `"".join` would name for it.
     nodes: usize,
+    /// Scoped nodelists preserve their own join boundaries, including the
+    /// loop-wide join spanning all iterations.
+    scoped_joins: usize,
     census: Option<Census>,
     /// The implementations an included target must still answer to, read once per process by
     /// [`stock`]. `None` when they could not be read, in which case every include declines. See
@@ -3856,6 +3984,7 @@ impl<'py> Walk<'py> {
     /// `depth` is the walk's own nesting count, checked against [`MAX_WALK_DEPTH`] — the one piece of state
     /// a body inherits from its parent.
     fn run(&mut self, slots: &[Slot], depth: usize) -> PyResult<()> {
+        let py = self.py;
         if depth > MAX_WALK_DEPTH {
             return Err(pyo3::exceptions::PyRecursionError::new_err(
                 "maximum recursion depth exceeded",
@@ -3882,8 +4011,34 @@ impl<'py> Walk<'py> {
                     Ok(Rendered::Refused) => self.delegate(slot)?,
                     Err(error) => return Err(self.culprit(slot, error)),
                 },
+                Act::For(plan) if self.scoped_joins > 0 => {
+                    if WITH_LOOP_IS_STOCK
+                        .import(
+                            py,
+                            "django_rust_templates.engine._stock",
+                            "with_loop_is_stock",
+                        )?
+                        .call1((&self.context, slot.node.bind(py)))?
+                        .is_truthy()?
+                    {
+                        match self.run_scoped_for(plan, depth + 1) {
+                            Ok(output) => {
+                                self.push_python(output)?;
+                                census_bump(&mut self.census, &slot.class_name, false);
+                            }
+                            Err(error) => return Err(self.culprit(slot, error)),
+                        }
+                    } else {
+                        self.delegate(slot)?;
+                    }
+                }
                 Act::For(plan) => match self.run_for(plan, depth + 1) {
                     Ok(()) => census_bump(&mut self.census, &slot.class_name, false),
+                    Err(error) => return Err(self.culprit(slot, error)),
+                },
+                Act::With(plan) => match self.run_with(slot, plan, depth + 1) {
+                    Ok(Rendered::Done) => census_bump(&mut self.census, &slot.class_name, false),
+                    Ok(Rendered::Refused) => self.delegate(slot)?,
                     Err(error) => return Err(self.culprit(slot, error)),
                 },
                 Act::SimpleTag(plan) => match self.run_simple_tag(slot, plan) {
@@ -3976,6 +4131,107 @@ impl<'py> Walk<'py> {
         }
         self.emit(value)?;
         Ok(Rendered::Done)
+    }
+
+    /// Resolve bindings before entering the scope, then render its body in a
+    /// separate accumulator. The body's join and the manager's unwind complete
+    /// before its result is appended to the parent nodelist.
+    fn run_with(&mut self, slot: &Slot, plan: &WithPlan, depth: usize) -> PyResult<Rendered> {
+        let py = self.py;
+        let Some(stock) = self.bypassed else {
+            return Ok(Rendered::Refused);
+        };
+        let Some(_frame) = WalkFrame::enter() else {
+            return Ok(Rendered::Refused);
+        };
+        let values = WITH_VALUES
+            .import(py, "django_rust_templates.engine._stock", "with_values")?
+            .call1((slot.node.bind(py), &self.context))?;
+        if values.is_none() {
+            return Ok(Rendered::Refused);
+        }
+        let layers = ContextLayers::push_values(&self.context, Some(values.cast::<PyDict>()?))?;
+        // Read the body and its render method after entering: a custom push can
+        // replace either. A refusal here calls that already-resolved method,
+        // without repeating bindings or pushing the scope again.
+        let outcome = (|| -> PyResult<Py<PyAny>> {
+            let body = slot.node.bind(py).getattr("nodelist")?;
+            let render = body.getattr("render")?;
+            if body.is(plan.nodelist.bind(py))
+                && body.get_type().is(stock.nodelist.bind(py))
+                && render.get_type().is(stock.method_type.bind(py))
+                && render.getattr("__self__")?.is(&body)
+                && render
+                    .getattr("__func__")?
+                    .is(stock.nodelist_render.bind(py))
+            {
+                self.autoescape = self.context.getattr(intern!(py, "autoescape"))?.extract()?;
+                self.use_tz = None;
+                return self.render_scoped_body(&plan.body, depth);
+            }
+            Ok(render.call1((&self.context,))?.unbind())
+        })();
+        self.push_python(layers.finish(outcome)?)?;
+        self.autoescape = self.context.getattr(intern!(py, "autoescape"))?.extract()?;
+        self.use_tz = None;
+        Ok(Rendered::Done)
+    }
+
+    fn render_scoped_body(&mut self, body: &[Slot], depth: usize) -> PyResult<Py<PyAny>> {
+        let outer_out = std::mem::take(&mut self.out);
+        let outer_spill = self.spill.take();
+        let outer_nodes = std::mem::replace(&mut self.nodes, 0);
+        self.scoped_joins += 1;
+        let outcome = self.run(body, depth).and_then(|()| self.finish_output());
+        // Restore the parent even when rendering or the body join raises.
+        self.out = outer_out;
+        self.spill = outer_spill;
+        self.nodes = outer_nodes;
+        self.scoped_joins -= 1;
+        outcome
+    }
+
+    fn run_scoped_for(&mut self, plan: &ForPlan, depth: usize) -> PyResult<Py<PyAny>> {
+        let py = self.py;
+        let parentloop = self.parentloop()?;
+        let layers = ContextLayers::push_context(&self.context)?;
+        let outer_out = std::mem::take(&mut self.out);
+        let outer_spill = self.spill.take();
+        let outer_nodes = std::mem::replace(&mut self.nodes, 0);
+        let result = self.run_loop_body(plan, &parentloop, depth);
+        let empty = matches!(result, Ok(true));
+        let outcome = result.and_then(|_| {
+            if empty {
+                self.finish_output()
+            } else {
+                Ok(py.None())
+            }
+        });
+        let outcome = layers.finish(outcome).and_then(|output| {
+            if empty {
+                Ok(output)
+            } else {
+                self.finish_output()
+            }
+        });
+        self.out = outer_out;
+        self.spill = outer_spill;
+        self.nodes = outer_nodes;
+        outcome
+    }
+
+    fn finish_output(&mut self) -> PyResult<Py<PyAny>> {
+        let py = self.py;
+        let out: Py<PyAny> = match self.spill.take() {
+            None => PyString::new(py, &self.out).into_any().unbind(),
+            Some(pieces) => PyString::new(py, "")
+                .call_method1("join", (PyList::new(py, pieces)?,))?
+                .unbind(),
+        };
+        Ok(SAFE_STRING
+            .import(py, "django.utils.safestring", "SafeString")?
+            .call1((out,))?
+            .unbind())
     }
 
     /// Run one third-party `simple_tag` — `SimpleNode.render` (`django/template/library.py`).
@@ -4086,7 +4342,12 @@ impl<'py> Walk<'py> {
                 },
             };
             if matched {
-                self.run(body, depth)?;
+                if self.scoped_joins > 0 {
+                    let output = self.render_scoped_body(body, depth)?;
+                    self.push_python(output)?;
+                } else {
+                    self.run(body, depth)?;
+                }
                 return Ok(Rendered::Done);
             }
         }
@@ -4332,9 +4593,9 @@ impl<'py> Walk<'py> {
     /// not fit **spills** the accumulator into Python's; the slow path ends in `"".join`, as `NodeList.render`
     /// does (`engine/base.py:1204-1205`).
     /// A **`str` that will not fit** goes into the spill; a piece that is **not a `str` at all** is a value
-    /// Django dies on: the `join` raises `TypeError`, and this raises from the same call rather than
-    /// re-writing its message. The list is padded with empty strings so the offending piece sits at its
-    /// **node** index (`self.nodes`), since the `join` raises before concatenating anything.
+    /// Django dies on: keep it until the final `join` raises `TypeError`, after all
+    /// sibling nodes have rendered. Empty padding keeps the offending piece at
+    /// its **node** index (`self.nodes`) despite an aggregated string prefix.
     fn push_python(&mut self, piece: Py<PyAny>) -> PyResult<()> {
         let py = self.py;
         let fits = match piece.bind(py).cast::<PyString>() {
@@ -4353,13 +4614,22 @@ impl<'py> Walk<'py> {
             }
             self.spill.as_mut().unwrap().push(piece);
         } else {
-            let list = PyList::empty(py);
-            for _ in 0..self.nodes {
-                list.append("")?;
+            // NodeList first renders every child and then joins. Keep a bad
+            // piece until that join so later nodes still run. Empty padding
+            // preserves its node ordinal after an aggregated string prefix.
+            if self.spill.is_none() {
+                self.spill = Some(if self.nodes == 0 {
+                    Vec::new()
+                } else {
+                    vec![PyString::new(py, &self.out).into_any().unbind()]
+                });
+                self.out.clear();
             }
-            list.append(&piece)?;
-            PyString::new(py, "").call_method1("join", (list,))?;
-            unreachable!("`''.join` over a non-str piece did not raise");
+            let pieces = self.spill.as_mut().unwrap();
+            while pieces.len() < self.nodes {
+                pieces.push(PyString::new(py, "").into_any().unbind());
+            }
+            pieces.push(piece);
         }
         self.nodes += 1;
         Ok(())
@@ -4581,7 +4851,7 @@ impl<'py> Walk<'py> {
         plan: &ForPlan,
         parentloop: &Bound<'py, PyAny>,
         depth: usize,
-    ) -> PyResult<()> {
+    ) -> PyResult<bool> {
         let py = self.py;
         let mut values = plan
             .sequence
@@ -4602,7 +4872,13 @@ impl<'py> Walk<'py> {
             // makes is discarded with the loop's layer. Rendering the arm outside any push keeps the write,
             // which is observable: `{% for r in none %}{% empty %}{% writes "foo" %}{% endfor %}{{ foo }}`
             // renders `[]` in stock and `[W]` without this.
-            return self.run(&plan.empty, depth);
+            if self.scoped_joins > 0 {
+                let output = self.render_scoped_body(&plan.empty, depth)?;
+                self.push_python(output)?;
+            } else {
+                self.run(&plan.empty, depth)?;
+            }
+            return Ok(true);
         }
         if plan.is_reversed {
             values = py
@@ -4663,7 +4939,7 @@ impl<'py> Walk<'py> {
             self.context.set_item(plan.loopvar.bind(py), &item)?;
             self.run(&plan.body, depth)?;
         }
-        Ok(())
+        Ok(false)
     }
 }
 
@@ -4752,6 +5028,7 @@ fn render_plan(
         out: String::new(),
         spill: None,
         nodes: 0,
+        scoped_joins: 0,
         census: if census_on() {
             Some(Census::default())
         } else {
@@ -4770,18 +5047,7 @@ fn render_plan(
     // `SafeString` of a whole `str`, or of `"".join(pieces)` where the walk had to spill —
     // `NodeList.render`'s own expression (`engine/base.py:1204-1205`). `SafeString` and not `mark_safe`,
     // for the reasons on [`SAFE_STRING`].
-    let out: Py<PyAny> = match walk.spill.take() {
-        None => PyString::new(py, &walk.out).into_any().unbind(),
-        Some(pieces) => PyString::new(py, "")
-            .call_method1("join", (PyList::new(py, pieces)?,))?
-            .unbind(),
-    };
-    Ok(Some(
-        SAFE_STRING
-            .import(py, "django.utils.safestring", "SafeString")?
-            .call1((out,))?
-            .unbind(),
-    ))
+    Ok(Some(walk.finish_output()?))
 }
 
 /// `django_rust_templates.engine.base.render_value_in_context`, cached once.
@@ -4840,6 +5106,8 @@ struct Stock {
     method_type: Py<PyAny>,
     /// `engine/_unwind.py`'s `UNWIND` — the exceptional `__exit__`. See [`exit`].
     unwind: Py<PyAny>,
+    nodelist: Py<PyAny>,
+    nodelist_render: Py<PyAny>,
     safe_string: Py<PyAny>,
     safe_string_str: Py<PyAny>,
     safe_string_html: Py<PyAny>,
@@ -4910,6 +5178,8 @@ fn stock(py: Python<'_>) -> Option<&'static Stock> {
                 plan: module.getattr("PLAN")?.unbind(),
                 method_type: module.getattr("METHOD_TYPE")?.unbind(),
                 unwind: unwind.getattr("UNWIND")?.unbind(),
+                nodelist: module.getattr("NODELIST")?.unbind(),
+                nodelist_render: module.getattr("NODELIST_RENDER")?.unbind(),
                 safe_string: module.getattr("SAFE_STRING")?.unbind(),
                 safe_string_str: module.getattr("SAFE_STRING_STR")?.unbind(),
                 safe_string_html: module.getattr("SAFE_STRING_HTML")?.unbind(),
@@ -5318,6 +5588,7 @@ class Described(Base):
             out: String::new(),
             spill: None,
             nodes: 0,
+            scoped_joins: 0,
             census: None,
             // This walk has no template, so it has no `render` to stand in for and every include
             // declines — which is what `render_plan` does for the same reason.

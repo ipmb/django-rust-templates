@@ -164,14 +164,14 @@ checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
 
 [[package]]
 name = "template-core"
-version = "6.0.9-alpha2"
+version = "6.0.9-alpha3"
 dependencies = [
  "regex",
 ]
 
 [[package]]
 name = "template-py"
-version = "6.0.9-alpha2"
+version = "6.0.9-alpha3"
 dependencies = [
  "pyo3",
  "template-core",
