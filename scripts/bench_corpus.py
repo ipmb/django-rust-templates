@@ -77,6 +77,12 @@ agree" is a fact about the corpus and not a fact about the engines.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+
+TEMPLATE_DIR = Path(__file__).resolve().parent / "bench_templates"
+
+def _template(name):
+    return (TEMPLATE_DIR / name).read_text(encoding="utf-8")
 
 SHARED = ("django", "rust", "jinja2")
 DJANGO_ONLY = ("django", "rust")
@@ -152,98 +158,28 @@ SECTIONS = [
 
 # --- templates ---------------------------------------------------------------------
 
-BASE = (
-    "<!doctype html><html><head><title>{% block title %}Report{% endblock %}</title>"
-    "</head><body>{% block content %}{% endblock %}</body></html>"
-)
+BASE = _template("base.html")
 
-FOOTER = "<footer>{{ title }} - {{ rows|length }} rows</footer>"
+FOOTER = _template("footer.html")
 
 # real-world / normal: a page a project would actually have. Two levels of
 # inheritance, one loop over 50 dicts, a filter, an `{% if %}` with both branches
 # live, one include, and four escaped columns.
-NORMAL = (
-    '{% extends "base.html" %}'
-    "{% block title %}{{ title }}{% endblock %}"
-    "{% block content %}"
-    "<h1>{{ title|upper }}</h1>"
-    "{% if rows %}<p>{{ rows|length }} rows</p>{% else %}<p>no rows</p>{% endif %}"
-    "<table>"
-    "{% for r in rows %}"
-    "<tr><td>{{ r.name }}</td><td>{{ r.owner }}</td>"
-    "<td>{{ r.status|title }}</td><td>{{ r.note }}</td>"
-    "<td>{% if r.hot %}<b>hot</b>{% else %}ok{% endif %}</td></tr>"
-    "{% endfor %}"
-    "</table>"
-    '{% include "partials/footer.html" %}'
-    "{% endblock %}"
-)
+NORMAL = _template("report.html")
 
 # real-world / complex: three levels of inheritance, a nested loop (12 outer x 6
 # inner), an `{% include %}` per *inner* iteration, escaping on every row, and a
 # conditional whose branches are both taken.
-LAYOUT = (
-    '{% extends "base.html" %}'
-    "{% block content %}"
-    "<header><h1>{% block heading %}Invoice{% endblock %}</h1></header>"
-    "{% block body %}{% endblock %}"
-    '{% include "partials/footer.html" %}'
-    "{% endblock %}"
-)
+LAYOUT = _template("layout.html")
 
-COMPLEX = (
-    '{% extends "layout.html" %}'
-    "{% block heading %}{{ title|upper }}{% endblock %}"
-    "{% block body %}"
-    "{% for s in sections %}"
-    "<section><h2>{{ s.title|title }}</h2><table>"
-    "{% for line in s.lines %}"
-    '{% include "partials/line.html" %}'
-    "{% endfor %}"
-    "</table>"
-    "{% if s.total %}<p>total {{ s.total }}</p>{% endif %}"
-    "</section>"
-    "{% endfor %}"
-    "{% endblock %}"
-)
+COMPLEX = _template("invoice.html")
 
-LINE = "<tr><td>{{ line.sku|upper }}</td><td>{{ line.note }}</td><td>{{ line.qty }}</td></tr>"
+LINE = _template("line.html")
 
 
 def large_template() -> str:
-    """A ~9 KB page: the parse-bound row.
-
-    Twenty sibling sections, each with ten variables, an `{% if %}`, and a
-    `{% for %}` over three items, so the node count is dominated by variables and
-    control tags rather than text. There is no `{% load i18n %}`: this row is in
-    the shared family and Jinja2 has no such library. The `load_i18n` parameter
-    this used to take had one call site, and it passed `False` — a dead branch in
-    a corpus whose whole argument is that a row is where it is for a reason, so it
-    is gone.
-
-    This docstring said "no loop" until the frame-rewrite fix's second round
-    measured against it: the body below has appended a `{% for %}` per section
-    since the row was written, i.e. **20 loop statements and 60 iterations per
-    render**, and a per-loop cost therefore lands on this row twenty times over.
-    No body holds a delegate, and *that* is the property the row has — it is what
-    made it a control for the gate's action in `frame_rewrite_ab.txt`, and a
-    subject for the loop's own push order in `frame_rewrite_ab2.txt`. A row named
-    by the property it does not have is the `a-measurement-names-a-code-path`
-    trap; a row named by one it does have is a control.
-    """
-    parts = ["<article>"]
-    for i in range(20):
-        parts.append(f'<section id="s{i}">')
-        for j in range(10):
-            parts.append(f"<p>{{{{ section{i}.field{j} }}}}</p>")
-        parts.append(f"{{% if section{i}.enabled %}}<b>{{{{ section{i}.label }}}}</b>{{% endif %}}")
-        parts.append(
-            f"{{% for item in section{i}.parts %}}<li>{{{{ item.name }}}}: "
-            f"{{{{ item.value }}}}</li>{{% endfor %}}"
-        )
-        parts.append("</section>")
-    parts.append("</article>")
-    return "".join(parts)
+    """The large-page benchmark source, also used by the parity corpus."""
+    return _template("large.html")
 
 
 LARGE_DATA = {
@@ -285,21 +221,8 @@ D_ESCAPE_TABLE = "{{ apos }}|{{ quot }}|{{ solidus }}"
 
 # The M16 page, kept verbatim so the historical row still has a home and the
 # milestone-to-milestone comparison does not silently change subject.
-M16_BASE = (
-    "{% load i18n %}<html><head><title>{% block title %}Default{% endblock %}</title></head>\n"
-    '<body><h1>{% block heading %}{% translate "Report" %}{% endblock %}</h1>\n'
-    "{% block content %}{% endblock %}</body></html>"
-)
-M16_PAGE = (
-    '{% extends "base.html" %}{% load i18n %}\n'
-    '{% block title %}{% translate "Monthly Report" %}{% endblock %}\n'
-    "{% block content %}\n<table>\n"
-    "{% for row in rows %}\n"
-    "<tr><td>{{ row.name }}</td><td>{{ row.value|floatformat:2 }}</td>\n"
-    "<td>{% blocktranslate count count=row.count %}{{ count }} item{% plural %}{{ count }} items{% endblocktranslate %}</td></tr>\n"
-    "{% endfor %}\n</table>\n"
-    "{% endblock %}"
-)
+M16_BASE = _template("translated_base.html")
+M16_PAGE = _template("translated_report.html")
 M16_ROWS = [{"name": f"Row {i}", "value": i * 1.5, "count": i} for i in range(50)]
 
 I18N_LIBRARY = {
@@ -321,11 +244,15 @@ class Workload:
     engines: tuple = SHARED
     needs_i18n: bool = False
     note: str = ""
+    library_names: tuple = ()
+    deterministic: bool = False
 
     def libraries(self, engine: str) -> dict:
-        if not self.needs_i18n:
-            return {}
-        return {"i18n": I18N_LIBRARY[engine]}
+        names = set(self.library_names)
+        if self.needs_i18n:
+            names.add("i18n")
+        package = "django.templatetags" if engine == "django" else "django_rust_templates.engine.templatetags"
+        return {name: f"{package}.{name}" for name in names}
 
 
 def _one(template: str, **kw) -> dict:
@@ -333,6 +260,8 @@ def _one(template: str, **kw) -> dict:
 
 
 def workloads() -> list[Workload]:
+    from bench_features import workloads as feature_workloads
+
     W = Workload
     return [
         # --- micro: one construct per row, so a regression names itself --------
@@ -450,7 +379,7 @@ def workloads() -> list[Workload]:
             "real-world/large",
             "real-world",
             "a 9 KB page of 20 sections, 20 loop statements: the parse-bound row",
-            _one(large_template()),
+            _one(_template("large.html")),
             "page.html",
             LARGE_DATA,
         ),
@@ -508,12 +437,14 @@ def workloads() -> list[Workload]:
             needs_i18n=True,
             note="kept verbatim so the milestone-to-milestone row does not change subject",
         ),
-    ]
+    ] + feature_workloads()
 
 
-FAMILIES = ("micro", "real-world", "django-only")
+FAMILIES = ("micro", "real-world", "django-only", "filters", "tags")
 
 FAMILY_SUMMARY = {
+    "filters": "one illustrative template per default Django filter",
+    "tags": "one illustrative template per builtin Django tag",
     "micro": (
         "one construct per row, so a regression names itself. It is two families and "
         "the earlier note here claimed one: the single-node rows (text, variable, "

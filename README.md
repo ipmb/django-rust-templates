@@ -102,11 +102,44 @@ Python 3.12/3.13 use Unicode 15.0/15.1 tables; Python 3.14 uses Unicode 16.
 The native parser, numeric literals, and uppercase filters select the matching
 tables when the extension loads. Exhaustive parity tests check these tables.
 
-The **Benchmarks** Actions workflow runs on pushes to `main`, `v*` tags, pull
-requests, and manual runs. Its job summary contains compile, render, and
-parse-and-render timings for Django, this engine, and Jinja2, plus measurement
-parameters and output hashes. JSON results and the Markdown summary are saved
-as workflow artifacts.
+The **Benchmarks** Actions workflow runs on pushes to `main`, pull requests,
+manual runs, and through the report publishing workflow. Its job summary
+contains compile, render, and parse-and-render timings for Django, this engine,
+and Jinja2, plus measurement parameters and output hashes. JSON results, HTML, and the Markdown summary
+are saved as workflow artifacts.
+
+The public [benchmark report](https://ipmb.github.io/django-rust-templates/)
+is regenerated and published to GitHub Pages after each successful tagged release.
+It compares full-page templates, every default and standard-library filter/tag,
+and a separately recorded Wagtail Bakerydemo run. The report is rendered by
+nanodjango using this package's backend.
+
+To publish without a release, run **Publish benchmark report** from the Actions
+tab on `main` (or an existing `v*` tag). This generates fresh measurements and
+deploys the HTML and JSON results. It can also be started from the CLI:
+
+```sh
+gh workflow run publish-benchmarks.yml --ref main
+```
+
+Install its optional dependencies outside the test environment:
+
+```sh
+python -m pip install --target .bench-deps -r scripts/bench-report-requirements.txt
+.venv/bin/python -I scripts/bench.py --json results.json --html docs/bench.html
+```
+
+Preview or export an existing JSON results file without rerunning measurements:
+
+```sh
+BENCHMARK_RESULTS=results.json .venv/bin/python -I scripts/bench_site.py
+BENCHMARK_RESULTS=results.json .venv/bin/python -I scripts/bench_site.py --export docs/bench.html
+```
+
+The preview serves at `127.0.0.1:8000`; `--bind` changes its address. Results are
+read on each request. `BENCHMARK_BAKERYDEMO` selects the recorded Bakerydemo JSON
+for a file that does not already include it; `bench.py --bakerydemo` selects it
+when creating new results. Full timing data remains available in the JSON download.
 
 ## Preliminary releases
 
@@ -114,8 +147,12 @@ Run **Release artifacts** manually in Actions to verify release builds without
 publishing. A pushed `v*` tag runs CI, builds and tests CPython 3.12–3.14 wheels
 for Linux x86_64/aarch64, macOS Intel/Apple Silicon, and Windows x86_64, and
 builds and installs the source distribution. After all checks pass, it creates
-a GitHub prerelease with those artifacts. Linux wheels target glibc; musl,
-free-threaded Python, and PyPy are outside the initial release matrix.
+a GitHub prerelease with those artifacts and publishes a freshly generated
+benchmark report to GitHub Pages. Manual release builds on branches do not
+publish; use **Publish benchmark report** to update the site independently.
+The Bakerydemo section retains its separately recorded measurements; releases
+rerun the synthetic corpus. Linux wheels target glibc; musl, free-threaded Python,
+and PyPy are outside the initial release matrix.
 
 The tag version must match `workspace.package.version` in `Cargo.toml` (for
 example, `v6.0.9-alpha1` for `6.0.9-alpha1`; Python normalizes this to

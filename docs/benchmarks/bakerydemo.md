@@ -1,47 +1,104 @@
-# Bakerydemo render measurements — 2026-10-12
+# Benchmarking Wagtail Bakerydemo
 
-The optimized native walk takes **2.26% less time than stock Django** and **3.11% less time than the previous Rust backend** in the final warm-render comparison. All eleven pages are faster than Django in this run, and their output hashes match across all three backends. These are local measurements on Python 3.12.9 and Django 6.0.9, not a general speed guarantee.
+[Bakerydemo](https://github.com/wagtail/bakerydemo) exercises the template engine
+inside a real Wagtail application. Its pages combine inheritance, includes, rich
+content, navigation, images, and third-party template tags. This complements the
+small filter/tag examples and synthetic full-page templates in the benchmark
+report: it measures how much an engine change helps when rendering is part of a
+larger application.
 
-## What changed
+## What the benchmark measures
 
-- Keep Python lookup-name objects on the compiled plan, avoiding repeated allocation and hashing during rendering.
-- Prove that ordinary objects have no subscript method without constructing an `AttributeError`. Custom metaclass hooks and descriptors retain the attribute-probing path.
-- Append exact stock `SafeString` values directly and spell ungrouped exact integers in the native emitter. Subclasses, changed string methods, and localized grouped numbers retain Python formatting.
-- Reuse interned names for callable flags and delegated render methods.
+[`scripts/bench_bakerydemo.py`](../../scripts/bench_bakerydemo.py) compares stock
+Django with the Rust backend across eleven pages: the home page, blog listings
+and articles, bread listings and detail pages, locations, recipes, gallery, and
+about page.
 
-## Final comparison
+Each backend runs in its own persistent process, using Bakerydemo's production
+settings and a single configured template backend. This keeps Wagtail's internal
+template loads on the engine being measured. Templates and their dependencies
+are warmed before timed samples, and backend order alternates between samples.
+The same page URLs and demo database are used for both backends.
 
-Each backend runs in a separate persistent process with a single configured template backend, production settings, and template caching. Each page receives ten warmup renders and 250 timed renders per backend. The three-way run rotates backend order between samples. The contexts come from real bakerydemo requests; rendering still includes work initiated by template tags and the ORM. Timings include UTF-8 encoding.
+The harness has two modes:
 
-| Page | Django (ms) | Previous Rust (ms) | Optimized Rust (ms) | Rust/Django |
-| --- | ---: | ---: | ---: | ---: |
-| `/` | 17.935 | 17.954 | 17.550 | 0.9785 |
-| `/blog/` | 10.912 | 10.982 | 10.639 | 0.9750 |
-| `/blog/wild-yeast/` | 6.485 | 6.495 | 6.327 | 0.9757 |
-| `/breads/` | 7.295 | 7.389 | 7.042 | 0.9654 |
-| `/breads/bagel/` | 4.279 | 4.325 | 4.156 | 0.9712 |
-| `/locations/` | 6.760 | 6.811 | 6.664 | 0.9859 |
-| `/locations/hof/` | 7.074 | 7.189 | 6.991 | 0.9883 |
-| `/recipes/` | 4.985 | 4.995 | 4.833 | 0.9694 |
-| `/recipes/hot-cross-bun/` | 6.239 | 6.480 | 6.168 | 0.9886 |
-| `/gallery/` | 10.484 | 10.473 | 10.139 | 0.9671 |
-| `/about/` | 3.826 | 3.832 | 3.776 | 0.9867 |
+- **Warm template render** (`--mode render`, the default): make an initial real
+  request to obtain the template, context, and request object, then repeatedly
+  render that template. Timings include UTF-8 encoding, context processors
+  invoked during rendering, and work initiated by template tags or lazy context
+  values. They exclude the initial view execution and template loading.
+- **Warm request** (`--mode request`): repeatedly request each page through
+  Django's test client. Timings include views, middleware, database work, and
+  rendering. They exclude network transport and a browser's work.
 
-The summary is the geometric mean of the per-page median ratios, giving each page equal weight. The previous Rust backend is 0.88% slower than Django in the same run. A separate final two-backend render run measured a 2.05% reduction. The final Django test-client request run measured **2.35% less time** with matching output hashes on all eleven pages; it includes views, middleware, database work, and rendering, but excludes network transport. Earlier intermediate implementations ranged from near parity to small regressions. Full request samples are saved locally under `target/benchmarks/bakerydemo-request-2026-10-12.json`.
+The harness records individual samples, per-page medians, Python and Django
+versions, the imported native extension's path and SHA-256, and output hashes.
+After warmup, it validates a render of each page and refuses the comparison if
+those output hashes differ between backends.
+Its summary is the geometric mean of the per-page Rust/Django median ratios,
+giving each page equal weight. A ratio below one means less time; above one
+means more time.
 
-[Measurement summary and output hashes](bakerydemo-2026-10-12.json) records the bakerydemo commit, baseline engine commit, interpreter version, and native artifact hashes. The candidate is the optimization accompanying this report, built before the alpha2 version bump. Full three-way samples are saved locally under `target/benchmarks/bakerydemo-three-way-2026-10-12.json`.
+These are warm measurements. They do not measure startup, cold template
+compilation, or user-perceived page load time. Reusing render contexts and warming
+pages can also warm lazy querysets and application caches; the request mode
+captures more of the repeated request work.
 
-## Reproduce
+## Why gains can be smaller than in the other examples
 
-The bakerydemo environment needs its demo database, production settings, and the Rust backend installed. The harness uses bakerydemo’s `.venv/bin/python` by default; `--python` selects another environment. It records the imported native extension path and SHA-256 so a stale installation is visible.
+The engine accelerates part of the work on a Bakerydemo page. The small examples
+spend a much larger share of their time in template parsing, variable resolution,
+filters, and walking ordinary template nodes. Bakerydemo also spends time doing
+work that replacing the template engine does not accelerate:
+
+- **Database access.** Navigation, related page lookups, and lazy querysets can
+  issue ORM queries during rendering. Request mode also includes queries made
+  by views. SQL execution, database latency, and constructing model objects
+  remain costs of the application.
+- **Custom Python tags.** Wagtail and project-specific tags execute their Python
+  callbacks. Their work can include rich-content processing, image rendition
+  lookups, navigation building, and assembling inclusion-tag contexts. Rust can
+  render eligible templates they invoke, but the callback's own work remains
+  in Python.
+- **Python object behavior.** Model properties, methods, custom lookup behavior,
+  and formatting still need to preserve Django's semantics. Accelerated lookup
+  cannot remove the cost of a property or method it calls.
+- **Work around the template.** Context processors, response encoding, and, in
+  request mode, middleware and view execution contribute to the measured total.
+
+As these costs take a larger share of a page's time, even a substantial reduction
+in the engine's own work produces a smaller reduction in the total. Pages differ
+in that mix, so a simple table template and a Wagtail page need not show similar
+improvements. Profile the application before interpreting a small overall change
+as evidence that the engine's ordinary nodes did not get faster.
+
+## Run the benchmark
+
+The Bakerydemo checkout needs its dependencies, demo database, production
+settings, and the Rust backend installed in its environment. Use a release build
+of the extension when evaluating performance. The harness uses Bakerydemo's
+`.venv/bin/python` by default; `--python` selects another interpreter.
 
 ```sh
-python scripts/bench_bakerydemo.py ../bakerydemo --samples 250 --output render.json
-python scripts/bench_bakerydemo.py ../bakerydemo --mode request --samples 250 --output request.json
+python scripts/bench_bakerydemo.py ../bakerydemo --samples 250 --warmup 10 --output render.json
+python scripts/bench_bakerydemo.py ../bakerydemo --mode request --samples 250 --warmup 10 --output request.json
 ```
 
-To measure a new wheel without changing bakerydemo’s installation, extract the wheel into a temporary directory and pass that directory as `--rust-pythonpath`. Each worker uses exactly one backend, including templates loaded internally by Wagtail. Configuring both backends in one process would let those internal loads use the first backend and distort the comparison.
+To measure a wheel without changing Bakerydemo's installation, extract it into a
+temporary directory and pass that directory with `--rust-pythonpath`. Check the
+recorded native path and hash to confirm which artifact ran.
 
-## Validation
+Keep the machine, database, application checkout, interpreter, settings, and
+sample count consistent between runs. Repeat measurements to see whether a small
+change persists, and inspect the per-page samples rather than relying only on the
+aggregate ratio.
 
-The full `scripts/check.sh` gate passes: 799 core Rust tests, 12 interpreter-backed Rust tests, 679 Python tests, and 1,547 Django template tests (six expected skips), plus formatting, Clippy, transcription checks, differential comparisons, and packaging. New tests cover safe-string subclasses and method rebinding before and after backend import, lone surrogates, metaclass and descriptor probes, live grouping settings, and English/German number formatting.
+## Recorded data in the public report
+
+The public report includes separately recorded Bakerydemo measurements alongside
+the fresh synthetic benchmarks. Those measurements retain their own date,
+interpreter version, application commit, and artifact identity; generating a new
+report does not rerun Bakerydemo. The report labels them as a recorded run and
+keeps their methodology separate. Historical data lives in dated JSON files in
+this directory; this document describes the benchmark rather than a particular
+run's results.
