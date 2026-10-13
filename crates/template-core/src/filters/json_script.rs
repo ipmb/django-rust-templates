@@ -44,6 +44,7 @@
 //!   argument and the engines would be handed different inputs.
 
 use crate::filters::host::FilterCall;
+use crate::filters::safety;
 use crate::filters::value::Value;
 use crate::parser::error::Error;
 
@@ -78,7 +79,7 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
     let rendered = if call.host.is_true(&element_id)? {
         // `format_html`'s `conditional_escape(element_id)`; the id is unescaped
         // by `escape` iff it carries `SafeData` or `__html__`.
-        let escaped_id = call.host.conditional_escape(&element_id)?;
+        let escaped_id = safety::conditional_escape(&element_id, call)?;
         // `str.format`'s `{}` is `str(v)`, which is what `to_str` asks.
         let id_text = call.host.to_str(&escaped_id)?;
         wrap_json(&escaped, Some(&id_text))
@@ -86,7 +87,7 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
         wrap_json(&escaped, None)
     };
     // `format_html`'s own `mark_safe`; the loop's does not fire for a bare input.
-    Ok(call.host.mark_safe(Value::Str(rendered.into())))
+    Ok(safety::mark_safe(Value::Str(rendered.into()), call))
 }
 
 #[cfg(test)]
@@ -112,7 +113,9 @@ mod tests {
             is_true: Some(id_truthy),
             conditional_escape: Some(Value::Safe(escaped_id.into())),
             to_str: Some(escaped_id.to_string()),
-            mark_safe: Some(Value::Safe("MARKED".into())),
+            mark_safe: Some(Value::Safe(
+                "<script id=\"a&lt;b\" type=\"application/json\">[1, 2]</script>".into(),
+            )),
             ..TestFilterHost::default()
         }
     }
@@ -169,7 +172,7 @@ mod tests {
     /// The **truthy** branch: `is_true`, `conditional_escape`, `to_str`, then
     /// `mark_safe`.
     #[test]
-    fn the_truthy_id_branch_escapes_through_the_host() {
+    fn the_truthy_id_branch_escapes_the_id() {
         let h = host(r#"[1, 2]"#, true, "a&lt;b");
         assert_eq!(
             run(
@@ -178,17 +181,16 @@ mod tests {
                 &call(&h)
             )
             .unwrap(),
-            Value::Safe("MARKED".into())
+            Value::Safe("<script id=\"a&lt;b\" type=\"application/json\">[1, 2]</script>".into())
         );
         assert_eq!(
             h.calls(),
-            vec![
-                "json_dumps",
-                "is_true",
-                "conditional_escape",
-                "to_str",
-                "mark_safe"
-            ]
+            // A native string id is escaped in Rust and the result marked there
+            // too (`filters::safety`), so only `to_str` still crosses. An id that
+            // is an `Opaque` — a `Promise`, or markupsafe's `Markup` — still
+            // reaches `conditional_escape` on the host; `filters::safety` owns
+            // that row.
+            vec!["json_dumps", "is_true", "to_str"]
         );
     }
 
@@ -201,11 +203,11 @@ mod tests {
             let h = host("1", false, "unused");
             assert_eq!(
                 run(Value::Int(1), Some(falsy.clone()), &call(&h)).unwrap(),
-                Value::Safe("MARKED".into())
+                Value::Safe("<script type=\"application/json\">1</script>".into())
             );
             assert_eq!(
                 h.calls(),
-                vec!["json_dumps", "is_true", "mark_safe"],
+                vec!["json_dumps", "is_true"],
                 "a falsy `{falsy:?}` must not reach the id escaping"
             );
         }
@@ -217,7 +219,7 @@ mod tests {
         let h = host("1", false, "unused");
         assert_eq!(
             run(Value::Int(1), None, &call(&h)).unwrap(),
-            Value::Safe("MARKED".into())
+            Value::Safe("<script type=\"application/json\">1</script>".into())
         );
         assert!(
             !h.calls().contains(&"conditional_escape"),
@@ -232,8 +234,13 @@ mod tests {
     fn the_body_marks_the_result_safe() {
         let h = host("1", false, "unused");
         let result = run(Value::Int(1), None, &call(&h)).unwrap();
-        assert_eq!(result, Value::Safe("MARKED".into()));
+        assert_eq!(
+            result,
+            Value::Safe("<script type=\"application/json\">1</script>".into())
+        );
         assert_ne!(result, Value::Str("MARKED".into()));
-        h.assert_called("mark_safe");
+        // The safety is asserted on the value just above. `mark_safe` of a
+        // native string is Rust's now (`filters::safety`), so there is no host
+        // call left to assert on.
     }
 }

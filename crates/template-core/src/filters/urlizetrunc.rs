@@ -35,7 +35,7 @@
 //!    same collapse [`urlize`](crate::filters::urlize) makes and for the same
 //!    reason — `Urlizer.__call__`'s `safe_input = isinstance(text, SafeData)`
 //!    (`html.py:319`); see that module's "The `safe_input` collapse".
-//! 4. `call.host.mark_safe(Value::Str(rendered))` — `defaultfilters.py:398`'s own
+//! 4. `safety::mark_safe(Value::Str(rendered), call)` — `defaultfilters.py:398`'s own
 //!    `mark_safe`.
 //!
 //! **`int(limit)` is the body's, not the seam's.** Django does it at
@@ -86,6 +86,7 @@
 //! have escaped. The collapse is what makes the seam's flag say so.
 
 use crate::filters::host::FilterCall;
+use crate::filters::safety;
 use crate::filters::value::Value;
 use crate::parser::error::Error;
 
@@ -104,7 +105,7 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
     // The int reaches the seam unread: `trim_url` compares and slices with it.
     let rendered = call.host.urlize(&text, Some(&limit), autoescape);
     // `defaultfilters.py:398`'s own `mark_safe`.
-    Ok(call.host.mark_safe(Value::Str(rendered.into())))
+    Ok(safety::mark_safe(Value::Str(rendered.into()), call))
 }
 
 #[cfg(test)]
@@ -152,10 +153,7 @@ mod tests {
             .unwrap(),
             Value::Safe("RENDERED".into())
         );
-        assert_eq!(
-            h.calls(),
-            vec!["to_int", "is_safe", "to_str", "urlize", "mark_safe"]
-        );
+        assert_eq!(h.calls(), vec!["to_int", "is_safe", "to_str", "urlize"]);
     }
 
     /// `int(limit)` runs **before** the text is read, and its `ValueError`
@@ -243,6 +241,8 @@ mod tests {
         let result = run(Value::Str("x".into()), Some(Value::Int(5)), &call(&h, true)).unwrap();
         assert_eq!(result, Value::Safe("RENDERED".into()));
         assert_ne!(result, Value::Str("RENDERED".into()));
-        h.assert_called("mark_safe");
+        // The safety is asserted on the value just above. `mark_safe` of a
+        // native string is Rust's now (`filters::safety`), so there is no host
+        // call left to assert on.
     }
 }

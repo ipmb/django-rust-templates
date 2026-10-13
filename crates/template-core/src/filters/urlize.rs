@@ -26,7 +26,7 @@
 //!    `defaultfilters.py:386`'s absent `trim_url_limit`; `nofollow=True` is the
 //!    seam's constant, hardcoded at both call sites, so the trait carries no
 //!    `nofollow` parameter.
-//! 5. `call.host.mark_safe(Value::Str(rendered))` — the `def` body's own
+//! 5. `safety::mark_safe(Value::Str(rendered), call)` — the `def` body's own
 //!    `mark_safe` (`defaultfilters.py:386`). The loop marks only when
 //!    `is_safe and isinstance(obj, SafeData)` (`base.py:816`), and for a plain
 //!    `str` input neither half fires, so the body's marking is what makes every
@@ -63,6 +63,7 @@
 //! Django raises; the body refuses instead.
 
 use crate::filters::host::FilterCall;
+use crate::filters::safety;
 use crate::filters::value::Value;
 use crate::parser::error::{Error, PyErrorKind};
 
@@ -93,7 +94,7 @@ pub fn run(value: Value, arg: Option<Value>, call: &FilterCall<'_>) -> Result<Va
     let rendered = call.host.urlize(&text, None, autoescape);
     // `defaultfilters.py:386`'s own `mark_safe`; the loop's does not fire for a
     // plain `str`.
-    Ok(call.host.mark_safe(Value::Str(rendered.into())))
+    Ok(safety::mark_safe(Value::Str(rendered.into()), call))
 }
 
 #[cfg(test)]
@@ -176,7 +177,7 @@ mod tests {
             .unwrap(),
             Value::Safe("RENDERED".into())
         );
-        assert_eq!(h.calls(), vec!["is_safe", "to_str", "urlize", "mark_safe"]);
+        assert_eq!(h.calls(), vec!["is_safe", "to_str", "urlize"]);
     }
 
     /// **The `safe_input` collapse, as far as a name-recording host can see it.**
@@ -189,13 +190,13 @@ mod tests {
     fn a_safe_value_is_consulted_for_the_seam_autoescape() {
         let h = host("x", "RENDERED");
         run(Value::Str("x".into()), None, &call(&h, true)).unwrap();
-        assert_eq!(h.calls(), vec!["is_safe", "to_str", "urlize", "mark_safe"]);
+        assert_eq!(h.calls(), vec!["is_safe", "to_str", "urlize"]);
 
         // `call.autoescape` false: `&&` short-circuits, so `is_safe` is not
         // asked, as Django's own expression evaluates it.
         let h = host("x", "RENDERED");
         run(Value::Str("x".into()), None, &call(&h, false)).unwrap();
-        assert_eq!(h.calls(), vec!["to_str", "urlize", "mark_safe"]);
+        assert_eq!(h.calls(), vec!["to_str", "urlize"]);
     }
 
     /// A plain input is marked by the **body**, not left to the loop: the body
@@ -206,7 +207,9 @@ mod tests {
         let result = run(Value::Str("x".into()), None, &call(&h, true)).unwrap();
         assert_eq!(result, Value::Safe("RENDERED".into()));
         assert_ne!(result, Value::Str("RENDERED".into()));
-        h.assert_called("mark_safe");
+        // The safety is asserted on the value just above. `mark_safe` of a
+        // native string is Rust's now (`filters::safety`), so there is no host
+        // call left to assert on.
     }
 
     /// The `autoescape` the body hands the seam is `call.autoescape` and not a
