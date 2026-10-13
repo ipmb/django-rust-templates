@@ -153,8 +153,8 @@ captured-identity check:
 
 | population | guarded bindings |
 |---|---|
-| `simple_tag` / `inclusion_tag` | `Parser.compile_filter` (`base.py:711`), `Parser.find_filter` (`base.py:717`), `Token.split_contents` (`base.py:429`), `library.parse_bits` (`library.py:390`), **`library.token_kwargs`** (`library.py:11`, used at `:423`), `FilterExpression.__init__` and `FilterExpression.args_check` (`base.py:943`), `Variable.__init__` and `Variable.resolve`, `base.smart_split`, `TagHelperNode.__init__` (`library.py:304`), `SimpleNode.__init__` (`:321`), `InclusionNode.__init__` (`:354`) |
-| `defaulttags.load` | `Parser.add_library` (`base.py:707`), `defaulttags.find_library`, `defaulttags.load_from_library` (`defaulttags.py:1080`), `defaulttags.LoadNode` (`:392`), `defaulttags.Library` (constructed at `:1084`) |
+| `simple_tag` / `inclusion_tag` | **functions:** `Parser.compile_filter` (`base.py:711`), `Parser.find_filter` (`base.py:717`), `Token.split_contents` (`base.py:429`), `library.parse_bits` (`library.py:390`), `library.token_kwargs` (`library.py:11`, resolved at `:423`), `base.smart_split`.<br>**class bindings _and_ their methods:** `library.SimpleNode` + `__init__`/`__new__` (`:321`), `library.InclusionNode` + `__init__`/`__new__` (`:354`), `library.TagHelperNode` + `__init__` (`:304`), `base.FilterExpression` + `__init__`/`args_check` (`base.py:943`), `base.Variable` + `__init__`/`resolve`, the `Token` class used for the dispatched token |
+| `defaulttags.load` | **functions:** `Parser.add_library` (`base.py:707`), `defaulttags.find_library` (called in both branches, `:1125`/`:1131`), `defaulttags.load_from_library` (`:1080`).<br>**class bindings _and_ their methods:** `defaulttags.LoadNode` + `__init__`/`__new__` (`:392`), `defaulttags.Library` + `__init__`/`__new__` (`library.py:27`, constructed at `defaulttags.py:1084`) |
 
 **Outside the supported environment** — not guarded, and a deviation there is undefined
 rather than detected: CPython's stdlib (`inspect.unwrap`, `inspect.getfullargspec`, `re`) and
@@ -173,9 +173,14 @@ Three corrections to an earlier draft, each demonstrated rather than argued:
   (`defaulttags.py:1121`); `split_contents` appears in that function only inside the comment
   at `:1119-1120` explaining why it is *not* used. Guarding it there is an unnecessary restriction.
   It also calls `find_library` in **both** syntax branches (`:1125`, `:1131`).
-- **Class identity is not implementation identity.** Keeping `SimpleNode` bound to the same
-  class says nothing about its `__init__`, which reaches `TagHelperNode.__init__` through
-  `super()`. The guarded objects above are the **callables**, not the classes that hold them.
+- **Class identity and implementation identity are each insufficient alone — guard both.**
+  Keeping `SimpleNode` bound to the same class says nothing about its `__init__`, which
+  reaches `TagHelperNode.__init__` through `super()`. But the converse also fails: replacing
+  `library.SimpleNode` with a *subclass* that inherits the captured `__init__` untouched and
+  adds a `__new__` leaves `SimpleNode.__init__ is captured` **True**, while the generated
+  compiler calls the replacement class at `library.py:147` and its `__new__` reads the
+  suffix. Measured. So the rows above pin the class binding, its `__init__` **and** its
+  `__new__`.
 
 Capture happens once at host-module import, after the relevant modules are initialised. Code
 objects are derived per interpreter by registering throwaway tags on a throwaway `Library` —
@@ -190,17 +195,30 @@ A dispatch is stream-free only if **all four** hold. Each is O(1) and exact.
 **1 — The parser is one we support.** `type(parser) is Parser or type(parser) is
 _DeferredTokenParser`. An exact type check, not `isinstance`.
 
-This single condition retires three separate attacks: a `Parser` subclass overriding
-`find_filter` or `add_library`, a metaclass, and any custom `__getattribute__` or property
-that would execute code during the guard itself. Unknown attribute-resolution models are
-rejected **without being invoked**. `_DeferredTokenParser.__getattr__` stays supported and is
+This condition rejects **foreign** parser implementations — an unknown `Parser` subclass
+overriding `find_filter` or `add_library`, a metaclass, a custom `__getattribute__` — without
+invoking their attribute lookup.
+
+It does **not** prove the lookup machinery of the two accepted classes is itself unchanged:
+rebinding `__getattribute__` or installing a descriptor on `Parser` or `_DeferredTokenParser`
+is outside what any identity check here establishes. That is declared outside the supported
+environment in §5.2 rather than claimed as proven. `_DeferredTokenParser.__getattr__` stays supported and is
 never triggered by this guard, since it fires only for a missing `tokens`
 (`render.py:277-284`).
 
 **2 — No instance override.** For each guarded parser method in the population's row,
 `name not in vars(parser)`.
 
-**3 — No class rebinding.** For each, `Parser.__dict__[name] is` the captured function.
+**3 — No class rebinding, on either accepted class.** For each guarded method,
+`Parser.__dict__[name] is` the captured function **and** `name not in
+_DeferredTokenParser.__dict__`.
+
+The second clause is not belt-and-braces. `_DeferredTokenParser` is itself a `Parser`
+subclass (`render.py:234`), so its own `__dict__` wins during resolution. Measured: assigning
+`compile_filter` on `_DeferredTokenParser` passes the exact-type check, passes
+`not in vars(parser)`, passes `Parser.__dict__['compile_filter'] is captured` — and the
+resolved method is still the replacement. One known inheritance level, which the guard has to
+account for by name.
 
 Conditions 1–3 together make the resolved attribute *provably* the captured implementation,
 without comparing it. That matters: `parser.compile_filter is Parser.compile_filter` is
@@ -221,9 +239,10 @@ receiver clause included, so a trusted method bound to a *different* parser cann
   tokens while `library.parse_bits` is untouched.
 - For `load`: `func is` the **captured** load object — not whatever currently occupies
   `defaulttags.load`.
-- A callable lacking `__code__` or `__globals__` declines cleanly. Classification reads them
-  with `getattr(..., None)` and never raises; an ordinary callable-object tag is simply not
-  eligible.
+- The `type(func) is types.FunctionType` test runs **first**, before any attribute of `func`
+  is read. `getattr(..., None)` on a callable object can itself execute custom lookup, so the
+  type gate precedes the metadata read rather than accompanying it. An ordinary
+  callable-object tag is simply not eligible, and declines without executing anything.
 - Plus the module-binding checks for that population's row in §5.2.
 
 **This is a compatibility classifier, not a security boundary.** It exists to avoid
@@ -242,10 +261,16 @@ memoisation may be added keyed on the callable object with explicit invalidation
 not in the first implementation, and immutable provenance must stay separate from live
 environment checking.
 
-Classification and invocation operate on the **same** selected callable in the supported
-synchronous model: the callable is resolved once, classified, and invoked. There is no window
-in which an unsupported mutation can be discovered between the two, and no path by which a
-stream-free invocation falls back mid-call — it was never given a suffix to fall back to.
+Classification and invocation operate on the **same** selected callable. The trait's boolean
+return cannot transport it, so `ShellHost` holds the callable selected by
+`tag_is_stream_free` in a single-slot **pending selection**, which `call_tag_stream_free`
+consumes and clears. It is cleared on every exit, success or raise. An implementation that
+instead looked `parser.tags[command]` up a second time at invocation would not satisfy this,
+because an earlier callback in the same parse can rebind the name between the two crossings.
+
+That slot is *dispatch state*, not eligibility memoisation — it lives for one dispatch and
+says nothing about the next. No concurrent-mutation guarantee is implied or needed: the model
+is synchronous.
 
 ## 6. The seam
 
@@ -291,9 +316,17 @@ The sketch above is architectural, not literal. Two things it elides:
 - **`wire()` belongs in the PyO3 adapter, not `template-core`.** Both new trait methods take
   a core `&Token`, exactly as today's `call_tag` does (`parser/host.rs:55-60`); the wire
   conversion happens in `crates/template-py`.
-- **Both methods get default implementations.** `tag_is_stream_free` defaults to `false` and
-  `call_tag_stream_free` is then unreachable, so `NoHost`, `FilterCheckHost` and every test
-  host stay on today's path without changes.
+- **Both methods get default implementations** — `tag_is_stream_free` returns `false` and
+  `call_tag_stream_free` is then unreachable — so `NoHost` and the ~8 core test hosts stay on
+  today's path untouched, the way `library_tag_loaded` already does.
+
+  **`FilterCheckHost` is not among them.** It is the *production* adapter: it forwards to
+  `ShellHost` (`lib.rs:1026-1037`) and `_native.compile_template` constructs it at
+  `lib.rs:5277-5282` before handing it to `parse_nodelist`. There is no separate adapter for
+  a "PyO3 implementation" to live in. `FilterCheckHost` must therefore **override both
+  methods**, returning `false` from the classifier only when it holds no Python host. An
+  earlier draft said it could keep the defaults; that would have left the whole feature
+  inert, passing every test except the zero-transfer assertion.
 
 ```rust
 fn tag_is_stream_free(&self, _command: &str) -> bool { false }
@@ -500,6 +533,9 @@ not merely that eligibility returned `False`:
 | a `Parser` subclass overriding only `add_library` | load |
 | instance override of `compile_filter` installed by an **earlier** host callback in the same parse | generated |
 | rebinding `Parser.compile_filter` on the class itself | generated |
+| **shadowing a guarded method on `_DeferredTokenParser` itself** — the accepted subclass | both |
+| **replacing `library.SimpleNode` with a subclass inheriting the captured `__init__`, adding a `__new__`** | generated |
+| `Library.__init__` changed in place, against selective `{% load x from y %}` | load |
 | **`library.token_kwargs` rebound while `base.token_kwargs` is untouched** | generated |
 | `defaulttags.find_library` rebound | load |
 | `SimpleNode.__init__` or `FilterExpression.args_check` changed while the class object is unchanged | generated |
@@ -513,14 +549,36 @@ not merely that eligibility returned `False`:
 Plus:
 
 - `do_block_translate` (§4.1) compiles correctly and is never classified stream-free.
-- The purpose-built silent-skipping fixture from §4.1 trips the sentinel rather than
-  compiling an empty body.
+- The purpose-built silent-skipping fixture from §4.1 appears in **two** tests with
+  deliberately opposite outcomes, and the distinction is stated so acceptance does not ask
+  for both at once: under *ordinary* dispatch it is rejected by §5.3 and gets the full
+  stream like any other tag; only when *deliberately injected* onto the stream-free method
+  does it trip the sentinel. The first is the contract working; the second is the contract
+  being violated on purpose.
 - Sentinel tests: every listed operation raises `StreamFreeContractViolation`; the original
   exception and its attached token survive the full compile-and-convert path in both debug
   modes; no diagnostic path reprs the parser.
 - Error-path tests: exception identity restoration (`render.py:223-227`) and the token
   attached to the error are unchanged on the stream-free path, including a boundary error
   carrying no token.
+
+### 11.1 Test order
+
+Written first, because these are where an implementation is most likely to go wrong:
+
+1. **Guard correctness against the real production parser.** An unmodified
+   `_DeferredTokenParser` must *qualify* — the failure mode is a guard so strict it disables
+   the feature, which no other test catches. Then every deviation above declines, each
+   asserted through the real generated compiler with baseline-equivalent output.
+2. **End-to-end activation and route transitions**, through `_native.compile_template` rather
+   than `ShellHost` directly, proving zero suffix transfer via `FilterCheckHost`. Sequence:
+   `load` → eligible simple tag → streamful block → eligible inclusion tag, checking trailing
+   text survives, registry shadowing is honoured, and the host-body route assertion holds.
+   This is what catches an inert adapter and stale dispatch state.
+3. **Failures through both modes and both seams.** Exception object and token preserved for a
+   generated-compiler error and an injected sentinel violation; core token attachment for a
+   boundary error carrying none; no replay; no repr-induced replacement; command-stack and
+   reference handling intact on success.
 
 ## 12. Non-goals
 
