@@ -31,6 +31,54 @@ PLAN = Template._render
 # whole question.
 METHOD_TYPE = types.MethodType
 
+from .base import NodeList
+from .defaulttags import ForNode, WithNode
+from .context import BaseContext, Context, ContextDict, RequestContext
+
+NODELIST = NodeList
+NODELIST_RENDER = NodeList.render
+_WITH_RENDER = WithNode.render
+_FOR_RENDER = ForNode.render
+_CONTEXT_PUSH = BaseContext.push
+_LAYER_ENTER = ContextDict.__enter__
+_LAYER_EXIT = ContextDict.__exit__
+
+
+def with_loop_is_stock(context, node):
+    # A nonempty for-loop joins after leaving its layer; an empty branch
+    # returns from inside it. Only the stock, non-suppressing manager takes
+    # the native scoped-loop path. Custom managers keep Python's loop frame.
+    return (
+        type(node) is ForNode
+        and ForNode.render is _FOR_RENDER
+        and ForNode.__getattribute__ is object.__getattribute__
+        and "render" not in node.__dict__
+        and type(context) in (Context, RequestContext)
+        and type(context).__getattribute__ is object.__getattribute__
+        and type(context).push is _CONTEXT_PUSH
+        and "push" not in context.__dict__
+        and ContextDict.__enter__ is _LAYER_ENTER
+        and ContextDict.__exit__ is _LAYER_EXIT
+    )
+
+
+def with_node_is_stock(node):
+    return (
+        type(node) is WithNode
+        and WithNode.render is _WITH_RENDER
+        and WithNode.__getattribute__ is object.__getattribute__
+        and "render" not in node.__dict__
+    )
+
+
+def with_values(node, context):
+    if not with_node_is_stock(node):
+        return None
+    # Resolve every binding against the outer context, in mapping order, before
+    # pushing the new scope. Keep Python's mapping and expression protocols.
+    return {key: val.resolve(context) for key, val in node.extra_context.items()}
+
+
 # The native emitter can append an exact SafeString directly while these
 # implementations still govern its conversion and attribute reads.
 from django.utils.safestring import SafeString

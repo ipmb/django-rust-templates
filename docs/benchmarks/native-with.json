@@ -1,0 +1,97 @@
+{
+  "baseline_commit": "21bff559981c1da7e14e9fb6d0a2c2a414edef4a",
+  "samples_per_page_per_backend": 250,
+  "candidate_over_alpha2": 0.996814445767811,
+  "pages": [
+    {
+      "url": "/",
+      "median_ms": {
+        "django": 18.1777085,
+        "baseline": 18.032646,
+        "candidate": 18.1470625
+      }
+    },
+    {
+      "url": "/blog/",
+      "median_ms": {
+        "django": 11.241208,
+        "baseline": 11.400979,
+        "candidate": 11.373999999999999
+      }
+    },
+    {
+      "url": "/blog/wild-yeast/",
+      "median_ms": {
+        "django": 6.630125,
+        "baseline": 6.5851255,
+        "candidate": 6.6332705
+      }
+    },
+    {
+      "url": "/breads/",
+      "median_ms": {
+        "django": 7.7745835,
+        "baseline": 7.686834,
+        "candidate": 7.716979
+      }
+    },
+    {
+      "url": "/breads/bagel/",
+      "median_ms": {
+        "django": 4.623521,
+        "baseline": 4.540417,
+        "candidate": 4.4955415
+      }
+    },
+    {
+      "url": "/locations/",
+      "median_ms": {
+        "django": 7.3305620000000005,
+        "baseline": 7.318645999999999,
+        "candidate": 7.2966465
+      }
+    },
+    {
+      "url": "/locations/hof/",
+      "median_ms": {
+        "django": 7.703103499999999,
+        "baseline": 7.6106045,
+        "candidate": 7.637167
+      }
+    },
+    {
+      "url": "/recipes/",
+      "median_ms": {
+        "django": 5.6325210000000006,
+        "baseline": 5.608937,
+        "candidate": 5.4866455
+      }
+    },
+    {
+      "url": "/recipes/hot-cross-bun/",
+      "median_ms": {
+        "django": 6.407646,
+        "baseline": 6.4767085,
+        "candidate": 6.3049789999999994
+      }
+    },
+    {
+      "url": "/gallery/",
+      "median_ms": {
+        "django": 10.2708335,
+        "baseline": 10.2127295,
+        "candidate": 10.2542705
+      }
+    },
+    {
+      "url": "/about/",
+      "median_ms": {
+        "django": 3.916333,
+        "baseline": 3.8662704999999997,
+        "candidate": 3.8820205
+      }
+    }
+  ],
+  "baseline_native_sha256": "4267a76c3663c600f3bed80ccf37124f5d93289142ed9e72d46e9be08d6515c9",
+  "candidate_native_sha256": "918e0c4c39cf628580d1b957c2ff577c464fcb7f4d6c87ad7ab25a72dfaf00f1"
+}
