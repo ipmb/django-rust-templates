@@ -2368,6 +2368,8 @@ enum Act {
     For(Box<ForPlan>),
     /// An `{% include %}` the walk resolves and renders itself.
     Include(Box<IncludePlan>),
+    /// A third-party `simple_tag`, whose scaffolding the walk owns.
+    SimpleTag(Box<SimpleTagPlan>),
     /// A node the walk does not render. `render_annotated` is called on it, which keeps Django's culprit
     /// protocol in one place.
     Delegate,
@@ -2407,6 +2409,28 @@ struct ForPlan {
     /// `PyString::new` and not `PyString::intern` — the name comes from the template, and the
     /// interpreter's intern table is permanent.
     loopvar: Py<PyString>,
+}
+
+/// A third-party `{% simple_tag %}` the walk calls itself.
+///
+/// `SimpleNode.render` is scaffolding around one call — resolve each argument, call, escape,
+/// optionally assign `as var` — and it is **Django's** code, not the tag author's: a library
+/// registers with `django.template.Library`, so the node class is Django's even though the function
+/// is not. Measured on bakerydemo, the scaffolding is ~2.7 µs a call against a body that is 0.42 µs
+/// for `cell_classname` (89% scaffolding) and 21.6 µs for `pageurl` (12%).
+struct SimpleTagPlan {
+    /// The third-party function, called once per render with everything already resolved.
+    func: Py<PyAny>,
+    /// `takes_context`, which prepends the context to the positional arguments.
+    takes_context: bool,
+    /// One per positional argument, each a `FilterExpression` the walk resolves natively. This is
+    /// where the win is: on the delegated path every argument is resolved in Python and our own
+    /// transcription sends each lookup through `_native.resolve`, so each one pays a crossing that
+    /// Django does not — which is why the delegated penalty grows with arity (1.17x at zero
+    /// arguments, 1.62x at three).
+    args: Vec<Emit>,
+    /// `as var`: the output is assigned and the node renders `""`.
+    target_var: Option<Py<PyAny>>,
 }
 
 /// A `{% include %}` with a constant name, no `with` bindings and no `only`.
@@ -3395,6 +3419,50 @@ fn constant_text(py: Python<'_>, node: &Bound<'_, PyAny>) -> PyResult<Option<Str
     Ok(Some(answer.extract::<String>()?))
 }
 
+/// `engine/_stock.py`'s `simple_tag_parts`, cached.
+static SIMPLE_TAG_PARTS: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+/// A third-party `simple_tag` the walk can call itself, or `None`.
+///
+/// **The gate is Python's**, in `engine/_stock.py`: it answers `None` for anything that is not
+/// exactly Django's `SimpleNode` with its own `render` — a subclass such as `SimpleBlockNode`, a
+/// rebound body, or a shape with keyword arguments. Rust then plans the arguments, and a single
+/// argument it cannot plan declines the whole node, because a half-planned call would resolve some
+/// operands here and some in Python.
+fn plan_simple_tag(py: Python<'_>, node: &Bound<'_, PyAny>) -> PyResult<Option<SimpleTagPlan>> {
+    let parts = SIMPLE_TAG_PARTS
+        .import(
+            py,
+            "django_rust_templates.engine._stock",
+            "simple_tag_parts",
+        )?
+        .call1((node,))?;
+    if parts.is_none() {
+        return Ok(None);
+    }
+    let func = parts.get_item(0)?.unbind();
+    let takes_context: bool = parts.get_item(1)?.extract()?;
+    let raw_args = parts.get_item(2)?;
+    let target = parts.get_item(3)?;
+    let mut args = Vec::with_capacity(raw_args.len()?);
+    for expression in raw_args.try_iter()? {
+        match plan_condition(py, &expression?)? {
+            Some(emit) => args.push(emit),
+            None => return Ok(None),
+        }
+    }
+    Ok(Some(SimpleTagPlan {
+        func,
+        takes_context,
+        args,
+        target_var: if target.is_none() {
+            None
+        } else {
+            Some(target.unbind())
+        },
+    }))
+}
+
 fn plan_slot(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResult<Option<Slot>> {
     let class_name: String = node.get_type().name()?.to_string();
     // `HOST_NODE` is the one descriptor whose class name is not the object's: a user tag's compile
@@ -3432,6 +3500,8 @@ fn plan_slot(py: Python<'_>, desc: &NodeDesc, node: &Bound<'_, PyAny>) -> PyResu
             })),
             None => Act::Delegate,
         }
+    } else if let Some(plan) = plan_simple_tag(py, node)? {
+        Act::SimpleTag(Box::new(plan))
     } else if let Some(text) = constant_text(py, node)? {
         // The node's whole output, known before any context exists. `Act::Text` and not a
         // removed slot: the slot carries the node, which the culprit protocol reads when a
@@ -3712,6 +3782,11 @@ impl<'py> Walk<'py> {
                     Ok(()) => census_bump(&mut self.census, &slot.class_name, false),
                     Err(error) => return Err(self.culprit(slot, error)),
                 },
+                Act::SimpleTag(plan) => match self.run_simple_tag(slot, plan) {
+                    Ok(Rendered::Done) => census_bump(&mut self.census, &slot.class_name, false),
+                    Ok(Rendered::Refused) => self.delegate(slot)?,
+                    Err(error) => return Err(self.culprit(slot, error)),
+                },
                 Act::Include(plan) => match self.run_include(slot, plan, depth) {
                     Ok(true) => census_bump(&mut self.census, &slot.class_name, false),
                     Ok(false) => self.delegate(slot)?,
@@ -3794,6 +3869,89 @@ impl<'py> Walk<'py> {
         }
         self.emit(value)?;
         Ok(Rendered::Done)
+    }
+
+    /// Run one third-party `simple_tag` — `SimpleNode.render` (`django/template/library.py`).
+    ///
+    /// Everything but the call is reproduced here: the arguments resolve natively, the function is
+    /// called once, and the result is escaped or assigned. The function itself is untouched third-party
+    /// code, which is the whole point — the scaffolding is Django's and the body is not.
+    ///
+    /// Two refusals, both handing the node back whole before anything is emitted: an argument whose
+    /// filter the seam cannot hold, and an output that is not a `str`. The second is faithfulness
+    /// rather than caution — `SimpleNode.render` returns the value and `NodeList.render` joins it, so
+    /// a non-string output is a `TypeError` raised by Python's `join`, and letting Python render the
+    /// node is what produces that error where Django produces it.
+    fn run_simple_tag(&mut self, slot: &Slot, plan: &SimpleTagPlan) -> PyResult<Rendered> {
+        let py = self.py;
+        let mut args: Vec<Py<PyAny>> = Vec::with_capacity(plan.args.len() + 1);
+        if plan.takes_context {
+            args.push(self.context.clone().unbind());
+        }
+        for expression in &plan.args {
+            match self.resolve_expression(slot, expression)? {
+                Some(value) => args.push(value),
+                None => return Ok(Rendered::Refused),
+            }
+        }
+        let output = plan.func.bind(py).call1(PyTuple::new(py, args)?)?;
+
+        // `context[self.target_var] = output; return ""` — the assignment goes to the top frame,
+        // which is `Context.__setitem__`'s own `self.dicts[-1]`.
+        if let Some(target) = &plan.target_var {
+            self.context.set_item(target.bind(py), &output)?;
+            self.push_text("")?;
+            return Ok(Rendered::Done);
+        }
+
+        // `if context.autoescape: output = conditional_escape(output)`. The exact-`str` arm is the
+        // one the walk already takes for `{{ … }}`: a `str` *subclass* is where `SafeString` lives
+        // and carries `__html__`, so it is left to Python.
+        if self.autoescape && self.spill.is_none() && output.is_exact_instance_of::<PyString>() {
+            if let Ok(text) = output.cast::<PyString>() {
+                if let Some(escaped) = html_escape(text)? {
+                    self.push_text(&escaped)?;
+                    return Ok(Rendered::Done);
+                }
+            }
+        }
+        let output = if self.autoescape {
+            conditional_escape_fn(py)?.call1((&output,))?
+        } else {
+            output
+        };
+        match output.extract::<String>() {
+            Ok(text) => {
+                self.push_text(&text)?;
+                Ok(Rendered::Done)
+            }
+            // Not a `str`: Django's `"".join` is where that fails, so Python renders it.
+            Err(_) => Ok(Rendered::Refused),
+        }
+    }
+
+    /// One `FilterExpression`'s value — `FilterExpression.resolve(context)`, the argument form.
+    ///
+    /// The same absorption an emitted `{{ … }}` takes, because it is the same method: a failed head
+    /// becomes `string_if_invalid` and the filters either stop or run on it. The one arm that does
+    /// **not** carry over is `Absorbed::Nothing`, which belongs to `VariableNode.render` rather than
+    /// to `resolve`; an argument has no such arm, so the node is handed back instead of inventing one.
+    fn resolve_expression(&mut self, slot: &Slot, emit: &Emit) -> PyResult<Option<Py<PyAny>>> {
+        let mut value = match self.resolve_head(&emit.head) {
+            Ok(value) => value,
+            Err(error) => match absorb_emit(self.py, slot, &self.context, error)? {
+                Absorbed::Final(value) => return Ok(Some(value)),
+                Absorbed::Continue(value) => value,
+                Absorbed::Nothing => return Ok(None),
+            },
+        };
+        for step in &emit.steps {
+            match self.apply_step(step, &value)? {
+                StepOutcome::Value(next) => value = next,
+                StepOutcome::Refused => return Ok(None),
+            }
+        }
+        Ok(Some(value))
     }
 
     /// Render one `{% if %}` this walk owns — `IfNode.render`'s loop (`engine/defaulttags.py:324-337`).
@@ -4505,6 +4663,13 @@ fn render_plan(
 /// Cached because a per-render fetch cost ~1.2 µs of fixed cost — most of the `micro/text` row, which is
 /// the render call. `PyOnceLock::import` resolves it once per process.
 static RENDER_VALUE_IN_CONTEXT: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+/// `django.utils.html.conditional_escape`, cached — `SimpleNode.render`'s own escape.
+static CONDITIONAL_ESCAPE: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+fn conditional_escape_fn(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
+    CONDITIONAL_ESCAPE.import(py, "django.utils.html", "conditional_escape")
+}
 
 fn render_value_in_context(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
     RENDER_VALUE_IN_CONTEXT.import(
