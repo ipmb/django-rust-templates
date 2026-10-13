@@ -66,7 +66,7 @@ residual reported as residual. N=200, compile 45.5 ms:
 | inbound `Token` build (`host.py:435-438`) | 24.5 | 54% |
 | outbound wire serialisation (`host.py:493`) | 11.3 | 25% |
 | the tag's own compile function (`host.py:454`) | 1.8 | 4% |
-| residual inside the bracket (PyO3 call overhead) | 0.1 | 0.2% |
+| residual inside the bracket (PyO3 call overhead **+ unmeasured**) | 0.1 | 0.2% |
 | **outside** the bracket | 7.7 | 17% |
 
 Perturbation against an uninstrumented control: +2.7%.
@@ -103,7 +103,7 @@ and name metadata. Measured: a tag registered as `a` reports `__qualname__ == "a
 user-copyable marker attribute are therefore all unsound. `__code__` is not copied by
 `@wraps`.
 
-### 4.1 In-tree proof that the risk is real
+### 4.1 In-tree proof that direct stream reads exist
 
 `engine/templatetags/i18n.py:564,575` — `do_block_translate` — reads the stream directly:
 
@@ -112,10 +112,19 @@ while parser.tokens:
     token = parser.next_token()
 ```
 
-It is a plain `@register.tag`, so the classifier below excludes it by construction. It is
-retained as a regression test because it demonstrates the failure mode exactly: handed an
-**empty** list it would compile silently and wrongly, with `singular` left empty and no
-exception anywhere.
+It is a plain `@register.tag`, so the classifier below excludes it by construction, and it is
+retained as a stream-access exclusion test.
+
+**It is not an example of silent miscompilation.** Handed an empty list it raises, because it
+validates the dispatched token against the expected end tag at `i18n.py:581-585`:
+
+```
+TemplateSyntaxError: 'blocktranslate' doesn't allow other block tags (seen 'blocktranslate') inside it
+```
+
+An earlier draft claimed it would succeed silently. That was wrong. The silent-skipping
+fixture is instead a purpose-built compile function that loops on `while parser.tokens:` with
+no end-tag validation — written for the suite, since no in-tree tag has that shape.
 
 ## 5. Classification
 
@@ -133,55 +142,110 @@ body-consuming compiler through the stream-free seam. This is ordinary supported
 Any memoisation must therefore be keyed on the callable object actually selected, and must
 be invalidated by every supported mutation of the environment in §5.3.
 
-### 5.2 Trusted implementations, captured once
+### 5.2 The supported environment, declared
 
-At host-module import, after the relevant modules are initialised, capture:
+An earlier draft promised to guard "everything the eligible compilers reach" while also
+disclaiming deliberate monkeypatching. Those are inconsistent, and the inconsistency is
+resolved here rather than left to code review.
 
-- the `__code__` objects of `simple_tag`'s and `inclusion_tag`'s generated `compile_func`,
-  obtained by registering throwaway tags on a throwaway `Library` — never by editing
-  `library.py`;
-- the `__globals__` dict of those generated functions;
-- `defaulttags.load` itself;
-- the trusted implementations of everything the eligible compilers reach, **per population**,
-  because the two have different dependency sets:
+**Inside the supported environment** — a deviation must cause fallback, and each is a
+captured-identity check:
 
-| population | trusted implementations that must be unchanged |
+| population | guarded bindings |
 |---|---|
-| `simple_tag` / `inclusion_tag` | `Parser.compile_filter` (`base.py:711`), `Parser.find_filter` (`base.py:717`), `Token.split_contents` (`base.py:429`), `library.parse_bits` (`library.py:390`), `base.token_kwargs` (`base.py:1372`), `base.FilterExpression` **and** `FilterExpression.args_check` (`base.py:943`), `library.SimpleNode` (`:318`), `library.InclusionNode` (`:353`) |
-| `defaulttags.load` | `Parser.add_library` (`base.py:707`), `defaulttags.load_from_library` (`defaulttags.py:1080`), `defaulttags.LoadNode`, `Token.split_contents` (`base.py:429`) |
+| `simple_tag` / `inclusion_tag` | `Parser.compile_filter` (`base.py:711`), `Parser.find_filter` (`base.py:717`), `Token.split_contents` (`base.py:429`), `library.parse_bits` (`library.py:390`), **`library.token_kwargs`** (`library.py:11`, used at `:423`), `FilterExpression.__init__` and `FilterExpression.args_check` (`base.py:943`), `Variable.__init__` and `Variable.resolve`, `base.smart_split`, `TagHelperNode.__init__` (`library.py:304`), `SimpleNode.__init__` (`:321`), `InclusionNode.__init__` (`:354`) |
+| `defaulttags.load` | `Parser.add_library` (`base.py:707`), `defaulttags.find_library`, `defaulttags.load_from_library` (`defaulttags.py:1080`), `defaulttags.LoadNode` (`:392`), `defaulttags.Library` (constructed at `:1084`) |
 
-`Parser.add_library` is in that second row because `load`'s identity matching says nothing
-about it: an instance or subclass override of `add_library` can read or consume the stream
-while `load` itself is untouched.
+**Outside the supported environment** — not guarded, and a deviation there is undefined
+rather than detected: CPython's stdlib (`inspect.unwrap`, `inspect.getfullargspec`, `re`) and
+`django.utils` helpers reached below our own code. Guarding those is unbounded and they are
+not plausible extension points.
 
-Code objects are derived per interpreter and never persisted: nothing requires a 3.12 code
-object to equal a 3.13 or 3.14 one. A module reload that changes the code conservatively
-loses eligibility until the trusted set is rebuilt.
+Three corrections to an earlier draft, each demonstrated rather than argued:
+
+- **`library.token_kwargs`, not `base.token_kwargs`.** `parse_bits` resolves `token_kwargs`
+  through `library.py`'s own globals (`library.py:423`, and `parse_bits.__globals__ is
+  library.__dict__`). The two names currently point at one object, so an identity check on
+  `base.token_kwargs` passes today — but rebinding only `library.token_kwargs` to a
+  token-consuming wrapper leaves `base.token_kwargs` untouched and defeats it. Guard the name
+  actually resolved.
+- **`load` does not call `Token.split_contents`.** It uses `token.contents.split()`
+  (`defaulttags.py:1121`); `split_contents` appears in that function only inside the comment
+  at `:1119-1120` explaining why it is *not* used. Guarding it there is an unnecessary restriction.
+  It also calls `find_library` in **both** syntax branches (`:1125`, `:1131`).
+- **Class identity is not implementation identity.** Keeping `SimpleNode` bound to the same
+  class says nothing about its `__init__`, which reaches `TagHelperNode.__init__` through
+  `super()`. The guarded objects above are the **callables**, not the classes that hold them.
+
+Capture happens once at host-module import, after the relevant modules are initialised. Code
+objects are derived per interpreter by registering throwaway tags on a throwaway `Library` —
+never by editing `library.py`, whose `simple_tag` is a `COMPARED_PATH` span
+(`scripts/check_transcriptions.py:250`) and therefore cannot carry a declared divergence at
+all. Nothing is persisted across processes: no 3.12 code object need equal a 3.13 or 3.14 one.
 
 ### 5.3 The test
 
-A callable is stream-free only if **all** hold:
+A dispatch is stream-free only if **all four** hold. Each is O(1) and exact.
 
-1. `func.__code__` is one of the captured code objects, **and** `func.__globals__` is the
-   captured globals dict — or `func` is `defaulttags.load` itself;
-2. every **effective** parser method in that population's row of §5.2 is the captured
-   implementation — checked against the resolved attribute, so that an instance override, a
-   `Parser` subclass override, *and* a rebinding of the base-class attribute are all caught;
-3. the module-level helpers in that row are still the captured objects.
+**1 — The parser is one we support.** `type(parser) is Parser or type(parser) is
+_DeferredTokenParser`. An exact type check, not `isinstance`.
 
-Condition 1's globals clause is not pedantry. A function carrying the genuine code object
-and closure but a different `__globals__` resolves `parse_bits` through *its own* globals
-(`library.py:135`), so it can consume tokens while `library.parse_bits` is untouched and a
-code-identity test passes.
+This single condition retires three separate attacks: a `Parser` subclass overriding
+`find_filter` or `add_library`, a metaclass, and any custom `__getattribute__` or property
+that would execute code during the guard itself. Unknown attribute-resolution models are
+rejected **without being invoked**. `_DeferredTokenParser.__getattr__` stays supported and is
+never triggered by this guard, since it fires only for a missing `tokens`
+(`render.py:277-284`).
 
-Condition 2's "effective" wording is likewise load-bearing: checking
-`type(parser).compile_filter is Parser.compile_filter` plus the absence of an instance
-override passes for a `Parser` subclass that overrides only `find_filter`, which then reads
-the stream from inside `FilterExpression.__init__` (`base.py:810`).
+**2 — No instance override.** For each guarded parser method in the population's row,
+`name not in vars(parser)`.
+
+**3 — No class rebinding.** For each, `Parser.__dict__[name] is` the captured function.
+
+Conditions 1–3 together make the resolved attribute *provably* the captured implementation,
+without comparing it. That matters: `parser.compile_filter is Parser.compile_filter` is
+**`False` on a completely standard parser**, because the resolved attribute is a bound method
+and the captured one is a plain function. A spec that compared them directly would have
+rejected every template and silently disabled the feature. Where a comparison is unavoidable
+elsewhere, it is `resolved.__func__ is captured and resolved.__self__ is parser` — the
+receiver clause included, so a trusted method bound to a *different* parser cannot qualify.
+
+**4 — The callable is the one we captured.**
+
+- For the generated compilers: `type(func) is types.FunctionType`, **and** `func.__code__` is
+  one of the captured code objects, **and** `func.__globals__` is the captured globals dict.
+  The `FunctionType` clause is load-bearing — a callable object can expose `__code__` and
+  `__globals__` attributes while executing an entirely different `__call__`. The globals
+  clause is equally so: a function carrying the genuine code object and closure but foreign
+  globals resolves `parse_bits` through *its own* globals (`library.py:135`) and can consume
+  tokens while `library.parse_bits` is untouched.
+- For `load`: `func is` the **captured** load object — not whatever currently occupies
+  `defaulttags.load`.
+- A callable lacking `__code__` or `__globals__` declines cleanly. Classification reads them
+  with `getattr(..., None)` and never raises; an ordinary callable-object tag is simply not
+  eligible.
+- Plus the module-binding checks for that population's row in §5.2.
 
 **This is a compatibility classifier, not a security boundary.** It exists to avoid
 misclassifying reconstructed functions and callable lookalikes, not to withstand deliberate
-monkeypatching. The spec says so where it is documented.
+monkeypatching. §5.2 states which layer that promise covers.
+
+### 5.4 No caching in the first implementation
+
+Classification runs live, per dispatch. Provenance facts from §5.2 are captured once at
+import and are immutable; nothing about the *live* environment is memoised.
+
+§5.1's shadowing case is why: eligibility is a property of the callable currently bound to
+the command plus the current environment, and an earlier host callback in the same parse can
+change either. If §8's tiny-template control shows the live check costs more than it saves,
+memoisation may be added keyed on the callable object with explicit invalidation — but it is
+not in the first implementation, and immutable provenance must stay separate from live
+environment checking.
+
+Classification and invocation operate on the **same** selected callable in the supported
+synchronous model: the callable is resolved once, classified, and invoked. There is no window
+in which an unsupported mutation can be discovered between the two, and no path by which a
+stream-free invocation falls back mid-call — it was never given a suffix to fall back to.
 
 ## 6. The seam
 
@@ -222,13 +286,35 @@ Three properties of that shape are deliberate:
   (`mod.rs:249-250`) and `replace_tokens()` reverses it back (`mod.rs:257-258`); for a
   genuinely stream-free callback, doing neither is equivalent.
 
-`tag_is_stream_free` is a new `Host` trait method with an explicit PyO3 signature, and
-`NoHost`/`FilterCheckHost` implement it. `has_tag` keeps its existing boolean contract
-(`host.py:386-400`) — its `False` already conflates several situations whose core routing
-differs, and smuggling a third state through the bool extraction is not acceptable.
+The sketch above is architectural, not literal. Two things it elides:
+
+- **`wire()` belongs in the PyO3 adapter, not `template-core`.** Both new trait methods take
+  a core `&Token`, exactly as today's `call_tag` does (`parser/host.rs:55-60`); the wire
+  conversion happens in `crates/template-py`.
+- **Both methods get default implementations.** `tag_is_stream_free` defaults to `false` and
+  `call_tag_stream_free` is then unreachable, so `NoHost`, `FilterCheckHost` and every test
+  host stay on today's path without changes.
+
+```rust
+fn tag_is_stream_free(&self, _command: &str) -> bool { false }
+
+fn call_tag_stream_free(
+    &self, command: &str, token: &Token,
+) -> Result<NodeDesc, Error> { unreachable!("gated on tag_is_stream_free") }
+```
+
+The PyO3 implementation of `call_tag_stream_free` performs the **same** node handling as
+`call_tag`: `must_be_first` extraction (`lib.rs:1106-1113`), reference-table insertion, and
+the `Error::internal` boundary error when the host returns something that is not a node. Only
+the token vector is absent.
+
+`has_tag` keeps its existing boolean contract (`host.py:386-400`) — its `False` already
+conflates several situations whose core routing differs, and smuggling a third state through
+the bool extraction is not acceptable.
 
 Whether one extra crossing per host tag is cheaper than the transfer it avoids on *short*
-streams is a measurement, not an assumption; §8 covers it.
+streams is a measurement, not an assumption; §8 covers it, including the case that pays the
+crossing and receives nothing.
 
 ## 7. `parser.tokens` during a stream-free call
 
@@ -252,10 +338,27 @@ raises by design. Diagnostic and cleanup paths must therefore never let a repr a
 replace the original compiler exception; a sentinel violation is reported as a contract
 failure that preserves the error it was raised during.
 
+### 7.1 The exception
+
+Every sentinel operation raises `StreamFreeContractViolation`, a `RuntimeError` subclass
+defined in `host.py`. It is **an ordinary Python host error**, not a dedicated boundary
+error: it travels through `python_host_error`, is stashed in `host.last_error`
+(`host.py:479-491`), and is restored by identity in `django_exception`
+(`render.py:223-227`) with its traceback intact — the same route any compile function's
+exception takes. That consistency is the point; a second mechanism would be a second thing to
+get right.
+
+Its message names the operation (`"len()"`, `"pop()"`, `"iteration"`, …) and the command, and
+**never formats the sentinel itself**. `Parser.__repr__` renders `self.tokens` with `%r`
+(`base.py:566`), so any diagnostic that reprs the parser would raise a second time from
+inside the first exception's handling. Tests assert that the original exception and its
+attached token survive, in both debug modes, through the full compile-and-convert path —
+not merely that the sentinel's methods raise when called directly.
+
 A tripped sentinel is a genuine integration failure. The callback is **not** replayed on the
 ordinary path: it may already have mutated parser state.
 
-### 7.1 Stated behaviour change
+### 7.2 Stated behaviour change
 
 Today a streamful call leaves the real leftover list on `parser.tokens`
 (`host.py:493-494`). A stream-free call leaves the sentinel. This is documented as a limit of
@@ -283,23 +386,39 @@ cached template.
 Before this ships, all of the following must be measured end-to-end and recorded, with the
 probe scripts committed under `.review/` so the numbers are checkable rather than asserted:
 
-- median, p90 and max shapes: compile time before and after;
-- an **all-native** control: no measurable regression;
-- a **tiny one-host** template: the extra classification crossing must not cost more than
-  the transfer it avoids;
-- debug and non-debug paths separately;
-- the existing benchmark corpus, for the default path.
+| # | workload | what it proves |
+|---|---|---|
+| 1 | median / p90 / max shapes | the gain this is bought with |
+| 2 | **all-native** control | no regression where no host tag exists — pays nothing, gains nothing |
+| 3 | **tiny one-host** control | the extra classification crossing is cheaper than the transfer it avoids |
+| 4 | **all-streamful** control (§3's flat block-tag shape) | the rejected-host path pays the crossing and receives **no** saving — the only workload that is pure overhead |
+| 5 | **mixed transitions** — stream-free → streamful → stream-free | classification is correct and cheap across route changes |
+| 6 | the existing benchmark corpus | the default path is unmoved |
 
-If the tiny-template control regresses, the classification result may be memoised per
-callable for the life of the parse — subject to §5.3's invalidation — or the feature gated on
-stream length. That decision is deferred to the measurement.
+Workload 4 is the one an earlier draft missed, and it is the one most likely to regress.
+
+Every row runs in **both** debug modes, at a realistic size and a stress size, paired against
+the unchanged baseline in the same process. Report **dispersion**, not an isolated best time:
+median and interquartile range over at least 15 runs. "No measurable regression" means the
+post-change median is within the baseline's interquartile range, and any regression beyond
+that is reported rather than absorbed.
+
+The component-heavy row in the table above is a **volume illustration, not a latency gate**.
+If its benefit becomes part of the argument for shipping, its wall-clock result joins the
+required set — and even then it would not prove anything about component forms this work has
+not inspected.
+
+If the tiny-template or all-streamful control regresses, §5.4's memoisation is the lever,
+subject to its invalidation requirement. That decision is deferred to the measurement.
 
 ## 9. What this does not fix
 
 A compile function that parses a body cannot be stream-free. `django-includecontents`
 compiles components through exactly that shape, so this design leaves the component round
 trip intact — the 46% row in §8. It accelerates the *other* host calls in such a template,
-notably its `{% load %}`, so component-heavy compiles improve without becoming linear.
+notably its `{% load %}`, so component-heavy compiles would be **expected** to improve
+without becoming linear. That is a prediction, not a result: §8 establishes no latency gain
+for this shape, and none is claimed.
 
 The remaining half needs a boundary design this spec does not attempt: `Parser.parse()`
 calls `self.tags[command](parser, token)` directly (`base.py:580-622`) without returning
@@ -330,31 +449,75 @@ because the dead ends are the reason this one is shaped as it is.
 - **Caching eligibility by command name**: killed by §5.1's shadowing case.
 - **`call_tag_stream_free(...)?`**: killed by §6 — it bypasses the shared token annotation.
 - **Leaving `parser.tokens` alone outside debug**: killed by §7's deferred-lexer case.
+- **Comparing `parser.compile_filter` against `Parser.compile_filter`**: killed, and it would
+  have disabled the feature outright rather than loosened it. The resolved attribute is a
+  bound method and the captured one is a plain function, so that identity is `False` on a
+  *standard* parser. §5.3 conditions 1-3 prove the binding instead of comparing it.
+- **Guarding `base.token_kwargs`**: killed. `parse_bits` resolves the name through
+  `library.py`'s globals, so rebinding only `library.token_kwargs` defeats it while the
+  `base` identity still passes.
+- **Guarding classes rather than callables**: killed. `SimpleNode` can keep its identity while
+  its `__init__` changes.
+- **Claiming `do_block_translate` would silently miscompile**: withdrawn, having been run. It
+  raises, because it validates its end tag (§4.1).
+- **Requiring `Token.split_contents` for `load`**: withdrawn. `load` uses
+  `token.contents.split()`; `split_contents` appears only in the comment explaining why not.
 - **A claimed 70/30 Python/Rust cost split**: withdrawn. It rested on a synthetic matching a
   net excess between two different pipelines, which is not a partition; §3 is the disjoint-span
   replacement, and it reports its residual as residual.
 
 ## 11. Acceptance
 
-- Tokens materialised per compile is O(tokens) for the covered populations, asserted with the
-  counting instrument from §2 rather than inferred from timings.
-- §8's measurements recorded, including the two controls, before ship.
-- The Django suite stays green; `tests/test_host_tags.py`'s route assertions
-  (`:115-142`) are unchanged — a host block tag's body is still Django-parsed.
+**Narrowed from an earlier draft.** "Tokens materialised per compile is O(tokens)" is not
+true of an arbitrary mixed template: one containing many *streamful* callbacks still
+materialises quadratic suffixes, because this design does not touch them. The two assertions
+that are true:
+
+- **zero** suffix transfer on every eligible call, and
+- linear dispatched-token construction for templates whose host tags are all eligible.
+
+The old `call_tag` counter cannot prove this on its own, since eligible calls no longer go
+through it. Instrument the construction and transfer sites on **both** routes.
+
+Further:
+
+- §8's six workloads recorded, with dispersion, before ship.
+- The Django suite stays green; `tests/test_host_tags.py`'s route assertions (`:115-142`) are
+  unchanged — a host block tag's body is still Django-parsed.
 - `scripts/check_transcriptions.py` passes with no new declared region: no transcribed file
   is edited.
-- Classification tests on all three supported Python versions, covering both
-  `takes_context` values, varied signatures and `as name` syntax.
-- Negative tests, each asserting fallback **before** the callback runs:
-  an overridden `{% load %}`; a `Parser` subclass overriding only `find_filter`; a subclass
-  overriding only `add_library`, against `{% load %}`; an instance override of
-  `compile_filter` installed by an *earlier* host callback in the same parse; a function
-  rebuilt with the genuine code object and closure but foreign `__globals__`; a `{% load %}`
-  that rebinds a `simple_tag` name to a block compiler mid-parse; `simple_block_tag`, which
-  must never classify as stream-free.
+- Classification tests on all three supported Python versions, covering both `takes_context`
+  values, varied signatures and `as name` syntax.
+
+**Negative tests.** Each asserts fallback **before the callback runs**, and each asserts the
+callback received the ordinary stream and produced output matching the unchanged baseline —
+not merely that eligibility returned `False`:
+
+| deviation | population |
+|---|---|
+| an overridden `{% load %}` | load |
+| a `Parser` subclass overriding only `find_filter` | generated |
+| a `Parser` subclass overriding only `add_library` | load |
+| instance override of `compile_filter` installed by an **earlier** host callback in the same parse | generated |
+| rebinding `Parser.compile_filter` on the class itself | generated |
+| **`library.token_kwargs` rebound while `base.token_kwargs` is untouched** | generated |
+| `defaulttags.find_library` rebound | load |
+| `SimpleNode.__init__` or `FilterExpression.args_check` changed while the class object is unchanged | generated |
+| a function rebuilt with the genuine code object and closure but foreign `__globals__` | generated |
+| a callable object exposing `__code__`/`__globals__` but a different `__call__` | generated |
+| a callable tag with no `__code__` at all — must decline cleanly, not raise | generated |
+| a `{% load %}` that rebinds a `simple_tag` name to a block compiler mid-parse | both |
+| a non-exact parser type — rejected **without invoking** its attribute lookup | both |
+| `simple_block_tag`, which must never classify as stream-free | — |
+
+Plus:
+
 - `do_block_translate` (§4.1) compiles correctly and is never classified stream-free.
-- Sentinel tests: every listed operation raises; a tripped sentinel preserves the original
-  exception rather than replacing it with a repr failure.
+- The purpose-built silent-skipping fixture from §4.1 trips the sentinel rather than
+  compiling an empty body.
+- Sentinel tests: every listed operation raises `StreamFreeContractViolation`; the original
+  exception and its attached token survive the full compile-and-convert path in both debug
+  modes; no diagnostic path reprs the parser.
 - Error-path tests: exception identity restoration (`render.py:223-227`) and the token
   attached to the error are unchanged on the stream-free path, including a boundary error
   carrying no token.
