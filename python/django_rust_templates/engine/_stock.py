@@ -79,3 +79,58 @@ def constant_text(node):
         return None
     text = text_of(node)
     return text if type(text) is str or isinstance(text, str) else None
+
+
+# --- third-party `simple_tag` nodes ------------------------------------------
+#
+# `@register.simple_tag` is how most third-party tags are written, and the node it
+# generates is **Django's** `django.template.library.SimpleNode` -- a library
+# registers with `django.template.Library`, not with this package's, so the class
+# is Django's even though the tag is not. Its `render` is scaffolding around a
+# call: resolve each argument, call the function, escape the result, optionally
+# assign `as var`. None of that is third-party code.
+#
+# Measured on bakerydemo, splitting each real render into the two halves: the
+# scaffolding is ~2.7 us per call, and for a tag whose body is cheap it is nearly
+# all of the cost -- `cell_classname` spends 0.42 us doing its job and 3.39 us
+# being called (89%). For an expensive one it is a smaller share: `pageurl` is
+# 21.63 us of body against 2.91 us of scaffolding (12%).
+from django.template.library import SimpleNode as _DjangoSimpleNode
+
+from .library import SimpleNode as _OurSimpleNode
+
+# **Both classes, and Django's is the one that matters.** A third-party library
+# registers with `django.template.Library`, so its generated node is Django's even
+# though the tag is not -- measured on bakerydemo, all 283 `SimpleNode` renders
+# were `django.template.library.SimpleNode`. This package's own `library.py` is a
+# transcription of that module, so its `SimpleNode` is the same implementation and
+# is accepted on the same terms; `{% querystring %}` is the built-in that reaches
+# it.
+_SIMPLE_NODE_RENDERS = {
+    _DjangoSimpleNode: _DjangoSimpleNode.render,
+    _OurSimpleNode: _OurSimpleNode.render,
+}
+
+
+def simple_tag_parts(node):
+    """The pieces of a `SimpleNode` the walk needs, or ``None`` to leave it alone.
+
+    ``None`` for anything that is not exactly one of the two `SimpleNode` classes
+    with its own `render`: a subclass (`SimpleBlockNode` is one, and it renders a nodelist
+    first), a rebound body, or a shape the walk does not reproduce. The identity
+    rule is `RENDER`/`PLAN`'s, for the same reason -- what the walk stands in for
+    has to be the implementation it was measured against.
+
+    **Keyword arguments are declined for now**, not because they are hard but
+    because every one of the 283 `SimpleNode` renders measured across eleven real
+    pages had none; the shape that matters is ``takes_context`` with one
+    positional argument, which is 68% of them.
+    """
+    stock_render = _SIMPLE_NODE_RENDERS.get(type(node))
+    if stock_render is None:
+        return None
+    if type(node).render is not stock_render:
+        return None
+    if node.kwargs:
+        return None
+    return node.func, bool(node.takes_context), list(node.args), node.target_var
