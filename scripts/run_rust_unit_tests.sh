@@ -50,4 +50,20 @@ PY_SITE="$("$VIRTUAL_ENV/bin/python" -c 'import site; print(site.getsitepackages
 export PYTHONPATH="${PY_SITE}${PYTHONPATH:+:$PYTHONPATH}"
 export RUST_MIN_STACK=8388608
 
-exec cargo test -p template-py --no-default-features --quiet "$@"
+# **One test thread, and it is a correctness fix rather than a preference.** These
+# tests each start from a bare interpreter and import `django_rust_templates`,
+# whose chain reaches Django's own circular import —
+# `django/template/__init__.py` imports `autoreload`, which imports
+# `backends.django`, which imports `django.template` again. Single-threaded that
+# cycle is ordinary; from two test threads at once CPython's per-module locks see
+# each thread holding what the other wants and raise
+# `_frozen_importlib._DeadlockError`. Observed on CI, in `materialise::malformed`,
+# and green on the very next run of the same commit — a flake, not a failure, and
+# one that reports as a red build on a commit that is fine.
+#
+# A mutex around the import would be the wrong fix: these threads hold the GIL,
+# importlib releases it mid-import, and a thread blocking on a Rust lock while
+# holding the GIL is a deadlock of its own. Serialising the tests removes the
+# second thread instead. The crate is 12 tests in about half a second, so there is
+# nothing to buy back.
+exec cargo test -p template-py --no-default-features --quiet "$@" -- --test-threads=1
