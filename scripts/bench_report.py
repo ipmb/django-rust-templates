@@ -1,15 +1,11 @@
-"""Public benchmark presentation and isolated nanodjango HTML export."""
+"""Presentation data for the nanodjango benchmark report."""
 
 from __future__ import annotations
 
 import base64
 import json
 import math
-import os
 from pathlib import Path
-import subprocess
-import sys
-import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 REPO = "https://github.com/ipmb/django-rust-templates"
@@ -223,24 +219,3 @@ def context(payload):
             if v.get("differ")
         ],
     }
-
-
-def render(payload):
-    """Export via the same nanodjango app used for preview, in fresh settings."""
-    with tempfile.TemporaryDirectory(prefix="benchmark-report-") as directory:
-        results = Path(directory) / "results.json"
-        output = Path(directory) / "report.html"
-        results.write_text(json.dumps(payload), encoding="utf-8")
-        env = dict(os.environ, BENCHMARK_RESULTS=str(results))
-        subprocess.run(
-            [
-                sys.executable,
-                "-I",
-                str(ROOT / "scripts/bench_site.py"),
-                "--export",
-                str(output),
-            ],
-            env=env,
-            check=True,
-        )
-        return output.read_text(encoding="utf-8")

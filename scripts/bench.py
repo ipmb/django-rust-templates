@@ -4,7 +4,10 @@
     source scripts/env.sh
     maturin develop --release                       # or every number is about the wrong file
     .venv/bin/python -I scripts/bench.py            # table
-    .venv/bin/python -I scripts/bench.py --html docs/bench.html
+    .venv/bin/python -I scripts/bench.py --json results.json
+
+Render HTML separately with `BENCHMARK_RESULTS=results.json` and
+`scripts/bench_site.py --export docs/bench.html`.
 
 **Three engines, and the control is one of them.** `django` is stock Django's DTL
 and every ratio in the report is taken against it; `rust` is this package;
@@ -919,7 +922,6 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="list the corpus and stop")
     ap.add_argument("--count", action="store_true", help="print the FFI crossing census")
     ap.add_argument("--json", default=None, help="write the full payload here")
-    ap.add_argument("--html", default=None, help="write a self-contained HTML report here")
     ap.add_argument(
         "--bakerydemo", default=str(PROJECT_ROOT / "docs/benchmarks/bakerydemo-2026-10-12.json"),
         help="recorded Bakerydemo JSON to include in the report",
@@ -1060,11 +1062,6 @@ def main() -> int:
     if args.json:
         Path(args.json).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"\nwrote {args.json}")
-    if args.html:
-        import bench_report
-
-        Path(args.html).write_text(bench_report.render(payload), encoding="utf-8")
-        print(f"wrote {args.html}")
     return 0
 
 

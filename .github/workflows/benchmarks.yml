@@ -41,7 +41,11 @@ jobs:
           maturin develop --release --locked
           python -I scripts/assert_native_is_the_built_artifact.py
       - name: Measure benchmarks
-        run: .venv/bin/python -u -I scripts/bench.py --engines django,rust,jinja2 --repeats 7 --target 0.05 --json benchmark.json --html benchmark.html > benchmark.log 2>&1
+        run: .venv/bin/python -u -I scripts/bench.py --engines django,rust,jinja2 --repeats 7 --target 0.05 --json benchmark.json > benchmark.log 2>&1
+      - name: Render HTML report
+        env:
+          BENCHMARK_RESULTS: benchmark.json
+        run: .venv/bin/python -I scripts/bench_site.py --export benchmark.html
       - name: Prepare public report
         if: inputs.pages
         run: |

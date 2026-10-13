@@ -126,7 +126,8 @@ Install its optional dependencies outside the test environment:
 
 ```sh
 python -m pip install --target .bench-deps -r scripts/bench-report-requirements.txt
-.venv/bin/python -I scripts/bench.py --json results.json --html docs/bench.html
+.venv/bin/python -I scripts/bench.py --json results.json
+BENCHMARK_RESULTS=results.json .venv/bin/python -I scripts/bench_site.py --export docs/bench.html
 ```
 
 Preview or export an existing JSON results file without rerunning measurements:
