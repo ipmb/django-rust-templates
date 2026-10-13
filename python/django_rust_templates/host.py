@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import types
 
 from django.utils.datastructures import DeferredSubDict
 
@@ -363,6 +364,276 @@ _RUST_OWNED = (
 ) | set(_native.library_tag_names())
 
 
+
+
+# --------------------------------------------------------------------------
+# Stream-free host calls: the classifier.
+#
+# `call_tag` ships every remaining token in and takes every remaining token
+# back, so a template with N host tags builds O(N x tokens) Python objects
+# where Django builds O(tokens). A compile function that provably never reads
+# `parser.tokens` can skip the transfer in both directions.
+#
+# "Provably" is the whole of the difficulty, and it is **transitive**: a stock
+# `simple_tag` compiler reaches `parse_bits` -> `compile_filter` ->
+# `find_filter`, every one of them overridable. Identity of the compile
+# function alone was measured to be insufficient. See
+# `docs/superpowers/specs/2026-10-13-stream-free-host-calls-design.md` §5.
+# --------------------------------------------------------------------------
+
+
+class StreamFreeContractViolation(RuntimeError):
+    """A stream-free compile function reached for the token stream anyway.
+
+    An ordinary Python host error, deliberately: it travels through
+    `python_host_error`, is stashed in `last_error`, and is restored by identity
+    in `render.django_exception` like any compile function's exception. A second
+    mechanism would be a second thing to get right.
+    """
+
+
+class _UnavailableStream:
+    """What `parser.tokens` holds during a stream-free call: a thing that raises.
+
+    Armed in **production as well as debug**, because neither alternative is
+    safe. An empty list lets a misclassified compile function run
+    ``while parser.tokens:`` and silently skip its body. Leaving the attribute
+    alone is worse: `_DeferredTokenParser` deliberately has no `tokens` before
+    the first host call (`python/django_rust_templates/render.py:275`), so the first read lexes the whole
+    source and hands back the *entire original template*, already-consumed
+    tokens included.
+
+    **Not a `list` subclass, and that is the point** — there is no operation it
+    can satisfy quietly. A tripped sentinel is an integration failure, and the
+    callback is never replayed on the ordinary path: it may already have mutated
+    `parser.tags` or `extra_data`.
+    """
+
+    __slots__ = ("_command",)
+
+    def __init__(self, command):
+        self._command = command
+
+    def _refuse(self, operation):
+        raise StreamFreeContractViolation(
+            f"{operation} on parser.tokens during the stream-free compile of "
+            f"{self._command!r}: this tag was classified as never reading the "
+            f"token stream, so no stream was supplied. See "
+            f"docs/superpowers/specs/2026-10-13-stream-free-host-calls-design.md."
+        )
+
+    # `__repr__` refuses like the rest, and `Parser.__repr__` renders
+    # `self.tokens` with `%r` (`base.py:566`) — so a diagnostic that reprs the
+    # parser raises a second time from inside the first exception's handling.
+    # Nothing in the error path may repr either object.
+    def __bool__(self):
+        self._refuse("bool()")
+
+    def __len__(self):
+        self._refuse("len()")
+
+    def __iter__(self):
+        self._refuse("iteration")
+
+    def __getitem__(self, index):
+        self._refuse("subscript")
+
+    def __delitem__(self, index):
+        self._refuse("del")
+
+    def __repr__(self):
+        self._refuse("repr()")
+
+    def pop(self, *args):
+        self._refuse("pop()")
+
+    def append(self, item):
+        self._refuse("append()")
+
+
+def _capture_trusted():
+    """Provenance, read once at import and never again.
+
+    The generated compile functions are reached by **registering throwaway tags
+    on a throwaway `Library`** rather than by editing `library.py`, whose
+    `simple_tag` is a `COMPARED_PATH` span (`scripts/check_transcriptions.py:250`)
+    and so cannot carry a declared divergence at all.
+
+    Code objects are derived per interpreter and never persisted: nothing
+    requires a 3.12 code object to equal a 3.13 or 3.14 one.
+    """
+    from django_rust_templates.engine.library import Library
+
+    probe = Library()
+
+    @probe.simple_tag
+    def _simple():  # pragma: no cover - never called
+        return ""
+
+    @probe.inclusion_tag("_probe.html")
+    def _inclusion():  # pragma: no cover - never called
+        return {}
+
+    simple, inclusion = probe.tags["_simple"], probe.tags["_inclusion"]
+    return {
+        "codes": frozenset({simple.__code__, inclusion.__code__}),
+        # `compile_func` is defined in `library.py`, so its globals are that
+        # module's dict. A function carrying the genuine code object but
+        # *foreign* globals resolves `parse_bits` through its own and can consume
+        # tokens while `library.parse_bits` is untouched — measured.
+        "globals": simple.__globals__,
+    }
+
+
+_TRUSTED = _capture_trusted()
+
+
+def _captured(module, name):
+    return getattr(module, name)
+
+
+def _class_binding(module, name, methods):
+    """A guarded class: the binding **and** the methods that run at compile time.
+
+    Each alone is insufficient, and both failures were measured. Keeping
+    `SimpleNode` bound to one class says nothing about its `__init__`; but
+    replacing it with a *subclass* that inherits the captured `__init__` and adds
+    a `__new__` leaves the initializer identity `True` while the compiler calls
+    the replacement.
+    """
+    cls = getattr(module, name)
+    return (module, name, cls, {m: getattr(cls, m, None) for m in methods})
+
+
+def _guard_tables():
+    from django_rust_templates.engine import base as _base
+    from django_rust_templates.engine import library as _library
+
+    generated_functions = [
+        (_base.Parser, "compile_filter"),
+        (_base.Parser, "find_filter"),
+        (_library, "parse_bits"),
+        # The name `parse_bits` actually resolves (`python/django_rust_templates/engine/library.py:423`), which is
+        # *not* `base.token_kwargs`: the two point at one object until someone
+        # rebinds this one, and then only this check sees it.
+        (_library, "token_kwargs"),
+        (_base, "smart_split"),
+    ]
+    generated_classes = [
+        _class_binding(_library, "SimpleNode", ("__init__", "__new__")),
+        _class_binding(_library, "InclusionNode", ("__init__", "__new__")),
+        _class_binding(_library, "TagHelperNode", ("__init__",)),
+        _class_binding(_base, "FilterExpression", ("__init__", "args_check")),
+        _class_binding(_base, "Variable", ("__init__", "resolve")),
+        # **This module's own `Token`, not `base.Token`.** `call_tag_stream_free`
+        # instantiates the name bound *here* to build the dispatched token, and
+        # the compile function then calls `split_contents()` on it. Guarding
+        # `base.Token` instead is the alias mistake `token_kwargs` already
+        # taught: the two share an object until exactly one of them is replaced,
+        # and then only the executed one matters.
+        _class_binding(sys.modules[__name__], "Token", ("__init__", "__new__", "split_contents")),
+    ]
+    load_functions = [
+        (_base.Parser, "add_library"),
+        (_defaulttags, "find_library"),
+        (_defaulttags, "load_from_library"),
+    ]
+    load_classes = [
+        _class_binding(_defaulttags, "LoadNode", ("__init__", "__new__")),
+        # `defaulttags.Library`, because that is the name `load_from_library`
+        # resolves when it constructs one. `library.Library` is a different name
+        # for the same object and rebinding one does not rebind the other.
+        _class_binding(_defaulttags, "Library", ("__init__", "__new__")),
+        # Shared with the generated row: `call_tag_stream_free` builds the
+        # dispatched token for every population, at `host.py`'s own `Token`.
+        # `split_contents` is absent here because `load` reads
+        # `token.contents.split()` instead (`defaulttags.py:1121`), so
+        # requiring it would be a restriction this population does not earn.
+        _class_binding(sys.modules[__name__], "Token", ("__init__", "__new__")),
+    ]
+    return {
+        "generated": {
+            "methods": ("compile_filter", "find_filter"),
+            "functions": [(o, n, _captured(o, n)) for o, n in generated_functions],
+            "classes": generated_classes,
+        },
+        "load": {
+            "methods": ("add_library",),
+            "functions": [(o, n, _captured(o, n)) for o, n in load_functions],
+            "classes": load_classes,
+        },
+    }
+
+
+_GUARDS = _guard_tables()
+_LOAD = _defaulttags.load
+
+# The two parser classes whose attribute resolution this package controls.
+# Filled lazily: `render` imports this module, so naming it at import is a cycle.
+_SUPPORTED_PARSERS = None
+
+
+def _supported_parsers():
+    global _SUPPORTED_PARSERS
+    if _SUPPORTED_PARSERS is None:
+        from django_rust_templates.engine.base import Parser
+        from django_rust_templates.render import _DeferredTokenParser
+
+        _SUPPORTED_PARSERS = (Parser, _DeferredTokenParser)
+    return _SUPPORTED_PARSERS
+
+
+def _population(func):
+    """Which guard table `func` must satisfy, or `None` for "not eligible".
+
+    The `FunctionType` test runs **before any attribute of `func` is read**: a
+    callable object can expose `__code__` and `__globals__` while executing an
+    entirely different `__call__`, and even `getattr(..., None)` on one can run
+    its custom lookup.
+    """
+    if func is _LOAD:
+        return "load"
+    if type(func) is not types.FunctionType:
+        return None
+    if func.__code__ in _TRUSTED["codes"] and func.__globals__ is _TRUSTED["globals"]:
+        return "generated"
+    return None
+
+
+def _environment_is_trusted(parser, population):
+    guards = _GUARDS[population]
+
+    # 1 — a parser whose attribute resolution we control. An *exact* type test,
+    # so an unknown subclass or metaclass is rejected without its lookup being
+    # invoked at all.
+    base, deferred = _supported_parsers()
+    if type(parser) is not base and type(parser) is not deferred:
+        return False
+
+    # 2 and 3 — no instance override, and no rebinding on *either* class. The
+    # second clause is not belt-and-braces: `_DeferredTokenParser` is itself a
+    # `Parser` subclass, so its own `__dict__` wins during resolution, and
+    # assigning there passes conditions 1 and 2 and an identity check against
+    # `Parser.__dict__` while the resolved method is the replacement. Measured.
+    instance = vars(parser)
+    for name in guards["methods"]:
+        if name in instance or name in deferred.__dict__:
+            return False
+
+    for owner, name, original in guards["functions"]:
+        if getattr(owner, name, None) is not original:
+            return False
+
+    for module, name, cls, methods in guards["classes"]:
+        if getattr(module, name, None) is not cls:
+            return False
+        for method, original in methods.items():
+            if getattr(cls, method, None) is not original:
+                return False
+
+    return True
+
+
 class ShellHost:
     """The `has_tag`/`call_tag` pair for one parse.
 
@@ -382,6 +653,37 @@ class ShellHost:
         # The exception object `call_tag` last let past, for the shell to
         # re-raise by identity. `None` until one does. See `call_tag`.
         self.last_error = None
+        # The callable `tag_is_stream_free` approved, for `call_tag_stream_free`
+        # to invoke. **Dispatch state, not memoisation**: it lives for one
+        # dispatch and says nothing about the next. The trait's boolean return
+        # cannot carry the callable, and looking `parser.tags[command]` up a
+        # second time at invocation would not be the same object — an earlier
+        # callback in this parse can rebind the name between the two crossings.
+        self._pending = None
+
+    def tag_is_stream_free(self, command):
+        """Whether `command`'s compile function provably never reads the stream.
+
+        Asked only inside the host arm (`crates/template-core/src/parser/mod.rs:372`) and **before**
+        `remaining_tokens()`, so an all-native template never reaches this and an
+        eligible tag skips the Rust clone and the inbound `PyList` as well as both
+        Python halves.
+
+        Live, per dispatch: §5.1's shadowing case — a `{% load %}` rebinding a
+        `simple_tag` name to a block compiler mid-parse — makes any answer cached
+        against the *name* wrong. Nothing about the live environment is memoised;
+        only §5.2's provenance, which is immutable, is captured once.
+        """
+        func = self.parser.tags.get(command)
+        if func is None:
+            return False
+        population = _population(func)
+        if population is None:
+            return False
+        if not _environment_is_trusted(self.parser, population):
+            return False
+        self._pending = func
+        return True
 
     def has_tag(self, command):
         func = self.parser.tags.get(command)
@@ -492,6 +794,41 @@ class ShellHost:
         parser.command_stack.pop()
         left = [_wire_token(tok) for tok in reversed(parser.tokens)]
         return node, left
+
+    def call_tag_stream_free(self, command, token_wire):
+        """Run a classified compile function without handing it the stream.
+
+        The counterpart of `call_tag` for tags `tag_is_stream_free` approved, and
+        deliberately the *same* code either side of the call: the command stack is
+        pushed before and popped only on success, and a raising tag has its token
+        attached and the object stashed for `render.django_exception` to restore
+        by identity. Only the token vector is absent.
+
+        The callable is the one classification approved, taken from `_pending`
+        rather than looked up again — an earlier callback in this parse can
+        rebind the name between the two crossings.
+        """
+        parser = self.parser
+        func, self._pending = self._pending, None
+        if func is None:
+            raise RuntimeError(
+                f"call_tag_stream_free({command!r}) with no approved callable: "
+                f"tag_is_stream_free must be consulted first."
+            )
+        parser.tokens = _UnavailableStream(command)
+        kind, contents, lineno, position = token_wire
+        token = Token(TokenType(kind), contents, position, lineno)
+        parser.command_stack.append((command, token))
+        try:
+            node = func(parser, token)
+        except Exception as error:
+            # `call_tag`'s arm, for `call_tag`'s reasons (`base.py:583-585`).
+            error = parser.error(token, error)
+            error.token_wire = _wire_token(error.token)
+            self.last_error = error
+            raise
+        parser.command_stack.pop()
+        return node
 
     def partial_node(self, name):
         """`partial_func`'s second arm (`defaulttags.py:1277-1281`).

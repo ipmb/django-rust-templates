@@ -160,7 +160,7 @@ def django_exception(error, host=None):
       (`python/django_rust_templates/host.py:572`) — so it names that failure
       too;
     * a host error is **terminal**: the parse loop's arm is
-      `Err(error) => Err(error)` (`crates/template-core/src/parser/mod.rs:366-375`) and its caller is
+      `Err(error) => Err(error)` (`crates/template-core/src/parser/mod.rs:418-428`) and its caller is
       `?`, so no host failure is caught and survived, and the failing call
       is necessarily the last one to have touched either field.
 

@@ -319,7 +319,7 @@ ERRORS = [
     # outer `self.error(div_token, e)` leaves it alone.
     #
     # Rust's matching guard (`Error::error`'s `token.or_else`,
-    # `crates/template-core/src/parser/mod.rs:408-413`) is inert without the token crossing the
+    # `crates/template-core/src/parser/mod.rs:461-466`) is inert without the token crossing the
     # seam — it would see `None` and attach the **outer** token. Both
     # `test_every_case_carries_the_same_token*` assertions fail without the transport.
     (
