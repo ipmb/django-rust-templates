@@ -110,3 +110,29 @@ jobs:
       - run: ruff check python scripts tests
       # Transcriptions and upstream tests retain their source formatting.
       - run: ruff format --check scripts/ci python/django_rust_templates/engine/_unwind.py tests/test_ci_acceptance.py tests/test_unicode_profiles.py
+
+  # The one check to put in branch protection.
+  #
+  # **Why an aggregate job rather than the real ones.** Required status checks are
+  # configured by *name*, and two of the names above are not stable: `python` is a
+  # matrix, so it reports as `Python 3.12 / 6.0.9`, `Python 3.14 / 6.0.x` and so on,
+  # one check per combination. Requiring those means editing branch protection
+  # every time the matrix gains a Python or a Django — and, worse, a combination
+  # that is *removed* stays required and blocks every PR until someone notices.
+  # This job's name never changes, so protection is configured once.
+  #
+  # `if: always()` is what makes it run at all when something upstream failed;
+  # without it the job is skipped, and a skipped required check blocks the PR
+  # instead of failing it, which reads as "stuck" rather than "broken".
+  #
+  # A `skipped` dependency counts as success here, deliberately: a job that opted
+  # out of this run has nothing to say about it. Only `failure` and `cancelled`
+  # fail the aggregate.
+  ci-ok:
+    name: CI OK
+    if: always()
+    needs: [integrity, rust, python, python-lint]
+    runs-on: ubuntu-24.04
+    steps:
+      - if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: exit 1
