@@ -52,6 +52,41 @@ Everything Django's own backend accepts, plus:
   first, from the declared `Django>=6.0.9,<6.1`, so this is for a resolver that has
   been bypassed (`--no-deps`, a vendored wheel, another installer).
 
+### Rendering that does not go through `TEMPLATES`
+
+Naming the backend is not quite the whole of it. Three routes leave this engine
+without raising anything, so the backend reports the two it can see as system
+checks:
+
+- **Form widgets.** `FORM_RENDERER` defaults to
+  `django.forms.renderers.DjangoTemplates`, which builds a private template engine
+  of its own; `TEMPLATES` never reaches it, so every widget on every page renders
+  on Django's engine whatever backend you configure. To render widgets through
+  this one:
+
+  ```python
+  FORM_RENDERER = "django.forms.renderers.TemplatesSetting"
+  INSTALLED_APPS += ["django.forms"]
+  ```
+
+  Reported as `django_rust_templates.W002`. It is a warning rather than advice to
+  always change it: the setting is global rather than per-backend, so a project
+  running two engines cannot satisfy both.
+
+- **Backend order.** `render_to_string()`, `get_template()` and
+  `select_template()` default to `using=None` and resolve to the *first*
+  `TEMPLATES` entry. Libraries render their own sub-templates that way, so a
+  second entry ahead of this one quietly keeps them on the other engine. Reported
+  as `django_rust_templates.W001`.
+
+- **Loaders.** A loader builds the `Template`, so one that builds Django's gives
+  you Django's engine. Entries naming Django's own loader classes are substituted
+  for this package's transcriptions of them, and a third-party loader that only
+  locates templates is adapted automatically; one that overrides `get_template()`
+  is refused by name with `ImproperlyConfigured`, because what it builds is its
+  own business. Subclass
+  `django_rust_templates.engine.loaders.base.Loader` to take that on yourself.
+
 ## Development
 
 `scripts/check.sh` is the gate; `--fast` is the loop. Both need the pinned Django

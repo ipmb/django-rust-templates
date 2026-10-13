@@ -71,6 +71,7 @@ from django_rust_templates.engine.context import make_context
 from django_rust_templates.engine.engine import Engine
 from django_rust_templates.engine.exceptions import TemplateDoesNotExist
 from django_rust_templates.engine.library import InvalidTemplateLibrary
+from django_rust_templates.loaders import adapt_loaders
 
 # Imported for its import side effect, which is a capture: `engine/_stock.py` records the two
 # `Template` methods the native include slot stands in for, and it has to record them **before**
@@ -121,6 +122,13 @@ class RustTemplates(DjangoTemplates):
         options.setdefault("autoescape", True)
         options.setdefault("debug", settings.DEBUG)
         options.setdefault("file_charset", "utf-8")
+        # **Before the engine is built, because a loader decides which `Template`
+        # class comes out.** A project naming Django's loader classes here gets
+        # Django's engine back, silently — see `loaders.adapt_loaders`, which
+        # carries the measurement. Absent `loaders`, `Engine.__init__` builds the
+        # default list out of this package's own and there is nothing to adapt.
+        if options.get("loaders") is not None:
+            options["loaders"] = adapt_loaders(options["loaders"])
         libraries = options.get("libraries", {})
         options["libraries"] = self.get_templatetag_libraries(libraries)
         # **`BaseEngine.__init__`, named, rather than `super().__init__`.** The
@@ -137,6 +145,87 @@ class RustTemplates(DjangoTemplates):
         return [
             *self._check_string_if_invalid_is_string(),
             *self._check_for_template_tags_with_the_same_name(),
+            *self._check_this_backend_is_first(),
+            *self._check_form_renderer(),
+        ]
+
+    def _check_form_renderer(self):
+        """Warn when form widgets are rendered by a second, private engine.
+
+        ``FORM_RENDERER`` defaults to ``django.forms.renderers.DjangoTemplates``,
+        which builds a **standalone** ``DjangoTemplates`` engine of its own
+        (``django/forms/renderers.py``) with its own loaders. ``TEMPLATES`` does
+        not reach it, so every widget on every page is rendered by Django's
+        engine no matter which backend a project configures.
+
+        Measured on bakerydemo with a tripwire on ``NodeList.render``: ten of
+        eleven pages reached Django's engine zero times, and the form page
+        reached it 103 times, all of them ``django/forms/widgets/*``.
+        ``FORM_RENDERER = "django.forms.renderers.TemplatesSetting"`` plus
+        ``"django.forms"`` in ``INSTALLED_APPS`` took that to zero with
+        byte-identical output.
+
+        A warning, not an error: the default is Django's and a project may have
+        good reason to keep it — widget templates are small, and the setting is
+        global rather than per-backend, so a project running two backends cannot
+        satisfy both.
+        """
+        renderer = getattr(settings, "FORM_RENDERER", "")
+        private = (
+            "django.forms.renderers.DjangoTemplates",
+            "django.forms.renderers.Jinja2",
+        )
+        if renderer not in private:
+            return []
+        return [
+            Warning(
+                f"FORM_RENDERER is {renderer!r}, which builds its own private "
+                f"template engine, so form widgets are rendered by it and not by "
+                f"this backend. Set FORM_RENDERER to "
+                f"'django.forms.renderers.TemplatesSetting' and add 'django.forms' "
+                f"to INSTALLED_APPS to render widgets through TEMPLATES.",
+                obj=self,
+                id="django_rust_templates.W002",
+            )
+        ]
+
+    def _check_this_backend_is_first(self):
+        """Warn when another backend is configured ahead of this one.
+
+        ``django.template.loader``'s four functions take ``using=None`` by
+        default, and that resolves through ``engines.all()`` — the **first**
+        backend that can find the name wins. Libraries render their own
+        sub-templates through exactly that door: Wagtail's ``images/blocks.py``
+        and ``blocks.py`` both call ``render_to_string`` with no ``using``. So a
+        project that appends this backend after an existing ``DjangoTemplates``
+        entry still renders every one of those sub-templates with Django's
+        engine, and the only symptom is that this package appears not to help.
+        Measured on bakerydemo: with a ``DjangoTemplates`` entry first, the
+        sub-template renders left this engine entirely.
+
+        A warning and not an error, because the ordering is legitimate when it is
+        deliberate — a project may want Django's engine to own the names it can
+        find, and a second entry is how a Jinja2 backend is configured too.
+        """
+        configured = [
+            backend.get("BACKEND") for backend in getattr(settings, "TEMPLATES", [])
+        ]
+        if len(configured) < 2:
+            return []
+        ours = f"{type(self).__module__}.{type(self).__name__}"
+        if ours not in configured or configured.index(ours) == 0:
+            return []
+        return [
+            Warning(
+                f"{ours!r} is not the first TEMPLATES entry, so "
+                f"render_to_string(), get_template() and select_template() called "
+                f"without `using=` will resolve to "
+                f"{configured[0]!r} instead. Third-party code renders its own "
+                f"sub-templates that way, so this engine will not be used for "
+                f"them. Put this backend first if that is not what you want.",
+                obj=self,
+                id="django_rust_templates.W001",
+            )
         ]
 
     def _check_string_if_invalid_is_string(self):
