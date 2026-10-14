@@ -1,0 +1,1 @@
+{% load i18n %}<h1>{% translate "Monthly Report" %}</h1><ul>{% for row in rows %}<li>{{ row.name }}: {% blocktranslate count count=row.qty %}{{ count }} item{% plural %}{{ count }} items{% endblocktranslate %}</li>{% endfor %}</ul>

@@ -225,7 +225,7 @@ def calibrate(engine, workload, handle, mode, context, target: float) -> int:
             return engine.render(handle, context)
 
     else:
-        source = workload.templates[workload.entry]
+        source = workload.templates_for(engine.name)[workload.entry]
 
         if mode == COMPILE:
 
@@ -285,7 +285,7 @@ def measure(
     The context is built once by the caller and not per call: see the class
     docstring in `bench_engines` for why, and for what that leaves unmeasured.
     """
-    source = workload.templates[workload.entry]
+    source = workload.templates_for(engine.name)[workload.entry]
 
     if mode == RENDER:
 
@@ -392,7 +392,9 @@ def measure_floor(engines: list[str], repeats: int, target: float) -> dict:
     out: dict = {}
     try:
         for name in engines:
-            built[name] = bench_engines.build(name, workload.templates, {})
+            built[name] = bench_engines.build(
+                name, workload.templates_for(name), {}
+            )
         contexts = {name: built[name].context({}) for name in engines}
         control = bench_engines.CONTROL
         pins = {}
@@ -451,7 +453,7 @@ def run(engines: list[str], repeats: int, target: float) -> list[dict]:
         try:
             for name in wanted:
                 built[name] = bench_engines.build(
-                    name, workload.templates, workload.libraries(name)
+                    name, workload.templates_for(name), workload.libraries(name)
                 )
             contexts = {name: built[name].context(workload.data) for name in wanted}
             pins = {}
@@ -550,7 +552,7 @@ def run_census(iters: int) -> None:
             if "rust" not in workload.engines:
                 continue
             engine = bench_engines.build(
-                "rust", workload.templates, workload.libraries("rust")
+                "rust", workload.templates_for("rust"), workload.libraries("rust")
             )
             handle = engine.get(workload.entry)
             context = engine.context(workload.data)
@@ -668,6 +670,18 @@ def refusals(records: list[dict], verdicts: dict) -> list[str]:
                 f"({verdict['control_sha256'][:16]} against "
                 f"{next(r['sha256'][:16] for r in records if r['key'] == key and r['mode'] == mode and r['engine'] == 'rust')})"
             )
+        # A row whose engines render *equivalent* rather than identical sources
+        # is only a comparison while their output matches. Elsewhere a jinja2
+        # mismatch is reported and tolerated, because the corpus is not a
+        # byte-for-byte intersection; here it means the two templates stopped
+        # saying the same thing, and the row's timings stopped being about one
+        # workload. So it is a failure for these rows and these rows only.
+        if "jinja2" in verdict["differ"] and key in EQUIVALENT_SOURCE_ROWS:
+            out.append(
+                f"{key} / {mode}: this row renders a per-engine template and its "
+                f"jinja2 output no longer matches the django control, so the two "
+                f"sources are no longer equivalent and the row is not a comparison"
+            )
     return out
 
 
@@ -721,6 +735,13 @@ NONDETERMINISTIC = (
 )
 
 
+#: Rows whose engines render equivalent, not identical, sources. For these a
+#: jinja2 output mismatch is a hard failure; see `problems()`.
+EQUIVALENT_SOURCE_ROWS = frozenset(
+    w.key for w in bench_corpus.workloads() if w.engine_templates
+)
+
+
 def nondeterministic_rows() -> list[str]:
     """Corpus rows carrying a construct whose output the source does not fix.
 
@@ -733,7 +754,12 @@ def nondeterministic_rows() -> list[str]:
     for workload in bench_corpus.workloads():
         if getattr(workload, "deterministic", False):
             continue
-        for text in workload.templates.values():
+        sources = dict(workload.templates)
+        # `getattr`, like the `deterministic` read just above: this scan is
+        # also called with stub workloads that carry only what it reads.
+        for variant in (getattr(workload, "engine_templates", None) or {}).values():
+            sources.update(variant)
+        for text in sources.values():
             for pattern, why in NONDETERMINISTIC:
                 if re.search(pattern, text):
                     out.append(f"{workload.key}: {why}")
