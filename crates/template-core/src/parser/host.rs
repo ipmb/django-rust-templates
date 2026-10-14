@@ -42,6 +42,33 @@ pub trait Host {
         false
     }
 
+    /// Whether `command`'s compile function provably never reads the token stream.
+    ///
+    /// Asked only inside the host arm and **before** `remaining_tokens()`, so an
+    /// all-native template never reaches it and an eligible tag skips the suffix clone
+    /// and the inbound `PyList` as well as both Python halves. The host answers from the
+    /// *live* callable and environment — a `{% load %}` can rebind a name to a different
+    /// compile function mid-parse, so an answer cached against the name would be wrong.
+    ///
+    /// Defaulted to `false` so `NoHost` and every core test host stay on the ordinary
+    /// path unchanged, exactly as [`library_tag_loaded`] does. The Python adapter
+    /// overrides it; a host that does not is simply never offered the optimisation.
+    ///
+    /// [`library_tag_loaded`]: Host::library_tag_loaded
+    fn tag_is_stream_free(&self, _command: &str) -> bool {
+        false
+    }
+
+    /// Compile `command` without handing the host any tokens.
+    ///
+    /// Returns a node and **nothing else**: the caller's cursor is not replaced, because
+    /// there is nothing to replace it with. Returning an empty remainder instead would
+    /// discard the rest of the template, since the ordinary arm adopts whatever comes
+    /// back.
+    fn call_tag_stream_free(&self, _command: &str, _token: &Token) -> Result<NodeDesc, Error> {
+        unreachable!("call_tag_stream_free is gated on tag_is_stream_free, which defaults to false")
+    }
+
     /// Compile `command` in Python, against the parser's remaining tokens.
     ///
     /// `tokens` is everything the caller has not consumed, **in parse order**. The

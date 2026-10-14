@@ -1037,6 +1037,77 @@ impl Host for FilterCheckHost<'_> {
             .expect("ShellHost.has_tag raised or did not return a bool")
     }
 
+    // **`FilterCheckHost` must override these, and that is not a detail.** It is the
+    // production adapter: `_native.compile_template` builds this very struct and hands it
+    // to `parse_nodelist`, so there is no other PyO3 host for an implementation to live
+    // in. Inheriting the trait's `false` default would leave the optimisation inert —
+    // passing every test except the zero-transfer assertion.
+    fn tag_is_stream_free(&self, command: &str) -> bool {
+        let Some(host) = &self.host else {
+            // No Python host, no classifier: the ordinary path, which is also what a
+            // caller driving `_native.parse` directly gets.
+            return false;
+        };
+        // **Absence is not failure.** `_native.compile_template` takes a caller-supplied
+        // host, and one written against the seam as it was before this optimisation has no
+        // such method. That host must still compile — reading a missing attribute as
+        // `false` puts it on the ordinary path, which is exactly what it had. An attribute
+        // that *exists* and misbehaves is still a loud integration bug, like `has_tag`'s.
+        let py = host.py();
+        let method = match host.getattr("tag_is_stream_free") {
+            Ok(method) => method,
+            // **Absence declines; a lookup that raises stays loud.** Returning
+            // `false` for any error would silently swallow a property or custom
+            // `__getattr__` that failed, which is an integration bug and not a
+            // host that predates this optimisation.
+            Err(error) if error.is_instance_of::<pyo3::exceptions::PyAttributeError>(py) => {
+                return false
+            }
+            Err(error) => panic!("ShellHost.tag_is_stream_free lookup raised: {error}"),
+        };
+        method
+            .call1((command,))
+            .and_then(|answer| answer.extract::<bool>())
+            .expect("ShellHost.tag_is_stream_free raised or did not return a bool")
+    }
+
+    fn call_tag_stream_free(&self, command: &str, token: &Token) -> Result<NodeDesc, Error> {
+        let Some(host) = &self.host else {
+            unreachable!(
+                "FilterCheckHost::call_tag_stream_free is never reached without a host: \
+                 tag_is_stream_free returns false when there is none"
+            )
+        };
+        let py = host.py();
+        let wire = (
+            token.token_type as u8,
+            token.contents.clone(),
+            token.lineno,
+            token.position,
+        );
+        let node = host
+            .call_method1("call_tag_stream_free", (command, wire))
+            .map_err(|error| python_host_error(py, &error))?;
+        // The same node handling `call_tag` performs, because the node is the same kind
+        // of object: only the token vector is absent.
+        let must_be_first = node
+            .getattr("must_be_first")
+            .and_then(|flag| flag.extract::<bool>())
+            .map_err(|error| {
+                Error::internal(format!(
+                    "ShellHost.call_tag_stream_free({command:?}) returned a node without a \
+                     bool `must_be_first`: {error}"
+                ))
+            })?;
+        // The same reference-table handling as `call_tag`: the node is a Python object
+        // this side must not read, named by a `NodeRef` (§5.2). `fill_slot` takes
+        // ownership, so `must_be_first` is read off it above.
+        let handle = self.fill_slot(node);
+        let mut desc = NodeDesc::host(handle);
+        desc.must_be_first = must_be_first;
+        Ok(desc)
+    }
+
     fn library_tag_loaded(&self, command: &str) -> bool {
         let Some(host) = &self.host else {
             // No host means no parser and no dict of loaded tags — `NoHost`'s answer. `false` rather

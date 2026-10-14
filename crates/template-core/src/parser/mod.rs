@@ -37,6 +37,13 @@ use crate::text::get_text_list;
 use crate::token::{Token, TokenType};
 
 /// The parser, ported from `django.template.base.Parser`.
+/// The shortest suffix worth a classifier crossing. See the gate in `parse`.
+///
+/// The crossing and its guard cost roughly what two or three tokens cost to
+/// ship, so the break-even is low; this sits comfortably above it rather than
+/// at it, because a template this small cannot recover a misjudgement.
+const STREAM_FREE_MIN_TOKENS: usize = 8;
+
 pub struct Parser<'a> {
     /// Reversed, so the *front* of the stream is the *end* of the vec: `next_token` is `pop`,
     /// `prepend_token` is `push`, `delete_first_token` is `pop`. That is Django's
@@ -45,6 +52,19 @@ pub struct Parser<'a> {
     /// `(command, token)` for every tag currently being compiled, innermost
     /// last. `unclosed_block_tag` pops it to name the tag that was left open.
     command_stack: Vec<(String, Token)>,
+    /// Commands the host has already declined to compile stream-free, so the
+    /// classifier is not re-asked across the seam for every repetition.
+    ///
+    /// **Negative answers only, and the asymmetry is the safety argument.** A
+    /// command can only move from ineligible to eligible by a `{% load %}`
+    /// rebinding the name (`base.py:707-709`), and a stale "no" costs a lost
+    /// optimisation. A stale "yes" would be a *wrong answer* — a body-consuming
+    /// compile function handed no stream — which is why eligibility is never
+    /// cached and the classifier is re-asked on every hit.
+    ///
+    /// Measured: §8's all-streamful control paid ~3% for one crossing per host
+    /// tag, which this reduces to one per distinct command per parse.
+    stream_free_declined: std::collections::HashSet<String>,
     host: &'a dyn Host,
     /// `parser.origin.template_name` — the **raw** name Django's `Origin` holds, not a
     /// rendered `repr`.
@@ -105,6 +125,7 @@ impl<'a> Parser<'a> {
         Self {
             tokens,
             command_stack: Vec::new(),
+            stream_free_declined: std::collections::HashSet::new(),
             host,
             origin_template_name: None,
             last_cycle_node: None,
@@ -353,17 +374,49 @@ impl<'a> Parser<'a> {
                         // cross by value: the host is Python's own `Parser` and holds no borrow of
                         // this one (§5.2), which is what lets `{% load %}` and a
                         // `simple_block_tag`'s nested parse re-enter at all.
-                        let remaining = self.remaining_tokens();
-                        // Not `?`: a host error must reach the `map_err` below like any other
-                        // compile error, because Django attaches the token in `Parser.parse`'s
-                        // `except` and the host's exception carries none. `?` would return before
-                        // `self.error(&token, …)` ran and the message would lose its line.
-                        match self.host.call_tag(&command, &token, &remaining) {
-                            Ok((desc, left)) => {
-                                self.replace_tokens(left);
-                                Ok(desc)
+                        // Below this, there is nothing worth classifying: the saving
+                        // scales with the suffix that would have crossed, while the
+                        // classifier crossing costs the same whatever the length.
+                        // Measured against main, a one-host template of a few tokens
+                        // was +4.9% slower before this gate — a real cost, outside the
+                        // noise, on a template with nothing to gain. Taking the
+                        // ordinary path without asking is always correct; the
+                        // classifier is an optimisation gate, never a correctness one.
+                        let stream_free = self.tokens.len() >= STREAM_FREE_MIN_TOKENS
+                            && !self.stream_free_declined.contains(&command)
+                            && {
+                                let answer = self.host.tag_is_stream_free(&command);
+                                if !answer {
+                                    self.stream_free_declined.insert(command.clone());
+                                }
+                                answer
+                            };
+                        if stream_free {
+                            // The whole of the optimisation: no `remaining_tokens()`
+                            // clone, no inbound `PyList`, no Python `Token` per token,
+                            // no outbound wire tuples, and no `replace_tokens` — the
+                            // cursor is simply never touched. Skipping both halves is
+                            // value-preserving because `remaining_tokens` reverses a
+                            // clone and `replace_tokens` reverses it back.
+                            //
+                            // **Not `?`**, for the reason the ordinary arm below is not
+                            // `?` either: the result must reach the shared
+                            // `map_err(|error| self.error(&token, error))` so a boundary
+                            // error that carries no token still gets one.
+                            self.host.call_tag_stream_free(&command, &token)
+                        } else {
+                            let remaining = self.remaining_tokens();
+                            // Not `?`: a host error must reach the `map_err` below like any other
+                            // compile error, because Django attaches the token in `Parser.parse`'s
+                            // `except` and the host's exception carries none. `?` would return before
+                            // `self.error(&token, …)` ran and the message would lose its line.
+                            match self.host.call_tag(&command, &token, &remaining) {
+                                Ok((desc, left)) => {
+                                    self.replace_tokens(left);
+                                    Ok(desc)
+                                }
+                                Err(error) => Err(error),
                             }
-                            Err(error) => Err(error),
                         }
                     } else if let Some(compile) = registry::builtin_tag(&command) {
                         compile(self, &token)

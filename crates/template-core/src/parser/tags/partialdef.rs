@@ -62,7 +62,7 @@ pub fn compile(parser: &mut Parser<'_>, token: &Token) -> Result<NodeDesc, Error
 
     // `parser.parse(valid_endpartials)`, then `parser.next_token()`. The token
     // cannot be `None`: `Parser::parse` returns `Ok` with the matching token
-    // prepended exactly when it stopped on one (`parser/mod.rs:336-338`), and
+    // prepended exactly when it stopped on one (`parser/mod.rs:357-359`), and
     // returns `Err(unclosed_block_tag)` rather than `Ok` when the tokens run out
     // (`parser/mod.rs:465-469`). So a defensive branch here would be one no
     // input reaches and therefore none can redden.
