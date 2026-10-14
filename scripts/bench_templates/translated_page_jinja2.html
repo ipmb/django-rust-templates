@@ -1,0 +1,1 @@
+<h1>{% trans %}Monthly Report{% endtrans %}</h1><ul>{% for row in rows %}<li>{{ row.name }}: {% trans count=row.qty %}{{ count }} item{% pluralize %}{{ count }} items{% endtrans %}</li>{% endfor %}</ul>

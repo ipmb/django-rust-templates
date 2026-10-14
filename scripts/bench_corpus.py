@@ -219,6 +219,20 @@ D_FOR_TAGS = (
 # character, so the report can print which character each engine spells differently.
 D_ESCAPE_TABLE = "{{ apos }}|{{ quot }}|{{ solidus }}"
 
+# real-world / translation: the same page in each engine's own spelling of
+# gettext. Django writes `{% translate %}` and `{% blocktranslate %}…{% plural %}`;
+# Jinja2 writes `{% trans %}…{% pluralize %}…{% endtrans %}` and needs
+# `jinja2.ext.i18n` loaded. There is no single source that both parse, which is
+# why the existing `django-only/realistic` row leaves the Jinja2 column blank --
+# and why a translation comparison needed equivalent templates instead.
+#
+# Null translations on both sides, so every msgid renders as itself and the
+# plural is still chosen by count. The row measures the translation machinery,
+# not a catalogue lookup. Its data key is `qty` rather than `count`, because
+# `count` is one of the dict-method names this module's docstring warns about.
+TRANSLATED_DJANGO = _template("translated_page_django.html")
+TRANSLATED_JINJA2 = _template("translated_page_jinja2.html")
+
 # The M16 page, kept verbatim so the historical row still has a home and the
 # milestone-to-milestone comparison does not silently change subject.
 M16_BASE = _template("translated_base.html")
@@ -242,10 +256,23 @@ class Workload:
     entry: str
     data: dict
     engines: tuple = SHARED
+    #: Per-engine template sources, for a row whose construct has no single
+    #: spelling. The engines render *equivalent* templates rather than identical
+    #: ones, and the row is only legitimate because its output is asserted equal
+    #: across them -- `tests/test_bench_report.py` is where that is enforced.
+    #: Every other row shares one source, which is the stronger guarantee and
+    #: stays the default.
+    engine_templates: dict = None
     needs_i18n: bool = False
     note: str = ""
     library_names: tuple = ()
     deterministic: bool = False
+
+    def templates_for(self, engine: str) -> dict:
+        """The source this engine renders: its own variant, or the shared one."""
+        if self.engine_templates and engine in self.engine_templates:
+            return self.engine_templates[engine]
+        return self.templates
 
     def libraries(self, engine: str) -> dict:
         names = set(self.library_names)
@@ -374,6 +401,16 @@ def workloads() -> list[Workload]:
             },
             "page.html",
             {"title": _TITLE, "rows": ROWS, "sections": SECTIONS},
+        ),
+        W(
+            "real-world/translation",
+            "real-world",
+            "50 translated strings with plurals, each engine's own gettext syntax",
+            {"page.html": TRANSLATED_DJANGO},
+            "page.html",
+            {"rows": [{"name": f"Row {i}", "qty": i % 4} for i in range(50)]},
+            engine_templates={"jinja2": {"page.html": TRANSLATED_JINJA2}},
+            needs_i18n=True,
         ),
         W(
             "real-world/large",
